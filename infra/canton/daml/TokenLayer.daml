@@ -1,0 +1,107 @@
+-- TokenLayer compliance asset for Canton / Daml.
+--
+-- One `Asset` contract per tokenized asset, keyed by (operator, assetId), holds
+-- the full state (balances, NFT owners, allowlist, freeze). Mutating choices are
+-- consuming and recreate the contract with updated state; `exerciseByKey` lets
+-- the adapter operate without tracking changing contract ids. Reads are served
+-- by querying the contract payload over the JSON API.
+--
+-- Mirrors the EVM contracts / simulated ledger rules. Not compiled in this build
+-- environment (no Daml SDK); see infra/canton/README.md.
+module TokenLayer where
+
+import DA.Map (Map)
+import qualified DA.Map as Map
+import DA.Optional (fromOptional)
+
+get : Text -> Map Text Int -> Int
+get k m = fromOptional 0 (Map.lookup k m)
+
+flagged : Text -> Map Text Bool -> Bool
+flagged k m = fromOptional False (Map.lookup k m)
+
+template Asset
+  with
+    operator : Party
+    assetId : Text
+    tokenType : Text
+    allowlistEnabled : Bool
+    balances : Map Text Int
+    supply : Int
+    owners : Map Text Text        -- tokenId -> owner
+    frozen : Map Text Bool
+    allowed : Map Text Bool
+  where
+    signatory operator
+    key (operator, assetId) : (Party, Text)
+    maintainer key._1
+
+    ensure assetId /= ""
+
+    choice Mint : ContractId Asset
+      with to : Text; amount : Int
+      controller operator
+      do
+        assertMsg "not allowlisted" (not allowlistEnabled || flagged to allowed)
+        assertMsg "frozen" (not (flagged to frozen))
+        assertMsg "amount must be positive" (amount > 0)
+        create this with
+          balances = Map.insert to (get to balances + amount) balances
+          supply = supply + amount
+
+    choice Transfer : ContractId Asset
+      with from : Text; to : Text; amount : Int
+      controller operator
+      do
+        assertMsg "frozen" (not (flagged from frozen) && not (flagged to frozen))
+        assertMsg "not allowlisted"
+          (not allowlistEnabled || (flagged from allowed && flagged to allowed))
+        assertMsg "insufficient balance" (get from balances >= amount)
+        create this with
+          balances = Map.insert to (get to balances + amount)
+                       (Map.insert from (get from balances - amount) balances)
+
+    choice Burn : ContractId Asset
+      with from : Text; amount : Int
+      controller operator
+      do
+        assertMsg "insufficient balance" (get from balances >= amount)
+        create this with
+          balances = Map.insert from (get from balances - amount) balances
+          supply = supply - amount
+
+    choice MintToken : ContractId Asset
+      with to : Text; tokenId : Text
+      controller operator
+      do
+        assertMsg "token exists" (isNone (Map.lookup tokenId owners))
+        assertMsg "not allowlisted" (not allowlistEnabled || flagged to allowed)
+        assertMsg "frozen" (not (flagged to frozen))
+        create this with owners = Map.insert tokenId to owners
+
+    choice TransferToken : ContractId Asset
+      with from : Text; to : Text; tokenId : Text
+      controller operator
+      do
+        assertMsg "not owner" (Map.lookup tokenId owners == Some from)
+        assertMsg "frozen" (not (flagged from frozen) && not (flagged to frozen))
+        assertMsg "not allowlisted"
+          (not allowlistEnabled || (flagged from allowed && flagged to allowed))
+        create this with owners = Map.insert tokenId to owners
+
+    choice BurnToken : ContractId Asset
+      with tokenId : Text
+      controller operator
+      do
+        assertMsg "no such token" (isSome (Map.lookup tokenId owners))
+        create this with owners = Map.delete tokenId owners
+
+    choice SetFrozen : ContractId Asset
+      with account : Text; isFrozen : Bool
+      controller operator
+      do create this with frozen = Map.insert account isFrozen frozen
+
+    choice SetAllowed : ContractId Asset
+      with account : Text; isAllowed : Bool
+      controller operator
+      do create this with allowed = Map.insert account isAllowed allowed

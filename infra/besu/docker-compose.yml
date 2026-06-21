@@ -1,0 +1,34 @@
+# Local Hyperledger Besu dev network (free gas, instant finality) for TokenLayer.
+#
+#   docker compose -f infra/besu/docker-compose.yml up
+#
+# Then point the API at it (the key below is Besu's well-known dev account, which
+# is pre-funded on the dev network):
+#
+#   BESU_RPC_URL=http://127.0.0.1:8550 \
+#   BESU_OPERATOR_KEY=0x8f2a55949038a9610f50fb23b5883af3b4ecb3c3bb792cbcefbd1542c692be63 \
+#   pnpm api:dev
+#
+# The "besu" chain (config/chains.json) uses gas:"zero" to suit free-gas IBFT/dev.
+services:
+  besu:
+    image: hyperledger/besu:24.12.0
+    container_name: tokenlayer-besu
+    command:
+      - --network=dev
+      - --miner-enabled
+      - --miner-coinbase=0xfe3b557e8fb62b89f4916b721be55ceb828dbd73
+      - --rpc-http-enabled
+      - --rpc-http-host=0.0.0.0
+      - --rpc-http-port=8545
+      - --rpc-http-cors-origins=*
+      - --rpc-http-api=ETH,NET,WEB3,DEBUG,TXPOOL
+      - --host-allowlist=*
+      - --data-path=/opt/besu/data
+    ports:
+      - "8550:8545"
+    volumes:
+      - besu-data:/opt/besu/data
+
+volumes:
+  besu-data:

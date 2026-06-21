@@ -1,0 +1,22 @@
+{
+  "name": "@tokenlayer/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "build": "hardhat compile",
+    "typecheck": "hardhat compile",
+    "test": "hardhat test",
+    "node": "hardhat node",
+    "deploy:local": "hardhat run scripts/deploy-sample.ts --network localhost"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@onchain-id/solidity": "2.2.1",
+    "@openzeppelin/contracts": "4.8.3",
+    "@openzeppelin/contracts-upgradeable": "4.8.3",
+    "@tokenysolutions/t-rex": "4.1.6",
+    "chai": "^4.3.10",
+    "hardhat": "^2.22.17"
+  }
+}

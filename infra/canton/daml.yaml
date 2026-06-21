@@ -1,0 +1,9 @@
+sdk-version: 2.9.4
+name: tokenlayer
+version: 0.1.0
+source: daml
+parties:
+  - Operator
+dependencies:
+  - daml-prim
+  - daml-stdlib

@@ -1,0 +1,8 @@
+[
+  { "id": "mock", "label": "Mock Chain (in-memory)", "family": "mock", "kind": "simulated" },
+  { "id": "fabric", "label": "Hyperledger Fabric (simulated)", "family": "fabric", "kind": "simulated" },
+  { "id": "canton", "label": "Canton Network (simulated)", "family": "canton", "kind": "simulated" },
+  { "id": "local-evm", "label": "Local EVM (Hardhat)", "family": "evm", "kind": "evm", "rpcEnv": "EVM_RPC_URL", "keyEnv": "EVM_OPERATOR_KEY", "gas": "auto", "confirmations": 1 },
+  { "id": "besu", "label": "Hyperledger Besu", "family": "evm", "kind": "evm", "rpcEnv": "BESU_RPC_URL", "keyEnv": "BESU_OPERATOR_KEY", "gas": "zero", "confirmations": 1 },
+  { "id": "mst", "label": "MST Blockchain (public EVM)", "family": "evm", "kind": "evm", "rpcEnv": "MST_RPC_URL", "keyEnv": "MST_OPERATOR_KEY", "gas": "auto", "confirmations": 2 }
+]

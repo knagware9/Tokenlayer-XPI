@@ -1,0 +1,22 @@
+node_modules/
+dist/
+build/
+out/
+coverage/
+*.log
+.env
+.env.local
+.DS_Store
+
+# Prisma / SQLite
+apps/api/prisma/*.db
+apps/api/prisma/*.db-journal
+*.sqlite
+
+# Hardhat
+packages/contracts/artifacts/
+packages/contracts/cache/
+packages/contracts/typechain-types/
+
+# Vite
+apps/web/dist/

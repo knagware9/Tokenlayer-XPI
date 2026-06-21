@@ -1,0 +1,69 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  role         String
+  createdAt    DateTime @default(now())
+}
+
+model Asset {
+  id            String   @id
+  useCaseKey    String
+  name          String
+  symbol        String
+  chainId       String
+  contractRef   String
+  tokenType     String
+  tokenStandard String   @default("ERC-20")
+  metadata      String // JSON-encoded
+  status        String   @default("active")
+  createdBy     String
+  createdAt     DateTime @default(now())
+}
+
+// Low-code use-case definitions, editable via the dashboard builder. JSON
+// columns hold the structured config; the repository validates + normalises.
+model UseCase {
+  key             String   @id
+  name            String
+  description     String?
+  tokenStandard   String
+  defaultChainId  String
+  allowedChainIds String // JSON array
+  metadataSchema  String // JSON object
+  lifecycle       String // JSON object
+  compliance      String // JSON object
+  roles           String // JSON array
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// Append-only audit stream. assetId is an unconstrained reference (not a FK) so
+// entries can be written before/after an asset row exists and survive its removal.
+model AuditLog {
+  id        String   @id @default(cuid())
+  assetId   String?
+  actorId   String
+  action    String
+  payload   String // JSON-encoded
+  txHash    String?
+  chainId   String?
+  createdAt DateTime @default(now())
+
+  @@index([assetId])
+}
+
+model Account {
+  id      String @id @default(cuid())
+  address String @unique
+  label   String
+}

@@ -1,0 +1,25 @@
+{
+  "name": "tokenlayer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "TokenLayer — chain-agnostic tokenization platform with configurable use cases",
+  "scripts": {
+    "build": "pnpm -r --filter \"./packages/*\" --filter \"./apps/*\" run build",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test",
+    "api:dev": "pnpm --filter @tokenlayer/api dev",
+    "web:dev": "pnpm --filter @tokenlayer/web dev",
+    "chain:node": "pnpm --filter @tokenlayer/contracts node",
+    "demo": "pnpm --filter @tokenlayer/api demo"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

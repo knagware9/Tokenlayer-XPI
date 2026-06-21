@@ -1,0 +1,20 @@
+{
+  "key": "generic-asset",
+  "name": "Generic Asset",
+  "description": "A fungible, transferable asset token (ERC-20) with allowlist + freeze compliance. A neutral template for tokenizing any divisible value on any DLT.",
+  "tokenStandard": "ERC-20",
+  "allowedChainIds": ["mock", "fabric", "canton", "local-evm", "besu", "mst"],
+  "defaultChainId": "mock",
+  "metadataSchema": {
+    "type": "object",
+    "properties": {
+      "issuer": { "type": "string", "description": "Legal entity issuing the asset" },
+      "assetClass": { "type": "string", "description": "Free-form classification, e.g. commodity / security / credit" },
+      "valuation": { "type": "number", "description": "Reference valuation in the issuer's base currency" }
+    },
+    "required": ["issuer", "assetClass"]
+  },
+  "lifecycle": { "mint": true, "transfer": true, "burn": true, "freeze": true },
+  "compliance": { "allowlist": true, "transferRestrictions": true },
+  "roles": ["Admin", "Issuer", "Operator", "Viewer"]
+}

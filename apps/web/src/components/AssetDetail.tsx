@@ -1,0 +1,308 @@
+import { useCallback, useEffect, useState } from "react";
+import { api, ApiError } from "../api.js";
+import { useAuth } from "../auth.js";
+import { can } from "../rbac.js";
+import type { AccountState, Asset, AuditEntry, ChainInfo, TokenInfo, UseCase } from "../types.js";
+
+interface Props {
+  assetId: string;
+  useCases: UseCase[];
+  chains: ChainInfo[];
+  onBack: () => void;
+  onChanged: () => void;
+}
+
+export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Props): JSX.Element {
+  const { token, user } = useAuth();
+  const [asset, setAsset] = useState<Asset | null>(null);
+  const [accounts, setAccounts] = useState<AccountState[]>([]);
+  const [tokens, setTokens] = useState<TokenInfo[]>([]);
+  const [audit, setAudit] = useState<AuditEntry[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const reload = useCallback(async () => {
+    if (!token) return;
+    const a = await api.asset(token, assetId);
+    setAsset(a);
+    const [acc, log] = await Promise.all([api.assetAccounts(token, assetId), api.audit(token, assetId)]);
+    setAccounts(acc);
+    setAudit(log);
+    if (a.tokenType === "nonfungible") setTokens(await api.assetTokens(token, assetId));
+  }, [token, assetId]);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  const useCase = asset ? useCases.find((u) => u.key === asset.useCaseKey) : undefined;
+  const role = user?.role ?? "Viewer";
+  const chain = asset ? chains.find((c) => c.id === asset.chainId) : undefined;
+
+  async function run(action: string, body: Record<string, string>): Promise<void> {
+    if (!token) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.action(token, assetId, action, body);
+      await reload();
+      onChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? `${err.code ?? "Error"}: ${err.message}` : "Action failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!asset || !useCase) return <p className="text-sm text-slate-400">Loading…</p>;
+
+  const isNft = asset.tokenType === "nonfungible";
+  const canAllow = useCase.compliance.allowlist && can(role, "allow");
+  const canFreeze = useCase.lifecycle.freeze && can(role, "freeze");
+
+  return (
+    <div className="space-y-5">
+      <button onClick={onBack} className="text-xs text-slate-500 hover:text-slate-800">
+        ← Back to assets
+      </button>
+
+      <div className="bg-white rounded-xl border border-slate-200 p-6">
+        <div className="flex items-start justify-between">
+          <div>
+            <h2 className="text-xl font-bold text-slate-900">
+              {asset.name} <span className="text-slate-400 font-normal">{asset.symbol}</span>
+            </h2>
+            <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
+              <span className="px-1.5 py-0.5 rounded bg-brand-600 text-white font-semibold">{asset.tokenStandard}</span>
+              <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 font-medium">{asset.tokenType}</span>
+              <ChainPill chain={chain} />
+            </p>
+          </div>
+          <div className="text-right">
+            <div className="text-2xl font-bold text-slate-900">{asset.totalSupply ?? "—"}</div>
+            <div className="text-[11px] text-slate-400 uppercase tracking-wide">{isNft ? "Tokens" : "Total supply"}</div>
+          </div>
+        </div>
+        <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+          {Object.entries(asset.metadata).map(([k, v]) => (
+            <div key={k} className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2">
+              <div className="text-slate-400 uppercase tracking-wide text-[10px]">{k}</div>
+              <div className="text-slate-700 font-medium truncate">{String(v)}</div>
+            </div>
+          ))}
+        </div>
+        <p className="mt-3 text-[11px] text-slate-400 font-mono break-all">ref: {asset.contractRef}</p>
+      </div>
+
+      {error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2">{error}</div>}
+
+      <Operations role={role} useCase={useCase} isNft={isNft} accounts={accounts} busy={busy} onRun={run} />
+
+      {isNft && (
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-slate-100 text-xs font-semibold text-slate-500 uppercase tracking-wide">Tokens</div>
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-slate-400 text-[11px] uppercase">
+              <tr>
+                <th className="text-left font-medium px-4 py-2">Token ID</th>
+                <th className="text-left font-medium px-4 py-2">Owner</th>
+                <th className="text-center font-medium px-4 py-2">State</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {tokens.map((t) => (
+                <tr key={t.tokenId}>
+                  <td className="px-4 py-2.5 font-mono text-slate-700">#{t.tokenId}</td>
+                  <td className="px-4 py-2.5 text-slate-600">{t.ownerLabel}</td>
+                  <td className="px-4 py-2.5 text-center">{t.frozen ? <Pill tone="red">frozen</Pill> : <span className="text-slate-300 text-xs">—</span>}</td>
+                </tr>
+              ))}
+              {tokens.length === 0 && (
+                <tr>
+                  <td colSpan={3} className="px-4 py-4 text-center text-sm text-slate-400">No tokens minted yet.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div className="px-4 py-2.5 border-b border-slate-100 text-xs font-semibold text-slate-500 uppercase tracking-wide">Holders</div>
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 text-slate-400 text-[11px] uppercase">
+            <tr>
+              <th className="text-left font-medium px-4 py-2">Account</th>
+              <th className="text-right font-medium px-4 py-2">{isNft ? "Tokens" : "Balance"}</th>
+              <th className="text-center font-medium px-4 py-2">State</th>
+              <th className="text-right font-medium px-4 py-2">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {accounts.map((acc) => (
+              <tr key={acc.address}>
+                <td className="px-4 py-2.5">
+                  <div className="font-medium text-slate-700">{acc.label}</div>
+                  <div className="text-[10px] text-slate-400 font-mono">{acc.address.slice(0, 10)}…{acc.address.slice(-4)}</div>
+                </td>
+                <td className="px-4 py-2.5 text-right font-mono text-slate-700">{acc.balance}</td>
+                <td className="px-4 py-2.5 text-center">
+                  {acc.frozen && <Pill tone="red">frozen</Pill>}
+                  {useCase.compliance.allowlist && (acc.allowed ? <Pill tone="green">allowed</Pill> : <Pill tone="gray">not listed</Pill>)}
+                  {!acc.frozen && !useCase.compliance.allowlist && <span className="text-slate-300 text-xs">—</span>}
+                </td>
+                <td className="px-4 py-2.5">
+                  <div className="flex justify-end gap-1.5">
+                    {canAllow && (
+                      <button disabled={busy} onClick={() => run(acc.allowed ? "disallow" : "allow", { account: acc.address })} className="btn-sm border-slate-200 text-slate-600 hover:border-brand-500">
+                        {acc.allowed ? "Disallow" : "Allow"}
+                      </button>
+                    )}
+                    {canFreeze && (
+                      <button disabled={busy} onClick={() => run(acc.frozen ? "unfreeze" : "freeze", { account: acc.address })} className="btn-sm border-slate-200 text-slate-600 hover:border-red-400">
+                        {acc.frozen ? "Unfreeze" : "Freeze"}
+                      </button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="bg-white rounded-xl border border-slate-200 p-5">
+        <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Audit trail</div>
+        <ol className="space-y-2">
+          {audit.map((e) => (
+            <li key={e.id} className="flex items-start gap-3 text-sm">
+              <span className="mt-0.5 inline-block w-20 shrink-0 text-[11px] font-semibold text-brand-600 uppercase">{e.action}</span>
+              <span className="flex-1 text-slate-600">
+                {summarize(e)}
+                {e.txHash && <span className="ml-2 font-mono text-[10px] text-slate-400">{e.txHash.slice(0, 14)}…</span>}
+              </span>
+              <span className="text-[11px] text-slate-400">{new Date(e.createdAt).toLocaleTimeString()}</span>
+            </li>
+          ))}
+          {audit.length === 0 && <li className="text-sm text-slate-400">No activity yet.</li>}
+        </ol>
+      </div>
+    </div>
+  );
+}
+
+type OpField = { name: string; kind: "account" | "number" | "text"; optional?: boolean };
+
+function Operations({
+  role,
+  useCase,
+  isNft,
+  accounts,
+  busy,
+  onRun,
+}: {
+  role: string;
+  useCase: UseCase;
+  isNft: boolean;
+  accounts: AccountState[];
+  busy: boolean;
+  onRun: (action: string, body: Record<string, string>) => void;
+}): JSX.Element | null {
+  const showMint = useCase.lifecycle.mint && can(role as never, "mint");
+  const showTransfer = useCase.lifecycle.transfer && can(role as never, "transfer");
+  const showBurn = useCase.lifecycle.burn && can(role as never, "burn");
+  if (!showMint && !showTransfer && !showBurn) return null;
+
+  const fungible = {
+    mint: [{ name: "to", kind: "account" }, { name: "amount", kind: "number" }] as OpField[],
+    transfer: [{ name: "from", kind: "account" }, { name: "to", kind: "account" }, { name: "amount", kind: "number" }] as OpField[],
+    burn: [{ name: "from", kind: "account" }, { name: "amount", kind: "number" }] as OpField[],
+  };
+  const nft = {
+    mint: [{ name: "to", kind: "account" }, { name: "tokenId", kind: "text" }, { name: "uri", kind: "text", optional: true }] as OpField[],
+    transfer: [{ name: "from", kind: "account" }, { name: "to", kind: "account" }, { name: "tokenId", kind: "text" }] as OpField[],
+    burn: [{ name: "tokenId", kind: "text" }] as OpField[],
+  };
+  const fields = isNft ? nft : fungible;
+
+  return (
+    <div className="grid gap-4 sm:grid-cols-3">
+      {showMint && <OpForm title="Mint" fields={fields.mint} accounts={accounts} busy={busy} onSubmit={(b) => onRun("mint", b)} />}
+      {showTransfer && <OpForm title="Transfer" fields={fields.transfer} accounts={accounts} busy={busy} onSubmit={(b) => onRun("transfer", b)} />}
+      {showBurn && <OpForm title="Burn" fields={fields.burn} accounts={accounts} busy={busy} onSubmit={(b) => onRun("burn", b)} />}
+    </div>
+  );
+}
+
+function OpForm({
+  title,
+  fields,
+  accounts,
+  busy,
+  onSubmit,
+}: {
+  title: string;
+  fields: OpField[];
+  accounts: AccountState[];
+  busy: boolean;
+  onSubmit: (body: Record<string, string>) => void;
+}): JSX.Element {
+  const [state, setState] = useState<Record<string, string>>({});
+  const set = (k: string, v: string): void => setState((s) => ({ ...s, [k]: v }));
+  const ready = fields.every((f) => f.optional || state[f.name]);
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-2.5">
+      <div className="text-sm font-semibold text-slate-800">{title}</div>
+      {fields.map((f) =>
+        f.kind === "account" ? (
+          <select key={f.name} className="select" value={state[f.name] ?? ""} onChange={(e) => set(f.name, e.target.value)}>
+            <option value="">{f.name}…</option>
+            {accounts.map((a) => (
+              <option key={a.address} value={a.address}>
+                {a.label}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            key={f.name}
+            className="input"
+            type={f.kind === "number" ? "number" : "text"}
+            placeholder={f.optional ? `${f.name} (optional)` : f.name}
+            value={state[f.name] ?? ""}
+            onChange={(e) => set(f.name, e.target.value)}
+          />
+        ),
+      )}
+      <button disabled={busy || !ready} onClick={() => onSubmit(state)} className="w-full rounded-lg bg-brand-600 text-white py-1.5 text-xs font-medium hover:bg-brand-700 disabled:opacity-40">
+        {title}
+      </button>
+    </div>
+  );
+}
+
+function ChainPill({ chain }: { chain?: ChainInfo }): JSX.Element {
+  const tone = chain?.family === "evm" ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600";
+  return <span className={`px-1.5 py-0.5 rounded font-medium ${tone}`}>{chain?.label ?? "unknown chain"}</span>;
+}
+
+function Pill({ tone, children }: { tone: "red" | "green" | "gray"; children: React.ReactNode }): JSX.Element {
+  const tones = { red: "bg-red-100 text-red-700", green: "bg-emerald-100 text-emerald-700", gray: "bg-slate-100 text-slate-400" };
+  return <span className={`inline-block mx-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium ${tones[tone]}`}>{children}</span>;
+}
+
+function summarize(e: AuditEntry): string {
+  const p = e.payload;
+  if (e.action === "issue") return `${String(p.name ?? "")} (${String(p.tokenStandard ?? p.useCaseKey ?? "")})`;
+  if (e.action === "mint") return p.tokenId ? `#${String(p.tokenId)} → ${short(p.to)}` : `${String(p.amount)} → ${short(p.to)}`;
+  if (e.action === "transfer") return p.tokenId ? `#${String(p.tokenId)} ${short(p.from)} → ${short(p.to)}` : `${String(p.amount)} ${short(p.from)} → ${short(p.to)}`;
+  if (e.action === "burn") return p.tokenId ? `#${String(p.tokenId)}` : `${String(p.amount)} from ${short(p.from)}`;
+  if (e.action === "freeze" || e.action === "unfreeze" || e.action === "allow" || e.action === "disallow") return short(p.account);
+  return "";
+}
+
+function short(v: unknown): string {
+  const s = String(v ?? "");
+  return s.length > 12 ? `${s.slice(0, 8)}…${s.slice(-4)}` : s;
+}
