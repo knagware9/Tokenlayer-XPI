@@ -36,7 +36,7 @@ export function App(): JSX.Element {
 
   return (
     <div className="min-h-screen">
-      <Header chains={chains} />
+      <Header />
       <main className="max-w-6xl mx-auto px-6 py-6">
         {selected ? (
           <AssetDetail
@@ -57,7 +57,7 @@ export function App(): JSX.Element {
               </TabButton>
               {isAdmin && (
                 <TabButton active={tab === "build"} onClick={() => setTab("build")}>
-                  Use Cases
+                  Define your own Use Case
                 </TabButton>
               )}
             </div>

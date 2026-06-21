@@ -9,11 +9,12 @@ ledger or standard an asset uses.
 
 ## What it does
 
-- **Multi-DLT** — one `LedgerAdapter` seam, many chains: a real **EVM** family
-  (`local-evm`, **Besu**, **MST** public EVM) plus **Hyperledger Fabric** and **Canton**
-  (full adapters over a simulated ledger, no Docker/Daml required) and an in-memory **mock**
-  chain. **Each use case chooses which DLTs it may deploy to.** A single behavioural suite
-  passes identically against every adapter.
+- **Multi-DLT** — one `LedgerAdapter` seam, many chains: an **EVM** family
+  (**Besu**, **MST** public EVM, `local-evm`) plus **Hyperledger Fabric** and **Canton**.
+  Out of the box every chain runs on an in-memory simulated ledger (no Docker/Daml/RPC
+  required) and upgrades to its real backend once its connection env is set. **Each use case
+  chooses which DLTs it may deploy to.** A single behavioural suite passes identically
+  against every adapter.
 - **Multi-standard** — **ERC-20**, **ERC-721** (NFT), and **ERC-3643**. On EVM chains, ERC-3643
   issues a **full, official T-REX suite** (vendored `@tokenysolutions/t-rex` + `@onchain-id/solidity`):
   ONCHAINID identities, IdentityRegistry, TrustedIssuers, and ModularCompliance. The use case
@@ -47,9 +48,9 @@ apps/
   api/         Fastify HTTP layer, JWT/RBAC, Prisma persistence, DB-backed use cases, demo.
   web/         React + Vite + Tailwind dashboard incl. the Use-Case Builder.
 config/
-  chains.json        Declarative chain registry (mock, fabric, canton, local-evm, besu, mst).
+  chains.json        Declarative chain registry (besu, mst, fabric, canton, local-evm).
   use-cases/         Default use cases: generic-asset (ERC-20), generic-certificate (ERC-721),
-                     security-token (ERC-3643). Seeded into the DB on startup.
+                     gold-loan (ERC-20), corporate-bond (ERC-3643). Seeded into the DB on startup.
 ```
 
 The chain-agnostic seam — every ledger implements this and nothing else leaks chain specifics:
@@ -78,7 +79,7 @@ pnpm web:dev      # dashboard on http://localhost:5173 (terminal 2)
 ```
 
 Open http://localhost:5173 and use **Quick login** (Admin / Issuer / Operator / Viewer). Out of
-the box you get three DLTs (mock, Fabric, Canton) and three standards.
+the box you get four DLTs (Besu, MST, Fabric, Canton) and three standards.
 
 ### Demo credentials
 
@@ -115,6 +116,38 @@ create it. It is immediately available in **Issue Asset**. The same is available
 ```bash
 POST /use-cases     # create (Admin)
 PUT  /use-cases/:key  # edit  (Admin)
+```
+
+## REST API
+
+The platform is fully API-driven. All endpoints are versioned under **`/api/v1`**, validated by
+JSON schema, and documented with **OpenAPI 3**:
+
+- **Swagger UI:** `http://localhost:4000/docs` (with an Authorize button for the Bearer token)
+- **OpenAPI document:** `http://localhost:4000/openapi.json`
+
+Auth is a JWT obtained from `POST /api/v1/auth/login`, sent as `Authorization: Bearer <token>`.
+
+| Method & path | Purpose |
+| --- | --- |
+| `POST /api/v1/auth/login` | Obtain a JWT |
+| `GET /api/v1/chains` · `GET /api/v1/accounts` | Catalog |
+| `GET/POST/PUT /api/v1/use-cases[/:key]` | Low-code asset-type definitions (create/edit = Admin) |
+| `POST /api/v1/assets` | Issue (tokenize) an asset |
+| `GET /api/v1/assets?useCaseKey=&chainId=&status=&limit=&offset=` | List assets (filter + paginate) |
+| `GET /api/v1/assets/:id` · `/accounts` · `/tokens` · `/audit` | Asset, holders, NFT tokens, audit (paginated) |
+| `POST /api/v1/assets/:id/actions/{mint\|transfer\|burn\|freeze\|unfreeze\|allow\|disallow}` | Lifecycle |
+
+**Conventions.** Errors use a uniform envelope `{ "error": "<CODE>", "message": "...", "details"?: {} }`
+(`VALIDATION_ERROR`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `NOT_ALLOWLISTED`, `ACCOUNT_FROZEN`, …).
+Unbounded collections return `{ "data": [...], "pagination": { "limit", "offset", "total" } }`.
+
+```bash
+TOKEN=$(curl -s localhost:4000/api/v1/auth/login -H 'content-type: application/json' \
+  -d '{"email":"issuer@tokenlayer.dev","password":"issuer123"}' | jq -r .token)
+curl -s localhost:4000/api/v1/assets -H "authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"useCaseKey":"gold-loan","name":"GL-1","symbol":"GLD","chainId":"besu","metadata":{"borrower":"R","goldWeightGrams":250,"loanAmountInr":500000}}'
 ```
 
 ## Verify
@@ -163,7 +196,8 @@ declarative use cases, and compliance hooks are designed so these attach without
 
 ## Notes & limitations (MVP)
 
-- Simulated chains (mock, Fabric, Canton) are in-memory: balances reset when the API restarts
+- Unconfigured chains (Besu, MST, Fabric, Canton) run on the in-memory simulated ledger:
+  balances reset when the API restarts; set each chain's RPC/connection env to use its real backend
   (asset + use-case records persist in SQLite). EVM chains persist for the life of the node.
 - ERC-721 token ids on EVM chains are numeric (the contract uses `uint256`); the simulated
   ledger accepts any string id.

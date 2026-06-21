@@ -11,10 +11,13 @@ import {
 import type {
   AccountRecord,
   AccountRepository,
+  AssetFilter,
   AssetRecord,
   AssetRepository,
   AuditEntryRecord,
   AuditRepository,
+  Page,
+  Paged,
   UseCaseRepository,
   UserRecord,
   UserRepository,
@@ -67,15 +70,26 @@ export class PrismaAssetRepository implements AssetRepository {
       createdAt: r.createdAt.toISOString(),
     };
   }
-  async list(): Promise<AssetRecord[]> {
-    const rows = await prisma.asset.findMany({ orderBy: { createdAt: "desc" } });
-    return rows.map((r) => ({
-      ...r,
-      tokenType: r.tokenType as TokenType,
-      tokenStandard: r.tokenStandard as TokenStandard,
-      metadata: JSON.parse(r.metadata) as Record<string, unknown>,
-      createdAt: r.createdAt.toISOString(),
-    }));
+  async list(filter: AssetFilter = {}, page: Page = {}): Promise<Paged<AssetRecord>> {
+    const where = {
+      ...(filter.useCaseKey ? { useCaseKey: filter.useCaseKey } : {}),
+      ...(filter.chainId ? { chainId: filter.chainId } : {}),
+      ...(filter.status ? { status: filter.status } : {}),
+    };
+    const [rows, total] = await Promise.all([
+      prisma.asset.findMany({ where, orderBy: { createdAt: "desc" }, skip: page.offset ?? 0, take: page.limit }),
+      prisma.asset.count({ where }),
+    ]);
+    return {
+      items: rows.map((r) => ({
+        ...r,
+        tokenType: r.tokenType as TokenType,
+        tokenStandard: r.tokenStandard as TokenStandard,
+        metadata: JSON.parse(r.metadata) as Record<string, unknown>,
+        createdAt: r.createdAt.toISOString(),
+      })),
+      total,
+    };
   }
   async setStatus(id: string, status: string): Promise<void> {
     await prisma.asset.update({ where: { id }, data: { status } });
@@ -108,18 +122,24 @@ export class PrismaAuditRepository implements AuditRepository {
       createdAt: r.createdAt.toISOString(),
     };
   }
-  async listByAsset(assetId: string): Promise<AuditEntryRecord[]> {
-    const rows = await prisma.auditLog.findMany({ where: { assetId }, orderBy: { createdAt: "desc" } });
-    return rows.map((r) => ({
-      id: r.id,
-      assetId: r.assetId ?? undefined,
-      actorId: r.actorId,
-      action: r.action as LifecycleAction,
-      payload: JSON.parse(r.payload) as Record<string, unknown>,
-      txHash: r.txHash ?? undefined,
-      chainId: r.chainId ?? undefined,
-      createdAt: r.createdAt.toISOString(),
-    }));
+  async listByAsset(assetId: string, page: Page = {}): Promise<Paged<AuditEntryRecord>> {
+    const [rows, total] = await Promise.all([
+      prisma.auditLog.findMany({ where: { assetId }, orderBy: { createdAt: "desc" }, skip: page.offset ?? 0, take: page.limit }),
+      prisma.auditLog.count({ where: { assetId } }),
+    ]);
+    return {
+      items: rows.map((r) => ({
+        id: r.id,
+        assetId: r.assetId ?? undefined,
+        actorId: r.actorId,
+        action: r.action as LifecycleAction,
+        payload: JSON.parse(r.payload) as Record<string, unknown>,
+        txHash: r.txHash ?? undefined,
+        chainId: r.chainId ?? undefined,
+        createdAt: r.createdAt.toISOString(),
+      })),
+      total,
+    };
   }
 }
 

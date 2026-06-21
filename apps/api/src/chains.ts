@@ -22,6 +22,8 @@ interface ChainDescriptor {
   keyEnv?: string;
   gas?: "auto" | "zero";
   confirmations?: number;
+  /** EVM chains: run on the in-memory simulated ledger until their RPC is configured. */
+  simulatedFallback?: boolean;
 }
 
 export interface ChainInfo {
@@ -47,10 +49,10 @@ function evmArtifacts(): Record<TokenStandard, ReturnType<typeof loadArtifact>> 
 }
 
 /**
- * Assembles every available ledger from config/chains.json. Simulated chains
- * (mock, Fabric, Canton) are always present; EVM chains (local-evm, Besu, MST)
- * are added when their RPC URL + operator key are configured. Each use case
- * chooses which of these it may deploy to.
+ * Assembles every available ledger from config/chains.json. Fabric, Canton, and
+ * any EVM chain flagged `simulatedFallback` (Besu, MST) are always present,
+ * running on the in-memory simulated ledger and upgrading to their real backend
+ * once the connection env is set. Each use case chooses which it may deploy to.
  */
 export function buildChainRegistry(env: Env = process.env): ChainRegistry {
   const descriptors = JSON.parse(readFileSync(CHAINS_FILE, "utf8")) as ChainDescriptor[];
@@ -61,19 +63,22 @@ export function buildChainRegistry(env: Env = process.env): ChainRegistry {
   for (const d of descriptors) {
     if (d.kind === "simulated") {
       adapters.set(d.id, makeSimulatedOrReal(d.id, d.family, env));
-      infos.push({ id: d.id, label: d.label, family: d.family, kind: d.kind });
+      infos.push({ id: d.id, label: d.label, family: d.family, kind: "simulated" });
       continue;
     }
-    // EVM chain — only enabled when configured.
+    // EVM chain — real when its RPC + operator key are configured...
     const rpcUrl = d.rpcEnv ? env[d.rpcEnv] : undefined;
     const privateKey = (d.keyEnv ? env[d.keyEnv] : undefined) ?? env.EVM_OPERATOR_KEY;
-    if (!rpcUrl || !privateKey) continue;
-    artifacts ??= evmArtifacts();
-    adapters.set(
-      d.id,
-      new EvmLedgerAdapter({ chainId: d.id, rpcUrl, privateKey, artifacts, gas: d.gas, confirmations: d.confirmations }),
-    );
-    infos.push({ id: d.id, label: d.label, family: d.family, kind: d.kind });
+    if (rpcUrl && privateKey) {
+      artifacts ??= evmArtifacts();
+      adapters.set(d.id, new EvmLedgerAdapter({ chainId: d.id, rpcUrl, privateKey, artifacts, gas: d.gas, confirmations: d.confirmations }));
+      infos.push({ id: d.id, label: d.label, family: d.family, kind: "evm" });
+    } else if (d.simulatedFallback) {
+      // ...otherwise run on the simulated ledger so the chain is always usable.
+      adapters.set(d.id, new MockLedgerAdapter(d.id));
+      infos.push({ id: d.id, label: d.label, family: d.family, kind: "simulated" });
+    }
+    // else (e.g. local-evm with no RPC): not configured, omitted from the registry.
   }
 
   return {

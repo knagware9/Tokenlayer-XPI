@@ -3,8 +3,8 @@
   "name": "Gold Loan",
   "description": "A gold-collateral-backed loan token (ERC-20). KYC allowlist for lenders/investors, freeze on default, and burn on repayment.",
   "tokenStandard": "ERC-20",
-  "allowedChainIds": ["mock", "fabric", "canton", "local-evm", "besu", "mst"],
-  "defaultChainId": "local-evm",
+  "allowedChainIds": ["besu", "mst", "fabric", "canton", "local-evm"],
+  "defaultChainId": "besu",
   "metadataSchema": {
     "type": "object",
     "properties": {

@@ -23,8 +23,9 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [standard, setStandard] = useState<TokenStandard>("ERC-20");
-  const [allowedChainIds, setAllowedChainIds] = useState<string[]>(["mock"]);
-  const [defaultChainId, setDefaultChainId] = useState("mock");
+  const firstChain = chains[0]?.id ?? "besu";
+  const [allowedChainIds, setAllowedChainIds] = useState<string[]>([firstChain]);
+  const [defaultChainId, setDefaultChainId] = useState(firstChain);
   const [fields, setFields] = useState<FieldRow[]>([{ name: "issuer", type: "string", required: true }]);
   const [lifecycle, setLifecycle] = useState({ mint: true, transfer: true, burn: true, freeze: true });
   const [compliance, setCompliance] = useState({ allowlist: true, transferRestrictions: true });

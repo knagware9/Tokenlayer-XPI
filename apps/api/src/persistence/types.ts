@@ -46,16 +46,33 @@ export interface UserRepository {
   list(): Promise<UserRecord[]>;
 }
 
+/** A page of results plus the total count of matching rows (for pagination). */
+export interface Paged<T> {
+  items: T[];
+  total: number;
+}
+
+export interface Page {
+  limit?: number;
+  offset?: number;
+}
+
+export interface AssetFilter {
+  useCaseKey?: string;
+  chainId?: string;
+  status?: string;
+}
+
 export interface AssetRepository {
   create(input: Omit<AssetRecord, "createdAt">): Promise<AssetRecord>;
   get(id: string): Promise<AssetRecord | null>;
-  list(): Promise<AssetRecord[]>;
+  list(filter?: AssetFilter, page?: Page): Promise<Paged<AssetRecord>>;
   setStatus(id: string, status: string): Promise<void>;
 }
 
 export interface AuditRepository {
   append(entry: Omit<AuditEntryRecord, "id" | "createdAt"> & { createdAt?: string }): Promise<AuditEntryRecord>;
-  listByAsset(assetId: string): Promise<AuditEntryRecord[]>;
+  listByAsset(assetId: string, page?: Page): Promise<Paged<AuditEntryRecord>>;
 }
 
 export interface AccountRepository {

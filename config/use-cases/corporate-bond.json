@@ -3,8 +3,8 @@
   "name": "Corporate Bond",
   "description": "A regulated corporate bond as an ERC-3643 security token. On EVM it deploys a real ONCHAINID + T-REX suite: every holder is identity-registered, transfers are identity-gated, with freeze + recovery and burn on redemption.",
   "tokenStandard": "ERC-3643",
-  "allowedChainIds": ["mock", "fabric", "canton", "local-evm", "besu", "mst"],
-  "defaultChainId": "local-evm",
+  "allowedChainIds": ["besu", "mst", "fabric", "canton", "local-evm"],
+  "defaultChainId": "besu",
   "metadataSchema": {
     "type": "object",
     "properties": {

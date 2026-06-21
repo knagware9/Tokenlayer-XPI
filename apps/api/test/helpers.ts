@@ -30,10 +30,13 @@ export async function buildTestApp(): Promise<FastifyInstance> {
 const PASSWORDS: Record<string, string> = Object.fromEntries(DEFAULT_USERS.map((u) => [u.role, u.password]));
 const EMAILS: Record<string, string> = Object.fromEntries(DEFAULT_USERS.map((u) => [u.role, u.email]));
 
+/** All v1 API routes live under this prefix. */
+export const V1 = "/api/v1";
+
 export async function login(app: FastifyInstance, role: string): Promise<string> {
   const res = await app.inject({
     method: "POST",
-    url: "/auth/login",
+    url: `${V1}/auth/login`,
     payload: { email: EMAILS[role], password: PASSWORDS[role] },
   });
   return res.json().token as string;

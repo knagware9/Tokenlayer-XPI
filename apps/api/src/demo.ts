@@ -52,8 +52,8 @@ async function main(): Promise<void> {
   }
 
   // 2. ERC-3643 — identity allowlist is mandatory.
-  console.log(`\n=== ERC-3643 "Security Token" on Canton (simulated) ===`);
-  const sec = (await issue(app, token, "security-token", "Acme Equity", "ACME", "canton", { issuer: "ACME", instrument: "equity" })).id;
+  console.log(`\n=== ERC-3643 "Corporate Bond" on Canton (simulated) ===`);
+  const sec = (await issue(app, token, "corporate-bond", "Acme Bond", "ACMEB", "canton", { issuer: "ACME", isin: "INE000A01001", faceValue: 1000 })).id;
   const unregistered = await post(app, `/assets/${sec}/actions/mint`, token, { to: ALICE, amount: "100" });
   check("mint to unregistered holder rejected", unregistered.status === 400 && unregistered.body.error === "NOT_ALLOWLISTED");
   await post(app, `/assets/${sec}/actions/allow`, token, { account: ALICE });
@@ -72,7 +72,7 @@ async function main(): Promise<void> {
   // ONCHAINID + registries + modular-compliance suite through the platform.
   if (chains.list().some((c) => c.id === "local-evm")) {
     console.log(`\n=== ERC-3643 real T-REX on Local EVM (deploys ONCHAINID + registries) ===`);
-    const trex = (await issue(app, token, "security-token", "Onchain Equity", "OEQ", "local-evm", { issuer: "ACME", instrument: "equity" })).id;
+    const trex = (await issue(app, token, "corporate-bond", "Onchain Bond", "OBND", "local-evm", { issuer: "ACME", isin: "INE000A01002", faceValue: 1000 })).id;
     const unregistered = await post(app, `/assets/${trex}/actions/mint`, token, { to: ALICE, amount: "100" });
     check("mint to non-identity holder rejected on-chain", unregistered.status === 400);
     await post(app, `/assets/${trex}/actions/allow`, token, { account: ALICE }); // registers an ONCHAINID identity
@@ -86,7 +86,7 @@ async function main(): Promise<void> {
     key: "carbon-credit",
     name: "Carbon Credit",
     tokenStandard: "ERC-20",
-    allowedChainIds: ["mock", "fabric", "canton"],
+    allowedChainIds: ["besu", "fabric", "canton"],
     defaultChainId: "fabric",
     metadataSchema: { type: "object", properties: { project: { type: "string" } }, required: ["project"] },
     lifecycle: { mint: true, transfer: true, burn: true, freeze: true },
@@ -117,12 +117,12 @@ async function issue(
 }
 
 async function post(app: FastifyInstance, url: string, token: string | null, payload: unknown) {
-  const res = await app.inject({ method: "POST", url, headers: token ? { authorization: `Bearer ${token}` } : {}, payload: payload as object });
+  const res = await app.inject({ method: "POST", url: `/api/v1${url}`, headers: token ? { authorization: `Bearer ${token}` } : {}, payload: payload as object });
   return { status: res.statusCode, body: res.json() };
 }
 
 async function get(app: FastifyInstance, url: string, token: string) {
-  const res = await app.inject({ method: "GET", url, headers: { authorization: `Bearer ${token}` } });
+  const res = await app.inject({ method: "GET", url: `/api/v1${url}`, headers: { authorization: `Bearer ${token}` } });
   return { status: res.statusCode, body: res.json() };
 }
 

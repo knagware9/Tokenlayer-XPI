@@ -37,6 +37,10 @@ function check(label: string, ok: boolean): void {
 function section(title: string): void {
   console.log(`\n${"━".repeat(64)}\n${title}\n${"━".repeat(64)}`);
 }
+/** A use case is "ready" if we just created it (201) or it was already seeded (409-ish 400). */
+function created(r: { status: number; body: { error?: string } }): boolean {
+  return r.status === 201 || (r.status === 400 && r.body.error === "INVALID_USECASE");
+}
 
 async function main(): Promise<void> {
   const rbac = new RbacPolicy();
@@ -60,17 +64,17 @@ async function main(): Promise<void> {
   // ============================================================
   section("USE CASE 1 — Gold Loan Tokenization (ERC-20, KYC allowlist + freeze)");
 
-  const goldChain = evmAvailable ? "local-evm" : "mock";
+  const goldChain = evmAvailable ? "local-evm" : "besu";
   check(
     "Admin creates the 'gold-loan' use case (low-code, no deploy)",
-    (
+    created(
       await post(app, "/use-cases", admin, {
         key: "gold-loan",
         name: "Gold Loan",
         description: "A gold-collateral-backed loan token. KYC allowlist for lenders/investors; freeze on default; burn on repayment.",
         tokenStandard: "ERC-20",
-        allowedChainIds: ["mock", "fabric", "canton", "local-evm", "besu", "mst"],
-        defaultChainId: "mock",
+        allowedChainIds: ["besu", "mst", "fabric", "canton", "local-evm"],
+        defaultChainId: "besu",
         metadataSchema: {
           type: "object",
           properties: {
@@ -87,7 +91,7 @@ async function main(): Promise<void> {
         compliance: { allowlist: true, transferRestrictions: true },
         roles: ["Admin", "Issuer", "Operator", "Viewer"],
       })
-    ).status === 201,
+    ),
   );
 
   console.log(`\n   Issuing on chain: ${goldChain}`);
@@ -133,7 +137,7 @@ async function main(): Promise<void> {
   check(`Bob balance ₹50,000 (got ${bal(BOB)})`, bal(BOB) === "50000");
   const goldSupply = (await get(app, `/assets/${gold}`, admin)).body.totalSupply;
   check(`Total supply ₹400,000 after repayment (got ${goldSupply})`, goldSupply === "400000");
-  const goldAudit = (await get(app, `/assets/${gold}/audit`, admin)).body as unknown[];
+  const goldAudit = (await get(app, `/assets/${gold}/audit`, admin)).body.data as unknown[];
   check(`Audit trail recorded ${goldAudit.length} events`, goldAudit.length >= 9);
 
   // ============================================================
@@ -144,13 +148,13 @@ async function main(): Promise<void> {
   const bondChain = evmAvailable ? "local-evm" : "canton";
   check(
     "Admin creates the 'corporate-bond' use case (low-code)",
-    (
+    created(
       await post(app, "/use-cases", admin, {
         key: "corporate-bond",
         name: "Corporate Bond",
         description: "A regulated corporate bond as an ERC-3643 security token. Every holder is identity-registered (ONCHAINID); identity-gated transfers; freeze + recovery; burn on redemption.",
         tokenStandard: "ERC-3643",
-        allowedChainIds: ["mock", "fabric", "canton", "local-evm", "besu", "mst"],
+        allowedChainIds: ["besu", "mst", "fabric", "canton", "local-evm"],
         defaultChainId: "canton",
         metadataSchema: {
           type: "object",
@@ -169,7 +173,7 @@ async function main(): Promise<void> {
         compliance: { allowlist: true, transferRestrictions: true },
         roles: ["Admin", "Issuer", "Operator", "Viewer"],
       })
-    ).status === 201,
+    ),
   );
 
   console.log(`\n   Issuing on chain: ${bondChain}${bondChain === "local-evm" ? " (deploys real ONCHAINID + T-REX registries + modular compliance)" : " (simulated ERC-3643)"}`);
@@ -218,7 +222,7 @@ async function main(): Promise<void> {
   const bbal = (a: string) => bondAccounts.find((x) => x.address === a)?.balance;
   check(`Alice holds 500 bonds (got ${bbal(ALICE)})`, bbal(ALICE) === "500");
   check(`Bob holds 400 bonds (got ${bbal(BOB)})`, bbal(BOB) === "400");
-  const bondAudit = (await get(app, `/assets/${bond}/audit`, admin)).body as unknown[];
+  const bondAudit = (await get(app, `/assets/${bond}/audit`, admin)).body.data as unknown[];
   check(`Audit trail recorded ${bondAudit.length} events`, bondAudit.length >= 8);
 
   await app.close();
@@ -227,15 +231,15 @@ async function main(): Promise<void> {
 }
 
 async function login(app: FastifyInstance, who: string): Promise<string> {
-  const res = await app.inject({ method: "POST", url: "/auth/login", payload: { email: `${who}@tokenlayer.dev`, password: `${who}123` } });
+  const res = await app.inject({ method: "POST", url: "/api/v1/auth/login", payload: { email: `${who}@tokenlayer.dev`, password: `${who}123` } });
   return res.json().token as string;
 }
 async function post(app: FastifyInstance, url: string, token: string, payload: unknown) {
-  const res = await app.inject({ method: "POST", url, headers: { authorization: `Bearer ${token}` }, payload: payload as object });
+  const res = await app.inject({ method: "POST", url: `/api/v1${url}`, headers: { authorization: `Bearer ${token}` }, payload: payload as object });
   return { status: res.statusCode, body: res.json() };
 }
 async function get(app: FastifyInstance, url: string, token: string) {
-  const res = await app.inject({ method: "GET", url, headers: { authorization: `Bearer ${token}` } });
+  const res = await app.inject({ method: "GET", url: `/api/v1${url}`, headers: { authorization: `Bearer ${token}` } });
   return { status: res.statusCode, body: res.json() };
 }
 function act(app: FastifyInstance, token: string, id: string, action: string, body: Record<string, string>) {

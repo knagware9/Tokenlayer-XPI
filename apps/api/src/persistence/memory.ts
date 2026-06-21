@@ -2,10 +2,13 @@ import { normalizeUseCaseDefinition, PolicyError, type UseCaseDefinition } from 
 import type {
   AccountRecord,
   AccountRepository,
+  AssetFilter,
   AssetRecord,
   AssetRepository,
   AuditEntryRecord,
   AuditRepository,
+  Page,
+  Paged,
   UseCaseRepository,
   UserRecord,
   UserRepository,
@@ -41,8 +44,13 @@ export class MemoryAssetRepository implements AssetRepository {
   async get(assetId: string): Promise<AssetRecord | null> {
     return this.byId.get(assetId) ?? null;
   }
-  async list(): Promise<AssetRecord[]> {
-    return [...this.byId.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  async list(filter: AssetFilter = {}, page: Page = {}): Promise<Paged<AssetRecord>> {
+    const matched = [...this.byId.values()]
+      .filter((a) => (!filter.useCaseKey || a.useCaseKey === filter.useCaseKey))
+      .filter((a) => (!filter.chainId || a.chainId === filter.chainId))
+      .filter((a) => (!filter.status || a.status === filter.status))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return paginate(matched, page);
   }
   async setStatus(assetId: string, status: string): Promise<void> {
     const rec = this.byId.get(assetId);
@@ -59,9 +67,16 @@ export class MemoryAuditRepository implements AuditRepository {
     this.entries.push(rec);
     return rec;
   }
-  async listByAsset(assetId: string): Promise<AuditEntryRecord[]> {
-    return this.entries.filter((e) => e.assetId === assetId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  async listByAsset(assetId: string, page: Page = {}): Promise<Paged<AuditEntryRecord>> {
+    const matched = this.entries.filter((e) => e.assetId === assetId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return paginate(matched, page);
   }
+}
+
+function paginate<T>(rows: T[], page: Page): Paged<T> {
+  const offset = page.offset ?? 0;
+  const limit = page.limit ?? rows.length;
+  return { items: rows.slice(offset, offset + limit), total: rows.length };
 }
 
 export class MemoryUseCaseRepository implements UseCaseRepository {

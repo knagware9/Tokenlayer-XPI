@@ -3,8 +3,8 @@
   "name": "Generic Asset",
   "description": "A fungible, transferable asset token (ERC-20) with allowlist + freeze compliance. A neutral template for tokenizing any divisible value on any DLT.",
   "tokenStandard": "ERC-20",
-  "allowedChainIds": ["mock", "fabric", "canton", "local-evm", "besu", "mst"],
-  "defaultChainId": "mock",
+  "allowedChainIds": ["besu", "mst", "fabric", "canton", "local-evm"],
+  "defaultChainId": "besu",
   "metadataSchema": {
     "type": "object",
     "properties": {

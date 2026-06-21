@@ -3,8 +3,8 @@
   "name": "Generic Certificate",
   "description": "A non-fungible certificate (ERC-721) bound to its holder. Each certificate is a distinct token with its own id and URI; it can be frozen or burned but, by default, not transferred — a neutral template for credentials, registrations, or attestations.",
   "tokenStandard": "ERC-721",
-  "allowedChainIds": ["mock", "fabric", "canton", "local-evm", "besu", "mst"],
-  "defaultChainId": "mock",
+  "allowedChainIds": ["besu", "mst", "fabric", "canton", "local-evm"],
+  "defaultChainId": "besu",
   "metadataSchema": {
     "type": "object",
     "properties": {
