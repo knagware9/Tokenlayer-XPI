@@ -89,7 +89,7 @@ async function main(): Promise<void> {
         },
         lifecycle: { mint: true, transfer: true, burn: true, freeze: true },
         compliance: { allowlist: true, transferRestrictions: true },
-        roles: ["Admin", "Issuer", "Operator", "Viewer"],
+        roles: ["UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"],
       })
     ),
   );
@@ -171,7 +171,7 @@ async function main(): Promise<void> {
         },
         lifecycle: { mint: true, transfer: true, burn: true, freeze: true },
         compliance: { allowlist: true, transferRestrictions: true },
-        roles: ["Admin", "Issuer", "Operator", "Viewer"],
+        roles: ["UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"],
       })
     ),
   );
