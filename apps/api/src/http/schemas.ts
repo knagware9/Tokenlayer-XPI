@@ -299,4 +299,22 @@ export const S: Record<string, FastifySchema> = {
     },
     response: { 200: { type: "object", properties: { receipt: { $ref: "Receipt#" } }, required: ["receipt"] }, ...errs(400, 401, 403, 404) },
   },
+
+  listUsers: { tags: ["Users"], summary: "List users in scope", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403) } },
+  createUser: {
+    tags: ["Users"], summary: "Create a user (scoped)", security: bearer,
+    body: {
+      type: "object",
+      required: ["email", "password", "role"],
+      properties: {
+        email: { type: "string" },
+        password: { type: "string", minLength: 6 },
+        role: { type: "string", enum: ["UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"] },
+        useCaseKey: { type: "string" },
+        walletAddress: { type: "string" },
+      },
+    },
+    response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403) },
+  },
+  deleteUser: { tags: ["Users"], summary: "Remove a user (scoped)", security: bearer, params: { type: "object", properties: { id: { type: "string" } } }, response: { 204: { type: "null" }, ...errs(401, 403, 404) } },
 };
