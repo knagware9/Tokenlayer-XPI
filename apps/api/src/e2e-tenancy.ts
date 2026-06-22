@@ -48,8 +48,11 @@ async function main(): Promise<void> {
 
   check("Gold Issuer cannot read the carbon asset (404)", (await get(app, `/assets/${id}`, goldIssuer)).status === 404);
   check("Gold Issuer cannot act on the carbon asset (403)", (await post(app, `/assets/${id}/actions/mint`, goldIssuer, { to: buyerWallet, amount: "1" })).status === 403);
+  const goldIssue = await post(app, "/assets", goldIssuer, { useCaseKey: "gold-loan", name: "GL Test", symbol: "GLT", chainId: "besu", metadata: { borrower: "R", goldWeightGrams: 1, loanAmountInr: 1 } });
+  check("Gold Issuer issues a gold-loan asset", goldIssue.status === 201);
   const goldList = await get(app, "/assets?limit=50", goldIssuer);
-  check("Gold Issuer's asset list excludes carbon assets", (goldList.body.data as { useCaseKey: string }[]).every((a) => a.useCaseKey === "gold-loan"));
+  const goldRows = goldList.body.data as { useCaseKey: string }[];
+  check("Gold Issuer's list is non-empty and excludes carbon assets", goldRows.length > 0 && goldRows.every((a) => a.useCaseKey === "gold-loan"));
 
   await app.close();
   console.log(failures === 0 ? "\n✅ TENANCY E2E PASSED" : `\n❌ FAILED (${failures})`);
