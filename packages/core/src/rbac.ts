@@ -5,21 +5,15 @@ import type { Actor, LifecycleAction, Role } from "./types.js";
  * Role → permitted-action matrix. Deliberately simple and declarative so it can
  * be audited at a glance and extended as new actions arrive in later phases.
  */
+const FULL: readonly LifecycleAction[] = ["issue", "mint", "transfer", "burn", "freeze", "unfreeze", "allow", "disallow", "read"];
+
 const MATRIX: Record<Role, ReadonlySet<LifecycleAction>> = {
-  Admin: new Set<LifecycleAction>([
-    "issue",
-    "mint",
-    "transfer",
-    "burn",
-    "freeze",
-    "unfreeze",
-    "allow",
-    "disallow",
-    "read",
-  ]),
-  Issuer: new Set<LifecycleAction>(["issue", "mint", "allow", "disallow", "read"]),
-  Operator: new Set<LifecycleAction>(["transfer", "burn", "freeze", "unfreeze", "read"]),
-  Viewer: new Set<LifecycleAction>(["read"]),
+  PlatformAdmin: new Set<LifecycleAction>(FULL),
+  UseCaseAdmin: new Set<LifecycleAction>(FULL),
+  Issuer: new Set<LifecycleAction>(["issue", "mint", "allow", "disallow", "freeze", "unfreeze", "read"]),
+  Trader: new Set<LifecycleAction>(["transfer", "burn", "read"]),
+  Buyer: new Set<LifecycleAction>(["read"]),
+  Auditor: new Set<LifecycleAction>(["read"]),
 };
 
 export class RbacPolicy {

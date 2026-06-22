@@ -7,9 +7,9 @@
  */
 
 /** Roles recognised by the platform's access-control policy. */
-export type Role = "Admin" | "Issuer" | "Operator" | "Viewer";
+export type Role = "PlatformAdmin" | "UseCaseAdmin" | "Issuer" | "Trader" | "Buyer" | "Auditor";
 
-export const ROLES: readonly Role[] = ["Admin", "Issuer", "Operator", "Viewer"];
+export const ROLES: readonly Role[] = ["PlatformAdmin", "UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"];
 
 /** Every operation the platform can perform on an asset. */
 export type LifecycleAction =
