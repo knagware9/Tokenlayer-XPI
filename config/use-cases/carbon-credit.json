@@ -1,0 +1,24 @@
+{
+  "key": "carbon-credit",
+  "name": "Carbon Credit",
+  "description": "A tradable carbon credit (ERC-20) where 1 token = 1 tonne of CO2e (a Verified Carbon Unit). Minting issues credits from a verified project, transfers trade them between KYC-verified registry participants, and burning permanently retires a credit so it can never be double-counted. Freeze places a compliance hold on an account.",
+  "tokenStandard": "ERC-20",
+  "allowedChainIds": ["besu", "mst", "fabric", "canton", "local-evm"],
+  "defaultChainId": "besu",
+  "metadataSchema": {
+    "type": "object",
+    "properties": {
+      "projectName": { "type": "string", "description": "Name of the carbon project" },
+      "registry": { "type": "string", "description": "Issuing registry, e.g. Verra / Gold Standard" },
+      "projectId": { "type": "string", "description": "Registry project identifier" },
+      "vintage": { "type": "number", "description": "Vintage year the credits were generated" },
+      "methodology": { "type": "string", "description": "e.g. VM0042, AR-ACM0003" },
+      "country": { "type": "string", "description": "Host country (ISO name)" },
+      "creditType": { "type": "string", "description": "e.g. avoidance / removal" }
+    },
+    "required": ["projectName", "registry", "vintage"]
+  },
+  "lifecycle": { "mint": true, "transfer": true, "burn": true, "freeze": true },
+  "compliance": { "allowlist": true, "transferRestrictions": true },
+  "roles": ["Admin", "Issuer", "Operator", "Viewer"]
+}
