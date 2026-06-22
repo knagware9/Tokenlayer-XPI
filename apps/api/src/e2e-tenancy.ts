@@ -1,0 +1,72 @@
+import { RbacPolicy } from "@tokenlayer/core";
+import type { FastifyInstance } from "fastify";
+import { buildApp } from "./app.js";
+import { buildChainRegistry } from "./chains.js";
+import { createEngine } from "./context.js";
+import { MemoryAccountRepository, MemoryAssetRepository, MemoryAuditRepository, MemoryUseCaseRepository, MemoryUserRepository } from "./persistence/memory.js";
+import { seedDefaults } from "./seed.js";
+import { seedUseCases } from "./use-cases.js";
+
+let failures = 0;
+const check = (label: string, ok: boolean): void => { console.log(`   ${ok ? "✓" : "✗"} ${label}`); if (!ok) failures++; };
+
+async function main(): Promise<void> {
+  const rbac = new RbacPolicy();
+  const chains = buildChainRegistry();
+  const users = new MemoryUserRepository();
+  const assets = new MemoryAssetRepository();
+  const audit = new MemoryAuditRepository();
+  const accounts = new MemoryAccountRepository();
+  const useCases = new MemoryUseCaseRepository();
+  await seedUseCases(useCases);
+  await seedDefaults(users, accounts); // Platform Admin + per-use-case rosters
+  const engine = createEngine(useCases, rbac, chains, audit);
+  const app = await buildApp({ useCases, rbac, engine, users, assets, audit, accounts, chains, jwtSecret: "e2e" });
+
+  const platform = await login(app, "admin@tokenlayer.dev", "admin123");
+  const carbonAdmin = await login(app, "carbon.admin@tokenlayer.dev", "carbon123");
+  const carbonIssuer = await login(app, "carbon.issuer@tokenlayer.dev", "carbon123");
+  const carbonTrader = await login(app, "carbon.trader@tokenlayer.dev", "carbon123");
+  const goldIssuer = await login(app, "gold.issuer@tokenlayer.dev", "gold123");
+
+  const buyerWallet = "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc";
+  const secondWallet = "0x976EA74026E726554dB657fA54763abd0C3a0aa9";
+
+  const newBuyer = await post(app, "/users", carbonAdmin, { email: "extra.buyer@x.dev", password: "secret1", role: "Buyer", walletAddress: buyerWallet });
+  check("UseCaseAdmin creates a scoped Buyer with a wallet", newBuyer.status === 201 && newBuyer.body.useCaseKey === "carbon-credit");
+  check("UseCaseAdmin cannot create a UseCaseAdmin", (await post(app, "/users", carbonAdmin, { email: "x@x.dev", password: "secret1", role: "UseCaseAdmin" })).status === 403);
+
+  const issue = await post(app, "/assets", carbonIssuer, { useCaseKey: "carbon-credit", name: "VCU Test", symbol: "VCUT", chainId: "besu", metadata: { projectName: "P", registry: "Verra", vintage: 2024 } });
+  check("Carbon Issuer issues a credit", issue.status === 201);
+  const id = issue.body.asset.id as string;
+  await post(app, `/assets/${id}/actions/allow`, carbonIssuer, { account: buyerWallet });
+  check("Carbon Issuer mints to the buyer wallet", (await post(app, `/assets/${id}/actions/mint`, carbonIssuer, { to: buyerWallet, amount: "1000" })).status === 200);
+
+  await post(app, `/assets/${id}/actions/allow`, carbonIssuer, { account: secondWallet });
+  check("Carbon Trader settles a transfer", (await post(app, `/assets/${id}/actions/transfer`, carbonTrader, { from: buyerWallet, to: secondWallet, amount: "100" })).status === 200);
+  check("Carbon Issuer cannot transfer (role)", (await post(app, `/assets/${id}/actions/transfer`, carbonIssuer, { from: buyerWallet, to: secondWallet, amount: "1" })).status === 403);
+
+  check("Gold Issuer cannot read the carbon asset (404)", (await get(app, `/assets/${id}`, goldIssuer)).status === 404);
+  check("Gold Issuer cannot act on the carbon asset (403)", (await post(app, `/assets/${id}/actions/mint`, goldIssuer, { to: buyerWallet, amount: "1" })).status === 403);
+  const goldList = await get(app, "/assets?limit=50", goldIssuer);
+  check("Gold Issuer's asset list excludes carbon assets", (goldList.body.data as { useCaseKey: string }[]).every((a) => a.useCaseKey === "gold-loan"));
+
+  await app.close();
+  console.log(failures === 0 ? "\n✅ TENANCY E2E PASSED" : `\n❌ FAILED (${failures})`);
+  process.exit(failures === 0 ? 0 : 1);
+}
+
+async function login(app: FastifyInstance, email: string, password: string): Promise<string> {
+  const res = await app.inject({ method: "POST", url: "/api/v1/auth/login", payload: { email, password } });
+  return res.json().token as string;
+}
+async function post(app: FastifyInstance, url: string, token: string, payload: unknown) {
+  const res = await app.inject({ method: "POST", url: `/api/v1${url}`, headers: { authorization: `Bearer ${token}` }, payload: payload as object });
+  return { status: res.statusCode, body: res.json() };
+}
+async function get(app: FastifyInstance, url: string, token: string) {
+  const res = await app.inject({ method: "GET", url: `/api/v1${url}`, headers: { authorization: `Bearer ${token}` } });
+  return { status: res.statusCode, body: res.json() };
+}
+
+main().catch((err) => { console.error(err); process.exit(1); });
