@@ -308,6 +308,20 @@ describe("per-use-case tenancy", () => {
     expect(escalate.statusCode).toBe(403);
   });
 
+  it("a UseCaseAdmin cannot create a user in another use case", async () => {
+    // The POST /users handler ignores body.useCaseKey for non-PlatformAdmin callers:
+    //   targetUseCaseKey = claims.useCaseKey  (always the caller's own use case)
+    // So even though the body requests "gold-loan", the carbon admin's effective scope
+    // forces the new user into "carbon-credit". The security property is upheld:
+    // a UseCaseAdmin cannot provision a user into a foreign use case.
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
+    const res = await app.inject({ method: "POST", url: `${V1}/users`, headers: { authorization: `Bearer ${admin}` }, payload: { email: "x.cross@x.dev", password: "secret1", role: "Issuer", useCaseKey: "gold-loan" } });
+    // body.useCaseKey is ignored; user is silently created in the caller's own use case.
+    expect(res.statusCode).toBe(201);
+    expect(res.json().useCaseKey).toBe("carbon-credit");
+  });
+
   it("a Buyer is read-only", async () => {
     const app = await buildTestApp();
     const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");

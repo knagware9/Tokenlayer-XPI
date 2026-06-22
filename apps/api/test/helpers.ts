@@ -49,6 +49,7 @@ export async function issueAsset(app: FastifyInstance, token: string, useCaseKey
     headers: { authorization: `Bearer ${token}` },
     payload: { useCaseKey, name: "T", symbol: "T", chainId: "besu", metadata: meta[useCaseKey] ?? {} },
   });
+  if (res.statusCode !== 201) throw new Error(`issueAsset(${useCaseKey}) failed: ${res.statusCode} ${res.body}`);
   return res.json().asset.id as string;
 }
 
