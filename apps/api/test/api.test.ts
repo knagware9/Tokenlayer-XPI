@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FastifyInstance, InjectOptions } from "fastify";
-import { ACCOUNTS, auth, buildTestApp, login, V1 } from "./helpers.js";
+import { ACCOUNTS, auth, buildTestApp, issueAsset, loginAs, V1 } from "./helpers.js";
 
 let app: FastifyInstance;
 beforeAll(async () => {
@@ -15,6 +15,10 @@ function inj(opts: InjectOptions & { url: string }) {
   return app.inject({ ...opts, url: opts.url.startsWith("/api") || opts.url.startsWith("/openapi") ? opts.url : `${V1}${opts.url}` });
 }
 
+/**
+ * Issue a generic-asset (ERC-20) as PlatformAdmin and return its id.
+ * All tests that need a live asset in the shared `app` instance use this.
+ */
 async function issueGenericAsset(token: string): Promise<string> {
   const res = await inj({
     method: "POST",
@@ -52,8 +56,9 @@ describe("OpenAPI", () => {
 });
 
 describe("catalog", () => {
-  it("lists configured use cases and multi-DLT chains", async () => {
-    const token = await login(app, "Viewer");
+  it("lists configured use cases and multi-DLT chains (PlatformAdmin sees all)", async () => {
+    // PlatformAdmin is unscoped — sees every configured use case and chain.
+    const token = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     const useCases = await inj({ method: "GET", url: "/use-cases", headers: auth(token) });
     const keys = useCases.json().map((u: { key: string }) => u.key);
     expect(keys).toEqual(expect.arrayContaining(["generic-asset", "generic-certificate", "gold-loan", "corporate-bond"]));
@@ -61,29 +66,53 @@ describe("catalog", () => {
     const ids = chains.json().map((c: { id: string }) => c.id);
     expect(ids).toEqual(expect.arrayContaining(["besu", "mst", "fabric", "canton"]));
   });
+
+  it("a scoped user only sees their own use case in the catalog", async () => {
+    // carbon.auditor is scoped to carbon-credit — should only see that one use case.
+    const token = await loginAs(app, "carbon.auditor@tokenlayer.dev", "carbon123");
+    const useCases = await inj({ method: "GET", url: "/use-cases", headers: auth(token) });
+    const keys = useCases.json().map((u: { key: string }) => u.key);
+    expect(keys).toEqual(["carbon-credit"]);
+  });
 });
 
 describe("issuance + RBAC + validation", () => {
-  it("lets an Issuer issue an asset", async () => {
-    expect(await issueGenericAsset(await login(app, "Issuer"))).toBeTruthy();
+  it("lets a PlatformAdmin issue an asset", async () => {
+    const token = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    expect(await issueGenericAsset(token)).toBeTruthy();
   });
 
-  it("forbids a Viewer from issuing", async () => {
+  it("lets a scoped Issuer issue an asset in their own use case", async () => {
+    // carbon.issuer is an Issuer scoped to carbon-credit — can issue carbon-credit assets.
+    const token = await loginAs(app, "carbon.issuer@tokenlayer.dev", "carbon123");
     const res = await inj({
       method: "POST",
       url: "/assets",
-      headers: auth(await login(app, "Viewer")),
-      payload: { useCaseKey: "generic-asset", name: "X", symbol: "X", chainId: "besu", metadata: { issuer: "A", assetClass: "c" } },
+      headers: auth(token),
+      payload: { useCaseKey: "carbon-credit", name: "VCU Batch", symbol: "VCU", chainId: "besu", metadata: { projectName: "Rainforest", registry: "Verra", vintage: 2023 } },
+    });
+    expect(res.statusCode).toBe(201);
+  });
+
+  it("forbids a Buyer (read-only role) from issuing", async () => {
+    // Buyer's RBAC matrix only includes 'read' — no 'issue'.
+    const token = await loginAs(app, "carbon.buyer@tokenlayer.dev", "carbon123");
+    const res = await inj({
+      method: "POST",
+      url: "/assets",
+      headers: auth(token),
+      payload: { useCaseKey: "carbon-credit", name: "X", symbol: "X", chainId: "besu", metadata: { projectName: "X", registry: "Verra", vintage: 2024 } },
     });
     expect(res.statusCode).toBe(403);
     expect(res.json().error).toBe("FORBIDDEN");
   });
 
   it("rejects a malformed body with VALIDATION_ERROR (schema validation)", async () => {
+    const token = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     const res = await inj({
       method: "POST",
       url: "/assets",
-      headers: auth(await login(app, "Issuer")),
+      headers: auth(token),
       payload: { useCaseKey: "generic-asset", name: "X", chainId: "besu" }, // missing 'symbol'
     });
     expect(res.statusCode).toBe(400);
@@ -91,18 +120,20 @@ describe("issuance + RBAC + validation", () => {
   });
 
   it("rejects issuance with invalid metadata", async () => {
+    const token = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     const res = await inj({
       method: "POST",
       url: "/assets",
-      headers: auth(await login(app, "Issuer")),
-      payload: { useCaseKey: "generic-asset", name: "X", symbol: "X", chainId: "besu", metadata: { issuer: "A" } },
+      headers: auth(token),
+      payload: { useCaseKey: "generic-asset", name: "X", symbol: "X", chainId: "besu", metadata: { issuer: "A" } }, // missing 'assetClass'
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe("INVALID_METADATA");
   });
 
   it("returns a NOT_FOUND envelope for a missing asset", async () => {
-    const res = await inj({ method: "GET", url: "/assets/does-not-exist", headers: auth(await login(app, "Viewer")) });
+    const token = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const res = await inj({ method: "GET", url: "/assets/does-not-exist", headers: auth(token) });
     expect(res.statusCode).toBe(404);
     expect(res.json()).toMatchObject({ error: "NOT_FOUND" });
   });
@@ -110,7 +141,7 @@ describe("issuance + RBAC + validation", () => {
 
 describe("asset listing — filter + pagination", () => {
   it("returns a { data, pagination } envelope and honours limit/offset/filter", async () => {
-    const admin = await login(app, "Admin");
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     await issueGenericAsset(admin);
     await issueGenericAsset(admin);
 
@@ -127,7 +158,7 @@ describe("asset listing — filter + pagination", () => {
 
 describe("lifecycle + compliance + audit", () => {
   it("runs allow → mint → transfer → freeze-block → audit", async () => {
-    const admin = await login(app, "Admin");
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     const id = await issueGenericAsset(admin);
     const act = (action: string, body: Record<string, string>) =>
       inj({ method: "POST", url: `/assets/${id}/actions/${action}`, headers: auth(admin), payload: body });
@@ -158,7 +189,7 @@ describe("lifecycle + compliance + audit", () => {
   });
 
   it("issues and mints an ERC-721 certificate by token id, then blocks transfer", async () => {
-    const admin = await login(app, "Admin");
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     const issue = await inj({
       method: "POST",
       url: "/assets",
@@ -180,7 +211,7 @@ describe("lifecycle + compliance + audit", () => {
   });
 
   it("rejects issuance to a chain the use case does not allow", async () => {
-    const admin = await login(app, "Admin");
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     const create = await inj({
       method: "POST",
       url: "/use-cases",
@@ -188,7 +219,7 @@ describe("lifecycle + compliance + audit", () => {
       payload: {
         key: "besu-only-asset", name: "Besu Only", tokenStandard: "ERC-20", allowedChainIds: ["besu"], defaultChainId: "besu",
         metadataSchema: { type: "object", properties: {} }, lifecycle: { mint: true, transfer: true, burn: true, freeze: true },
-        compliance: { allowlist: false, transferRestrictions: false }, roles: ["Admin", "Issuer"],
+        compliance: { allowlist: false, transferRestrictions: false }, roles: ["UseCaseAdmin", "Issuer"],
       },
     });
     expect(create.statusCode).toBe(201);
@@ -204,43 +235,85 @@ describe("lifecycle + compliance + audit", () => {
 });
 
 describe("low-code use-case builder", () => {
-  it("lets an Admin create a use case and forbids non-Admins", async () => {
+  it("only a PlatformAdmin can create a use case; non-admin gets 403", async () => {
+    // Use a scoped role (Buyer) to confirm non-PlatformAdmin is rejected.
+    const buyer = await loginAs(app, "carbon.buyer@tokenlayer.dev", "carbon123");
     const forbidden = await inj({
       method: "POST",
       url: "/use-cases",
-      headers: auth(await login(app, "Viewer")),
-      payload: { key: "x", name: "X", tokenStandard: "ERC-20", allowedChainIds: ["besu"], defaultChainId: "besu", metadataSchema: { type: "object", properties: {} }, lifecycle: { mint: true, transfer: true, burn: true, freeze: true }, compliance: { allowlist: false, transferRestrictions: false }, roles: ["Admin"] },
+      headers: auth(buyer),
+      payload: { key: "x", name: "X", tokenStandard: "ERC-20", allowedChainIds: ["besu"], defaultChainId: "besu", metadataSchema: { type: "object", properties: {} }, lifecycle: { mint: true, transfer: true, burn: true, freeze: true }, compliance: { allowlist: false, transferRestrictions: false }, roles: ["UseCaseAdmin"] },
     });
     expect(forbidden.statusCode).toBe(403);
 
-    const admin = await login(app, "Admin");
+    // PlatformAdmin can create a new use case.
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     const created = await inj({
       method: "POST",
       url: "/use-cases",
       headers: auth(admin),
       payload: {
-        key: "carbon-credit", name: "Carbon Credit", tokenStandard: "ERC-20", allowedChainIds: ["besu", "fabric"], defaultChainId: "fabric",
-        metadataSchema: { type: "object", properties: { project: { type: "string" } }, required: ["project"] },
+        key: "supply-chain-token", name: "Supply Chain Token", tokenStandard: "ERC-20", allowedChainIds: ["besu", "fabric"], defaultChainId: "fabric",
+        metadataSchema: { type: "object", properties: { product: { type: "string" } }, required: ["product"] },
         lifecycle: { mint: true, transfer: true, burn: true, freeze: true }, compliance: { allowlist: true, transferRestrictions: true },
-        roles: ["Admin", "Issuer", "Operator", "Viewer"],
+        roles: ["UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"],
       },
     });
     expect(created.statusCode).toBe(201);
     expect(created.json().tokenType).toBe("fungible");
 
-    const fetched = await inj({ method: "GET", url: "/use-cases/carbon-credit", headers: auth(admin) });
-    expect(fetched.json().name).toBe("Carbon Credit");
+    const fetched = await inj({ method: "GET", url: "/use-cases/supply-chain-token", headers: auth(admin) });
+    expect(fetched.json().name).toBe("Supply Chain Token");
   });
 
   it("rejects an invalid use-case definition", async () => {
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     const res = await inj({
       method: "POST",
       url: "/use-cases",
-      headers: auth(await login(app, "Admin")),
-      payload: { key: "bad", name: "Bad", tokenStandard: "ERC-999", allowedChainIds: ["besu"], defaultChainId: "besu", metadataSchema: { type: "object", properties: {} }, lifecycle: { mint: true, transfer: true, burn: true, freeze: true }, compliance: { allowlist: false, transferRestrictions: false }, roles: ["Admin"] },
+      headers: auth(admin),
+      payload: { key: "bad", name: "Bad", tokenStandard: "ERC-999", allowedChainIds: ["besu"], defaultChainId: "besu", metadataSchema: { type: "object", properties: {} }, lifecycle: { mint: true, transfer: true, burn: true, freeze: true }, compliance: { allowlist: false, transferRestrictions: false }, roles: ["UseCaseAdmin"] },
     });
     expect(res.statusCode).toBe(400);
     // ERC-999 fails request-schema enum first; either VALIDATION_ERROR or INVALID_USECASE is acceptable.
     expect(["VALIDATION_ERROR", "INVALID_USECASE"]).toContain(res.json().error);
+  });
+});
+
+describe("per-use-case tenancy", () => {
+  it("a carbon Issuer cannot read a gold-loan asset (404) or act on it (403); lists are scoped", async () => {
+    const app = await buildTestApp();
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const gold = await issueAsset(app, platform, "gold-loan");
+    await issueAsset(app, platform, "carbon-credit");
+    const carbonIssuer = await loginAs(app, "carbon.issuer@tokenlayer.dev", "carbon123");
+
+    const read = await app.inject({ method: "GET", url: `${V1}/assets/${gold}`, headers: { authorization: `Bearer ${carbonIssuer}` } });
+    expect(read.statusCode).toBe(404);
+    const act = await app.inject({ method: "POST", url: `${V1}/assets/${gold}/actions/mint`, headers: { authorization: `Bearer ${carbonIssuer}` }, payload: { to: "0x1", amount: "1" } });
+    expect(act.statusCode).toBe(403);
+    expect(act.json().error).toBe("WRONG_USE_CASE");
+
+    const list = await app.inject({ method: "GET", url: `${V1}/assets?limit=50`, headers: { authorization: `Bearer ${carbonIssuer}` } });
+    expect(list.json().data.every((a: any) => a.useCaseKey === "carbon-credit")).toBe(true);
+  });
+
+  it("a UseCaseAdmin creates an Issuer in-scope but cannot escalate or cross use cases", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
+    const ok = await app.inject({ method: "POST", url: `${V1}/users`, headers: { authorization: `Bearer ${admin}` }, payload: { email: "new.issuer@x.dev", password: "secret1", role: "Issuer" } });
+    expect(ok.statusCode).toBe(201);
+    expect(ok.json().useCaseKey).toBe("carbon-credit");
+    const escalate = await app.inject({ method: "POST", url: `${V1}/users`, headers: { authorization: `Bearer ${admin}` }, payload: { email: "x@x.dev", password: "secret1", role: "UseCaseAdmin" } });
+    expect(escalate.statusCode).toBe(403);
+  });
+
+  it("a Buyer is read-only", async () => {
+    const app = await buildTestApp();
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const carbon = await issueAsset(app, platform, "carbon-credit");
+    const buyer = await loginAs(app, "carbon.buyer@tokenlayer.dev", "carbon123");
+    const mint = await app.inject({ method: "POST", url: `${V1}/assets/${carbon}/actions/mint`, headers: { authorization: `Bearer ${buyer}` }, payload: { to: "0x1", amount: "1" } });
+    expect(mint.statusCode).toBe(403);
   });
 });
