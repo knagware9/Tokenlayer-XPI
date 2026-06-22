@@ -47,7 +47,7 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
   if (!isAdmin) {
     return (
       <div className="bg-white rounded-xl border border-slate-200 p-6 text-sm text-slate-500">
-        Only an <span className="font-medium text-slate-700">Admin</span> can create use cases.
+        Only an <span className="font-medium text-slate-700">Platform Admin</span> can create use cases.
       </div>
     );
   }
