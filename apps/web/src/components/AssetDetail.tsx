@@ -36,7 +36,7 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
   }, [reload]);
 
   const useCase = asset ? useCases.find((u) => u.key === asset.useCaseKey) : undefined;
-  const role = user?.role ?? "Viewer";
+  const role = user?.role ?? "Auditor";
   const chain = asset ? chains.find((c) => c.id === asset.chainId) : undefined;
 
   async function run(action: string, body: Record<string, string>): Promise<void> {
