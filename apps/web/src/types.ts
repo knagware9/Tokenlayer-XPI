@@ -1,9 +1,11 @@
-export type Role = "Admin" | "Issuer" | "Operator" | "Viewer";
+export type Role = "PlatformAdmin" | "UseCaseAdmin" | "Issuer" | "Trader" | "Buyer" | "Auditor";
 
 export interface SessionUser {
   id: string;
   email: string;
   role: Role;
+  useCaseKey: string | null;
+  walletAddress?: string | null;
 }
 
 export type TokenStandard = "ERC-20" | "ERC-721" | "ERC-3643";
