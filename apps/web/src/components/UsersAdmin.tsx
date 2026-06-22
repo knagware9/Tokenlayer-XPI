@@ -40,8 +40,13 @@ export function UsersAdmin({ useCases }: { useCases: UseCase[] }): JSX.Element {
   }
 
   async function remove(id: string): Promise<void> {
-    await api.deleteUser(token!, id);
-    reload();
+    setError(null);
+    try {
+      await api.deleteUser(token!, id);
+      reload();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Remove failed");
+    }
   }
 
   return (

@@ -14,15 +14,18 @@ export function MyHoldings({ onSelect }: { onSelect: (id: string) => void }): JS
   useEffect(() => {
     if (!token) return;
     void (async () => {
-      const assets = await api.assets(token);
-      const rows: Holding[] = [];
-      for (const asset of assets) {
-        const accounts = await api.assetAccounts(token, asset.id);
-        const mine = accounts.find((a) => a.address.toLowerCase() === wallet?.toLowerCase());
-        if (mine && mine.balance !== "0") rows.push({ asset, balance: mine.balance });
+      try {
+        const assets = await api.assets(token);
+        const rows: Holding[] = [];
+        for (const asset of assets) {
+          const accounts = await api.assetAccounts(token, asset.id);
+          const mine = accounts.find((a) => a.address.toLowerCase() === wallet?.toLowerCase());
+          if (mine && mine.balance !== "0") rows.push({ asset, balance: mine.balance });
+        }
+        setHoldings(rows);
+      } finally {
+        setLoading(false);
       }
-      setHoldings(rows);
-      setLoading(false);
     })();
   }, [token, wallet]);
 
