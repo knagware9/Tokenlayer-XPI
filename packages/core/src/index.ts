@@ -5,3 +5,4 @@ export * from "./use-case-registry.js";
 export * from "./use-case-source.js";
 export * from "./rbac.js";
 export * from "./lifecycle-engine.js";
+export * from "./user-policy.js";

@@ -10,7 +10,7 @@ interface Props {
 }
 
 const STANDARDS: TokenStandard[] = ["ERC-20", "ERC-721", "ERC-3643"];
-const ALL_ROLES: Role[] = ["Admin", "Issuer", "Operator", "Viewer"];
+const ALL_ROLES: Role[] = ["UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"];
 interface FieldRow {
   name: string;
   type: PropertySchema["type"];
@@ -35,7 +35,7 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
   const [busy, setBusy] = useState(false);
 
   const tokenType = standard === "ERC-721" ? "nonfungible" : "fungible";
-  const isAdmin = user?.role === "Admin";
+  const isAdmin = user?.role === "PlatformAdmin";
 
   const toggle = <T,>(list: T[], v: T): T[] => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
 
@@ -47,7 +47,7 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
   if (!isAdmin) {
     return (
       <div className="bg-white rounded-xl border border-slate-200 p-6 text-sm text-slate-500">
-        Only an <span className="font-medium text-slate-700">Admin</span> can create use cases.
+        Only an <span className="font-medium text-slate-700">Platform Admin</span> can create use cases.
       </div>
     );
   }

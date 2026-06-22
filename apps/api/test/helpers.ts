@@ -27,19 +27,30 @@ export async function buildTestApp(): Promise<FastifyInstance> {
   return buildApp({ useCases, rbac, engine, users, assets, audit, accounts, chains, jwtSecret: "test-secret" });
 }
 
-const PASSWORDS: Record<string, string> = Object.fromEntries(DEFAULT_USERS.map((u) => [u.role, u.password]));
-const EMAILS: Record<string, string> = Object.fromEntries(DEFAULT_USERS.map((u) => [u.role, u.email]));
-
 /** All v1 API routes live under this prefix. */
 export const V1 = "/api/v1";
 
-export async function login(app: FastifyInstance, role: string): Promise<string> {
+/** Login by explicit email + password (preferred — unambiguous in the per-use-case model). */
+export async function loginAs(app: FastifyInstance, email: string, password: string): Promise<string> {
+  const res = await app.inject({ method: "POST", url: `${V1}/auth/login`, payload: { email, password } });
+  return res.json().token as string;
+}
+
+/** Issue an asset for the given use case key, returning the new asset's id. */
+export async function issueAsset(app: FastifyInstance, token: string, useCaseKey: string): Promise<string> {
+  const meta: Record<string, Record<string, unknown>> = {
+    "carbon-credit": { projectName: "P", registry: "Verra", vintage: 2024 },
+    "gold-loan": { borrower: "R", goldWeightGrams: 1, loanAmountInr: 1 },
+    "corporate-bond": { issuer: "ACME", isin: "X", faceValue: 1 },
+  };
   const res = await app.inject({
     method: "POST",
-    url: `${V1}/auth/login`,
-    payload: { email: EMAILS[role], password: PASSWORDS[role] },
+    url: `${V1}/assets`,
+    headers: { authorization: `Bearer ${token}` },
+    payload: { useCaseKey, name: "T", symbol: "T", chainId: "besu", metadata: meta[useCaseKey] ?? {} },
   });
-  return res.json().token as string;
+  if (res.statusCode !== 201) throw new Error(`issueAsset(${useCaseKey}) failed: ${res.statusCode} ${res.body}`);
+  return res.json().asset.id as string;
 }
 
 export function auth(token: string): { authorization: string } {
@@ -49,3 +60,20 @@ export function auth(token: string): { authorization: string } {
 const ALICE = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
 const BOB = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC";
 export const ACCOUNTS = { ALICE, BOB };
+
+// ---------------------------------------------------------------------------
+// Legacy role-based login — kept for any tests that still use old-style roles.
+// Maps by the first seeded user with that role (PlatformAdmin → admin@…, etc.).
+// ---------------------------------------------------------------------------
+const PASSWORDS: Record<string, string> = Object.fromEntries(DEFAULT_USERS.map((u) => [u.role, u.password]));
+const EMAILS: Record<string, string> = Object.fromEntries(DEFAULT_USERS.map((u) => [u.role, u.email]));
+
+/** @deprecated Prefer loginAs(app, email, password). */
+export async function login(app: FastifyInstance, role: string): Promise<string> {
+  const res = await app.inject({
+    method: "POST",
+    url: `${V1}/auth/login`,
+    payload: { email: EMAILS[role], password: PASSWORDS[role] },
+  });
+  return res.json().token as string;
+}

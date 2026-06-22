@@ -2,11 +2,11 @@ import { useState } from "react";
 import { ApiError } from "../api.js";
 import { useAuth } from "../auth.js";
 
-const QUICK = [
-  { role: "Admin", email: "admin@tokenlayer.dev", password: "admin123" },
-  { role: "Issuer", email: "issuer@tokenlayer.dev", password: "issuer123" },
-  { role: "Operator", email: "operator@tokenlayer.dev", password: "operator123" },
-  { role: "Viewer", email: "viewer@tokenlayer.dev", password: "viewer123" },
+const QUICK: { group: string; users: { label: string; email: string; password: string }[] }[] = [
+  { group: "Platform", users: [{ label: "Platform Admin", email: "admin@tokenlayer.dev", password: "admin123" }] },
+  { group: "Carbon Credit", users: ["admin", "issuer", "trader", "buyer", "auditor"].map((r) => ({ label: r, email: `carbon.${r}@tokenlayer.dev`, password: "carbon123" })) },
+  { group: "Gold Loan", users: ["admin", "issuer", "trader", "buyer", "auditor"].map((r) => ({ label: r, email: `gold.${r}@tokenlayer.dev`, password: "gold123" })) },
+  { group: "Corporate Bond", users: ["admin", "issuer", "trader", "buyer", "auditor"].map((r) => ({ label: r, email: `bond.${r}@tokenlayer.dev`, password: "bond123" })) },
 ];
 
 export function Login(): JSX.Element {
@@ -67,18 +67,18 @@ export function Login(): JSX.Element {
         </form>
         <div className="mt-6">
           <p className="text-xs text-slate-400 mb-2">Quick login (demo)</p>
-          <div className="grid grid-cols-2 gap-2">
-            {QUICK.map((q) => (
-              <button
-                key={q.role}
-                onClick={() => {
-                  setEmail(q.email);
-                  setPassword(q.password);
-                }}
-                className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:border-brand-500 hover:text-brand-700"
-              >
-                {q.role}
-              </button>
+          <div className="space-y-3">
+            {QUICK.map((g) => (
+              <div key={g.group}>
+                <p className="text-[11px] font-semibold text-slate-500 mb-1">{g.group}</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {g.users.map((q) => (
+                    <button key={q.email} onClick={() => { setEmail(q.email); setPassword(q.password); }} className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-medium text-slate-700 hover:border-brand-500 hover:text-brand-700">
+                      {q.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         </div>

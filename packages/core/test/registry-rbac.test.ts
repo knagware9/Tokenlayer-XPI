@@ -27,15 +27,15 @@ describe("UseCaseRegistry", () => {
 describe("RbacPolicy", () => {
   const rbac = new RbacPolicy();
 
-  it("lets Admin do everything", () => {
-    for (const action of ["issue", "mint", "transfer", "burn", "freeze", "allow", "read"] as const) {
-      expect(rbac.can("Admin", action)).toBe(true);
+  it("lets UseCaseAdmin do everything", () => {
+    for (const action of ["issue", "mint", "transfer", "burn", "freeze", "unfreeze", "allow", "disallow", "read"] as const) {
+      expect(rbac.can("UseCaseAdmin", action)).toBe(true);
     }
   });
 
-  it("limits Viewer to read", () => {
-    expect(rbac.can("Viewer", "read")).toBe(true);
-    expect(rbac.can("Viewer", "mint")).toBe(false);
+  it("limits Auditor to read", () => {
+    expect(rbac.can("Auditor", "read")).toBe(true);
+    expect(rbac.can("Auditor", "mint")).toBe(false);
   });
 
   it("lets Issuer mint but not transfer", () => {
@@ -43,13 +43,14 @@ describe("RbacPolicy", () => {
     expect(rbac.can("Issuer", "transfer")).toBe(false);
   });
 
-  it("lets Operator transfer/freeze but not issue", () => {
-    expect(rbac.can("Operator", "transfer")).toBe(true);
-    expect(rbac.can("Operator", "freeze")).toBe(true);
-    expect(rbac.can("Operator", "issue")).toBe(false);
+  it("lets Trader transfer/burn but not issue or freeze", () => {
+    expect(rbac.can("Trader", "transfer")).toBe(true);
+    expect(rbac.can("Trader", "burn")).toBe(true);
+    expect(rbac.can("Trader", "issue")).toBe(false);
+    expect(rbac.can("Trader", "freeze")).toBe(false);
   });
 
   it("authorize throws FORBIDDEN", () => {
-    expect(() => rbac.authorize({ id: "u1", role: "Viewer" }, "mint")).toThrowError(/may not perform/);
+    expect(() => rbac.authorize({ id: "u1", role: "Auditor" }, "mint")).toThrowError(/may not perform/);
   });
 });

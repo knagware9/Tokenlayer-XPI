@@ -26,7 +26,7 @@ ledger or standard an asset uses.
 - **Lifecycle engine** — one policy chokepoint enforcing, in order: RBAC → lifecycle rules →
   token-type → compliance (allowlist + freeze), then dispatching to the bound chain and writing
   an immutable audit record.
-- **RBAC** — Admin / Issuer / Operator / Viewer, enforced server-side and mirrored in the UI.
+- **RBAC** — six roles with strict per-use-case isolation, enforced server-side and mirrored in the UI (see [Users & Roles](#users--roles) below).
 - **API-driven** — Fastify + JWT over Prisma/SQLite; everything (issuance, lifecycle,
   use-case CRUD) is a REST endpoint.
 - **React dashboard** — login, use-case catalog, issuance, role-gated lifecycle actions
@@ -78,17 +78,75 @@ pnpm api:dev      # API on http://localhost:4000   (terminal 1)
 pnpm web:dev      # dashboard on http://localhost:5173 (terminal 2)
 ```
 
-Open http://localhost:5173 and use **Quick login** (Admin / Issuer / Operator / Viewer). Out of
-the box you get four DLTs (Besu, MST, Fabric, Canton) and three standards.
+Open http://localhost:5173 and log in with any of the seeded demo accounts below. Out of the box
+you get four DLTs (Besu, MST, Fabric, Canton) and three standards.
+
+## Users & Roles
+
+### Six roles
+
+| Role | Scope | What it can do |
+| ---- | ----- | -------------- |
+| **PlatformAdmin** | global | Create/edit use cases, create the first UseCaseAdmin for each use case, view all assets |
+| **UseCaseAdmin** | own use case | Manage that use case's user roster (Issuer / Trader / Buyer / Auditor), manage assets |
+| **Issuer** | own use case | Issue (tokenize) assets, mint, KYC-allowlist accounts, freeze/unfreeze accounts |
+| **Trader** | own use case | Transfer and burn tokens |
+| **Buyer** | own use case | Read-only: browse the catalog and view own holdings |
+| **Auditor** | own use case | Read-only: full audit trail + asset details |
+
+**Strict per-use-case isolation** — every non-PlatformAdmin user belongs to exactly one use case
+and only sees and acts within it. A gold-loan Issuer cannot read, list, or act on any carbon-credit
+asset (and vice versa).
+
+### Provisioning flow
+
+```
+PlatformAdmin
+  → creates use case
+  → creates first UseCaseAdmin for that use case
+
+UseCaseAdmin (scoped)
+  → creates Issuer / Trader / Buyer / Auditor (all scoped to same use case)
+  → cannot create another UseCaseAdmin (escalation blocked)
+```
 
 ### Demo credentials
 
-| Role     | Email                   | Password    |
-| -------- | ----------------------- | ----------- |
-| Admin    | admin@tokenlayer.dev    | admin123    |
-| Issuer   | issuer@tokenlayer.dev   | issuer123   |
-| Operator | operator@tokenlayer.dev | operator123 |
-| Viewer   | viewer@tokenlayer.dev   | viewer123   |
+**Platform Admin (global)**
+
+| Role | Email | Password |
+| ---- | ----- | -------- |
+| PlatformAdmin | admin@tokenlayer.dev | admin123 |
+
+**Carbon Credit use case**
+
+| Role | Email | Password |
+| ---- | ----- | -------- |
+| UseCaseAdmin | carbon.admin@tokenlayer.dev | carbon123 |
+| Issuer | carbon.issuer@tokenlayer.dev | carbon123 |
+| Trader | carbon.trader@tokenlayer.dev | carbon123 |
+| Buyer | carbon.buyer@tokenlayer.dev | carbon123 |
+| Auditor | carbon.auditor@tokenlayer.dev | carbon123 |
+
+**Gold Loan use case**
+
+| Role | Email | Password |
+| ---- | ----- | -------- |
+| UseCaseAdmin | gold.admin@tokenlayer.dev | gold123 |
+| Issuer | gold.issuer@tokenlayer.dev | gold123 |
+| Trader | gold.trader@tokenlayer.dev | gold123 |
+| Buyer | gold.buyer@tokenlayer.dev | gold123 |
+| Auditor | gold.auditor@tokenlayer.dev | gold123 |
+
+**Corporate Bond use case**
+
+| Role | Email | Password |
+| ---- | ----- | -------- |
+| UseCaseAdmin | bond.admin@tokenlayer.dev | bond123 |
+| Issuer | bond.issuer@tokenlayer.dev | bond123 |
+| Trader | bond.trader@tokenlayer.dev | bond123 |
+| Buyer | bond.buyer@tokenlayer.dev | bond123 |
+| Auditor | bond.auditor@tokenlayer.dev | bond123 |
 
 ### Enabling EVM chains (local-evm / Besu / MST)
 
@@ -109,13 +167,13 @@ pnpm api:dev                                       # terminal 2
 
 ## Low-code: create a use case (no code)
 
-Sign in as **Admin** → **Use Cases** tab. Pick a token standard, choose which DLTs it may
+Sign in as **PlatformAdmin** → **Use Cases** tab. Pick a token standard, choose which DLTs it may
 deploy to, define metadata fields, toggle lifecycle actions and compliance, set roles, and
 create it. It is immediately available in **Issue Asset**. The same is available over the API:
 
 ```bash
-POST /use-cases     # create (Admin)
-PUT  /use-cases/:key  # edit  (Admin)
+POST /use-cases     # create (PlatformAdmin)
+PUT  /use-cases/:key  # edit  (PlatformAdmin)
 ```
 
 ## REST API
@@ -132,7 +190,7 @@ Auth is a JWT obtained from `POST /api/v1/auth/login`, sent as `Authorization: B
 | --- | --- |
 | `POST /api/v1/auth/login` | Obtain a JWT |
 | `GET /api/v1/chains` · `GET /api/v1/accounts` | Catalog |
-| `GET/POST/PUT /api/v1/use-cases[/:key]` | Low-code asset-type definitions (create/edit = Admin) |
+| `GET/POST/PUT /api/v1/use-cases[/:key]` | Low-code asset-type definitions (create/edit = PlatformAdmin) |
 | `POST /api/v1/assets` | Issue (tokenize) an asset |
 | `GET /api/v1/assets?useCaseKey=&chainId=&status=&limit=&offset=` | List assets (filter + paginate) |
 | `GET /api/v1/assets/:id` · `/accounts` · `/tokens` · `/audit` | Asset, holders, NFT tokens, audit (paginated) |
@@ -144,7 +202,7 @@ Unbounded collections return `{ "data": [...], "pagination": { "limit", "offset"
 
 ```bash
 TOKEN=$(curl -s localhost:4000/api/v1/auth/login -H 'content-type: application/json' \
-  -d '{"email":"issuer@tokenlayer.dev","password":"issuer123"}' | jq -r .token)
+  -d '{"email":"gold.issuer@tokenlayer.dev","password":"gold123"}' | jq -r .token)
 curl -s localhost:4000/api/v1/assets -H "authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' \
   -d '{"useCaseKey":"gold-loan","name":"GL-1","symbol":"GLD","chainId":"besu","metadata":{"borrower":"R","goldWeightGrams":250,"loanAmountInr":500000}}'

@@ -103,7 +103,7 @@ export const FUNGIBLE_USE_CASE: UseCaseDefinition = {
   },
   lifecycle: { mint: true, transfer: true, burn: true, freeze: true },
   compliance: { allowlist: true, transferRestrictions: true },
-  roles: ["Admin", "Issuer", "Operator", "Viewer"],
+  roles: ["UseCaseAdmin", "Issuer", "Trader", "Auditor"],
 };
 
 export const NO_TRANSFER_USE_CASE: UseCaseDefinition = {
@@ -120,5 +120,5 @@ export const NO_TRANSFER_USE_CASE: UseCaseDefinition = {
   },
   lifecycle: { mint: true, transfer: false, burn: true, freeze: true },
   compliance: { allowlist: false, transferRestrictions: false },
-  roles: ["Admin", "Issuer", "Viewer"],
+  roles: ["UseCaseAdmin", "Issuer", "Auditor"],
 };

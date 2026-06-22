@@ -44,7 +44,7 @@ const SELLER_LABEL = "Treasury"; // the project issuance pool that initially hol
 async function login(): Promise<string> {
   const r = await fetch(`${BASE}/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: "admin@tokenlayer.dev", password: "admin123" }) });
   if (!r.ok) throw new Error(`login failed: ${r.status}`);
-  return (await r.json()).token as string;
+  return ((await r.json()) as any).token as string;
 }
 async function api(token: string, method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> {
   const r = await fetch(`${BASE}${path}`, { method, headers: { "content-type": "application/json", authorization: `Bearer ${token}` }, body: body ? JSON.stringify(body) : undefined });

@@ -82,19 +82,19 @@ async function main(): Promise<void> {
 
   // 4. Low-code — create a brand-new use case at runtime, then issue it.
   console.log(`\n=== Low-code: create a use case via API, then issue it ===`);
-  const created = await post(app, "/use-cases", token, {
-    key: "carbon-credit",
-    name: "Carbon Credit",
+  const createdUc = await post(app, "/use-cases", token, {
+    key: "forest-offset",
+    name: "Forest Offset Credit",
     tokenStandard: "ERC-20",
     allowedChainIds: ["besu", "fabric", "canton"],
     defaultChainId: "fabric",
     metadataSchema: { type: "object", properties: { project: { type: "string" } }, required: ["project"] },
     lifecycle: { mint: true, transfer: true, burn: true, freeze: true },
     compliance: { allowlist: false, transferRestrictions: false },
-    roles: ["Admin", "Issuer", "Operator", "Viewer"],
+    roles: ["UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"],
   });
-  check("use case created (201)", created.status === 201);
-  const cc = await post(app, "/assets", token, { useCaseKey: "carbon-credit", name: "Forest Offset", symbol: "CO2", chainId: "fabric", metadata: { project: "Amazon-1" } });
+  check("use case created (201)", createdUc.status === 201);
+  const cc = await post(app, "/assets", token, { useCaseKey: "forest-offset", name: "Forest Offset", symbol: "CO2", chainId: "fabric", metadata: { project: "Amazon-1" } });
   check("asset issued from new use case", cc.status === 201);
 
   await app.close();

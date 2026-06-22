@@ -18,9 +18,10 @@ class MemoryAudit implements AuditSink {
   }
 }
 
-const ADMIN: Actor = { id: "admin", role: "Admin" };
-const VIEWER: Actor = { id: "viewer", role: "Viewer" };
-const OPERATOR: Actor = { id: "op", role: "Operator" };
+const ADMIN: Actor = { id: "admin", role: "UseCaseAdmin" };
+const AUDITOR: Actor = { id: "auditor", role: "Auditor" };
+const ISSUER: Actor = { id: "issuer", role: "Issuer" };
+const TRADER: Actor = { id: "trader", role: "Trader" };
 
 // A transferable NFT use case (certificate is non-transferable) for NFT transfer tests.
 const TRANSFERABLE_NFT: UseCaseDefinition = {
@@ -80,8 +81,8 @@ describe("LifecycleEngine", () => {
     ).rejects.toThrowError(/missing required field 'issuer'/);
   });
 
-  it("enforces RBAC — Viewer cannot mint", async () => {
-    await expect(engine.mint(VIEWER, ctx, "alice", "100")).rejects.toThrowError(/may not perform 'mint'/);
+  it("enforces RBAC — Auditor cannot mint", async () => {
+    await expect(engine.mint(AUDITOR, ctx, "alice", "100")).rejects.toThrowError(/may not perform 'mint'/);
   });
 
   it("rejects fungible ops on a non-fungible use case", async () => {
@@ -108,20 +109,20 @@ describe("LifecycleEngine", () => {
     await engine.setAllowed(ADMIN, ctx, "alice", true);
     await engine.setAllowed(ADMIN, ctx, "bob", true);
     await engine.mint(ADMIN, ctx, "alice", "100");
-    await engine.setFrozen(OPERATOR, ctx, "alice", true);
-    await expect(engine.transfer(OPERATOR, ctx, "alice", "bob", "10")).rejects.toThrowError(/frozen/);
-    await engine.setFrozen(OPERATOR, ctx, "alice", false);
-    await engine.transfer(OPERATOR, ctx, "alice", "bob", "10");
+    await engine.setFrozen(ISSUER, ctx, "alice", true);
+    await expect(engine.transfer(TRADER, ctx, "alice", "bob", "10")).rejects.toThrowError(/frozen/);
+    await engine.setFrozen(ISSUER, ctx, "alice", false);
+    await engine.transfer(TRADER, ctx, "alice", "bob", "10");
     expect(await adapter.balanceOf(ctx.ref, "bob")).toBe("10");
   });
 
   it("mints, transfers and burns NFTs by token id", async () => {
     await engine.mintToken(ADMIN, nftCtx, "alice", "tok-1", "ipfs://x");
     expect(await engine.ownerOf(ADMIN, nftCtx, "tok-1")).toBe("alice");
-    await engine.transferToken(OPERATOR, nftCtx, "alice", "bob", "tok-1");
+    await engine.transferToken(TRADER, nftCtx, "alice", "bob", "tok-1");
     expect(await engine.ownerOf(ADMIN, nftCtx, "tok-1")).toBe("bob");
     expect(await engine.tokensOf(ADMIN, nftCtx, "bob")).toEqual(["tok-1"]);
-    await engine.burnToken(OPERATOR, nftCtx, "tok-1");
+    await engine.burnToken(TRADER, nftCtx, "tok-1");
     expect(await engine.ownerOf(ADMIN, nftCtx, "tok-1")).toBeNull();
   });
 

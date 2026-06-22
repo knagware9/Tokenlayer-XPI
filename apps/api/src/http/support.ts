@@ -6,6 +6,7 @@ export interface TokenClaims {
   id: string;
   email: string;
   role: Role;
+  useCaseKey: string | null;
 }
 
 export function actorOf(request: FastifyRequest): Actor {
@@ -51,4 +52,9 @@ export function errorHandler(err: any, _req: FastifyRequest, reply: FastifyReply
   }
   // Adapter/ledger reverts and unexpected errors surface as 400 with the message.
   return reply.code(400).send({ error: "REQUEST_FAILED", message: err?.message ?? "request failed" });
+}
+
+/** True if the caller may see/act on a resource governed by `useCaseKey`. */
+export function scopedToCaller(claims: TokenClaims, useCaseKey: string): boolean {
+  return claims.role === "PlatformAdmin" || claims.useCaseKey === useCaseKey;
 }

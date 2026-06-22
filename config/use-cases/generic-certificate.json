@@ -15,5 +15,5 @@
   },
   "lifecycle": { "mint": true, "transfer": false, "burn": true, "freeze": true },
   "compliance": { "allowlist": false, "transferRestrictions": false },
-  "roles": ["Admin", "Issuer", "Viewer"]
+  "roles": ["UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"]
 }
