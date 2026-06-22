@@ -16,6 +16,7 @@ describe("user-policy", () => {
     expect(canCreateUser(admin, "Issuer", "gold-loan")).toBe(false);
     expect(canCreateUser(admin, "UseCaseAdmin", "carbon-credit")).toBe(false);
     expect(canCreateUser(admin, "PlatformAdmin", "carbon-credit")).toBe(false);
+    expect(canCreateUser(admin, "Issuer", null)).toBe(false); // a UseCaseAdmin cannot create a user with no use case
   });
   it("roster roles cannot manage users at all", () => {
     expect(canManageUsers("Issuer")).toBe(false);
