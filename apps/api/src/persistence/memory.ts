@@ -20,17 +20,30 @@ const now = (): string => new Date().toISOString();
 
 /** In-memory persistence — used by integration tests and the demo script. */
 export class MemoryUserRepository implements UserRepository {
-  private readonly byEmail = new Map<string, UserRecord>();
+  private readonly byId = new Map<string, UserRecord>();
   async findByEmail(email: string): Promise<UserRecord | null> {
-    return this.byEmail.get(email) ?? null;
+    return [...this.byId.values()].find((u) => u.email === email) ?? null;
+  }
+  async findById(userId: string): Promise<UserRecord | null> {
+    return this.byId.get(userId) ?? null;
   }
   async create(input: Omit<UserRecord, "id" | "createdAt">): Promise<UserRecord> {
     const rec: UserRecord = { ...input, id: id("user"), createdAt: now() };
-    this.byEmail.set(rec.email, rec);
+    this.byId.set(rec.id, rec);
     return rec;
   }
-  async list(): Promise<UserRecord[]> {
-    return [...this.byEmail.values()];
+  async list(useCaseKey?: string): Promise<UserRecord[]> {
+    const all = [...this.byId.values()];
+    return useCaseKey ? all.filter((u) => u.useCaseKey === useCaseKey) : all;
+  }
+  async update(userId: string, patch: Partial<Pick<UserRecord, "passwordHash" | "accountId">>): Promise<UserRecord> {
+    const rec = this.byId.get(userId);
+    if (!rec) throw new Error(`unknown user '${userId}'`);
+    Object.assign(rec, patch);
+    return rec;
+  }
+  async remove(userId: string): Promise<void> {
+    this.byId.delete(userId);
   }
 }
 
@@ -111,6 +124,9 @@ export class MemoryAccountRepository implements AccountRepository {
   private readonly byAddress = new Map<string, AccountRecord>();
   async list(): Promise<AccountRecord[]> {
     return [...this.byAddress.values()];
+  }
+  async findById(accountId: string): Promise<AccountRecord | null> {
+    return [...this.byAddress.values()].find((a) => a.id === accountId) ?? null;
   }
   async upsert(address: string, label: string): Promise<AccountRecord> {
     const existing = this.byAddress.get(address);

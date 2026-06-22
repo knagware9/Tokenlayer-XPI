@@ -30,19 +30,39 @@ const toUser = (r: {
   email: string;
   passwordHash: string;
   role: string;
+  useCaseKey: string | null;
+  accountId: string | null;
   createdAt: Date;
-}): UserRecord => ({ ...r, role: r.role as Role, createdAt: r.createdAt.toISOString() });
+}): UserRecord => ({
+  id: r.id,
+  email: r.email,
+  passwordHash: r.passwordHash,
+  role: r.role as Role,
+  useCaseKey: r.useCaseKey,
+  accountId: r.accountId,
+  createdAt: r.createdAt.toISOString(),
+});
 
 export class PrismaUserRepository implements UserRepository {
   async findByEmail(email: string): Promise<UserRecord | null> {
     const r = await prisma.user.findUnique({ where: { email } });
     return r ? toUser(r) : null;
   }
+  async findById(id: string): Promise<UserRecord | null> {
+    const r = await prisma.user.findUnique({ where: { id } });
+    return r ? toUser(r) : null;
+  }
   async create(input: Omit<UserRecord, "id" | "createdAt">): Promise<UserRecord> {
     return toUser(await prisma.user.create({ data: input }));
   }
-  async list(): Promise<UserRecord[]> {
-    return (await prisma.user.findMany()).map(toUser);
+  async list(useCaseKey?: string): Promise<UserRecord[]> {
+    return (await prisma.user.findMany({ where: useCaseKey ? { useCaseKey } : undefined, orderBy: { createdAt: "asc" } })).map(toUser);
+  }
+  async update(id: string, patch: Partial<Pick<UserRecord, "passwordHash" | "accountId">>): Promise<UserRecord> {
+    return toUser(await prisma.user.update({ where: { id }, data: patch }));
+  }
+  async remove(id: string): Promise<void> {
+    await prisma.user.delete({ where: { id } });
   }
 }
 
@@ -146,6 +166,10 @@ export class PrismaAuditRepository implements AuditRepository {
 export class PrismaAccountRepository implements AccountRepository {
   async list(): Promise<AccountRecord[]> {
     return prisma.account.findMany();
+  }
+  async findById(id: string): Promise<AccountRecord | null> {
+    const r = await prisma.account.findUnique({ where: { id } });
+    return r ? { id: r.id, address: r.address, label: r.label } : null;
   }
   async upsert(address: string, label: string): Promise<AccountRecord> {
     return prisma.account.upsert({
