@@ -316,5 +316,5 @@ export const S: Record<string, FastifySchema> = {
     },
     response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403) },
   },
-  deleteUser: { tags: ["Users"], summary: "Remove a user (scoped)", security: bearer, params: { type: "object", properties: { id: { type: "string" } } }, response: { 204: { type: "null" }, ...errs(401, 403, 404) } },
+  deleteUser: { tags: ["Users"], summary: "Remove a user (scoped)", security: bearer, params: { type: "object", required: ["id"], properties: { id: { type: "string" } } }, response: { 204: { type: "null" }, ...errs(401, 403, 404) } },
 };

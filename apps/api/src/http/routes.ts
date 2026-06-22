@@ -1,10 +1,13 @@
 import { randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { AssetRecord } from "../persistence/types.js";
 import { canCreateUser, canManageUsers, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { S } from "./schemas.js";
 import { actorOf, authenticate, contextOf, notFound, scopedToCaller, type TokenClaims } from "./support.js";
+
+const NO_USE_CASE = "__none__"; // sentinel: a use-case key that matches no real use case (denies scoped users with no assigned use case)
 
 /** Registers every /api/v1 route on the given (prefixed) instance. */
 export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
@@ -12,7 +15,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
 
   // Loads an asset and enforces use-case scope. Returns null after sending the
   // right error (404 for reads to hide existence; 403 for actions).
-  async function scopedAsset(request: any, reply: any, mode: "read" | "act") {
+  async function scopedAsset(request: FastifyRequest, reply: FastifyReply, mode: "read" | "act"): Promise<AssetRecord | null> {
     const { id } = request.params as { id: string };
     const asset = await deps.assets.get(id);
     if (!asset) {
@@ -96,7 +99,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   app.get("/assets", { schema: S.listAssets, ...auth }, async (request) => {
     const claims = request.user as TokenClaims;
     const q = request.query as { useCaseKey?: string; chainId?: string; status?: string; limit: number; offset: number };
-    const useCaseKey = claims.role === "PlatformAdmin" ? q.useCaseKey : claims.useCaseKey ?? "__none__";
+    const useCaseKey = claims.role === "PlatformAdmin" ? q.useCaseKey : claims.useCaseKey ?? NO_USE_CASE;
     const { items, total } = await deps.assets.list({ useCaseKey, chainId: q.chainId, status: q.status }, { limit: q.limit, offset: q.offset });
     return { data: items, pagination: { limit: q.limit, offset: q.offset, total } };
   });
@@ -192,7 +195,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   app.get("/users", { schema: S.listUsers, ...auth }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     if (!canManageUsers(claims.role)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to manage users" });
-    const rows = await deps.users.list(claims.role === "PlatformAdmin" ? undefined : claims.useCaseKey ?? "__none__");
+    const rows = await deps.users.list(claims.role === "PlatformAdmin" ? undefined : claims.useCaseKey ?? NO_USE_CASE);
     return rows.map((u) => ({ id: u.id, email: u.email, role: u.role, useCaseKey: u.useCaseKey, accountId: u.accountId }));
   });
 
@@ -208,7 +211,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (b.walletAddress) accountId = (await deps.accounts.upsert(b.walletAddress, b.email)).id;
     const created = await deps.users.create({
       email: b.email,
-      passwordHash: bcrypt.hashSync(b.password, 10),
+      passwordHash: await bcrypt.hash(b.password, 10),
       role: b.role,
       useCaseKey: targetUseCaseKey,
       accountId,
