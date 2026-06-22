@@ -12,6 +12,8 @@ model User {
   email        String   @unique
   passwordHash String
   role         String
+  useCaseKey   String?  // null = global Platform Admin
+  accountId    String?  // wallet link for Buyer/Trader
   createdAt    DateTime @default(now())
 }
 

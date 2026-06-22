@@ -5,6 +5,8 @@ export interface UserRecord {
   email: string;
   passwordHash: string;
   role: Role;
+  useCaseKey: string | null;
+  accountId: string | null;
   createdAt: string;
 }
 
@@ -42,8 +44,11 @@ export interface AccountRecord {
 
 export interface UserRepository {
   findByEmail(email: string): Promise<UserRecord | null>;
+  findById(id: string): Promise<UserRecord | null>;
   create(input: Omit<UserRecord, "id" | "createdAt">): Promise<UserRecord>;
-  list(): Promise<UserRecord[]>;
+  list(useCaseKey?: string): Promise<UserRecord[]>;
+  update(id: string, patch: Partial<Pick<UserRecord, "passwordHash" | "accountId">>): Promise<UserRecord>;
+  remove(id: string): Promise<void>;
 }
 
 /** A page of results plus the total count of matching rows (for pagination). */
@@ -77,6 +82,7 @@ export interface AuditRepository {
 
 export interface AccountRepository {
   list(): Promise<AccountRecord[]>;
+  findById(id: string): Promise<AccountRecord | null>;
   upsert(address: string, label: string): Promise<AccountRecord>;
 }
 
