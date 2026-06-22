@@ -1,7 +1,7 @@
 import { PolicyError } from "./errors.js";
-import { tokenTypeForStandard, type MetadataSchema, type TokenStandard, type UseCaseDefinition, type Role } from "./types.js";
+import { ROLES, tokenTypeForStandard, type MetadataSchema, type TokenStandard, type UseCaseDefinition, type Role } from "./types.js";
 
-const VALID_ROLES: ReadonlySet<Role> = new Set<Role>(["PlatformAdmin", "UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"]);
+const VALID_ROLES: ReadonlySet<Role> = new Set<Role>(ROLES);
 const VALID_TOKEN_STANDARDS = new Set<string>(["ERC-20", "ERC-721", "ERC-3643"]);
 const VALID_PROP_TYPES = new Set(["string", "number", "boolean"]);
 

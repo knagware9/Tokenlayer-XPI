@@ -18,13 +18,9 @@ class MemoryAudit implements AuditSink {
   }
 }
 
-// Old "Admin" (all-powerful) → UseCaseAdmin
 const ADMIN: Actor = { id: "admin", role: "UseCaseAdmin" };
-// Old "Viewer" (read-only) → Auditor
 const AUDITOR: Actor = { id: "auditor", role: "Auditor" };
-// Old "Operator" used for freeze/unfreeze → Issuer (holds freeze/unfreeze in new matrix)
 const ISSUER: Actor = { id: "issuer", role: "Issuer" };
-// Old "Operator" used for transfer/burn → Trader
 const TRADER: Actor = { id: "trader", role: "Trader" };
 
 // A transferable NFT use case (certificate is non-transferable) for NFT transfer tests.
@@ -113,9 +109,7 @@ describe("LifecycleEngine", () => {
     await engine.setAllowed(ADMIN, ctx, "alice", true);
     await engine.setAllowed(ADMIN, ctx, "bob", true);
     await engine.mint(ADMIN, ctx, "alice", "100");
-    // Issuer role now holds freeze/unfreeze
     await engine.setFrozen(ISSUER, ctx, "alice", true);
-    // Trader role holds transfer
     await expect(engine.transfer(TRADER, ctx, "alice", "bob", "10")).rejects.toThrowError(/frozen/);
     await engine.setFrozen(ISSUER, ctx, "alice", false);
     await engine.transfer(TRADER, ctx, "alice", "bob", "10");
@@ -125,7 +119,6 @@ describe("LifecycleEngine", () => {
   it("mints, transfers and burns NFTs by token id", async () => {
     await engine.mintToken(ADMIN, nftCtx, "alice", "tok-1", "ipfs://x");
     expect(await engine.ownerOf(ADMIN, nftCtx, "tok-1")).toBe("alice");
-    // Trader role handles transfer/burn
     await engine.transferToken(TRADER, nftCtx, "alice", "bob", "tok-1");
     expect(await engine.ownerOf(ADMIN, nftCtx, "tok-1")).toBe("bob");
     expect(await engine.tokensOf(ADMIN, nftCtx, "bob")).toEqual(["tok-1"]);
