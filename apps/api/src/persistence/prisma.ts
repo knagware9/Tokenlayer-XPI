@@ -16,6 +16,8 @@ import type {
   AssetRepository,
   AuditEntryRecord,
   AuditRepository,
+  KycDetails,
+  KycStatus,
   Page,
   Paged,
   UseCaseRepository,
@@ -33,6 +35,8 @@ const toUser = (r: {
   useCaseKey: string | null;
   accountId: string | null;
   active: boolean;
+  kycStatus: string;
+  kyc: string | null;
   createdAt: Date;
 }): UserRecord => ({
   id: r.id,
@@ -42,6 +46,8 @@ const toUser = (r: {
   useCaseKey: r.useCaseKey,
   accountId: r.accountId,
   active: r.active,
+  kycStatus: r.kycStatus as KycStatus,
+  kyc: r.kyc ? (JSON.parse(r.kyc) as KycDetails) : null,
   createdAt: r.createdAt.toISOString(),
 });
 
@@ -55,7 +61,7 @@ export class PrismaUserRepository implements UserRepository {
     return r ? toUser(r) : null;
   }
   async create(input: Omit<UserRecord, "id" | "createdAt">): Promise<UserRecord> {
-    return toUser(await prisma.user.create({ data: input }));
+    return toUser(await prisma.user.create({ data: { ...input, kyc: input.kyc ? JSON.stringify(input.kyc) : null } }));
   }
   async list(useCaseKey?: string): Promise<UserRecord[]> {
     return (await prisma.user.findMany({ where: useCaseKey ? { useCaseKey } : undefined, orderBy: { createdAt: "asc" } })).map(toUser);

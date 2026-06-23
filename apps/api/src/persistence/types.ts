@@ -1,5 +1,14 @@
 import type { Role, TokenStandard, TokenType, LifecycleAction, UseCaseDefinition, UseCaseSource } from "@tokenlayer/core";
 
+export type KycStatus = "pending" | "approved" | "rejected";
+export interface KycDetails {
+  legalName?: string;
+  country?: string;
+  idType?: string;
+  idNumber?: string;
+  documentRef?: string;
+}
+
 export interface UserRecord {
   id: string;
   email: string;
@@ -8,6 +17,8 @@ export interface UserRecord {
   useCaseKey: string | null;
   accountId: string | null;
   active: boolean;
+  kycStatus: KycStatus;
+  kyc: KycDetails | null;
   createdAt: string;
 }
 
@@ -48,7 +59,7 @@ export interface UserRepository {
   findById(id: string): Promise<UserRecord | null>;
   create(input: Omit<UserRecord, "id" | "createdAt">): Promise<UserRecord>;
   list(useCaseKey?: string): Promise<UserRecord[]>;
-  update(id: string, patch: Partial<Pick<UserRecord, "passwordHash" | "accountId" | "active">>): Promise<UserRecord>;
+  update(id: string, patch: Partial<Pick<UserRecord, "passwordHash" | "accountId" | "active" | "kycStatus">>): Promise<UserRecord>;
   remove(id: string): Promise<void>;
 }
 
