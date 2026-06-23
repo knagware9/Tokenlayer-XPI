@@ -66,7 +66,7 @@ export class PrismaUserRepository implements UserRepository {
   async list(useCaseKey?: string): Promise<UserRecord[]> {
     return (await prisma.user.findMany({ where: useCaseKey ? { useCaseKey } : undefined, orderBy: { createdAt: "asc" } })).map(toUser);
   }
-  async update(id: string, patch: Partial<Pick<UserRecord, "passwordHash" | "accountId" | "active">>): Promise<UserRecord> {
+  async update(id: string, patch: Partial<Pick<UserRecord, "passwordHash" | "accountId" | "active" | "kycStatus">>): Promise<UserRecord> {
     return toUser(await prisma.user.update({ where: { id }, data: patch }));
   }
   async remove(id: string): Promise<void> {
