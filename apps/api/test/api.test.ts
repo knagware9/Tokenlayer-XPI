@@ -412,3 +412,339 @@ describe("per-use-case tenancy", () => {
     expect(allowed.statusCode).toBe(200);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Marketplace: buy (DvP) + cash/credit endpoints
+// ---------------------------------------------------------------------------
+
+// Seeded addresses used across buy tests:
+// Treasury wallet (used as treasury account for listings): 0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65
+// A buyer wallet we onboard fresh: Helios Energy Corp — 0x14dC79964da2C08b23698B3D3cc7Ca32193d9955
+const TREASURY_ADDR = "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65";
+const BUYER_WALLET = "0x14dC79964da2C08b23698B3D3cc7Ca32193d9955";
+
+/** Fund an address with CBDC-INR via POST /cash/credit using the given token. */
+async function creditCash(appInst: typeof app, token: string, account: string, amount: string): Promise<{ ok: boolean; balance: string }> {
+  const res = await appInst.inject({
+    method: "POST",
+    url: `${V1}/cash/credit`,
+    headers: { authorization: `Bearer ${token}` },
+    payload: { account, currency: "CBDC-INR", amount },
+  });
+  return res.json();
+}
+
+/** Read CBDC-INR balance for an address via GET /cash/balances. Returns "0" if none. */
+async function cashBalance(appInst: typeof app, token: string, address: string): Promise<string> {
+  const res = await appInst.inject({
+    method: "GET",
+    url: `${V1}/cash/balances?address=${address}`,
+    headers: { authorization: `Bearer ${token}` },
+  });
+  const rows = res.json() as { currency: string; address: string; amount: string }[];
+  return rows.find((r) => r.currency === "CBDC-INR")?.amount ?? "0";
+}
+
+/** POST /assets/:id/buy with a quantity. */
+async function buy(appInst: typeof app, token: string, assetId: string, quantity: string) {
+  return appInst.inject({
+    method: "POST",
+    url: `${V1}/assets/${assetId}/buy`,
+    headers: { authorization: `Bearer ${token}` },
+    payload: { quantity },
+  });
+}
+
+describe("marketplace: buy (DvP) + cash/credit", () => {
+  it("happy path: issue with sale terms, fund buyer, buy → token delivered + cash moved", async () => {
+    const app = await buildTestApp();
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const carbonAdmin = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
+
+    // Issue asset WITH sale terms (unitPrice=5, currency=CBDC-INR, treasuryAccount=TREASURY_ADDR)
+    const issueRes = await app.inject({
+      method: "POST",
+      url: `${V1}/assets`,
+      headers: { authorization: `Bearer ${platform}` },
+      payload: {
+        useCaseKey: "carbon-credit",
+        name: "Carbon VCU",
+        symbol: "VCU",
+        chainId: "besu",
+        metadata: { projectName: "Amazon Rainforest", registry: "Verra", vintage: 2024 },
+        sale: { unitPrice: "5", currency: "CBDC-INR", treasuryAccount: TREASURY_ADDR },
+      },
+    });
+    expect(issueRes.statusCode).toBe(201);
+    const assetId = issueRes.json().asset.id as string;
+    // Sale terms should be reflected in the returned asset
+    expect(issueRes.json().asset.unitPrice).toBe("5");
+    expect(issueRes.json().asset.currency).toBe("CBDC-INR");
+
+    // Onboard a new Buyer with a wallet (BUYER_WALLET = Helios Energy Corp)
+    const createdBuyer = (await app.inject({
+      method: "POST",
+      url: `${V1}/users`,
+      headers: { authorization: `Bearer ${carbonAdmin}` },
+      payload: { email: "helios@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER_WALLET },
+    })).json();
+    expect(createdBuyer.kycStatus).toBe("pending");
+
+    // KYC-approve the buyer
+    await app.inject({
+      method: "PATCH",
+      url: `${V1}/users/${createdBuyer.id}`,
+      headers: { authorization: `Bearer ${carbonAdmin}` },
+      payload: { kycStatus: "approved" },
+    });
+
+    // Allow treasury and buyer wallet
+    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: TREASURY_ADDR } });
+    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: BUYER_WALLET } });
+
+    // Mint 100 tokens to treasury
+    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/mint`, headers: { authorization: `Bearer ${platform}` }, payload: { to: TREASURY_ADDR, amount: "100" } });
+
+    // Fund the buyer with 1000 CBDC-INR via cash/credit (platform admin can always credit)
+    const creditRes = await app.inject({
+      method: "POST",
+      url: `${V1}/cash/credit`,
+      headers: { authorization: `Bearer ${platform}` },
+      payload: { account: BUYER_WALLET, currency: "CBDC-INR", amount: "1000" },
+    });
+    expect(creditRes.statusCode).toBe(200);
+    expect(creditRes.json().balance).toBe("1000");
+
+    // Log in as the buyer and buy 10 tokens
+    const buyerToken = await loginAs(app, "helios@x.dev", "secret1");
+    const buyRes = await buy(app, buyerToken, assetId, "10");
+    expect(buyRes.statusCode).toBe(200);
+    const buyBody = buyRes.json();
+    expect(buyBody.paid.amount).toBe("50"); // 5 * 10
+    expect(buyBody.paid.currency).toBe("CBDC-INR");
+    expect(buyBody.delivered.amount).toBe("10");
+
+    // Assert buyer CBDC balance = 1000 - 50 = 950
+    const buyerBalance = await cashBalance(app, platform, BUYER_WALLET);
+    expect(buyerBalance).toBe("950");
+
+    // Assert treasury CBDC balance = 50 (received payment)
+    const treasuryBalance = await cashBalance(app, platform, TREASURY_ADDR);
+    expect(treasuryBalance).toBe("50");
+
+    // Assert buyer received 10 tokens by checking asset accounts
+    const accountsRes = await app.inject({ method: "GET", url: `${V1}/assets/${assetId}/accounts`, headers: { authorization: `Bearer ${platform}` } });
+    const buyerAcct = accountsRes.json().find((a: { address: string }) => a.address === BUYER_WALLET);
+    expect(buyerAcct?.balance).toBe("10");
+  });
+
+  it("buy blocked when buyer NOT allowlisted → cash refunded (compensation ran)", async () => {
+    const app = await buildTestApp();
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const carbonAdmin = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
+
+    // Issue with sale terms
+    const assetId = (await app.inject({
+      method: "POST",
+      url: `${V1}/assets`,
+      headers: { authorization: `Bearer ${platform}` },
+      payload: {
+        useCaseKey: "carbon-credit",
+        name: "Carbon VCU",
+        symbol: "VCU",
+        chainId: "besu",
+        metadata: { projectName: "Amazon Rainforest", registry: "Verra", vintage: 2024 },
+        sale: { unitPrice: "5", currency: "CBDC-INR", treasuryAccount: TREASURY_ADDR },
+      },
+    })).json().asset.id as string;
+
+    // Onboard buyer with a fresh email
+    const createdBuyer = (await app.inject({
+      method: "POST",
+      url: `${V1}/users`,
+      headers: { authorization: `Bearer ${carbonAdmin}` },
+      payload: { email: "helios2@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER_WALLET },
+    })).json();
+    await app.inject({ method: "PATCH", url: `${V1}/users/${createdBuyer.id}`, headers: { authorization: `Bearer ${carbonAdmin}` }, payload: { kycStatus: "approved" } });
+
+    // Allow ONLY treasury (NOT the buyer wallet)
+    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: TREASURY_ADDR } });
+    // Mint to treasury
+    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/mint`, headers: { authorization: `Bearer ${platform}` }, payload: { to: TREASURY_ADDR, amount: "100" } });
+
+    // Fund buyer
+    await creditCash(app, platform, BUYER_WALLET, "1000");
+
+    // Attempt to buy — should fail because buyer wallet not allowlisted
+    const buyerToken = await loginAs(app, "helios2@x.dev", "secret1");
+    const buyRes = await buy(app, buyerToken, assetId, "10");
+    expect(buyRes.statusCode).toBe(400);
+
+    // Buyer CBDC balance must be unchanged (refund ran)
+    const buyerBalance = await cashBalance(app, platform, BUYER_WALLET);
+    expect(buyerBalance).toBe("1000");
+  });
+
+  it("buy 400 NO_SALE_TERMS when asset has no sale terms", async () => {
+    const app = await buildTestApp();
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const carbonAdmin = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
+
+    // Issue WITHOUT sale terms
+    const assetId = (await issueAsset(app, platform, "carbon-credit"));
+
+    // Onboard buyer
+    const createdBuyer = (await app.inject({
+      method: "POST",
+      url: `${V1}/users`,
+      headers: { authorization: `Bearer ${carbonAdmin}` },
+      payload: { email: "helios3@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER_WALLET },
+    })).json();
+    await app.inject({ method: "PATCH", url: `${V1}/users/${createdBuyer.id}`, headers: { authorization: `Bearer ${carbonAdmin}` }, payload: { kycStatus: "approved" } });
+    await creditCash(app, platform, BUYER_WALLET, "500");
+    const buyerToken = await loginAs(app, "helios3@x.dev", "secret1");
+
+    const res = await buy(app, buyerToken, assetId, "1");
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("NO_SALE_TERMS");
+  });
+
+  it("buy 400 INSUFFICIENT_FUNDS when buyer funded less than cost", async () => {
+    const app = await buildTestApp();
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const carbonAdmin = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
+
+    const assetId = (await app.inject({
+      method: "POST",
+      url: `${V1}/assets`,
+      headers: { authorization: `Bearer ${platform}` },
+      payload: {
+        useCaseKey: "carbon-credit",
+        name: "Carbon VCU",
+        symbol: "VCU",
+        chainId: "besu",
+        metadata: { projectName: "Amazon Rainforest", registry: "Verra", vintage: 2024 },
+        sale: { unitPrice: "5", currency: "CBDC-INR", treasuryAccount: TREASURY_ADDR },
+      },
+    })).json().asset.id as string;
+
+    const createdBuyer = (await app.inject({
+      method: "POST",
+      url: `${V1}/users`,
+      headers: { authorization: `Bearer ${carbonAdmin}` },
+      payload: { email: "helios4@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER_WALLET },
+    })).json();
+    await app.inject({ method: "PATCH", url: `${V1}/users/${createdBuyer.id}`, headers: { authorization: `Bearer ${carbonAdmin}` }, payload: { kycStatus: "approved" } });
+    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: TREASURY_ADDR } });
+    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: BUYER_WALLET } });
+    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/mint`, headers: { authorization: `Bearer ${platform}` }, payload: { to: TREASURY_ADDR, amount: "100" } });
+
+    // Fund with only 10 — not enough for 10 tokens at 5 each (cost=50)
+    await creditCash(app, platform, BUYER_WALLET, "10");
+
+    const buyerToken = await loginAs(app, "helios4@x.dev", "secret1");
+    const res = await buy(app, buyerToken, assetId, "10");
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("INSUFFICIENT_FUNDS");
+  });
+
+  it("buy 400 INSUFFICIENT_TREASURY when treasury holds fewer tokens than requested", async () => {
+    const app = await buildTestApp();
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const carbonAdmin = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
+
+    const assetId = (await app.inject({
+      method: "POST",
+      url: `${V1}/assets`,
+      headers: { authorization: `Bearer ${platform}` },
+      payload: {
+        useCaseKey: "carbon-credit",
+        name: "Carbon VCU",
+        symbol: "VCU",
+        chainId: "besu",
+        metadata: { projectName: "Amazon Rainforest", registry: "Verra", vintage: 2024 },
+        sale: { unitPrice: "5", currency: "CBDC-INR", treasuryAccount: TREASURY_ADDR },
+      },
+    })).json().asset.id as string;
+
+    const createdBuyer = (await app.inject({
+      method: "POST",
+      url: `${V1}/users`,
+      headers: { authorization: `Bearer ${carbonAdmin}` },
+      payload: { email: "helios5@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER_WALLET },
+    })).json();
+    await app.inject({ method: "PATCH", url: `${V1}/users/${createdBuyer.id}`, headers: { authorization: `Bearer ${carbonAdmin}` }, payload: { kycStatus: "approved" } });
+    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: TREASURY_ADDR } });
+    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: BUYER_WALLET } });
+
+    // Mint only 5 tokens to treasury — buyer requests 10
+    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/mint`, headers: { authorization: `Bearer ${platform}` }, payload: { to: TREASURY_ADDR, amount: "5" } });
+    await creditCash(app, platform, BUYER_WALLET, "1000");
+
+    const buyerToken = await loginAs(app, "helios5@x.dev", "secret1");
+    const res = await buy(app, buyerToken, assetId, "10");
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("INSUFFICIENT_TREASURY");
+  });
+
+  it("cash/credit 403 for a Buyer caller (role gate)", async () => {
+    const res = await inj({
+      method: "POST",
+      url: "/cash/credit",
+      headers: auth(await loginAs(app, "carbon.buyer@tokenlayer.dev", "carbon123")),
+      payload: { account: BUYER_WALLET, currency: "CBDC-INR", amount: "100" },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("FORBIDDEN");
+  });
+
+  it("cash/credit 403 OUT_OF_SCOPE when a UseCaseAdmin funds an out-of-scope account", async () => {
+    const app = await buildTestApp();
+    // gold.admin is scoped to gold-loan — ALICE (0x70997970…) is linked to gold.buyer in gold-loan scope
+    // but not to carbon-credit scope. We need an account that is NOT in gold-loan scope.
+    // Carol (0x90F79bf6EB2c4f870365E785982E1f101E93b906) is not linked to any gold-loan user.
+    const goldAdmin = await loginAs(app, "gold.admin@tokenlayer.dev", "gold123");
+
+    // EcoFund Capital is linked to carbon.buyer (carbon-credit scope), so out-of-scope for gold admin
+    const outOfScopeAccount = "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc"; // EcoFund Capital
+
+    const res = await app.inject({
+      method: "POST",
+      url: `${V1}/cash/credit`,
+      headers: { authorization: `Bearer ${goldAdmin}` },
+      payload: { account: outOfScopeAccount, currency: "CBDC-INR", amount: "100" },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("OUT_OF_SCOPE");
+  });
+
+  it("setPrice action updates sale terms; only issuers/admins may call it", async () => {
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const id = await issueGenericAsset(admin);
+
+    // setPrice should work for PlatformAdmin
+    const setPriceRes = await inj({
+      method: "POST",
+      url: `/assets/${id}/actions/setPrice`,
+      headers: auth(admin),
+      payload: { unitPrice: "10", currency: "CBDC-INR", treasuryAccount: TREASURY_ADDR },
+    });
+    expect(setPriceRes.statusCode).toBe(200);
+    expect(setPriceRes.json().ok).toBe(true);
+
+    // Verify sale terms are stored
+    const assetRes = await inj({ method: "GET", url: `/assets/${id}`, headers: auth(admin) });
+    expect(assetRes.json().unitPrice).toBe("10");
+    expect(assetRes.json().currency).toBe("CBDC-INR");
+
+    // Buyer cannot setPrice (no issue RBAC)
+    const buyerToken = await loginAs(app, "carbon.buyer@tokenlayer.dev", "carbon123");
+    const blockedRes = await inj({
+      method: "POST",
+      url: `/assets/${id}/actions/setPrice`,
+      headers: auth(buyerToken),
+      payload: { unitPrice: "10", currency: "CBDC-INR", treasuryAccount: TREASURY_ADDR },
+    });
+    expect(blockedRes.statusCode).toBe(403);
+  });
+});

@@ -237,6 +237,16 @@ export const S: Record<string, FastifySchema> = {
         symbol: { type: "string" },
         chainId: { type: "string" },
         metadata: { type: "object", additionalProperties: true },
+        sale: {
+          type: "object",
+          additionalProperties: false,
+          required: ["unitPrice", "currency", "treasuryAccount"],
+          properties: {
+            unitPrice: { type: "string" },
+            currency: { type: "string" },
+            treasuryAccount: { type: "string" },
+          },
+        },
       },
     },
     response: {
@@ -292,7 +302,7 @@ export const S: Record<string, FastifySchema> = {
       required: ["id", "action"],
       properties: {
         id: { type: "string" },
-        action: { type: "string", enum: ["mint", "transfer", "burn", "freeze", "unfreeze", "allow", "disallow"] },
+        action: { type: "string", enum: ["mint", "transfer", "burn", "freeze", "unfreeze", "allow", "disallow", "setPrice"] },
       },
     },
     body: {
@@ -305,9 +315,55 @@ export const S: Record<string, FastifySchema> = {
         tokenId: { type: "string" },
         uri: { type: "string" },
         account: { type: "string" },
+        unitPrice: { type: "string" },
+        currency: { type: "string" },
+        treasuryAccount: { type: "string" },
       },
     },
-    response: { 200: { type: "object", properties: { receipt: { $ref: "Receipt#" } }, required: ["receipt"] }, ...errs(400, 401, 403, 404) },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
+  },
+
+  buy: {
+    tags: ["Marketplace"], summary: "Buyer-initiated DvP purchase", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    body: {
+      type: "object",
+      additionalProperties: false,
+      required: ["quantity"],
+      properties: {
+        quantity: { type: "string" },
+      },
+    },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
+  },
+
+  creditCash: {
+    tags: ["Cash"], summary: "Fund an account with CBDC / cash (Issuer / admin only)", security: bearer,
+    body: {
+      type: "object",
+      additionalProperties: false,
+      required: ["account", "currency", "amount"],
+      properties: {
+        account: { type: "string" },
+        currency: { type: "string" },
+        amount: { type: "string" },
+      },
+    },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403) },
+  },
+
+  cashBalances: {
+    tags: ["Cash"], summary: "Query CBDC / cash balances for an address", security: bearer,
+    querystring: {
+      type: "object",
+      properties: {
+        address: { type: "string" },
+      },
+    },
+    response: {
+      200: { type: "array", items: { type: "object", additionalProperties: true } },
+      ...errs(401),
+    },
   },
 
   listUsers: { tags: ["Users"], summary: "List users in scope", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403) } },

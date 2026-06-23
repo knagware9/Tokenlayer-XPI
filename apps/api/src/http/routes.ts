@@ -4,6 +4,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AssetRecord, KycDetails, KycStatus } from "../persistence/types.js";
 import { canCreateUser, canManageUsers, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
+import { isSupportedCurrency } from "../currencies.js";
 import { S } from "./schemas.js";
 import { actorOf, contextOf, notFound, requireUser, scopedToCaller, type TokenClaims } from "./support.js";
 
@@ -104,10 +105,19 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
 
   // --- assets -------------------------------------------------------------
   app.post("/assets", { schema: S.issueAsset, ...auth }, async (request, reply) => {
-    const body = request.body as { useCaseKey: string; name: string; symbol: string; chainId: string; metadata?: Record<string, unknown> };
+    const body = request.body as { useCaseKey: string; name: string; symbol: string; chainId: string; metadata?: Record<string, unknown>; sale?: { unitPrice: string; currency: string; treasuryAccount: string } };
     const claims = request.user as TokenClaims;
     if (claims.role !== "PlatformAdmin" && body.useCaseKey !== claims.useCaseKey) {
       return reply.code(403).send({ error: "WRONG_USE_CASE", message: "cannot issue into another use case" });
+    }
+    // Validate sale terms if provided
+    if (body.sale) {
+      if (!isSupportedCurrency(body.sale.currency)) {
+        return reply.code(400).send({ error: "UNSUPPORTED_CURRENCY", message: `currency '${body.sale.currency}' is not supported` });
+      }
+      if (!/^\d+$/.test(body.sale.unitPrice) || BigInt(body.sale.unitPrice) <= 0n) {
+        return reply.code(400).send({ error: "INVALID_PRICE", message: "unitPrice must be a positive integer" });
+      }
     }
     const actor = actorOf(request);
     const id = randomUUID();
@@ -129,7 +139,11 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       currency: null,
       treasuryAccount: null,
     });
-    return reply.code(201).send({ asset, txHash: result.txHash });
+    if (body.sale) {
+      await deps.assets.setSaleTerms(id, body.sale);
+    }
+    const finalAsset = await deps.assets.get(id) ?? asset;
+    return reply.code(201).send({ asset: finalAsset, txHash: result.txHash });
   });
 
   app.get("/assets", { schema: S.listAssets, ...auth }, async (request) => {
@@ -239,10 +253,82 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       case "disallow":
         receipt = await deps.engine.setAllowed(actor, ctx, b.account!, false);
         break;
+      case "setPrice": {
+        deps.rbac.authorize(actor, "issue");
+        if (!isSupportedCurrency(b.currency!)) return reply.code(400).send({ error: "UNSUPPORTED_CURRENCY", message: `currency '${b.currency}' is not supported` });
+        if (!/^\d+$/.test(b.unitPrice ?? "") || BigInt(b.unitPrice!) <= 0n) return reply.code(400).send({ error: "INVALID_PRICE", message: "unitPrice must be a positive integer" });
+        await deps.assets.setSaleTerms(asset.id, { unitPrice: b.unitPrice!, currency: b.currency!, treasuryAccount: b.treasuryAccount! });
+        return reply.code(200).send({ ok: true });
+      }
       default:
         return reply.code(400).send({ error: "VALIDATION_ERROR", message: `unknown action '${action}'` });
     }
     return { receipt };
+  });
+
+  // --- marketplace: buy (DvP) ---------------------------------------------
+  app.post("/assets/:id/buy", { schema: S.buy, ...auth }, async (request, reply) => {
+    const asset = await deps.assets.get((request.params as { id: string }).id);
+    if (!asset) return notFound(reply, "asset not found");
+    if (!scopedToCaller(request.user as TokenClaims, asset.useCaseKey)) return notFound(reply, "asset not found");
+    if (!asset.unitPrice || !asset.currency || !asset.treasuryAccount) {
+      return reply.code(400).send({ error: "NO_SALE_TERMS", message: "this asset is not listed for sale" });
+    }
+    const claims = request.user as TokenClaims;
+    const actor = actorOf(request);
+    // Find buyer's linked wallet
+    const me = await deps.users.findById(claims.id);
+    const wallet = me?.accountId ? (await deps.accounts.findById(me.accountId))?.address : undefined;
+    if (!wallet) return reply.code(400).send({ error: "NO_WALLET", message: "your account has no linked wallet to receive tokens" });
+
+    const { unitPrice, currency, treasuryAccount } = asset;
+    const quantity = (request.body as { quantity: string }).quantity;
+    if (!/^\d+$/.test(quantity) || BigInt(quantity) <= 0n) return reply.code(400).send({ error: "INVALID_QUANTITY", message: "quantity must be a positive integer" });
+    const cost = (BigInt(unitPrice) * BigInt(quantity)).toString();
+    const ctx = contextOf(asset);
+    const adapter = deps.chains.resolveAdapter(asset.chainId);
+
+    // Pre-checks (no state change yet)
+    if (BigInt(await deps.cash.balanceOf(currency, wallet)) < BigInt(cost)) {
+      return reply.code(400).send({ error: "INSUFFICIENT_FUNDS", message: `you need ${cost} ${currency}` });
+    }
+    if (BigInt(await adapter.balanceOf(ctx.ref, treasuryAccount).catch(() => "0")) < BigInt(quantity)) {
+      return reply.code(400).send({ error: "INSUFFICIENT_TREASURY", message: "the treasury does not hold enough tokens" });
+    }
+
+    // Payment-first with compensation
+    await deps.cash.transfer(currency, wallet, treasuryAccount, cost);
+    try {
+      const receipt = await deps.engine.buy(actor, ctx, treasuryAccount, wallet, quantity, { unitPrice, currency, cost });
+      return reply.code(200).send({ receipt, paid: { amount: cost, currency }, delivered: { amount: quantity, to: wallet } });
+    } catch (err) {
+      await deps.cash.transfer(currency, treasuryAccount, wallet, cost); // refund
+      throw err; // errorHandler maps PolicyError (NOT_ALLOWLISTED/ACCOUNT_FROZEN) -> 400
+    }
+  });
+
+  // --- cash (CBDC) --------------------------------------------------------
+  app.post("/cash/credit", { schema: S.creditCash, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    if (!["Issuer", "UseCaseAdmin", "PlatformAdmin"].includes(claims.role)) {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "you may not fund accounts" });
+    }
+    const bdy = request.body as { account: string; currency: string; amount: string };
+    if (!isSupportedCurrency(bdy.currency)) return reply.code(400).send({ error: "UNSUPPORTED_CURRENCY", message: `currency '${bdy.currency}' is not supported` });
+    if (!/^\d+$/.test(bdy.amount) || BigInt(bdy.amount) <= 0n) return reply.code(400).send({ error: "INVALID_AMOUNT", message: "amount must be a positive integer" });
+    if (claims.role !== "PlatformAdmin") {
+      const scoped = await scopedAccounts(claims);
+      if (!scoped.some((a) => a.address === bdy.account)) {
+        return reply.code(403).send({ error: "OUT_OF_SCOPE", message: "that account is not in your use case" });
+      }
+    }
+    await deps.cash.credit(bdy.currency, bdy.account, bdy.amount);
+    return reply.code(200).send({ ok: true, balance: await deps.cash.balanceOf(bdy.currency, bdy.account) });
+  });
+
+  app.get("/cash/balances", { schema: S.cashBalances, ...auth }, async (request) => {
+    const address = (request.query as { address?: string }).address;
+    return address ? deps.cash.balancesOf(address) : [];
   });
 
   // --- users (scoped provisioning) ----------------------------------------
