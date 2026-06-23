@@ -2,11 +2,13 @@ import { RbacPolicy } from "@tokenlayer/core";
 import { buildApp } from "./app.js";
 import { buildChainRegistry } from "./chains.js";
 import { createEngine } from "./context.js";
+import { loadCurrencies } from "./currencies.js";
 import { env } from "./env.js";
 import {
   PrismaAccountRepository,
   PrismaAssetRepository,
   PrismaAuditRepository,
+  PrismaCashRepository,
   PrismaUseCaseRepository,
   PrismaUserRepository,
 } from "./persistence/prisma.js";
@@ -22,6 +24,7 @@ async function main(): Promise<void> {
   const audit = new PrismaAuditRepository();
   const accounts = new PrismaAccountRepository();
   const useCases = new PrismaUseCaseRepository();
+  const cash = new PrismaCashRepository();
   // Demo users/accounts (with predictable passwords) are seeded only outside production.
   if (env.nodeEnv !== "production") await seedDefaults(users, accounts);
   await seedUseCases(useCases);
@@ -36,6 +39,8 @@ async function main(): Promise<void> {
     audit,
     accounts,
     chains,
+    cash,
+    currencies: loadCurrencies(),
     jwtSecret: env.jwtSecret,
     corsOrigins: env.corsOrigins,
     isProduction: env.nodeEnv === "production",

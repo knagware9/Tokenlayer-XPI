@@ -3,10 +3,12 @@ import type { FastifyInstance } from "fastify";
 import { buildApp } from "./app.js";
 import { buildChainRegistry } from "./chains.js";
 import { createEngine } from "./context.js";
+import { loadCurrencies } from "./currencies.js";
 import {
   MemoryAccountRepository,
   MemoryAssetRepository,
   MemoryAuditRepository,
+  MemoryCashRepository,
   MemoryUseCaseRepository,
   MemoryUserRepository,
 } from "./persistence/memory.js";
@@ -33,7 +35,8 @@ async function main(): Promise<void> {
   await seedDefaults(users, accounts);
   await seedUseCases(useCases);
   const engine = createEngine(useCases, rbac, chains, audit);
-  const app = await buildApp({ useCases, rbac, engine, users, assets, audit, accounts, chains, jwtSecret: "demo" });
+  const cash = new MemoryCashRepository();
+  const app = await buildApp({ useCases, rbac, engine, users, assets, audit, accounts, chains, cash, currencies: loadCurrencies(), jwtSecret: "demo" });
   const token = (await post(app, "/auth/login", null, { email: "admin@tokenlayer.dev", password: "admin123" })).body.token;
 
   // 1. ERC-20 across every available DLT — identical behaviour everywhere.

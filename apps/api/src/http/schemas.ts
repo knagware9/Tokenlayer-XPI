@@ -127,6 +127,15 @@ export const components: Record<string, unknown>[] = [
     required: ["tokenId", "owner", "ownerLabel", "frozen"],
   },
   {
+    $id: "Currency",
+    type: "object",
+    properties: {
+      code: { type: "string" },
+      label: { type: "string" },
+    },
+    required: ["code", "label"],
+  },
+  {
     $id: "AuditEntry",
     type: "object",
     additionalProperties: true,
@@ -196,6 +205,7 @@ export const S: Record<string, FastifySchema> = {
   me: { tags: ["Auth"], summary: "Current session principal", security: bearer, response: { 200: { type: "object", additionalProperties: true }, ...errs(401) } },
 
   chains: { tags: ["Catalog"], summary: "List configured chains/DLTs", security: bearer, response: { 200: { type: "array", items: { $ref: "Chain#" } }, ...errs(401) } },
+  currencies: { tags: ["Catalog"], summary: "List supported settlement currencies", security: bearer, response: { 200: { type: "array", items: { $ref: "Currency#" } }, ...errs(401) } },
   accounts: { tags: ["Catalog"], summary: "List demo accounts", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401) } },
 
   listUseCases: { tags: ["Use Cases"], summary: "List use cases", security: bearer, response: { 200: { type: "array", items: { $ref: "UseCase#" } }, ...errs(401) } },

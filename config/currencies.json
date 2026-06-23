@@ -1,0 +1,5 @@
+[
+  { "code": "CBDC-INR", "label": "Digital Rupee (CBDC)" },
+  { "code": "USDC", "label": "USD Coin" },
+  { "code": "e-GBP", "label": "Digital Pound (CBDC)" }
+]

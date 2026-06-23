@@ -78,6 +78,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
 
   // --- catalog ------------------------------------------------------------
   app.get("/chains", { schema: S.chains, ...auth }, async () => deps.chains.list());
+  app.get("/currencies", { schema: S.currencies, ...auth }, async () => deps.currencies);
   app.get("/accounts", { schema: S.accounts, ...auth }, async (request) => scopedAccounts(request.user as TokenClaims));
 
   app.get("/use-cases", { schema: S.listUseCases, ...auth }, async (request) => {

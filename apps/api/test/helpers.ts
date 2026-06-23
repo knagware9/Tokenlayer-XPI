@@ -3,10 +3,12 @@ import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.js";
 import { buildChainRegistry } from "../src/chains.js";
 import { createEngine } from "../src/context.js";
+import { loadCurrencies } from "../src/currencies.js";
 import {
   MemoryAccountRepository,
   MemoryAssetRepository,
   MemoryAuditRepository,
+  MemoryCashRepository,
   MemoryUseCaseRepository,
   MemoryUserRepository,
 } from "../src/persistence/memory.js";
@@ -21,11 +23,12 @@ export async function buildTestApp(opts: { loginRateLimitMax?: number } = {}): P
   const audit = new MemoryAuditRepository();
   const accounts = new MemoryAccountRepository();
   const useCases = new MemoryUseCaseRepository();
+  const cash = new MemoryCashRepository();
   await seedDefaults(users, accounts);
   await seedUseCases(useCases);
   const engine = createEngine(useCases, rbac, chains, audit);
   // The suite makes many logins from one IP; raise the throttle unless a test opts into it.
-  return buildApp({ useCases, rbac, engine, users, assets, audit, accounts, chains, jwtSecret: "test-secret", loginRateLimitMax: opts.loginRateLimitMax ?? 100000 });
+  return buildApp({ useCases, rbac, engine, users, assets, audit, accounts, chains, cash, currencies: loadCurrencies(), jwtSecret: "test-secret", loginRateLimitMax: opts.loginRateLimitMax ?? 100000 });
 }
 
 /** All v1 API routes live under this prefix. */
