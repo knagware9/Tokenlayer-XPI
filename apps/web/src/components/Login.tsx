@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ApiError } from "../api.js";
 import { useAuth } from "../auth.js";
+import { Logo } from "./Logo.js";
 
 const QUICK: { group: string; users: { label: string; email: string; password: string }[] }[] = [
   { group: "Platform", users: [{ label: "Platform Admin", email: "admin@tokenlayer.dev", password: "admin123" }] },
@@ -30,11 +31,13 @@ export function Login(): JSX.Element {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl p-8">
+    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-[#0E2B26] via-[#163a33] to-[#0a5a4d]">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden">
+        <div className="h-1.5 bg-gradient-to-r from-xigreen via-brand-400 to-xiblue" />
+        <div className="p-8">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-slate-900">TokenLayer</h1>
-          <p className="text-sm text-slate-500">One platform. Any asset. Any chain.</p>
+          <Logo size={34} />
+          <p className="text-sm text-slate-500 mt-2">Tokenize any asset. On any chain. Any standard.</p>
         </div>
         <form onSubmit={submit} className="space-y-4">
           <div>
@@ -81,6 +84,7 @@ export function Login(): JSX.Element {
               </div>
             ))}
           </div>
+        </div>
         </div>
       </div>
     </div>
