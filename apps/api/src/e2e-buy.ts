@@ -30,7 +30,6 @@ import { seedUseCases } from "./use-cases.js";
 
 const BUYER_WALLET = DEFAULT_ACCOUNTS[4]!.address; // "EcoFund Capital" — carbon.buyer's wallet
 const TREASURY = DEFAULT_ACCOUNTS[3]!.address;     // "Treasury" — will hold the minted tokens
-const OUTSIDER = DEFAULT_ACCOUNTS[2]!.address;     // "Carol" — NOT allowlisted
 
 let failures = 0;
 function check(label: string, ok: boolean): void {
@@ -115,6 +114,10 @@ async function main(): Promise<void> {
   // ── 5. Buyer buys 10 tokens ───────────────────────────────────────────────
   const buy = await post(app, `/assets/${assetId}/buy`, buyerToken, { quantity: "10" });
   check("Buyer buys 10 tokens (200)", buy.status === 200);
+  const buyBody = buy.body as Record<string, Record<string, string>>;
+  check(`buy response: paid.amount = "50"`, buyBody.paid?.amount === "50");
+  check(`buy response: paid.currency = "CBDC-INR"`, buyBody.paid?.currency === "CBDC-INR");
+  check(`buy response: delivered.to = BUYER_WALLET`, buyBody.delivered?.to === BUYER_WALLET);
 
   // Verify CBDC balances after buy (cost = 10 * 5 = 50)
   const buyerBalances2 = (await get(app, `/cash/balances?address=${BUYER_WALLET}`, adminToken)).body as { currency: string; amount: string }[];
@@ -189,14 +192,12 @@ async function main(): Promise<void> {
     buyNotAllowed.body.error === "NOT_ALLOWLISTED",
   );
 
-  // Cash must NOT have been deducted (refund path — or pre-check prevented payment)
+  // Cash must NOT have been deducted — the allowlist check runs post-payment inside engine.buy; the refund path compensated.
   const buyerBalances5 = (await get(app, `/cash/balances?address=${BUYER_WALLET}`, adminToken)).body as { currency: string; amount: string }[];
   const buyerCbdc5 = buyerBalances5.find((b) => b.currency === "CBDC-INR")?.amount;
   check(`Cash NOT deducted on NOT_ALLOWLISTED rejection — still "1950" (got ${buyerCbdc5})`, buyerCbdc5 === "1950");
 
-  // Also verify OUTSIDER wallet is not in the scope of this use case's buy
-  // (OUTSIDER == Carol, index [2], never allowlisted)
-  check("OUTSIDER address is not BUYER_WALLET (sanity)", OUTSIDER !== BUYER_WALLET);
+  // Note: Carol (DEFAULT_ACCOUNTS[2]) is never allowlisted on any asset in this test.
 
   await app.close();
   section(failures === 0 ? "ALL MARKETPLACE BUY/DvP CHECKS PASSED" : `FAILED (${failures} checks)`);

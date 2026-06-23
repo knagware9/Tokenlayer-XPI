@@ -244,11 +244,11 @@ Scoped users can only fund wallets within their own use case.
 
 ### Buyer self-service DvP
 
-`POST /api/v1/assets/:id/buy { "quantity": "<positive-integer>" }` — validates in order:
-buyer has a linked wallet, buyer is KYC-allowlisted on the asset, buyer holds enough CBDC
-(`quantity × unitPrice`), treasury holds enough tokens. Payment is transferred first; if
-token delivery fails the cash is automatically refunded. On success the response includes
-the receipt, the amount paid, and the delivery details.
+`POST /api/v1/assets/:id/buy { "quantity": "<positive-integer>" }` — validates buyer has
+a linked wallet, sufficient CBDC balance (`quantity × unitPrice`), and the treasury holds
+enough tokens, then transfers cash first; if the token delivery fails (including allowlist
+checks), the cash is automatically refunded. On success the response includes the receipt,
+the amount paid, and the delivery details.
 
 ```bash
 TOKEN=$(curl -s localhost:4000/api/v1/auth/login -H 'content-type: application/json' \
