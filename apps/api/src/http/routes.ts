@@ -6,7 +6,7 @@ import { canCreateUser, canManageUsers, type Role, type UseCaseDefinition } from
 import type { AppDeps } from "../context.js";
 import { isSupportedCurrency } from "../currencies.js";
 import { S } from "./schemas.js";
-import { actorOf, contextOf, notFound, requireUser, scopedToCaller, type TokenClaims } from "./support.js";
+import { actorOf, contextOf, isPositiveIntString, notFound, requireUser, scopedToCaller, type TokenClaims } from "./support.js";
 
 const NO_USE_CASE = "__none__"; // sentinel: a use-case key that matches no real use case (denies scoped users with no assigned use case)
 const BCRYPT_ROUNDS = 12;
@@ -115,7 +115,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       if (!isSupportedCurrency(body.sale.currency)) {
         return reply.code(400).send({ error: "UNSUPPORTED_CURRENCY", message: `currency '${body.sale.currency}' is not supported` });
       }
-      if (!/^\d+$/.test(body.sale.unitPrice) || BigInt(body.sale.unitPrice) <= 0n) {
+      if (!isPositiveIntString(body.sale.unitPrice)) {
         return reply.code(400).send({ error: "INVALID_PRICE", message: "unitPrice must be a positive integer" });
       }
     }
@@ -255,9 +255,10 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         break;
       case "setPrice": {
         deps.rbac.authorize(actor, "issue");
-        if (!isSupportedCurrency(b.currency!)) return reply.code(400).send({ error: "UNSUPPORTED_CURRENCY", message: `currency '${b.currency}' is not supported` });
-        if (!/^\d+$/.test(b.unitPrice ?? "") || BigInt(b.unitPrice!) <= 0n) return reply.code(400).send({ error: "INVALID_PRICE", message: "unitPrice must be a positive integer" });
-        await deps.assets.setSaleTerms(asset.id, { unitPrice: b.unitPrice!, currency: b.currency!, treasuryAccount: b.treasuryAccount! });
+        if (!b.unitPrice || !b.currency || !b.treasuryAccount) return reply.code(400).send({ error: "VALIDATION_ERROR", message: "setPrice requires unitPrice, currency, and treasuryAccount" });
+        if (!isSupportedCurrency(b.currency)) return reply.code(400).send({ error: "UNSUPPORTED_CURRENCY", message: `currency '${b.currency}' is not supported` });
+        if (!isPositiveIntString(b.unitPrice)) return reply.code(400).send({ error: "INVALID_PRICE", message: "unitPrice must be a positive integer" });
+        await deps.assets.setSaleTerms(asset.id, { unitPrice: b.unitPrice, currency: b.currency, treasuryAccount: b.treasuryAccount });
         return reply.code(200).send({ ok: true });
       }
       default:
@@ -274,6 +275,9 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (!asset.unitPrice || !asset.currency || !asset.treasuryAccount) {
       return reply.code(400).send({ error: "NO_SALE_TERMS", message: "this asset is not listed for sale" });
     }
+    if (BigInt(asset.unitPrice) <= 0n) {
+      return reply.code(400).send({ error: "NO_SALE_TERMS", message: "this asset is not listed for sale" });
+    }
     const claims = request.user as TokenClaims;
     const actor = actorOf(request);
     // Find buyer's linked wallet
@@ -283,7 +287,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
 
     const { unitPrice, currency, treasuryAccount } = asset;
     const quantity = (request.body as { quantity: string }).quantity;
-    if (!/^\d+$/.test(quantity) || BigInt(quantity) <= 0n) return reply.code(400).send({ error: "INVALID_QUANTITY", message: "quantity must be a positive integer" });
+    if (!isPositiveIntString(quantity)) return reply.code(400).send({ error: "INVALID_QUANTITY", message: "quantity must be a positive integer" });
     const cost = (BigInt(unitPrice) * BigInt(quantity)).toString();
     const ctx = contextOf(asset);
     const adapter = deps.chains.resolveAdapter(asset.chainId);
@@ -302,8 +306,13 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       const receipt = await deps.engine.buy(actor, ctx, treasuryAccount, wallet, quantity, { unitPrice, currency, cost });
       return reply.code(200).send({ receipt, paid: { amount: cost, currency }, delivered: { amount: quantity, to: wallet } });
     } catch (err) {
-      await deps.cash.transfer(currency, treasuryAccount, wallet, cost); // refund
-      throw err; // errorHandler maps PolicyError (NOT_ALLOWLISTED/ACCOUNT_FROZEN) -> 400
+      try {
+        await deps.cash.transfer(currency, treasuryAccount, wallet, cost); // compensate
+      } catch (refundErr) {
+        request.log.error({ err, refundErr, wallet, treasuryAccount, currency, cost }, "buy delivery failed AND cash refund failed — manual reconciliation required");
+        throw refundErr;
+      }
+      throw err; // delivery failed but cash was refunded — surface the real cause
     }
   });
 
@@ -326,9 +335,17 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return reply.code(200).send({ ok: true, balance: await deps.cash.balanceOf(bdy.currency, bdy.account) });
   });
 
-  app.get("/cash/balances", { schema: S.cashBalances, ...auth }, async (request) => {
+  app.get("/cash/balances", { schema: S.cashBalances, ...auth }, async (request, reply) => {
     const address = (request.query as { address?: string }).address;
-    return address ? deps.cash.balancesOf(address) : [];
+    if (!address) return [];
+    const claims = request.user as TokenClaims;
+    if (claims.role !== "PlatformAdmin") {
+      const scoped = await scopedAccounts(claims);
+      if (!scoped.some((a) => a.address === address)) {
+        return reply.code(403).send({ error: "OUT_OF_SCOPE", message: "that account is not in your use case" });
+      }
+    }
+    return deps.cash.balancesOf(address);
   });
 
   // --- users (scoped provisioning) ----------------------------------------

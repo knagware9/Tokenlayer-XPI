@@ -76,3 +76,8 @@ export function errorHandler(err: any, _req: FastifyRequest, reply: FastifyReply
 export function scopedToCaller(claims: TokenClaims, useCaseKey: string): boolean {
   return claims.role === "PlatformAdmin" || claims.useCaseKey === useCaseKey;
 }
+
+/** True when `s` is a positive integer string (no sign, no decimals, > 0). */
+export function isPositiveIntString(s: string): boolean {
+  return /^\d+$/.test(s) && BigInt(s) > 0n;
+}

@@ -320,7 +320,13 @@ export const S: Record<string, FastifySchema> = {
         treasuryAccount: { type: "string" },
       },
     },
-    response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
+    response: {
+      200: { oneOf: [
+        { type: "object", required: ["receipt"], properties: { receipt: { $ref: "Receipt#" } }, additionalProperties: true },
+        { type: "object", required: ["ok"], properties: { ok: { type: "boolean" } }, additionalProperties: false },
+      ] },
+      ...errs(400, 401, 403, 404),
+    },
   },
 
   buy: {
@@ -362,7 +368,7 @@ export const S: Record<string, FastifySchema> = {
     },
     response: {
       200: { type: "array", items: { type: "object", additionalProperties: true } },
-      ...errs(401),
+      ...errs(401, 403),
     },
   },
 

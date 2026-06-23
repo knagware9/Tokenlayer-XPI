@@ -747,4 +747,125 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
     });
     expect(blockedRes.statusCode).toBe(403);
   });
+
+  it("buy 400 NO_WALLET when buyer has no linked wallet", async () => {
+    const app = await buildTestApp();
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const carbonAdmin = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
+
+    // Issue with sale terms
+    const assetId = (await app.inject({
+      method: "POST",
+      url: `${V1}/assets`,
+      headers: { authorization: `Bearer ${platform}` },
+      payload: {
+        useCaseKey: "carbon-credit",
+        name: "Carbon VCU",
+        symbol: "VCU",
+        chainId: "besu",
+        metadata: { projectName: "Amazon Rainforest", registry: "Verra", vintage: 2024 },
+        sale: { unitPrice: "5", currency: "CBDC-INR", treasuryAccount: TREASURY_ADDR },
+      },
+    })).json().asset.id as string;
+
+    // Onboard a Buyer WITHOUT a walletAddress
+    const createdBuyer = (await app.inject({
+      method: "POST",
+      url: `${V1}/users`,
+      headers: { authorization: `Bearer ${carbonAdmin}` },
+      payload: { email: "nowallet@x.dev", password: "secret1", role: "Buyer" },
+    })).json();
+    expect(createdBuyer.accountId).toBeNull();
+
+    // KYC-approve the buyer
+    await app.inject({
+      method: "PATCH",
+      url: `${V1}/users/${createdBuyer.id}`,
+      headers: { authorization: `Bearer ${carbonAdmin}` },
+      payload: { kycStatus: "approved" },
+    });
+
+    const buyerToken = await loginAs(app, "nowallet@x.dev", "secret1");
+    const res = await buy(app, buyerToken, assetId, "1");
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("NO_WALLET");
+  });
+
+  it("setPrice 200 for a scoped Issuer; Buyer is still denied", async () => {
+    // carbon.issuer@tokenlayer.dev is an Issuer scoped to carbon-credit
+    const app = await buildTestApp();
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+
+    // Issue a carbon-credit asset (required for the Issuer to be in-scope)
+    const assetId = await issueAsset(app, platform, "carbon-credit");
+
+    const issuerToken = await loginAs(app, "carbon.issuer@tokenlayer.dev", "carbon123");
+    const setPriceRes = await app.inject({
+      method: "POST",
+      url: `${V1}/assets/${assetId}/actions/setPrice`,
+      headers: { authorization: `Bearer ${issuerToken}` },
+      payload: { unitPrice: "20", currency: "CBDC-INR", treasuryAccount: TREASURY_ADDR },
+    });
+    expect(setPriceRes.statusCode).toBe(200);
+    expect(setPriceRes.json().ok).toBe(true);
+
+    // Buyer is still denied
+    const buyerToken = await loginAs(app, "carbon.buyer@tokenlayer.dev", "carbon123");
+    const blockedRes = await app.inject({
+      method: "POST",
+      url: `${V1}/assets/${assetId}/actions/setPrice`,
+      headers: { authorization: `Bearer ${buyerToken}` },
+      payload: { unitPrice: "20", currency: "CBDC-INR", treasuryAccount: TREASURY_ADDR },
+    });
+    expect(blockedRes.statusCode).toBe(403);
+  });
+
+  it("cash/balances 403 OUT_OF_SCOPE for a cross-tenant caller; 200 for PlatformAdmin", async () => {
+    const app = await buildTestApp();
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const goldAdmin = await loginAs(app, "gold.admin@tokenlayer.dev", "gold123");
+
+    // Fund an address that belongs to carbon-credit scope (EcoFund Capital)
+    const ecoFundAddr = "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc";
+    await app.inject({
+      method: "POST",
+      url: `${V1}/cash/credit`,
+      headers: { authorization: `Bearer ${platform}` },
+      payload: { account: ecoFundAddr, currency: "CBDC-INR", amount: "500" },
+    });
+
+    // gold.admin is scoped to gold-loan — EcoFund Capital is out of that scope
+    const scopedRes = await app.inject({
+      method: "GET",
+      url: `${V1}/cash/balances?address=${ecoFundAddr}`,
+      headers: { authorization: `Bearer ${goldAdmin}` },
+    });
+    expect(scopedRes.statusCode).toBe(403);
+    expect(scopedRes.json().error).toBe("OUT_OF_SCOPE");
+
+    // PlatformAdmin can query any address
+    const adminRes = await app.inject({
+      method: "GET",
+      url: `${V1}/cash/balances?address=${ecoFundAddr}`,
+      headers: { authorization: `Bearer ${platform}` },
+    });
+    expect(adminRes.statusCode).toBe(200);
+    const balances = adminRes.json() as { currency: string; amount: string }[];
+    expect(balances.find((b) => b.currency === "CBDC-INR")?.amount).toBe("500");
+  });
+
+  it("setPrice 400 VALIDATION_ERROR when treasuryAccount is missing", async () => {
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const id = await issueGenericAsset(admin);
+
+    const res = await inj({
+      method: "POST",
+      url: `/assets/${id}/actions/setPrice`,
+      headers: auth(admin),
+      payload: { unitPrice: "10", currency: "CBDC-INR" }, // missing treasuryAccount
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("VALIDATION_ERROR");
+    expect(res.json().message).toContain("setPrice requires unitPrice, currency, and treasuryAccount");
+  });
 });
