@@ -147,7 +147,7 @@ export class InMemoryCashRepository implements CashRepository {
     const fromKey = this.key(currency, from);
     const have = this.balances.get(fromKey) ?? 0n;
     if (have < amt) {
-      throw new Error(`INSUFFICIENT_FUNDS: ${from} has ${have} ${currency}, needs ${amt}`);
+      throw new PolicyError("INSUFFICIENT_FUNDS", `INSUFFICIENT_FUNDS: ${from} has insufficient ${currency} (has ${have}, needs ${amt})`, { from, currency, have: have.toString(), needs: amt.toString() });
     }
     this.balances.set(fromKey, have - amt);
     const toKey = this.key(currency, to);

@@ -8,7 +8,8 @@ export type PolicyErrorCode =
   | "INVALID_METADATA"
   | "INVALID_USECASE"
   | "CHAIN_NOT_ALLOWED"
-  | "WRONG_TOKEN_TYPE";
+  | "WRONG_TOKEN_TYPE"
+  | "INSUFFICIENT_FUNDS";
 
 /** Raised when a request violates RBAC, lifecycle, or compliance policy. */
 export class PolicyError extends Error {

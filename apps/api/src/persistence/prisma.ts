@@ -268,8 +268,8 @@ export class PrismaCashRepository implements CashRepository {
     return row?.amount ?? "0";
   }
   async balancesOf(address: string): Promise<CashBalanceRecord[]> {
-    const rows = await prisma.cashBalance.findMany({ where: { address } });
-    return rows.filter((r) => BigInt(r.amount) > 0n).map((r) => ({ currency: r.currency, address: r.address, amount: r.amount }));
+    const rows = await prisma.cashBalance.findMany({ where: { address, amount: { not: "0" } } });
+    return rows.map((r) => ({ currency: r.currency, address: r.address, amount: r.amount }));
   }
   async credit(currency: string, address: string, amount: string): Promise<void> {
     await prisma.$transaction(async (tx) => {
@@ -287,7 +287,7 @@ export class PrismaCashRepository implements CashRepository {
     await prisma.$transaction(async (tx) => {
       const fromRow = await tx.cashBalance.findUnique({ where: { currency_address: { currency, address: from } } });
       const have = BigInt(fromRow?.amount ?? "0");
-      if (have < amt) throw new Error(`INSUFFICIENT_FUNDS: ${from} has ${have} ${currency}, needs ${amt}`);
+      if (have < amt) throw new PolicyError("INSUFFICIENT_FUNDS", `INSUFFICIENT_FUNDS: ${from} has insufficient ${currency} (has ${have}, needs ${amt})`, { from, currency, have: have.toString(), needs: amt.toString() });
       await tx.cashBalance.update({ where: { currency_address: { currency, address: from } }, data: { amount: (have - amt).toString() } });
       const toRow = await tx.cashBalance.findUnique({ where: { currency_address: { currency, address: to } } });
       const next = (BigInt(toRow?.amount ?? "0") + amt).toString();
