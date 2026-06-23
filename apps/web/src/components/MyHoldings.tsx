@@ -25,8 +25,12 @@ export function MyHoldings({ onSelect }: { onSelect: (id: string) => void }): JS
         }
         setHoldings(rows);
         if (wallet) {
-          const balances = await api.cashBalances(token, wallet);
-          setCashBalances(balances.map((b) => ({ currency: b.currency, amount: b.amount })));
+          try {
+            const balances = await api.cashBalances(token, wallet);
+            setCashBalances(balances.map((b) => ({ currency: b.currency, amount: b.amount })));
+          } catch {
+            // balance load failed — section stays hidden
+          }
         }
       } finally {
         setLoading(false);
@@ -41,7 +45,7 @@ export function MyHoldings({ onSelect }: { onSelect: (id: string) => void }): JS
   return (
     <div className="space-y-4">
       {cashBalances.length > 0 && (
-        <div className="bg-white rounded-xl border border-slate-200 p-5 mb-4">
+        <div className="bg-white rounded-xl border border-slate-200 p-5">
           <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Cash / CBDC balances</div>
           <div className="space-y-1">
             {cashBalances.map((b) => (

@@ -53,10 +53,12 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
   // Load buyer's cash balance when asset has sale terms
   useEffect(() => {
     if (!token || !asset?.currency || !user?.walletAddress) return;
-    void api.cashBalances(token, user.walletAddress).then((balances) => {
-      const b = balances.find((b) => b.currency === asset.currency);
-      setMyBalance(b?.amount ?? "0");
-    });
+    void api.cashBalances(token, user.walletAddress)
+      .then((balances) => {
+        const b = balances.find((b) => b.currency === asset.currency);
+        setMyBalance(b?.amount ?? "0");
+      })
+      .catch(() => setMyBalance(null));
   }, [token, asset?.currency, user?.walletAddress]);
 
   // Load available currencies for Fund CBDC
@@ -127,6 +129,7 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
   const isNft = asset.tokenType === "nonfungible";
   const canAllow = useCase.compliance.allowlist && can(role, "allow");
   const canFreeze = useCase.lifecycle.freeze && can(role, "freeze");
+  const safeQty = /^\d+$/.test(buyQty) ? buyQty : null;
 
   return (
     <div className="space-y-5">
@@ -173,9 +176,9 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
               <span className="ml-3 text-slate-400">Your {asset.currency} balance: <strong>{myBalance}</strong></span>
             )}
           </div>
-          {buyQty && asset.unitPrice && BigInt(buyQty) > 0n && (
+          {safeQty && BigInt(asset.unitPrice) > 0n && (
             <div className="text-xs text-slate-500">
-              Total: {(BigInt(asset.unitPrice) * BigInt(buyQty)).toString()} {asset.currency}
+              Total: {(BigInt(asset.unitPrice) * BigInt(safeQty)).toString()} {asset.currency}
             </div>
           )}
           <div className="flex gap-2">
@@ -183,6 +186,7 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
               className="input w-32"
               type="number"
               min="1"
+              step="1"
               placeholder="Quantity"
               value={buyQty}
               onChange={(e) => setBuyQty(e.target.value)}

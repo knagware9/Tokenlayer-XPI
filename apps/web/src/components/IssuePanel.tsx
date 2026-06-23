@@ -25,6 +25,7 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
   const [saleCurrency, setSaleCurrency] = useState("");
   const [saleTreasury, setSaleTreasury] = useState("");
   const [currencies, setCurrencies] = useState<Currency[]>([]);
+  const [allAccounts, setAllAccounts] = useState<{ address: string; label: string }[]>([]);
 
   const useCase = useMemo(() => useCases.find((u) => u.key === useCaseKey), [useCases, useCaseKey]);
   // The chain picker is scoped to the use case's allowed DLTs that are actually available.
@@ -42,6 +43,11 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
   useEffect(() => {
     if (!token) return;
     void api.currencies(token).then(setCurrencies);
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+    void api.accounts(token).then(setAllAccounts);
   }, [token]);
 
   const allowed = user ? can(user.role, "issue") : false;
@@ -74,6 +80,10 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
       setName("");
       setSymbol("");
       setMeta({});
+      setListForSale(false);
+      setSalePrice("");
+      setSaleCurrency("");
+      setSaleTreasury("");
       onIssued(res.asset.id);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Issuance failed");
@@ -169,8 +179,13 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
                 </select>
               </Field>
             </div>
-            <Field label="Treasury account address">
-              <input className="input" value={saleTreasury} onChange={(e) => setSaleTreasury(e.target.value)} placeholder="0x…" />
+            <Field label="Treasury account">
+              <select className="select" value={saleTreasury} onChange={(e) => setSaleTreasury(e.target.value)}>
+                <option value="">Select account…</option>
+                {allAccounts.map((a) => (
+                  <option key={a.address} value={a.address}>{a.label}</option>
+                ))}
+              </select>
             </Field>
           </div>
         )}
