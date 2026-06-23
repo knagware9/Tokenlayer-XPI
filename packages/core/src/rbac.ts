@@ -5,14 +5,14 @@ import type { Actor, LifecycleAction, Role } from "./types.js";
  * Role → permitted-action matrix. Deliberately simple and declarative so it can
  * be audited at a glance and extended as new actions arrive in later phases.
  */
-const FULL: readonly LifecycleAction[] = ["issue", "mint", "transfer", "burn", "freeze", "unfreeze", "allow", "disallow", "read"];
+const FULL: readonly LifecycleAction[] = ["issue", "mint", "transfer", "burn", "freeze", "unfreeze", "allow", "disallow", "buy", "read"];
 
 const MATRIX: Record<Role, ReadonlySet<LifecycleAction>> = {
   PlatformAdmin: new Set<LifecycleAction>(FULL),
   UseCaseAdmin: new Set<LifecycleAction>(FULL),
   Issuer: new Set<LifecycleAction>(["issue", "mint", "allow", "disallow", "freeze", "unfreeze", "read"]),
-  Trader: new Set<LifecycleAction>(["transfer", "burn", "read"]),
-  Buyer: new Set<LifecycleAction>(["read"]),
+  Trader: new Set<LifecycleAction>(["transfer", "burn", "buy", "read"]),
+  Buyer: new Set<LifecycleAction>(["read", "buy"]),
   Auditor: new Set<LifecycleAction>(["read"]),
 };
 

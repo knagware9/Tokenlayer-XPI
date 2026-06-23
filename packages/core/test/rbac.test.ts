@@ -30,4 +30,9 @@ describe("RbacPolicy (per-use-case roles)", () => {
       expect(rbac.can(role, "mint")).toBe(false);
     }
   });
+  it("Buyer and Trader can buy; Auditor cannot", () => {
+    expect(rbac.can("Buyer", "buy")).toBe(true);
+    expect(rbac.can("Trader", "buy")).toBe(true);
+    expect(rbac.can("Auditor", "buy")).toBe(false);
+  });
 });

@@ -21,6 +21,7 @@ export type LifecycleAction =
   | "unfreeze"
   | "allow"
   | "disallow"
+  | "buy"
   | "read";
 
 /** Kind of token a use case issues. */
