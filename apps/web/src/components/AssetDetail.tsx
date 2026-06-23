@@ -64,7 +64,7 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
   // Load available currencies for Fund CBDC
   useEffect(() => {
     if (!token) return;
-    void api.currencies(token).then(setAvailCurrencies);
+    void api.currencies(token).then(setAvailCurrencies).catch(() => {});
   }, [token]);
 
   const useCase = asset ? useCases.find((u) => u.key === asset.useCaseKey) : undefined;
@@ -87,11 +87,11 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
   }
 
   async function doBuy(): Promise<void> {
-    if (!token || !buyQty) return;
+    if (!token || !safeQty) return;
     setBuyBusy(true);
     setBuyError(null);
     try {
-      await api.buy(token, assetId, buyQty);
+      await api.buy(token, assetId, safeQty);
       setBuyQty("");
       await reload();
       onChanged();
@@ -110,6 +110,10 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
 
   async function doFund(): Promise<void> {
     if (!token || !fundAccount || !fundCurrency || !fundAmount) return;
+    if (!/^\d+$/.test(fundAmount)) {
+      setFundError("Amount must be a whole number");
+      return;
+    }
     setFundBusy(true);
     setFundError(null);
     setFundSuccess(null);
@@ -192,7 +196,7 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
               onChange={(e) => setBuyQty(e.target.value)}
             />
             <button
-              disabled={buyBusy || !buyQty}
+              disabled={buyBusy || !safeQty}
               onClick={() => void doBuy()}
               className="rounded-lg bg-brand-600 text-white px-4 py-1.5 text-sm font-medium hover:bg-brand-700 disabled:opacity-40"
             >
@@ -295,7 +299,7 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
         </ol>
       </div>
 
-      {can(role, "issue") && accounts.length > 0 && (
+      {(["Issuer", "UseCaseAdmin", "PlatformAdmin"] as string[]).includes(role) && accounts.length > 0 && (
         <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
           <div className="text-sm font-semibold text-slate-800">Fund CBDC</div>
           <div className="grid grid-cols-3 gap-3">
@@ -310,7 +314,7 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
             <input className="input" type="number" min="1" placeholder="Amount" value={fundAmount} onChange={(e) => setFundAmount(e.target.value)} />
           </div>
           <button
-            disabled={fundBusy || !fundAccount || !fundCurrency || !fundAmount}
+            disabled={fundBusy || !fundAccount || !fundCurrency || !fundAmount || !/^\d+$/.test(fundAmount)}
             onClick={() => void doFund()}
             className="rounded-lg bg-brand-600 text-white px-4 py-1.5 text-sm font-medium hover:bg-brand-700 disabled:opacity-40"
           >

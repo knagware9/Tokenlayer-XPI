@@ -42,7 +42,7 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
 
   useEffect(() => {
     if (!token) return;
-    void api.currencies(token).then(setCurrencies);
+    void api.currencies(token).then(setCurrencies).catch(() => {});
   }, [token]);
 
   useEffect(() => {
