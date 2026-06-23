@@ -357,4 +357,15 @@ describe("per-use-case tenancy", () => {
     const res = await app.inject({ method: "PATCH", url: `${V1}/users/${carbonIssuer.id}`, headers: { authorization: `Bearer ${goldAdmin}` }, payload: { active: false } });
     expect(res.statusCode).toBe(403);
   });
+
+  it("throttles repeated logins from one IP (429)", async () => {
+    const app = await buildTestApp({ loginRateLimitMax: 3 });
+    const attempt = () => app.inject({ method: "POST", url: `${V1}/auth/login`, payload: { email: "admin@tokenlayer.dev", password: "wrong" } });
+    expect((await attempt()).statusCode).toBe(401); // 1
+    expect((await attempt()).statusCode).toBe(401); // 2
+    expect((await attempt()).statusCode).toBe(401); // 3 (= max)
+    const limited = await attempt(); // 4 → over the limit
+    expect(limited.statusCode).toBe(429);
+    expect(limited.json().error).toBe("TOO_MANY_REQUESTS");
+  });
 });

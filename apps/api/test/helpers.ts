@@ -13,7 +13,7 @@ import {
 import { DEFAULT_USERS, seedDefaults } from "../src/seed.js";
 import { seedUseCases } from "../src/use-cases.js";
 
-export async function buildTestApp(): Promise<FastifyInstance> {
+export async function buildTestApp(opts: { loginRateLimitMax?: number } = {}): Promise<FastifyInstance> {
   const rbac = new RbacPolicy();
   const chains = buildChainRegistry({}); // simulated chains only — no EVM env
   const users = new MemoryUserRepository();
@@ -24,7 +24,8 @@ export async function buildTestApp(): Promise<FastifyInstance> {
   await seedDefaults(users, accounts);
   await seedUseCases(useCases);
   const engine = createEngine(useCases, rbac, chains, audit);
-  return buildApp({ useCases, rbac, engine, users, assets, audit, accounts, chains, jwtSecret: "test-secret" });
+  // The suite makes many logins from one IP; raise the throttle unless a test opts into it.
+  return buildApp({ useCases, rbac, engine, users, assets, audit, accounts, chains, jwtSecret: "test-secret", loginRateLimitMax: opts.loginRateLimitMax ?? 100000 });
 }
 
 /** All v1 API routes live under this prefix. */

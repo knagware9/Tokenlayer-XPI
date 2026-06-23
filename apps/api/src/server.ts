@@ -22,11 +22,24 @@ async function main(): Promise<void> {
   const audit = new PrismaAuditRepository();
   const accounts = new PrismaAccountRepository();
   const useCases = new PrismaUseCaseRepository();
-  await seedDefaults(users, accounts);
+  // Demo users/accounts (with predictable passwords) are seeded only outside production.
+  if (env.nodeEnv !== "production") await seedDefaults(users, accounts);
   await seedUseCases(useCases);
 
   const engine = createEngine(useCases, rbac, chains, audit);
-  const app = await buildApp({ useCases, rbac, engine, users, assets, audit, accounts, chains, jwtSecret: env.jwtSecret });
+  const app = await buildApp({
+    useCases,
+    rbac,
+    engine,
+    users,
+    assets,
+    audit,
+    accounts,
+    chains,
+    jwtSecret: env.jwtSecret,
+    corsOrigins: env.corsOrigins,
+    isProduction: env.nodeEnv === "production",
+  });
 
   await app.listen({ port: env.port, host: "0.0.0.0" });
   const chainList = chains.list().map((c) => c.id).join(", ");

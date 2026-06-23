@@ -1,13 +1,56 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+/**
+ * Minimal, dependency-free .env loader for local development. Reads apps/api/.env
+ * and populates process.env for any key not already set by the real environment.
+ * In production, set real environment variables and ship no .env file.
+ */
+function loadDotenv(): void {
+  try {
+    const path = fileURLToPath(new URL("../.env", import.meta.url));
+    for (const raw of readFileSync(path, "utf8").split("\n")) {
+      const line = raw.trim();
+      if (!line || line.startsWith("#")) continue;
+      const eq = line.indexOf("=");
+      if (eq < 0) continue;
+      const key = line.slice(0, eq).trim();
+      if (process.env[key] !== undefined) continue;
+      process.env[key] = line.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
+    }
+  } catch {
+    /* no .env present — rely on the real environment */
+  }
+}
+
+loadDotenv();
+
+/** The insecure placeholder that must never be used to sign tokens. */
+const INSECURE_SECRET = "dev-secret-change-me";
+
+const jwtSecret = process.env.JWT_SECRET;
+if (!jwtSecret || jwtSecret === INSECURE_SECRET || jwtSecret.length < 16) {
+  throw new Error(
+    "JWT_SECRET is missing, too short, or uses the insecure development default. " +
+      "Set a strong secret in apps/api/.env or the environment, e.g. `openssl rand -hex 32`.",
+  );
+}
+
 export interface Env {
   port: number;
+  nodeEnv: string;
   jwtSecret: string;
+  corsOrigins: string[];
   evmRpcUrl?: string;
   evmOperatorKey?: string;
 }
 
 export const env: Env = {
   port: Number(process.env.PORT ?? 4000),
-  jwtSecret: process.env.JWT_SECRET ?? "dev-secret-change-me",
+  nodeEnv: process.env.NODE_ENV ?? "development",
+  jwtSecret,
+  // Comma-separated allowlist; defaults to the local dashboard origin.
+  corsOrigins: (process.env.CORS_ORIGINS ?? "http://localhost:5173").split(",").map((s) => s.trim()).filter(Boolean),
   evmRpcUrl: process.env.EVM_RPC_URL,
   evmOperatorKey: process.env.EVM_OPERATOR_KEY,
 };
