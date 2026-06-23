@@ -177,4 +177,21 @@ describe("LifecycleEngine", () => {
       }),
     ).rejects.toThrow(/NOT_ALLOWLISTED|allowlist/);
   });
+
+  it("buy rejects when the seller/treasury is frozen", async () => {
+    const treasury = "treasury";
+    const buyer = "buyer";
+    await engine.setAllowed(ADMIN, ctx, treasury, true);
+    await engine.setAllowed(ADMIN, ctx, buyer, true);
+    await engine.mint(ADMIN, ctx, treasury, "1000");
+    await engine.setFrozen(ISSUER, ctx, treasury, true);
+
+    await expect(
+      engine.buy(TRADER, ctx, treasury, buyer, "10", {
+        unitPrice: "5",
+        currency: "CBDC-INR",
+        cost: "50",
+      }),
+    ).rejects.toThrow(/ACCOUNT_FROZEN|frozen/);
+  });
 });

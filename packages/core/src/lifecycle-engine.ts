@@ -139,11 +139,12 @@ export class LifecycleEngine {
   ): Promise<TxReceipt> {
     const { adapter, useCase } = await this.prepare(actor, ctx, "buy");
     this.requireFungible(useCase);
+    // buy reuses the transfer lifecycle flag — there is no separate "buy" flag per use case
     this.requireLifecycle(useCase, "transfer");
     await this.requireAllowed(adapter, ctx.ref, useCase, [from, to]);
     await this.requireNotFrozen(adapter, ctx.ref, [from, to]);
     const receipt = await adapter.transfer(ctx.ref, from, to, amount);
-    await this.writeReceipt(actor, "buy", ctx, receipt, { from, to, amount, ...meta });
+    await this.writeReceipt(actor, "buy", ctx, receipt, { from, to, amount, forced: false, ...meta });
     return receipt;
   }
 
