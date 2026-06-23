@@ -21,7 +21,7 @@ export function Header(): JSX.Element {
             <div className="text-xs font-medium text-slate-100">{user?.email}</div>
             <div className="text-[11px] text-brand-400 font-semibold">{user?.role}</div>
           </div>
-          <button onClick={logout} className="text-xs text-slate-200 hover:text-white border border-white/20 hover:border-white/40 rounded-lg px-3 py-1.5">Sign out</button>
+          <button onClick={() => { navigate("/"); logout(); }} className="text-xs text-slate-200 hover:text-white border border-white/20 hover:border-white/40 rounded-lg px-3 py-1.5">Sign out</button>
         </div>
       </div>
     </header>
