@@ -207,10 +207,48 @@ Auth is a JWT obtained from `POST /api/v1/auth/login`, sent as `Authorization: B
 | `GET /api/v1/assets?useCaseKey=&chainId=&status=&limit=&offset=` | List assets (filter + paginate) |
 | `GET /api/v1/assets/:id` · `/accounts` · `/tokens` · `/audit` | Asset, holders, NFT tokens, audit (paginated) |
 | `POST /api/v1/assets/:id/actions/{mint\|transfer\|burn\|freeze\|unfreeze\|allow\|disallow}` | Lifecycle |
+| `POST /api/v1/assets/:id/actions/setPrice` | Set sale terms on an existing asset (Issuer / UseCaseAdmin) |
+| `POST /api/v1/assets/:id/buy` | Buyer self-service DvP purchase (see below) |
+| `POST /api/v1/cash/credit` | Credit CBDC to a wallet (Issuer / UseCaseAdmin / PlatformAdmin) |
+| `GET /api/v1/cash/balances?address=` | Query CBDC balances for a wallet |
+| `GET /api/v1/currencies` | List supported currencies |
 
 **Conventions.** Errors use a uniform envelope `{ "error": "<CODE>", "message": "...", "details"?: {} }`
 (`VALIDATION_ERROR`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `NOT_ALLOWLISTED`, `ACCOUNT_FROZEN`, …).
 Unbounded collections return `{ "data": [...], "pagination": { "limit", "offset", "total" } }`.
+
+## Marketplace Buy & CBDC Payment
+
+### Listing an asset for sale
+
+Include a `sale` object when issuing (`POST /assets`), or call `POST /assets/:id/actions/setPrice`
+after issuance:
+
+```json
+{ "unitPrice": "5", "currency": "CBDC-INR", "treasuryAccount": "0x..." }
+```
+
+`unitPrice` is a positive integer (smallest CBDC unit). `treasuryAccount` is the on-chain wallet
+that holds the tokens and receives payment.
+
+### Supported currencies
+
+Configured in `config/currencies.json` (defaults: `CBDC-INR`, `USDC`, `e-GBP`).
+Query the live list via `GET /api/v1/currencies`.
+
+### Funding buyers
+
+`POST /api/v1/cash/credit { "account", "currency", "amount" }` — restricted to
+Issuer / UseCaseAdmin / PlatformAdmin. Amounts must be positive integers.
+Scoped users can only fund wallets within their own use case.
+
+### Buyer self-service DvP
+
+`POST /api/v1/assets/:id/buy { "quantity": "<positive-integer>" }` — validates in order:
+buyer has a linked wallet, buyer is KYC-allowlisted on the asset, buyer holds enough CBDC
+(`quantity × unitPrice`), treasury holds enough tokens. Payment is transferred first; if
+token delivery fails the cash is automatically refunded. On success the response includes
+the receipt, the amount paid, and the delivery details.
 
 ```bash
 TOKEN=$(curl -s localhost:4000/api/v1/auth/login -H 'content-type: application/json' \
