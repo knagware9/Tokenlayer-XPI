@@ -62,7 +62,7 @@ export async function seedDefaults(users: UserRepository, accounts: AccountRepos
       const acct = DEFAULT_ACCOUNTS.find((a) => a.label === u.walletLabel);
       if (acct) accountId = (await accounts.upsert(acct.address, acct.label)).id;
     }
-    await users.create({ email: u.email, passwordHash: bcrypt.hashSync(u.password, 10), role: u.role, useCaseKey: u.useCaseKey, accountId });
+    await users.create({ email: u.email, passwordHash: bcrypt.hashSync(u.password, 10), role: u.role, useCaseKey: u.useCaseKey, accountId, active: true });
   }
 }
 

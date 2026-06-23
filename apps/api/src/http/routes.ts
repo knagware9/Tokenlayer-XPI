@@ -215,6 +215,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       role: b.role,
       useCaseKey: targetUseCaseKey,
       accountId,
+      active: true,
     });
     return reply.code(201).send({ id: created.id, email: created.email, role: created.role, useCaseKey: created.useCaseKey, accountId: created.accountId });
   });

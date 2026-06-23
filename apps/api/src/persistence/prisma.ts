@@ -32,6 +32,7 @@ const toUser = (r: {
   role: string;
   useCaseKey: string | null;
   accountId: string | null;
+  active: boolean;
   createdAt: Date;
 }): UserRecord => ({
   id: r.id,
@@ -40,6 +41,7 @@ const toUser = (r: {
   role: r.role as Role,
   useCaseKey: r.useCaseKey,
   accountId: r.accountId,
+  active: r.active,
   createdAt: r.createdAt.toISOString(),
 });
 
@@ -58,7 +60,7 @@ export class PrismaUserRepository implements UserRepository {
   async list(useCaseKey?: string): Promise<UserRecord[]> {
     return (await prisma.user.findMany({ where: useCaseKey ? { useCaseKey } : undefined, orderBy: { createdAt: "asc" } })).map(toUser);
   }
-  async update(id: string, patch: Partial<Pick<UserRecord, "passwordHash" | "accountId">>): Promise<UserRecord> {
+  async update(id: string, patch: Partial<Pick<UserRecord, "passwordHash" | "accountId" | "active">>): Promise<UserRecord> {
     return toUser(await prisma.user.update({ where: { id }, data: patch }));
   }
   async remove(id: string): Promise<void> {
