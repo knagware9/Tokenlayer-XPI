@@ -124,6 +124,9 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       metadata: body.metadata ?? {},
       status: "active",
       createdBy: actor.id,
+      unitPrice: null,
+      currency: null,
+      treasuryAccount: null,
     });
     return reply.code(201).send({ asset, txHash: result.txHash });
   });

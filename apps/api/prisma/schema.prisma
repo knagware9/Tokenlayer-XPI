@@ -30,9 +30,12 @@ model Asset {
   tokenType     String
   tokenStandard String   @default("ERC-20")
   metadata      String // JSON-encoded
-  status        String   @default("active")
-  createdBy     String
-  createdAt     DateTime @default(now())
+  status          String   @default("active")
+  createdBy       String
+  createdAt       DateTime @default(now())
+  unitPrice       String?
+  currency        String?
+  treasuryAccount String?
 }
 
 // Low-code use-case definitions, editable via the dashboard builder. JSON

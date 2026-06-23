@@ -35,6 +35,15 @@ export interface AssetRecord {
   status: string;
   createdBy: string;
   createdAt: string;
+  unitPrice: string | null;
+  currency: string | null;
+  treasuryAccount: string | null;
+}
+
+export interface SaleTerms {
+  unitPrice: string;
+  currency: string;
+  treasuryAccount: string;
 }
 
 export interface AuditEntryRecord {
@@ -85,6 +94,7 @@ export interface AssetRepository {
   get(id: string): Promise<AssetRecord | null>;
   list(filter?: AssetFilter, page?: Page): Promise<Paged<AssetRecord>>;
   setStatus(id: string, status: string): Promise<void>;
+  setSaleTerms(id: string, terms: SaleTerms): Promise<void>;
 }
 
 export interface AuditRepository {

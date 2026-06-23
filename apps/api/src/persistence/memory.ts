@@ -11,6 +11,7 @@ import type {
   CashRepository,
   Page,
   Paged,
+  SaleTerms,
   UseCaseRepository,
   UserRecord,
   UserRepository,
@@ -52,7 +53,13 @@ export class MemoryUserRepository implements UserRepository {
 export class MemoryAssetRepository implements AssetRepository {
   private readonly byId = new Map<string, AssetRecord>();
   async create(input: Omit<AssetRecord, "createdAt">): Promise<AssetRecord> {
-    const rec: AssetRecord = { ...input, createdAt: now() };
+    const rec: AssetRecord = {
+      ...input,
+      unitPrice: input.unitPrice ?? null,
+      currency: input.currency ?? null,
+      treasuryAccount: input.treasuryAccount ?? null,
+      createdAt: now(),
+    };
     this.byId.set(rec.id, rec);
     return rec;
   }
@@ -71,7 +78,14 @@ export class MemoryAssetRepository implements AssetRepository {
     const rec = this.byId.get(assetId);
     if (rec) rec.status = status;
   }
+  async setSaleTerms(id: string, terms: SaleTerms): Promise<void> {
+    const a = this.byId.get(id);
+    if (a) { a.unitPrice = terms.unitPrice; a.currency = terms.currency; a.treasuryAccount = terms.treasuryAccount; }
+  }
 }
+
+/** Alias for InMemoryAssetRepository (used in tests). */
+export { MemoryAssetRepository as InMemoryAssetRepository };
 
 export class MemoryAuditRepository implements AuditRepository {
   private readonly entries: AuditEntryRecord[] = [];

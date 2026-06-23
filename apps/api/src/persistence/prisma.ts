@@ -22,6 +22,7 @@ import type {
   KycStatus,
   Page,
   Paged,
+  SaleTerms,
   UseCaseRepository,
   UserRecord,
   UserRepository,
@@ -76,29 +77,59 @@ export class PrismaUserRepository implements UserRepository {
   }
 }
 
+function toAsset(r: {
+  id: string;
+  useCaseKey: string;
+  name: string;
+  symbol: string;
+  chainId: string;
+  contractRef: string;
+  tokenType: string;
+  tokenStandard: string;
+  metadata: string;
+  status: string;
+  createdBy: string;
+  createdAt: Date;
+  unitPrice: string | null;
+  currency: string | null;
+  treasuryAccount: string | null;
+}, parsedMetadata?: Record<string, unknown>): AssetRecord {
+  return {
+    id: r.id,
+    useCaseKey: r.useCaseKey,
+    name: r.name,
+    symbol: r.symbol,
+    chainId: r.chainId,
+    contractRef: r.contractRef,
+    tokenType: r.tokenType as TokenType,
+    tokenStandard: r.tokenStandard as TokenStandard,
+    metadata: parsedMetadata ?? JSON.parse(r.metadata) as Record<string, unknown>,
+    status: r.status,
+    createdBy: r.createdBy,
+    createdAt: r.createdAt.toISOString(),
+    unitPrice: r.unitPrice,
+    currency: r.currency,
+    treasuryAccount: r.treasuryAccount,
+  };
+}
+
 export class PrismaAssetRepository implements AssetRepository {
   async create(input: Omit<AssetRecord, "createdAt">): Promise<AssetRecord> {
     const r = await prisma.asset.create({
-      data: { ...input, metadata: JSON.stringify(input.metadata) },
+      data: {
+        ...input,
+        metadata: JSON.stringify(input.metadata),
+        unitPrice: input.unitPrice ?? null,
+        currency: input.currency ?? null,
+        treasuryAccount: input.treasuryAccount ?? null,
+      },
     });
-    return {
-      ...r,
-      tokenType: r.tokenType as TokenType,
-      tokenStandard: r.tokenStandard as TokenStandard,
-      metadata: input.metadata,
-      createdAt: r.createdAt.toISOString(),
-    };
+    return toAsset(r, input.metadata);
   }
   async get(id: string): Promise<AssetRecord | null> {
     const r = await prisma.asset.findUnique({ where: { id } });
     if (!r) return null;
-    return {
-      ...r,
-      tokenType: r.tokenType as TokenType,
-      tokenStandard: r.tokenStandard as TokenStandard,
-      metadata: JSON.parse(r.metadata) as Record<string, unknown>,
-      createdAt: r.createdAt.toISOString(),
-    };
+    return toAsset(r);
   }
   async list(filter: AssetFilter = {}, page: Page = {}): Promise<Paged<AssetRecord>> {
     const where = {
@@ -111,18 +142,15 @@ export class PrismaAssetRepository implements AssetRepository {
       prisma.asset.count({ where }),
     ]);
     return {
-      items: rows.map((r) => ({
-        ...r,
-        tokenType: r.tokenType as TokenType,
-        tokenStandard: r.tokenStandard as TokenStandard,
-        metadata: JSON.parse(r.metadata) as Record<string, unknown>,
-        createdAt: r.createdAt.toISOString(),
-      })),
+      items: rows.map((r) => toAsset(r)),
       total,
     };
   }
   async setStatus(id: string, status: string): Promise<void> {
     await prisma.asset.update({ where: { id }, data: { status } });
+  }
+  async setSaleTerms(id: string, terms: SaleTerms): Promise<void> {
+    await prisma.asset.update({ where: { id }, data: { unitPrice: terms.unitPrice, currency: terms.currency, treasuryAccount: terms.treasuryAccount } });
   }
 }
 
