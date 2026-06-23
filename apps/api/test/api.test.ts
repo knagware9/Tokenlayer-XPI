@@ -392,4 +392,23 @@ describe("per-use-case tenancy", () => {
     expect(burn?.payload.forced).toBe(true);
     expect(burn?.payload.actorRole).toBe("PlatformAdmin");
   });
+
+  it("KYC: onboard pending, gate allowlist until approved, ungated for unlinked wallets", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const wallet = "0x14dC79964da2C08b23698B3D3cc7Ca32193d9955"; // not linked by the seed
+    const created = (await app.inject({ method: "POST", url: `${V1}/users`, headers: { authorization: `Bearer ${admin}` }, payload: { email: "kyc.buyer@x.dev", password: "secret1", role: "Buyer", walletAddress: wallet, kyc: { legalName: "K Buyer", country: "IN", idType: "Passport", idNumber: "X1", documentRef: "doc://1" } } })).json();
+    expect(created.kycStatus).toBe("pending");
+    const id = await issueAsset(app, platform, "carbon-credit");
+    const blocked = await app.inject({ method: "POST", url: `${V1}/assets/${id}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: wallet } });
+    expect(blocked.statusCode).toBe(400);
+    expect(blocked.json().error).toBe("KYC_NOT_APPROVED");
+    const free = await app.inject({ method: "POST", url: `${V1}/assets/${id}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: "0x90F79bf6EB2c4f870365E785982E1f101E93b906" } });
+    expect(free.statusCode).toBe(200); // unlinked wallet ungated
+    const appr = await app.inject({ method: "PATCH", url: `${V1}/users/${created.id}`, headers: { authorization: `Bearer ${admin}` }, payload: { kycStatus: "approved" } });
+    expect(appr.json().kycStatus).toBe("approved");
+    const allowed = await app.inject({ method: "POST", url: `${V1}/assets/${id}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: wallet } });
+    expect(allowed.statusCode).toBe(200);
+  });
 });
