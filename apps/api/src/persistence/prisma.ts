@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import type { Asset } from "@prisma/client";
 import {
   normalizeUseCaseDefinition,
   PolicyError,
@@ -77,23 +78,7 @@ export class PrismaUserRepository implements UserRepository {
   }
 }
 
-function toAsset(r: {
-  id: string;
-  useCaseKey: string;
-  name: string;
-  symbol: string;
-  chainId: string;
-  contractRef: string;
-  tokenType: string;
-  tokenStandard: string;
-  metadata: string;
-  status: string;
-  createdBy: string;
-  createdAt: Date;
-  unitPrice: string | null;
-  currency: string | null;
-  treasuryAccount: string | null;
-}, parsedMetadata?: Record<string, unknown>): AssetRecord {
+function toAsset(r: Asset, parsedMetadata?: Record<string, unknown>): AssetRecord {
   return {
     id: r.id,
     useCaseKey: r.useCaseKey,
@@ -119,9 +104,6 @@ export class PrismaAssetRepository implements AssetRepository {
       data: {
         ...input,
         metadata: JSON.stringify(input.metadata),
-        unitPrice: input.unitPrice ?? null,
-        currency: input.currency ?? null,
-        treasuryAccount: input.treasuryAccount ?? null,
       },
     });
     return toAsset(r, input.metadata);

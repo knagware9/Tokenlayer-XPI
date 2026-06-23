@@ -84,9 +84,6 @@ export class MemoryAssetRepository implements AssetRepository {
   }
 }
 
-/** Alias for InMemoryAssetRepository (used in tests). */
-export { MemoryAssetRepository as InMemoryAssetRepository };
-
 export class MemoryAuditRepository implements AuditRepository {
   private readonly entries: AuditEntryRecord[] = [];
   async append(
@@ -136,7 +133,7 @@ export class MemoryUseCaseRepository implements UseCaseRepository {
   }
 }
 
-export class InMemoryCashRepository implements CashRepository {
+export class MemoryCashRepository implements CashRepository {
   private readonly balances = new Map<string, bigint>(); // key: `${currency} ${address}`
   private key(currency: string, address: string): string {
     return `${currency} ${address}`;
