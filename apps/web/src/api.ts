@@ -47,7 +47,8 @@ export const api = {
   accounts: (token: string) => request<{ address: string; label: string }[]>("/accounts", token),
   createUseCase: (token: string, def: UseCase) =>
     request<UseCase>("/use-cases", token, { method: "POST", body: JSON.stringify(def) }),
-  assets: (token: string) => request<Listed<Asset>>("/assets?limit=200", token).then((r) => r.data),
+  assets: (token: string, useCaseKey?: string) =>
+    request<Listed<Asset>>(`/assets?limit=200${useCaseKey ? `&useCaseKey=${encodeURIComponent(useCaseKey)}` : ""}`, token).then((r) => r.data),
   asset: (token: string, id: string) => request<Asset>(`/assets/${id}`, token),
   assetAccounts: (token: string, id: string) => request<AccountState[]>(`/assets/${id}/accounts`, token),
   assetTokens: (token: string, id: string) => request<TokenInfo[]>(`/assets/${id}/tokens`, token),
@@ -61,8 +62,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  users: (token: string) => request<{ id: string; email: string; role: Role; useCaseKey: string | null; accountId: string | null }[]>("/users", token),
+  users: (token: string) => request<{ id: string; email: string; role: Role; useCaseKey: string | null; accountId: string | null; active: boolean }[]>("/users", token),
   createUser: (token: string, input: { email: string; password: string; role: Role; useCaseKey?: string; walletAddress?: string }) =>
     request<{ id: string; email: string; role: Role }>("/users", token, { method: "POST", body: JSON.stringify(input) }),
+  updateUser: (token: string, id: string, patch: { password?: string; active?: boolean }) =>
+    request<{ id: string; active: boolean }>(`/users/${id}`, token, { method: "PATCH", body: JSON.stringify(patch) }),
   deleteUser: (token: string, id: string) => request<void>(`/users/${id}`, token, { method: "DELETE" }),
 };

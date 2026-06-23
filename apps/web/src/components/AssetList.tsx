@@ -7,9 +7,10 @@ interface Props {
   chains: ChainInfo[];
   refreshKey: number;
   onSelect: (id: string) => void;
+  useCaseKey?: string;
 }
 
-export function AssetList({ chains, refreshKey, onSelect }: Props): JSX.Element {
+export function AssetList({ chains, refreshKey, onSelect, useCaseKey }: Props): JSX.Element {
   const { token } = useAuth();
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
@@ -17,11 +18,11 @@ export function AssetList({ chains, refreshKey, onSelect }: Props): JSX.Element 
   useEffect(() => {
     if (!token) return;
     setLoading(true);
-    api.assets(token).then((a) => {
+    api.assets(token, useCaseKey).then((a) => {
       setAssets(a);
       setLoading(false);
     });
-  }, [token, refreshKey]);
+  }, [token, refreshKey, useCaseKey]);
 
   const chainLabel = (id: string): string => chains.find((c) => c.id === id)?.label ?? id;
 
