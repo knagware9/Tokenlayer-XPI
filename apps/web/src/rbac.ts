@@ -9,16 +9,17 @@ export type Action =
   | "unfreeze"
   | "allow"
   | "disallow"
+  | "buy"
   | "read";
 
 // Mirrors the server's RbacPolicy so the UI hides actions the role can't perform.
 // The server remains the source of truth and re-checks every request.
 const MATRIX: Record<Role, Action[]> = {
-  PlatformAdmin: ["issue", "mint", "transfer", "burn", "freeze", "unfreeze", "allow", "disallow", "read"],
-  UseCaseAdmin: ["issue", "mint", "transfer", "burn", "freeze", "unfreeze", "allow", "disallow", "read"],
+  PlatformAdmin: ["issue", "mint", "transfer", "burn", "freeze", "unfreeze", "allow", "disallow", "buy", "read"],
+  UseCaseAdmin: ["issue", "mint", "transfer", "burn", "freeze", "unfreeze", "allow", "disallow", "buy", "read"],
   Issuer: ["issue", "mint", "allow", "disallow", "freeze", "unfreeze", "read"],
-  Trader: ["transfer", "burn", "read"],
-  Buyer: ["read"],
+  Trader: ["transfer", "burn", "buy", "read"],
+  Buyer: ["read", "buy"],
   Auditor: ["read"],
 };
 

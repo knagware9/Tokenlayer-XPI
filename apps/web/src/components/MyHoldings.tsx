@@ -8,6 +8,7 @@ type Holding = { asset: Asset; balance: string };
 export function MyHoldings({ onSelect }: { onSelect: (id: string) => void }): JSX.Element {
   const { token, user } = useAuth();
   const [holdings, setHoldings] = useState<Holding[]>([]);
+  const [cashBalances, setCashBalances] = useState<{ currency: string; amount: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const wallet = user?.walletAddress ?? null;
 
@@ -23,6 +24,10 @@ export function MyHoldings({ onSelect }: { onSelect: (id: string) => void }): JS
           if (mine && mine.balance !== "0") rows.push({ asset, balance: mine.balance });
         }
         setHoldings(rows);
+        if (wallet) {
+          const balances = await api.cashBalances(token, wallet);
+          setCashBalances(balances.map((b) => ({ currency: b.currency, amount: b.amount })));
+        }
       } finally {
         setLoading(false);
       }
@@ -31,10 +36,24 @@ export function MyHoldings({ onSelect }: { onSelect: (id: string) => void }): JS
 
   if (!wallet) return <p className="text-sm text-slate-500">No wallet is linked to your account.</p>;
   if (loading) return <p className="text-sm text-slate-500">Loading holdings…</p>;
-  if (!holdings.length) return <p className="text-sm text-slate-500">You don't hold any credits yet.</p>;
+  if (!holdings.length && !cashBalances.length) return <p className="text-sm text-slate-500">You don't hold any credits yet.</p>;
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+    <div className="space-y-4">
+      {cashBalances.length > 0 && (
+        <div className="bg-white rounded-xl border border-slate-200 p-5 mb-4">
+          <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Cash / CBDC balances</div>
+          <div className="space-y-1">
+            {cashBalances.map((b) => (
+              <div key={b.currency} className="flex justify-between text-sm">
+                <span className="text-slate-600">{b.currency}</span>
+                <span className="font-medium text-slate-800">{b.amount}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {holdings.length > 0 && <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
       <table className="w-full text-sm">
         <thead className="text-xs text-slate-500 bg-slate-50"><tr><th className="text-left px-4 py-2">Asset</th><th className="text-left px-4 py-2">Symbol</th><th className="text-right px-4 py-2">Balance</th></tr></thead>
         <tbody>
@@ -47,6 +66,7 @@ export function MyHoldings({ onSelect }: { onSelect: (id: string) => void }): JS
           ))}
         </tbody>
       </table>
+    </div>}
     </div>
   );
 }

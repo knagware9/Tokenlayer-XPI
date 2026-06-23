@@ -1,5 +1,8 @@
 import type { AccountState, Asset, AuditEntry, ChainInfo, Role, SessionUser, TokenInfo, UseCase } from "./types.js";
 
+export interface Currency { code: string; label: string; }
+export interface CashBalance { currency: string; address: string; amount: string; }
+
 const ORIGIN = (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:4000";
 const BASE = `${ORIGIN}/api/v1`;
 
@@ -55,13 +58,23 @@ export const api = {
   audit: (token: string, id: string) => request<Listed<AuditEntry>>(`/assets/${id}/audit?limit=200`, token).then((r) => r.data),
   issue: (
     token: string,
-    input: { useCaseKey: string; name: string; symbol: string; chainId: string; metadata: Record<string, unknown> },
+    input: { useCaseKey: string; name: string; symbol: string; chainId: string; metadata: Record<string, unknown>; sale?: { unitPrice: string; currency: string; treasuryAccount: string } },
   ) => request<{ asset: Asset; txHash: string }>("/assets", token, { method: "POST", body: JSON.stringify(input) }),
   action: (token: string, id: string, action: string, body: Record<string, string>) =>
     request<{ receipt: { txHash: string } }>(`/assets/${id}/actions/${action}`, token, {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  currencies: (token: string) => request<Currency[]>("/currencies", token),
+  cashBalances: (token: string, address: string) =>
+    request<CashBalance[]>(`/cash/balances?address=${encodeURIComponent(address)}`, token),
+  buy: (token: string, id: string, quantity: string) =>
+    request<{ receipt: unknown; paid: { amount: string; currency: string }; delivered: { amount: string; to: string } }>(
+      `/assets/${id}/buy`, token, { method: "POST", body: JSON.stringify({ quantity }) }),
+  setPrice: (token: string, id: string, terms: { unitPrice: string; currency: string; treasuryAccount: string }) =>
+    request<{ ok: boolean }>(`/assets/${id}/actions/setPrice`, token, { method: "POST", body: JSON.stringify(terms) }),
+  creditCash: (token: string, account: string, currency: string, amount: string) =>
+    request<{ ok: boolean; balance: string }>("/cash/credit", token, { method: "POST", body: JSON.stringify({ account, currency, amount }) }),
   users: (token: string) => request<{ id: string; email: string; role: Role; useCaseKey: string | null; accountId: string | null; active: boolean; kycStatus: "pending" | "approved" | "rejected"; kyc: { legalName?: string; country?: string; idType?: string; idNumber?: string; documentRef?: string } | null }[]>("/users", token),
   createUser: (token: string, input: { email: string; password: string; role: Role; useCaseKey?: string; walletAddress?: string; kyc?: { legalName?: string; country?: string; idType?: string; idNumber?: string; documentRef?: string } }) =>
     request<{ id: string; email: string; role: Role }>("/users", token, { method: "POST", body: JSON.stringify(input) }),

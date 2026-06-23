@@ -21,6 +21,21 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Buy panel state
+  const [buyQty, setBuyQty] = useState("");
+  const [buyBusy, setBuyBusy] = useState(false);
+  const [buyError, setBuyError] = useState<string | null>(null);
+  const [myBalance, setMyBalance] = useState<string | null>(null);
+
+  // Fund CBDC state
+  const [fundAccount, setFundAccount] = useState("");
+  const [fundCurrency, setFundCurrency] = useState("");
+  const [fundAmount, setFundAmount] = useState("");
+  const [fundBusy, setFundBusy] = useState(false);
+  const [fundError, setFundError] = useState<string | null>(null);
+  const [fundSuccess, setFundSuccess] = useState<string | null>(null);
+  const [availCurrencies, setAvailCurrencies] = useState<{ code: string; label: string }[]>([]);
+
   const reload = useCallback(async () => {
     if (!token) return;
     const a = await api.asset(token, assetId);
@@ -34,6 +49,21 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // Load buyer's cash balance when asset has sale terms
+  useEffect(() => {
+    if (!token || !asset?.currency || !user?.walletAddress) return;
+    void api.cashBalances(token, user.walletAddress).then((balances) => {
+      const b = balances.find((b) => b.currency === asset.currency);
+      setMyBalance(b?.amount ?? "0");
+    });
+  }, [token, asset?.currency, user?.walletAddress]);
+
+  // Load available currencies for Fund CBDC
+  useEffect(() => {
+    if (!token) return;
+    void api.currencies(token).then(setAvailCurrencies);
+  }, [token]);
 
   const useCase = asset ? useCases.find((u) => u.key === asset.useCaseKey) : undefined;
   const role = user?.role ?? "Auditor";
@@ -51,6 +81,44 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
       setError(err instanceof ApiError ? `${err.code ?? "Error"}: ${err.message}` : "Action failed");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function doBuy(): Promise<void> {
+    if (!token || !buyQty) return;
+    setBuyBusy(true);
+    setBuyError(null);
+    try {
+      await api.buy(token, assetId, buyQty);
+      setBuyQty("");
+      await reload();
+      onChanged();
+      // refresh balance
+      if (user?.walletAddress && asset?.currency) {
+        const balances = await api.cashBalances(token, user.walletAddress);
+        const b = balances.find((b) => b.currency === asset.currency);
+        setMyBalance(b?.amount ?? "0");
+      }
+    } catch (err) {
+      setBuyError(err instanceof ApiError ? `${err.code ?? "Error"}: ${err.message}` : "Buy failed");
+    } finally {
+      setBuyBusy(false);
+    }
+  }
+
+  async function doFund(): Promise<void> {
+    if (!token || !fundAccount || !fundCurrency || !fundAmount) return;
+    setFundBusy(true);
+    setFundError(null);
+    setFundSuccess(null);
+    try {
+      const res = await api.creditCash(token, fundAccount, fundCurrency, fundAmount);
+      setFundSuccess(`Funded. New balance: ${res.balance} ${fundCurrency}`);
+      setFundAmount("");
+    } catch (err) {
+      setFundError(err instanceof ApiError ? `${err.code ?? "Error"}: ${err.message}` : "Fund failed");
+    } finally {
+      setFundBusy(false);
     }
   }
 
@@ -95,6 +163,41 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
       </div>
 
       {error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2">{error}</div>}
+
+      {asset.unitPrice && asset.currency && can(role, "buy") && (
+        <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
+          <div className="text-sm font-semibold text-slate-800">Buy tokens</div>
+          <div className="text-sm text-slate-600">
+            Price: <strong>{asset.unitPrice} {asset.currency}</strong> per token
+            {myBalance !== null && (
+              <span className="ml-3 text-slate-400">Your {asset.currency} balance: <strong>{myBalance}</strong></span>
+            )}
+          </div>
+          {buyQty && asset.unitPrice && BigInt(buyQty) > 0n && (
+            <div className="text-xs text-slate-500">
+              Total: {(BigInt(asset.unitPrice) * BigInt(buyQty)).toString()} {asset.currency}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <input
+              className="input w-32"
+              type="number"
+              min="1"
+              placeholder="Quantity"
+              value={buyQty}
+              onChange={(e) => setBuyQty(e.target.value)}
+            />
+            <button
+              disabled={buyBusy || !buyQty}
+              onClick={() => void doBuy()}
+              className="rounded-lg bg-brand-600 text-white px-4 py-1.5 text-sm font-medium hover:bg-brand-700 disabled:opacity-40"
+            >
+              {buyBusy ? "Buying…" : "Buy"}
+            </button>
+          </div>
+          {buyError && <p className="text-sm text-red-600">{buyError}</p>}
+        </div>
+      )}
 
       <Operations role={role} useCase={useCase} isNft={isNft} accounts={accounts} busy={busy} onRun={run} />
 
@@ -187,6 +290,32 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
           {audit.length === 0 && <li className="text-sm text-slate-400">No activity yet.</li>}
         </ol>
       </div>
+
+      {can(role, "issue") && accounts.length > 0 && (
+        <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
+          <div className="text-sm font-semibold text-slate-800">Fund CBDC</div>
+          <div className="grid grid-cols-3 gap-3">
+            <select className="select" value={fundAccount} onChange={(e) => setFundAccount(e.target.value)}>
+              <option value="">Account…</option>
+              {accounts.map((a) => <option key={a.address} value={a.address}>{a.label}</option>)}
+            </select>
+            <select className="select" value={fundCurrency} onChange={(e) => setFundCurrency(e.target.value)}>
+              <option value="">Currency…</option>
+              {availCurrencies.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}
+            </select>
+            <input className="input" type="number" min="1" placeholder="Amount" value={fundAmount} onChange={(e) => setFundAmount(e.target.value)} />
+          </div>
+          <button
+            disabled={fundBusy || !fundAccount || !fundCurrency || !fundAmount}
+            onClick={() => void doFund()}
+            className="rounded-lg bg-brand-600 text-white px-4 py-1.5 text-sm font-medium hover:bg-brand-700 disabled:opacity-40"
+          >
+            {fundBusy ? "Funding…" : "Fund account"}
+          </button>
+          {fundError && <p className="text-sm text-red-600">{fundError}</p>}
+          {fundSuccess && <p className="text-sm text-emerald-600">{fundSuccess}</p>}
+        </div>
+      )}
     </div>
   );
 }
@@ -299,6 +428,7 @@ function summarize(e: AuditEntry): string {
   if (e.action === "transfer") return p.tokenId ? `#${String(p.tokenId)} ${short(p.from)} → ${short(p.to)}` : `${String(p.amount)} ${short(p.from)} → ${short(p.to)}`;
   if (e.action === "burn") return p.tokenId ? `#${String(p.tokenId)}` : `${String(p.amount)} from ${short(p.from)}`;
   if (e.action === "freeze" || e.action === "unfreeze" || e.action === "allow" || e.action === "disallow") return short(p.account);
+  if (e.action === "buy") return `${String(p.amount)} → ${short(p.to)} @ ${String(p.unitPrice)} ${String(p.currency)}`;
   return "";
 }
 

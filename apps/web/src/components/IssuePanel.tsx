@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../api.js";
+import type { Currency } from "../api.js";
 import { useAuth } from "../auth.js";
 import { can } from "../rbac.js";
 import type { ChainInfo, UseCase } from "../types.js";
@@ -19,6 +20,11 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
   const [meta, setMeta] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [listForSale, setListForSale] = useState(false);
+  const [salePrice, setSalePrice] = useState("");
+  const [saleCurrency, setSaleCurrency] = useState("");
+  const [saleTreasury, setSaleTreasury] = useState("");
+  const [currencies, setCurrencies] = useState<Currency[]>([]);
 
   const useCase = useMemo(() => useCases.find((u) => u.key === useCaseKey), [useCases, useCaseKey]);
   // The chain picker is scoped to the use case's allowed DLTs that are actually available.
@@ -32,6 +38,11 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
     const preferred = availableChains.find((c) => c.id === useCase.defaultChainId) ?? availableChains[0];
     setChainId(preferred?.id ?? "");
   }, [useCaseKey, useCase, availableChains]);
+
+  useEffect(() => {
+    if (!token) return;
+    void api.currencies(token).then(setCurrencies);
+  }, [token]);
 
   const allowed = user ? can(user.role, "issue") : false;
 
@@ -56,7 +67,10 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
         if (raw === undefined || raw === "") continue;
         metadata[field] = prop.type === "number" ? Number(raw) : prop.type === "boolean" ? raw === "true" : raw;
       }
-      const res = await api.issue(token, { useCaseKey, name, symbol, chainId, metadata });
+      const sale = listForSale && salePrice && saleCurrency && saleTreasury
+        ? { unitPrice: salePrice, currency: saleCurrency, treasuryAccount: saleTreasury }
+        : undefined;
+      const res = await api.issue(token, { useCaseKey, name, symbol, chainId, metadata, sale });
       setName("");
       setSymbol("");
       setMeta({});
@@ -136,6 +150,31 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
           </div>
         </div>
       )}
+
+      <div className="space-y-2">
+        <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+          <input type="checkbox" checked={listForSale} onChange={(e) => setListForSale(e.target.checked)} />
+          List for sale
+        </label>
+        {listForSale && (
+          <div className="rounded-lg border border-slate-200 p-4 space-y-3 bg-slate-50">
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Unit price">
+                <input className="input" type="number" min="1" value={salePrice} onChange={(e) => setSalePrice(e.target.value)} placeholder="e.g. 5" />
+              </Field>
+              <Field label="Currency">
+                <select className="select" value={saleCurrency} onChange={(e) => setSaleCurrency(e.target.value)}>
+                  <option value="">Select currency…</option>
+                  {currencies.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}
+                </select>
+              </Field>
+            </div>
+            <Field label="Treasury account address">
+              <input className="input" value={saleTreasury} onChange={(e) => setSaleTreasury(e.target.value)} placeholder="0x…" />
+            </Field>
+          </div>
+        )}
+      </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
       <button

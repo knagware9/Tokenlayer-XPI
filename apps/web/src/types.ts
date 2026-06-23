@@ -57,6 +57,9 @@ export interface Asset {
   createdBy: string;
   createdAt: string;
   totalSupply?: string | null;
+  unitPrice?: string | null;
+  currency?: string | null;
+  treasuryAccount?: string | null;
 }
 
 export interface TokenInfo {
