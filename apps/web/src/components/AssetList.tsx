@@ -30,7 +30,7 @@ export function AssetList({ chains, refreshKey, onSelect, useCaseKey }: Props): 
   if (assets.length === 0)
     return (
       <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-sm text-slate-500">
-        No assets yet. Switch to <span className="font-medium text-slate-700">Issue Asset</span> to create one.
+        No assets yet. Switch to <span className="font-medium text-slate-700">Token Issuance</span> to create one.
       </div>
     );
 
