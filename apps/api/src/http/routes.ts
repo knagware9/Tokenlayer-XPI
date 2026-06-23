@@ -37,6 +37,9 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
       return reply.code(401).send({ error: "UNAUTHORIZED", message: "invalid credentials" });
     }
+    if (!user.active) {
+      return reply.code(401).send({ error: "ACCOUNT_SUSPENDED", message: "this account is suspended" });
+    }
     const claims: TokenClaims = { id: user.id, email: user.email, role: user.role, useCaseKey: user.useCaseKey };
     const wallet = user.accountId ? await deps.accounts.findById(user.accountId) : null;
     return { token: app.jwt.sign(claims), user: { ...claims, walletAddress: wallet?.address ?? null } };
@@ -196,7 +199,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const claims = request.user as TokenClaims;
     if (!canManageUsers(claims.role)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to manage users" });
     const rows = await deps.users.list(claims.role === "PlatformAdmin" ? undefined : claims.useCaseKey ?? NO_USE_CASE);
-    return rows.map((u) => ({ id: u.id, email: u.email, role: u.role, useCaseKey: u.useCaseKey, accountId: u.accountId }));
+    return rows.map((u) => ({ id: u.id, email: u.email, role: u.role, useCaseKey: u.useCaseKey, accountId: u.accountId, active: u.active }));
   });
 
   app.post("/users", { schema: S.createUser, ...auth }, async (request, reply) => {
@@ -229,5 +232,20 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (!sameScope) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to remove that user" });
     await deps.users.remove(id);
     return reply.code(204).send();
+  });
+
+  app.patch("/users/:id", { schema: S.updateUser, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    const b = request.body as { password?: string; active?: boolean };
+    const target = await deps.users.findById(id);
+    if (!target) return notFound(reply, "user not found");
+    const sameScope = claims.role === "PlatformAdmin" || (canManageUsers(claims.role) && target.useCaseKey === claims.useCaseKey && target.role !== "UseCaseAdmin");
+    if (!sameScope) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to edit that user" });
+    const patch: { passwordHash?: string; active?: boolean } = {};
+    if (typeof b.password === "string") patch.passwordHash = bcrypt.hashSync(b.password, 10);
+    if (typeof b.active === "boolean") patch.active = b.active;
+    const updated = await deps.users.update(id, patch);
+    return { id: updated.id, email: updated.email, role: updated.role, useCaseKey: updated.useCaseKey, accountId: updated.accountId, active: updated.active };
   });
 }

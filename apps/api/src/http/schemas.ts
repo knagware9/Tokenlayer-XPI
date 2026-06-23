@@ -317,4 +317,13 @@ export const S: Record<string, FastifySchema> = {
     response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403) },
   },
   deleteUser: { tags: ["Users"], summary: "Remove a user (scoped)", security: bearer, params: { type: "object", required: ["id"], properties: { id: { type: "string" } } }, response: { 204: { type: "null" }, ...errs(401, 403, 404) } },
+  updateUser: {
+    tags: ["Users"], summary: "Edit a user (reset password / suspend) — scoped", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    body: {
+      type: "object",
+      properties: { password: { type: "string", minLength: 6 }, active: { type: "boolean" } },
+    },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
+  },
 };

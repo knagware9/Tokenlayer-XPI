@@ -330,4 +330,31 @@ describe("per-use-case tenancy", () => {
     const mint = await app.inject({ method: "POST", url: `${V1}/assets/${carbon}/actions/mint`, headers: { authorization: `Bearer ${buyer}` }, payload: { to: "0x1", amount: "1" } });
     expect(mint.statusCode).toBe(403);
   });
+
+  it("edit (reset password), revoke (suspend), reactivate, and scope rules", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
+    const created = (await app.inject({ method: "POST", url: `${V1}/users`, headers: { authorization: `Bearer ${admin}` }, payload: { email: "edit.me@x.dev", password: "secret1", role: "Issuer" } })).json();
+    const reset = await app.inject({ method: "PATCH", url: `${V1}/users/${created.id}`, headers: { authorization: `Bearer ${admin}` }, payload: { password: "newpass1" } });
+    expect(reset.statusCode).toBe(200);
+    expect((await app.inject({ method: "POST", url: `${V1}/auth/login`, payload: { email: "edit.me@x.dev", password: "secret1" } })).statusCode).toBe(401);
+    expect((await app.inject({ method: "POST", url: `${V1}/auth/login`, payload: { email: "edit.me@x.dev", password: "newpass1" } })).statusCode).toBe(200);
+    expect((await app.inject({ method: "PATCH", url: `${V1}/users/${created.id}`, headers: { authorization: `Bearer ${admin}` }, payload: { active: false } })).statusCode).toBe(200);
+    const blocked = await app.inject({ method: "POST", url: `${V1}/auth/login`, payload: { email: "edit.me@x.dev", password: "newpass1" } });
+    expect(blocked.statusCode).toBe(401);
+    expect(blocked.json().error).toBe("ACCOUNT_SUSPENDED");
+    await app.inject({ method: "PATCH", url: `${V1}/users/${created.id}`, headers: { authorization: `Bearer ${admin}` }, payload: { active: true } });
+    expect((await app.inject({ method: "POST", url: `${V1}/auth/login`, payload: { email: "edit.me@x.dev", password: "newpass1" } })).statusCode).toBe(200);
+    const list = (await app.inject({ method: "GET", url: `${V1}/users`, headers: { authorization: `Bearer ${admin}` } })).json();
+    expect(list.find((u: any) => u.email === "edit.me@x.dev").active).toBe(true);
+  });
+
+  it("a UseCaseAdmin cannot PATCH a user in another use case", async () => {
+    const app = await buildTestApp();
+    const goldAdmin = await loginAs(app, "gold.admin@tokenlayer.dev", "gold123");
+    const carbonAdmin = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
+    const carbonIssuer = (await app.inject({ method: "POST", url: `${V1}/users`, headers: { authorization: `Bearer ${carbonAdmin}` }, payload: { email: "x.iss@x.dev", password: "secret1", role: "Issuer" } })).json();
+    const res = await app.inject({ method: "PATCH", url: `${V1}/users/${carbonIssuer.id}`, headers: { authorization: `Bearer ${goldAdmin}` }, payload: { active: false } });
+    expect(res.statusCode).toBe(403);
+  });
 });
