@@ -119,7 +119,7 @@ export class LifecycleEngine {
     await this.requireAllowed(adapter, ctx.ref, useCase, [from, to]);
     await this.requireNotFrozen(adapter, ctx.ref, [from, to]);
     const receipt = await adapter.transfer(ctx.ref, from, to, amount);
-    await this.writeReceipt(actor, "transfer", ctx, receipt, { from, to, amount });
+    await this.writeReceipt(actor, "transfer", ctx, receipt, { from, to, amount, forced: true });
     return receipt;
   }
 
@@ -128,7 +128,7 @@ export class LifecycleEngine {
     this.requireFungible(useCase);
     this.requireLifecycle(useCase, "burn");
     const receipt = await adapter.burn(ctx.ref, from, amount);
-    await this.writeReceipt(actor, "burn", ctx, receipt, { from, amount });
+    await this.writeReceipt(actor, "burn", ctx, receipt, { from, amount, forced: true });
     return receipt;
   }
 
@@ -151,7 +151,7 @@ export class LifecycleEngine {
     await this.requireAllowed(adapter, ctx.ref, useCase, [from, to]);
     await this.requireNotFrozen(adapter, ctx.ref, [from, to]);
     const receipt = await adapter.transferToken(ctx.ref, from, to, tokenId);
-    await this.writeReceipt(actor, "transfer", ctx, receipt, { from, to, tokenId });
+    await this.writeReceipt(actor, "transfer", ctx, receipt, { from, to, tokenId, forced: true });
     return receipt;
   }
 
@@ -160,7 +160,7 @@ export class LifecycleEngine {
     this.requireNonFungible(useCase);
     this.requireLifecycle(useCase, "burn");
     const receipt = await adapter.burnToken(ctx.ref, tokenId);
-    await this.writeReceipt(actor, "burn", ctx, receipt, { tokenId });
+    await this.writeReceipt(actor, "burn", ctx, receipt, { tokenId, forced: true });
     return receipt;
   }
 
@@ -292,7 +292,8 @@ export class LifecycleEngine {
       assetId: fields.assetId,
       actorId: actor.id,
       action,
-      payload: fields.payload,
+      // Record the acting role on every entry so operator-initiated actions are attributable.
+      payload: { ...fields.payload, actorRole: actor.role },
       txHash: fields.txHash,
       chainId: fields.chainId,
       at: this.now(),

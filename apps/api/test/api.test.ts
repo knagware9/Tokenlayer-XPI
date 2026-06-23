@@ -357,4 +357,39 @@ describe("per-use-case tenancy", () => {
     const res = await app.inject({ method: "PATCH", url: `${V1}/users/${carbonIssuer.id}`, headers: { authorization: `Bearer ${goldAdmin}` }, payload: { active: false } });
     expect(res.statusCode).toBe(403);
   });
+
+  it("throttles repeated logins from one IP (429)", async () => {
+    const app = await buildTestApp({ loginRateLimitMax: 3 });
+    const attempt = () => app.inject({ method: "POST", url: `${V1}/auth/login`, payload: { email: "admin@tokenlayer.dev", password: "wrong" } });
+    expect((await attempt()).statusCode).toBe(401); // 1
+    expect((await attempt()).statusCode).toBe(401); // 2
+    expect((await attempt()).statusCode).toBe(401); // 3 (= max)
+    const limited = await attempt(); // 4 → over the limit
+    expect(limited.statusCode).toBe(429);
+    expect(limited.json().error).toBe("TOO_MANY_REQUESTS");
+  });
+
+  it("M4: a scoped user's account list is limited to their use case (no cross-tenant enumeration)", async () => {
+    const app = await buildTestApp();
+    const carbonIssuer = await loginAs(app, "carbon.issuer@tokenlayer.dev", "carbon123");
+    const accts = (await app.inject({ method: "GET", url: `${V1}/accounts`, headers: { authorization: `Bearer ${carbonIssuer}` } })).json();
+    const labels = (accts as { label: string }[]).map((a) => a.label);
+    expect(labels).toContain("EcoFund Capital"); // linked to carbon.buyer — in scope
+    expect(labels).not.toContain("Alice"); // linked to gold.buyer — must be hidden
+  });
+
+  it("C2: operator transfers/burns are labeled forced + attributed in the audit trail", async () => {
+    const app = await buildTestApp();
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const id = await issueAsset(app, platform, "carbon-credit");
+    const wallet = "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc";
+    const h = { authorization: `Bearer ${platform}` };
+    await app.inject({ method: "POST", url: `${V1}/assets/${id}/actions/allow`, headers: h, payload: { account: wallet } });
+    await app.inject({ method: "POST", url: `${V1}/assets/${id}/actions/mint`, headers: h, payload: { to: wallet, amount: "100" } });
+    await app.inject({ method: "POST", url: `${V1}/assets/${id}/actions/burn`, headers: h, payload: { from: wallet, amount: "10" } });
+    const audit = (await app.inject({ method: "GET", url: `${V1}/assets/${id}/audit`, headers: h })).json();
+    const burn = (audit.data as { action: string; payload: Record<string, unknown> }[]).find((e) => e.action === "burn");
+    expect(burn?.payload.forced).toBe(true);
+    expect(burn?.payload.actorRole).toBe("PlatformAdmin");
+  });
 });

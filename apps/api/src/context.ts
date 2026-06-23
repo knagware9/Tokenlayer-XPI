@@ -19,6 +19,12 @@ export interface AppDeps {
   accounts: AccountRepository;
   chains: ChainRegistry;
   jwtSecret: string;
+  /** CORS origin allowlist; defaults to the local dashboard when omitted (tests/demo). */
+  corsOrigins?: string[];
+  /** When true, hides API docs and other dev-only surfaces. */
+  isProduction?: boolean;
+  /** Max login attempts per IP per 15-min window (default 10). */
+  loginRateLimitMax?: number;
 }
 
 /** Wires a LifecycleEngine over the use-case source, chains, and audit store. */

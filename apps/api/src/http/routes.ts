@@ -5,13 +5,29 @@ import type { AssetRecord } from "../persistence/types.js";
 import { canCreateUser, canManageUsers, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { S } from "./schemas.js";
-import { actorOf, authenticate, contextOf, notFound, scopedToCaller, type TokenClaims } from "./support.js";
+import { actorOf, contextOf, notFound, requireUser, scopedToCaller, type TokenClaims } from "./support.js";
 
 const NO_USE_CASE = "__none__"; // sentinel: a use-case key that matches no real use case (denies scoped users with no assigned use case)
+const BCRYPT_ROUNDS = 12;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 
 /** Registers every /api/v1 route on the given (prefixed) instance. */
 export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
-  const auth = { preHandler: authenticate };
+  const auth = { preHandler: requireUser(deps) };
+
+  // Per-instance in-memory login throttle (per IP): bounds credential-stuffing / brute force.
+  const loginMax = deps.loginRateLimitMax ?? 10;
+  const loginHits = new Map<string, { count: number; resetAt: number }>();
+  function loginThrottled(ip: string): boolean {
+    const now = Date.now();
+    const e = loginHits.get(ip);
+    if (!e || now > e.resetAt) {
+      loginHits.set(ip, { count: 1, resetAt: now + LOGIN_WINDOW_MS });
+      return false;
+    }
+    e.count += 1;
+    return e.count > loginMax;
+  }
 
   // Loads an asset and enforces use-case scope. Returns null after sending the
   // right error (404 for reads to hide existence; 403 for actions).
@@ -30,8 +46,21 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return asset;
   }
 
+  // Accounts visible to the caller: a PlatformAdmin sees all; a scoped user sees only
+  // the wallets linked to users in their own use case (no cross-tenant account enumeration).
+  async function scopedAccounts(claims: TokenClaims) {
+    const all = await deps.accounts.list();
+    if (claims.role === "PlatformAdmin") return all;
+    const users = await deps.users.list(claims.useCaseKey ?? NO_USE_CASE);
+    const allowed = new Set(users.map((u) => u.accountId).filter((id): id is string => !!id));
+    return all.filter((a) => allowed.has(a.id));
+  }
+
   // --- auth ---------------------------------------------------------------
   app.post("/auth/login", { schema: S.login }, async (request, reply) => {
+    if (loginThrottled(request.ip)) {
+      return reply.code(429).send({ error: "TOO_MANY_REQUESTS", message: "too many login attempts; try again later" });
+    }
     const { email, password } = request.body as { email: string; password: string };
     const user = await deps.users.findByEmail(email);
     if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
@@ -49,7 +78,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
 
   // --- catalog ------------------------------------------------------------
   app.get("/chains", { schema: S.chains, ...auth }, async () => deps.chains.list());
-  app.get("/accounts", { schema: S.accounts, ...auth }, async () => deps.accounts.list());
+  app.get("/accounts", { schema: S.accounts, ...auth }, async (request) => scopedAccounts(request.user as TokenClaims));
 
   app.get("/use-cases", { schema: S.listUseCases, ...auth }, async (request) => {
     const claims = request.user as TokenClaims;
@@ -117,11 +146,15 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   app.get("/assets/:id/accounts", { schema: S.assetAccounts, ...auth }, async (request, reply) => {
     const asset = await scopedAsset(request, reply, "read");
     if (!asset) return reply;
+    const claims = request.user as TokenClaims;
     const adapter = deps.chains.resolveAdapter(asset.chainId);
     const ref = contextOf(asset).ref;
-    const accounts = await deps.accounts.list();
-    return Promise.all(
-      accounts.map(async (acct) => ({
+    // Accounts linked to this use case's users (null = PlatformAdmin sees all).
+    const linked = claims.role === "PlatformAdmin" ? null : new Set((await scopedAccounts(claims)).map((a) => a.id));
+    const all = await deps.accounts.list();
+    const rows = await Promise.all(
+      all.map(async (acct) => ({
+        id: acct.id,
         address: acct.address,
         label: acct.label,
         balance: await adapter.balanceOf(ref, acct.address).catch(() => "0"),
@@ -129,6 +162,11 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         allowed: await adapter.isAllowed(ref, acct.address).catch(() => false),
       })),
     );
+    // Show accounts in the caller's use case, plus any account genuinely related to
+    // this asset (a holder, allowlisted, or frozen) — never the full cross-tenant roster.
+    return rows
+      .filter((r) => linked === null || linked.has(r.id) || r.allowed || r.frozen || r.balance !== "0")
+      .map(({ id, ...rest }) => rest);
   });
 
   app.get("/assets/:id/tokens", { schema: S.assetTokens, ...auth }, async (request, reply) => {
@@ -137,6 +175,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (asset.tokenType !== "nonfungible") return [];
     const adapter = deps.chains.resolveAdapter(asset.chainId);
     const ref = contextOf(asset).ref;
+    // Only actual token owners are emitted below, so the full account list is safe here.
     const accounts = await deps.accounts.list();
     const tokens: { tokenId: string; owner: string; ownerLabel: string; frozen: boolean }[] = [];
     for (const acct of accounts) {
@@ -214,7 +253,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (b.walletAddress) accountId = (await deps.accounts.upsert(b.walletAddress, b.email)).id;
     const created = await deps.users.create({
       email: b.email,
-      passwordHash: await bcrypt.hash(b.password, 10),
+      passwordHash: await bcrypt.hash(b.password, BCRYPT_ROUNDS),
       role: b.role,
       useCaseKey: targetUseCaseKey,
       accountId,
@@ -243,7 +282,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const sameScope = claims.role === "PlatformAdmin" || (canManageUsers(claims.role) && target.useCaseKey === claims.useCaseKey && target.role !== "UseCaseAdmin");
     if (!sameScope) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to edit that user" });
     const patch: { passwordHash?: string; active?: boolean } = {};
-    if (typeof b.password === "string") patch.passwordHash = bcrypt.hashSync(b.password, 10);
+    if (typeof b.password === "string") patch.passwordHash = bcrypt.hashSync(b.password, BCRYPT_ROUNDS);
     if (typeof b.active === "boolean") patch.active = b.active;
     const updated = await deps.users.update(id, patch);
     return { id: updated.id, email: updated.email, role: updated.role, useCaseKey: updated.useCaseKey, accountId: updated.accountId, active: updated.active };

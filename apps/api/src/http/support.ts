@@ -1,6 +1,6 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { PolicyError, type Actor, type AssetContext, type Role } from "@tokenlayer/core";
-import type { AssetRecord } from "../persistence/types.js";
+import type { AssetRecord, UserRepository } from "../persistence/types.js";
 
 export interface TokenClaims {
   id: string;
@@ -18,13 +18,29 @@ export function contextOf(asset: AssetRecord): AssetContext {
   return { ref: { id: asset.id, chainId: asset.chainId, contractRef: asset.contractRef }, useCaseKey: asset.useCaseKey };
 }
 
-/** JWT preHandler that emits the standard error envelope on failure. */
-export async function authenticate(request: FastifyRequest, reply: FastifyReply): Promise<void> {
-  try {
-    await request.jwtVerify();
-  } catch {
-    await reply.code(401).send({ error: "UNAUTHORIZED", message: "missing or invalid bearer token" });
-  }
+/**
+ * Auth preHandler factory: verifies the JWT, then re-validates the principal
+ * against the database every request. This revokes sessions for suspended or
+ * deleted users (a valid signature is no longer sufficient) and refreshes
+ * role/use-case from the source of truth, so a demoted or re-scoped user takes
+ * effect immediately rather than persisting in a stale token.
+ */
+export function requireUser(deps: { users: UserRepository }) {
+  return async function (request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    try {
+      await request.jwtVerify();
+    } catch {
+      await reply.code(401).send({ error: "UNAUTHORIZED", message: "missing or invalid bearer token" });
+      return;
+    }
+    const claims = request.user as TokenClaims;
+    const user = await deps.users.findById(claims.id);
+    if (!user || !user.active) {
+      await reply.code(401).send({ error: "UNAUTHORIZED", message: "session is no longer valid" });
+      return;
+    }
+    request.user = { id: user.id, email: user.email, role: user.role, useCaseKey: user.useCaseKey } satisfies TokenClaims;
+  };
 }
 
 /** Convenience 404 in the standard envelope. */
@@ -50,8 +66,10 @@ export function errorHandler(err: any, _req: FastifyRequest, reply: FastifyReply
   if (typeof err?.statusCode === "number" && err.statusCode >= 400 && err.statusCode < 500) {
     return reply.code(err.statusCode).send({ error: err.code ?? "REQUEST_FAILED", message: err.message });
   }
-  // Adapter/ledger reverts and unexpected errors surface as 400 with the message.
-  return reply.code(400).send({ error: "REQUEST_FAILED", message: err?.message ?? "request failed" });
+  // Adapter/ledger reverts and unexpected errors: log internally, return a generic
+  // message so raw RPC/contract/library internals are not disclosed to clients.
+  console.error("[request-failed]", err);
+  return reply.code(400).send({ error: "REQUEST_FAILED", message: "the request could not be completed" });
 }
 
 /** True if the caller may see/act on a resource governed by `useCaseKey`. */
