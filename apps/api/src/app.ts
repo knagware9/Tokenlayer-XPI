@@ -23,7 +23,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   await app.register(swagger, {
     openapi: {
       info: {
-        title: "TokenLayer API",
+        title: "XI Tokenize API",
         version: "1.0.0",
         description:
           "Chain-agnostic asset-tokenization REST API: configure use cases, issue assets across DLTs and token standards (ERC-20/721/3643), run the compliance-aware lifecycle, and read holders + audit trail.",
