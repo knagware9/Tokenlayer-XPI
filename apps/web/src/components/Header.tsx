@@ -1,14 +1,19 @@
 import { useAuth } from "../auth.js";
+import { useRoute } from "../router.js";
 import { Logo } from "./Logo.js";
 
 export function Header(): JSX.Element {
   const { user, logout } = useAuth();
-  const scope = user?.role === "PlatformAdmin" ? "Platform" : (user?.useCaseKey ?? "");
+  const { useCaseKey, navigate } = useRoute();
+  const isPlatform = user?.role === "PlatformAdmin";
+  const scope = isPlatform ? (useCaseKey || "Platform") : (user?.useCaseKey ?? "");
   return (
     <header className="bg-ink border-b border-ink-700">
       <div className="max-w-6xl mx-auto px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Logo onDark size={30} />
+          <button onClick={() => isPlatform && navigate("/")} className={isPlatform ? "cursor-pointer" : "cursor-default"} aria-label="Home">
+            <Logo onDark size={30} />
+          </button>
           {scope && <span className="hidden sm:inline-block text-[11px] text-brand-400 font-medium border border-brand-400/30 rounded-full px-2 py-0.5">{scope}</span>}
         </div>
         <div className="flex items-center gap-4">

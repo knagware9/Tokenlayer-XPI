@@ -1,101 +1,75 @@
 import { useEffect, useState } from "react";
 import { api } from "./api.js";
 import { useAuth } from "./auth.js";
-import { AssetDetail } from "./components/AssetDetail.js";
-import { AssetList } from "./components/AssetList.js";
+import { useRoute } from "./router.js";
+import { AssetManagement } from "./components/AssetManagement.js";
 import { Header } from "./components/Header.js";
-import { IssuePanel } from "./components/IssuePanel.js";
 import { Login } from "./components/Login.js";
-import { MyHoldings } from "./components/MyHoldings.js";
-import { UseCaseBuilder } from "./components/UseCaseBuilder.js";
-import { UsersAdmin } from "./components/UsersAdmin.js";
-import type { ChainInfo, Role, UseCase } from "./types.js";
+import { PlatformHome } from "./components/PlatformHome.js";
+import { UserManagement } from "./components/UserManagement.js";
+import { canManageUsers } from "./rbac.js";
+import type { ChainInfo, UseCase } from "./types.js";
 
-type Tab = "assets" | "issue" | "build" | "users" | "holdings";
-
-const TABS_BY_ROLE: Record<Role, { id: Tab; label: string }[]> = {
-  PlatformAdmin: [
-    { id: "build", label: "Use Cases" },
-    { id: "users", label: "Use-Case Admins" },
-    { id: "assets", label: "All Assets" },
-  ],
-  UseCaseAdmin: [
-    { id: "assets", label: "Assets" },
-    { id: "issue", label: "Issue Asset" },
-    { id: "users", label: "Users" },
-  ],
-  Issuer: [
-    { id: "assets", label: "Assets" },
-    { id: "issue", label: "Issue Asset" },
-  ],
-  Trader: [{ id: "assets", label: "Trading Desk" }],
-  Buyer: [
-    { id: "assets", label: "Marketplace" },
-    { id: "holdings", label: "My Holdings" },
-  ],
-  Auditor: [{ id: "assets", label: "Assets" }],
-};
+type Section = "assets" | "users";
 
 export function App(): JSX.Element {
   const { token, user } = useAuth();
+  const { useCaseKey: routeKey, navigate } = useRoute();
   const [chains, setChains] = useState<ChainInfo[]>([]);
   const [useCases, setUseCases] = useState<UseCase[]>([]);
-  const [tab, setTab] = useState<Tab>("assets");
-  const [selected, setSelected] = useState<string | null>(null);
-  const [refreshKey, setRefreshKey] = useState(0);
+  const [section, setSection] = useState<Section>("assets");
 
-  const reloadUseCases = (): void => {
-    if (token) void api.useCases(token).then(setUseCases);
-  };
+  const reloadUseCases = (): void => { if (token) void api.useCases(token).then(setUseCases); };
 
   useEffect(() => {
     if (!token) return;
-    void Promise.all([api.chains(token), api.useCases(token)]).then(([c, u]) => {
-      setChains(c);
-      setUseCases(u);
-    });
+    void Promise.all([api.chains(token), api.useCases(token)]).then(([c, u]) => { setChains(c); setUseCases(u); });
   }, [token]);
 
+  // Scoped users are clamped to their own use case's path.
   useEffect(() => {
-    if (user) { const first = TABS_BY_ROLE[user.role][0]; if (first) setTab(first.id); }
-  }, [user?.role]);
+    if (user && user.useCaseKey && routeKey !== user.useCaseKey) navigate(`/${user.useCaseKey}`);
+  }, [user, routeKey, navigate]);
 
   if (!token || !user) return <Login />;
-  const tabs = TABS_BY_ROLE[user.role];
+
+  const isPlatform = user.role === "PlatformAdmin";
+  const activeUseCase = isPlatform ? routeKey : user.useCaseKey ?? "";
+
+  if (isPlatform && !activeUseCase) {
+    return (
+      <div className="min-h-screen">
+        <Header />
+        <main className="max-w-6xl mx-auto px-6 py-6">
+          <PlatformHome useCases={useCases} chains={chains} onReloadUseCases={reloadUseCases} />
+        </main>
+      </div>
+    );
+  }
+
+  const sections: { id: Section; label: string }[] = [
+    { id: "assets", label: "Asset Management" },
+    ...(canManageUsers(user.role) ? [{ id: "users" as Section, label: "User Management" }] : []),
+  ];
 
   return (
     <div className="min-h-screen">
       <Header />
       <main className="max-w-6xl mx-auto px-6 py-6">
-        {selected ? (
-          <AssetDetail assetId={selected} useCases={useCases} chains={chains} onBack={() => setSelected(null)} onChanged={() => setRefreshKey((k) => k + 1)} />
-        ) : (
-          <>
-            <div className="flex gap-1 mb-5">
-              {tabs.map((t) => (
-                <TabButton key={t.id} active={tab === t.id} onClick={() => setTab(t.id)}>
-                  {t.label}
-                </TabButton>
-              ))}
-            </div>
-            {tab === "assets" && <AssetList chains={chains} refreshKey={refreshKey} onSelect={setSelected} />}
-            {tab === "issue" && (
-              <IssuePanel useCases={useCases} chains={chains} onIssued={(id) => { setRefreshKey((k) => k + 1); setSelected(id); }} />
-            )}
-            {tab === "build" && <UseCaseBuilder chains={chains} existing={useCases} onCreated={reloadUseCases} />}
-            {tab === "users" && <UsersAdmin useCases={useCases} />}
-            {tab === "holdings" && <MyHoldings onSelect={setSelected} />}
-          </>
-        )}
+        <div className="flex gap-1 mb-5">
+          {sections.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => setSection(s.id)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium ${section === s.id ? "bg-white text-brand-700 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-800"}`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+        {section === "assets" && <AssetManagement useCaseKey={activeUseCase} useCases={useCases} chains={chains} />}
+        {section === "users" && <UserManagement useCaseKey={activeUseCase} useCases={useCases} />}
       </main>
     </div>
-  );
-}
-
-function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }): JSX.Element {
-  return (
-    <button onClick={onClick} className={`px-4 py-2 rounded-lg text-sm font-medium ${active ? "bg-white text-brand-700 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-800"}`}>
-      {children}
-    </button>
   );
 }
