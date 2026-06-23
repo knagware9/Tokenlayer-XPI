@@ -4,8 +4,8 @@ import { MemoryUserRepository, MemoryAccountRepository } from "../src/persistenc
 describe("MemoryUserRepository", () => {
   it("creates, finds, lists-by-use-case, updates and removes", async () => {
     const repo = new MemoryUserRepository();
-    const a = await repo.create({ email: "a@x.dev", passwordHash: "h", role: "Issuer", useCaseKey: "carbon-credit", accountId: null, active: true });
-    await repo.create({ email: "b@x.dev", passwordHash: "h", role: "Trader", useCaseKey: "gold-loan", accountId: null, active: true });
+    const a = await repo.create({ email: "a@x.dev", passwordHash: "h", role: "Issuer", useCaseKey: "carbon-credit", accountId: null, active: true, kycStatus: "approved", kyc: null });
+    await repo.create({ email: "b@x.dev", passwordHash: "h", role: "Trader", useCaseKey: "gold-loan", accountId: null, active: true, kycStatus: "pending", kyc: { legalName: "B" } });
     expect((await repo.findById(a.id))?.email).toBe("a@x.dev");
     expect((await repo.findByEmail("a@x.dev"))?.role).toBe("Issuer");
     expect((await repo.list("carbon-credit")).map((u) => u.email)).toEqual(["a@x.dev"]);
@@ -16,6 +16,11 @@ describe("MemoryUserRepository", () => {
     const suspended = await repo.update(a.id, { active: false });
     expect(suspended.active).toBe(false);
     await expect(repo.update("no-such-id", { passwordHash: "x" })).rejects.toThrow("unknown user");
+    expect((await repo.findById(a.id))?.kycStatus).toBe("approved");
+    const bRec = (await repo.list("gold-loan"))[0];
+    expect(bRec?.kyc?.legalName).toBe("B");
+    const rej = await repo.update(a.id, { kycStatus: "rejected" });
+    expect(rej.kycStatus).toBe("rejected");
     await repo.remove(a.id);
     expect(await repo.findById(a.id)).toBeNull();
   });

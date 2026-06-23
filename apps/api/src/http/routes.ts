@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { AssetRecord } from "../persistence/types.js";
+import type { AssetRecord, KycDetails, KycStatus } from "../persistence/types.js";
 import { canCreateUser, canManageUsers, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { S } from "./schemas.js";
@@ -221,9 +221,17 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       case "unfreeze":
         receipt = await deps.engine.setFrozen(actor, ctx, b.account!, false);
         break;
-      case "allow":
+      case "allow": {
+        const acct = (await deps.accounts.list()).find((a) => a.address === b.account);
+        if (acct) {
+          const owner = (await deps.users.list()).find((u) => u.accountId === acct.id);
+          if (owner && owner.kycStatus !== "approved") {
+            return reply.code(400).send({ error: "KYC_NOT_APPROVED", message: "the wallet owner has not completed KYC approval" });
+          }
+        }
         receipt = await deps.engine.setAllowed(actor, ctx, b.account!, true);
         break;
+      }
       case "disallow":
         receipt = await deps.engine.setAllowed(actor, ctx, b.account!, false);
         break;
@@ -238,12 +246,12 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const claims = request.user as TokenClaims;
     if (!canManageUsers(claims.role)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to manage users" });
     const rows = await deps.users.list(claims.role === "PlatformAdmin" ? undefined : claims.useCaseKey ?? NO_USE_CASE);
-    return rows.map((u) => ({ id: u.id, email: u.email, role: u.role, useCaseKey: u.useCaseKey, accountId: u.accountId, active: u.active }));
+    return rows.map((u) => ({ id: u.id, email: u.email, role: u.role, useCaseKey: u.useCaseKey, accountId: u.accountId, active: u.active, kycStatus: u.kycStatus, kyc: u.kyc }));
   });
 
   app.post("/users", { schema: S.createUser, ...auth }, async (request, reply) => {
     const claims = request.user as TokenClaims;
-    const b = request.body as { email: string; password: string; role: Role; useCaseKey?: string; walletAddress?: string };
+    const b = request.body as { email: string; password: string; role: Role; useCaseKey?: string; walletAddress?: string; kyc?: KycDetails };
     const targetUseCaseKey = claims.role === "PlatformAdmin" ? (b.useCaseKey ?? null) : claims.useCaseKey;
     if (!canCreateUser({ role: claims.role, useCaseKey: claims.useCaseKey }, b.role, targetUseCaseKey)) {
       return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to create that user" });
@@ -258,8 +266,10 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       useCaseKey: targetUseCaseKey,
       accountId,
       active: true,
+      kycStatus: "pending",
+      kyc: b.kyc ?? null,
     });
-    return reply.code(201).send({ id: created.id, email: created.email, role: created.role, useCaseKey: created.useCaseKey, accountId: created.accountId });
+    return reply.code(201).send({ id: created.id, email: created.email, role: created.role, useCaseKey: created.useCaseKey, accountId: created.accountId, kycStatus: created.kycStatus });
   });
 
   app.delete("/users/:id", { schema: S.deleteUser, ...auth }, async (request, reply) => {
@@ -276,15 +286,16 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   app.patch("/users/:id", { schema: S.updateUser, ...auth }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const { id } = request.params as { id: string };
-    const b = request.body as { password?: string; active?: boolean };
+    const b = request.body as { password?: string; active?: boolean; kycStatus?: "approved" | "rejected" };
     const target = await deps.users.findById(id);
     if (!target) return notFound(reply, "user not found");
     const sameScope = claims.role === "PlatformAdmin" || (canManageUsers(claims.role) && target.useCaseKey === claims.useCaseKey && target.role !== "UseCaseAdmin");
     if (!sameScope) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to edit that user" });
-    const patch: { passwordHash?: string; active?: boolean } = {};
+    const patch: { passwordHash?: string; active?: boolean; kycStatus?: KycStatus } = {};
     if (typeof b.password === "string") patch.passwordHash = bcrypt.hashSync(b.password, BCRYPT_ROUNDS);
     if (typeof b.active === "boolean") patch.active = b.active;
+    if (b.kycStatus === "approved" || b.kycStatus === "rejected") patch.kycStatus = b.kycStatus;
     const updated = await deps.users.update(id, patch);
-    return { id: updated.id, email: updated.email, role: updated.role, useCaseKey: updated.useCaseKey, accountId: updated.accountId, active: updated.active };
+    return { id: updated.id, email: updated.email, role: updated.role, useCaseKey: updated.useCaseKey, accountId: updated.accountId, active: updated.active, kycStatus: updated.kycStatus };
   });
 }

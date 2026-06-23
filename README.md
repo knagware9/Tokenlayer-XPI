@@ -35,6 +35,10 @@ ledger or standard an asset uses.
     issuance, lifecycle actions (fungible *and* NFT), holders + token tables, audit timeline.
   - **User Management** (sub-tabs: Add User · Manage Users) — invite users, reset passwords,
     revoke/reactivate (suspended users cannot log in: `ACCOUNT_SUSPENDED`), and delete.
+    Onboarding captures KYC details (legal name, country, ID type/number, document reference).
+    New users start KYC **pending**; a UseCaseAdmin/PlatformAdmin **Approves/Rejects** them in
+    Manage Users. A wallet can only be allowlisted on an asset once its owner is KYC-approved
+    (`KYC_NOT_APPROVED` otherwise); unlinked demo wallets are exempt.
   - **PlatformAdmin** lands on `/` (use-case catalog/switcher + the Use-Case Builder); scoped
     users (Issuer, Trader, Buyer, Auditor, UseCaseAdmin) land directly on their own use case.
 

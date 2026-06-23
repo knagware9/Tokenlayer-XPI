@@ -312,6 +312,11 @@ export const S: Record<string, FastifySchema> = {
         role: { type: "string", enum: ["UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"] },
         useCaseKey: { type: "string" },
         walletAddress: { type: "string" },
+        kyc: {
+          type: "object",
+          additionalProperties: false,
+          properties: { legalName: { type: "string" }, country: { type: "string" }, idType: { type: "string" }, idNumber: { type: "string" }, documentRef: { type: "string" } },
+        },
       },
     },
     response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403) },
@@ -322,7 +327,7 @@ export const S: Record<string, FastifySchema> = {
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: {
       type: "object",
-      properties: { password: { type: "string", minLength: 6 }, active: { type: "boolean" } },
+      properties: { password: { type: "string", minLength: 6 }, active: { type: "boolean" }, kycStatus: { type: "string", enum: ["approved", "rejected"] } },
     },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
   },

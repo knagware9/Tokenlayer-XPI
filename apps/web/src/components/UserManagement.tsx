@@ -3,7 +3,7 @@ import { ApiError, api } from "../api.js";
 import { useAuth } from "../auth.js";
 import type { Role, UseCase } from "../types.js";
 
-type Summary = { id: string; email: string; role: Role; useCaseKey: string | null; accountId: string | null; active: boolean };
+type Summary = { id: string; email: string; role: Role; useCaseKey: string | null; accountId: string | null; active: boolean; kycStatus: "pending" | "approved" | "rejected"; kyc: { legalName?: string; country?: string; idType?: string; idNumber?: string; documentRef?: string } | null };
 type Sub = "add" | "manage";
 
 const ROLE_OPTIONS: Record<string, Role[]> = {
@@ -49,6 +49,11 @@ function AddUser({ useCaseKey, useCases, onAdded }: { useCaseKey: string; useCas
   const [role, setRole] = useState<Role>(roleOptions[0] ?? "Issuer");
   const [selUseCase, setSelUseCase] = useState(useCaseKey || useCases[0]?.key || "");
   const [walletAddress, setWalletAddress] = useState("");
+  const [legalName, setLegalName] = useState("");
+  const [country, setCountry] = useState("");
+  const [idType, setIdType] = useState("");
+  const [idNumber, setIdNumber] = useState("");
+  const [documentRef, setDocumentRef] = useState("");
   const [error, setError] = useState<string | null>(null);
   const needsWallet = role === "Buyer" || role === "Trader";
 
@@ -57,8 +62,9 @@ function AddUser({ useCaseKey, useCases, onAdded }: { useCaseKey: string; useCas
     setError(null);
     if (password.length < 6) { setError("Password must be at least 6 characters"); return; }
     try {
-      await api.createUser(token!, { email, password, role, useCaseKey: isPlatform ? selUseCase : undefined, walletAddress: needsWallet ? walletAddress : undefined });
+      await api.createUser(token!, { email, password, role, useCaseKey: isPlatform ? selUseCase : undefined, walletAddress: needsWallet ? walletAddress : undefined, kyc: { legalName, country, idType, idNumber, documentRef } });
       setEmail(""); setPassword(""); setWalletAddress("");
+      setLegalName(""); setCountry(""); setIdType(""); setIdNumber(""); setDocumentRef("");
       onAdded();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Create failed");
@@ -80,6 +86,16 @@ function AddUser({ useCaseKey, useCases, onAdded }: { useCaseKey: string; useCas
           </select>
         )}
         {needsWallet && <input className="input" placeholder="wallet address 0x…" value={walletAddress} onChange={(e) => setWalletAddress(e.target.value)} />}
+      </div>
+      <div className="border-t border-slate-100 pt-3">
+        <p className="text-xs font-semibold text-slate-500 mb-2">KYC / onboarding (reviewed before the user can transact)</p>
+        <div className="grid grid-cols-2 gap-4">
+          <input className="input" placeholder="legal name" value={legalName} onChange={(e) => setLegalName(e.target.value)} />
+          <input className="input" placeholder="country" value={country} onChange={(e) => setCountry(e.target.value)} />
+          <input className="input" placeholder="ID type (e.g. Passport)" value={idType} onChange={(e) => setIdType(e.target.value)} />
+          <input className="input" placeholder="ID number" value={idNumber} onChange={(e) => setIdNumber(e.target.value)} />
+          <input className="input col-span-2" placeholder="document reference (URL/ref)" value={documentRef} onChange={(e) => setDocumentRef(e.target.value)} />
+        </div>
       </div>
       {error && <p className="text-sm text-red-600">{error}</p>}
       <button type="submit" className="rounded-lg bg-brand-600 text-white py-1.5 px-4 text-sm font-medium hover:bg-brand-700">Create user</button>
@@ -103,7 +119,7 @@ function ManageUsers({ rows, me, onChanged }: { rows: Summary[]; me?: string; on
       {error && <p className="text-sm text-red-600">{error}</p>}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="text-xs text-slate-500 bg-slate-50"><tr><th className="text-left px-4 py-2">Email</th><th className="text-left px-4 py-2">Role</th><th className="text-left px-4 py-2">Use case</th><th className="text-left px-4 py-2">Status</th><th className="px-4 py-2 text-right">Actions</th></tr></thead>
+          <thead className="text-xs text-slate-500 bg-slate-50"><tr><th className="text-left px-4 py-2">Email</th><th className="text-left px-4 py-2">Role</th><th className="text-left px-4 py-2">Use case</th><th className="text-left px-4 py-2">Status</th><th className="text-left px-4 py-2">KYC</th><th className="px-4 py-2 text-right">Actions</th></tr></thead>
           <tbody>
             {rows.map((u) => (
               <tr key={u.id} className="border-t border-slate-100">
@@ -113,9 +129,14 @@ function ManageUsers({ rows, me, onChanged }: { rows: Summary[]; me?: string; on
                 <td className="px-4 py-2">
                   <span className={`text-[11px] px-2 py-0.5 rounded-full ${u.active ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{u.active ? "active" : "suspended"}</span>
                 </td>
+                <td className="px-4 py-2">
+                  <span className={`text-[11px] px-2 py-0.5 rounded-full ${u.kycStatus === "approved" ? "bg-emerald-100 text-emerald-700" : u.kycStatus === "rejected" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`} title={u.kyc?.legalName ? `${u.kyc.legalName}${u.kyc.country ? " · " + u.kyc.country : ""}` : ""}>{u.kycStatus}</span>
+                </td>
                 <td className="px-4 py-2 text-right space-x-3">
                   {manageable(u) ? (
                     <>
+                      {u.kycStatus !== "approved" && <button onClick={() => act(() => api.updateUser(token!, u.id, { kycStatus: "approved" }))} className="text-xs text-emerald-600 hover:text-emerald-700">Approve</button>}
+                      {u.kycStatus !== "rejected" && <button onClick={() => act(() => api.updateUser(token!, u.id, { kycStatus: "rejected" }))} className="text-xs text-red-500 hover:text-red-700">Reject</button>}
                       <button onClick={() => setEditing(u)} className="text-xs text-brand-600 hover:text-brand-700">Edit</button>
                       <button onClick={() => act(() => api.updateUser(token!, u.id, { active: !u.active }))} className="text-xs text-amber-600 hover:text-amber-700">{u.active ? "Revoke" : "Reactivate"}</button>
                       <button onClick={() => act(() => api.deleteUser(token!, u.id))} className="text-xs text-red-500 hover:text-red-700">Delete</button>

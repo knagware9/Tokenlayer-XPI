@@ -36,7 +36,7 @@ export class MemoryUserRepository implements UserRepository {
     const all = [...this.byId.values()];
     return useCaseKey ? all.filter((u) => u.useCaseKey === useCaseKey) : all;
   }
-  async update(userId: string, patch: Partial<Pick<UserRecord, "passwordHash" | "accountId" | "active">>): Promise<UserRecord> {
+  async update(userId: string, patch: Partial<Pick<UserRecord, "passwordHash" | "accountId" | "active" | "kycStatus">>): Promise<UserRecord> {
     const rec = this.byId.get(userId);
     if (!rec) throw new Error(`unknown user '${userId}'`);
     Object.assign(rec, patch);
