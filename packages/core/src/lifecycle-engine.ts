@@ -123,6 +123,30 @@ export class LifecycleEngine {
     return receipt;
   }
 
+  /**
+   * Buyer-initiated delivery leg of a DvP purchase. Same compliance as `transfer`
+   * (fungible, allowlist + freeze on both parties) but authorized under the `buy`
+   * action and audited as `buy` with the payment metadata. The API layer performs
+   * the cash payment around this call.
+   */
+  async buy(
+    actor: Actor,
+    ctx: AssetContext,
+    from: string,
+    to: string,
+    amount: string,
+    meta: { unitPrice: string; currency: string; cost: string },
+  ): Promise<TxReceipt> {
+    const { adapter, useCase } = await this.prepare(actor, ctx, "buy");
+    this.requireFungible(useCase);
+    this.requireLifecycle(useCase, "transfer");
+    await this.requireAllowed(adapter, ctx.ref, useCase, [from, to]);
+    await this.requireNotFrozen(adapter, ctx.ref, [from, to]);
+    const receipt = await adapter.transfer(ctx.ref, from, to, amount);
+    await this.writeReceipt(actor, "buy", ctx, receipt, { from, to, amount, ...meta });
+    return receipt;
+  }
+
   async burn(actor: Actor, ctx: AssetContext, from: string, amount: string): Promise<TxReceipt> {
     const { adapter, useCase } = await this.prepare(actor, ctx, "burn");
     this.requireFungible(useCase);

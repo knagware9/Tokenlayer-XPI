@@ -137,4 +137,44 @@ describe("LifecycleEngine", () => {
     expect(actions).toEqual(["allow", "mint"]);
     expect(audit.entries.every((e) => e.at === "2026-01-01T00:00:00.000Z")).toBe(true);
   });
+
+  it("buy delivers tokens treasury→buyer and records a 'buy' audit entry with price metadata", async () => {
+    const treasury = "treasury";
+    const buyer = "buyer";
+    await engine.setAllowed(ADMIN, ctx, treasury, true);
+    await engine.setAllowed(ADMIN, ctx, buyer, true);
+    await engine.mint(ADMIN, ctx, treasury, "1000");
+
+    await engine.buy(TRADER, ctx, treasury, buyer, "10", {
+      unitPrice: "5",
+      currency: "CBDC-INR",
+      cost: "50",
+    });
+
+    expect(await engine.balanceOf(TRADER, ctx, buyer)).toBe("10");
+    const last = audit.entries.at(-1)!;
+    expect(last.action).toBe("buy");
+    expect(last.payload).toMatchObject({
+      from: treasury,
+      to: buyer,
+      amount: "10",
+      unitPrice: "5",
+      currency: "CBDC-INR",
+      cost: "50",
+    });
+  });
+
+  it("buy rejects a non-allowlisted buyer", async () => {
+    const treasury = "treasury";
+    await engine.setAllowed(ADMIN, ctx, treasury, true);
+    await engine.mint(ADMIN, ctx, treasury, "1000");
+
+    await expect(
+      engine.buy(TRADER, ctx, treasury, "0xNOTLISTED", "10", {
+        unitPrice: "5",
+        currency: "CBDC-INR",
+        cost: "50",
+      }),
+    ).rejects.toThrow(/NOT_ALLOWLISTED|allowlist/);
+  });
 });
