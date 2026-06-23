@@ -7,6 +7,8 @@ import type {
   AssetRepository,
   AuditEntryRecord,
   AuditRepository,
+  CashBalanceRecord,
+  CashRepository,
   Page,
   Paged,
   UseCaseRepository,
@@ -117,6 +119,39 @@ export class MemoryUseCaseRepository implements UseCaseRepository {
     const def = normalizeUseCaseDefinition({ ...raw, key });
     this.byKey.set(key, def);
     return def;
+  }
+}
+
+export class InMemoryCashRepository implements CashRepository {
+  private readonly balances = new Map<string, bigint>(); // key: `${currency} ${address}`
+  private key(currency: string, address: string): string {
+    return `${currency} ${address}`;
+  }
+  async balanceOf(currency: string, address: string): Promise<string> {
+    return (this.balances.get(this.key(currency, address)) ?? 0n).toString();
+  }
+  async balancesOf(address: string): Promise<CashBalanceRecord[]> {
+    const out: CashBalanceRecord[] = [];
+    for (const [k, amount] of this.balances) {
+      const [currency, addr] = k.split(" ");
+      if (addr === address && amount > 0n) out.push({ currency: currency!, address, amount: amount.toString() });
+    }
+    return out;
+  }
+  async credit(currency: string, address: string, amount: string): Promise<void> {
+    const k = this.key(currency, address);
+    this.balances.set(k, (this.balances.get(k) ?? 0n) + BigInt(amount));
+  }
+  async transfer(currency: string, from: string, to: string, amount: string): Promise<void> {
+    const amt = BigInt(amount);
+    const fromKey = this.key(currency, from);
+    const have = this.balances.get(fromKey) ?? 0n;
+    if (have < amt) {
+      throw new Error(`INSUFFICIENT_FUNDS: ${from} has ${have} ${currency}, needs ${amt}`);
+    }
+    this.balances.set(fromKey, have - amt);
+    const toKey = this.key(currency, to);
+    this.balances.set(toKey, (this.balances.get(toKey) ?? 0n) + amt);
   }
 }
 

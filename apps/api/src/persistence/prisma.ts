@@ -16,6 +16,8 @@ import type {
   AssetRepository,
   AuditEntryRecord,
   AuditRepository,
+  CashBalanceRecord,
+  CashRepository,
   KycDetails,
   KycStatus,
   Page,
@@ -257,5 +259,43 @@ export class PrismaUseCaseRepository implements UseCaseRepository {
     const { key: _omit, ...data } = useCaseToData(def);
     await prisma.useCase.update({ where: { key }, data });
     return def;
+  }
+}
+
+export class PrismaCashRepository implements CashRepository {
+  async balanceOf(currency: string, address: string): Promise<string> {
+    const row = await prisma.cashBalance.findUnique({ where: { currency_address: { currency, address } } });
+    return row?.amount ?? "0";
+  }
+  async balancesOf(address: string): Promise<CashBalanceRecord[]> {
+    const rows = await prisma.cashBalance.findMany({ where: { address } });
+    return rows.filter((r) => BigInt(r.amount) > 0n).map((r) => ({ currency: r.currency, address: r.address, amount: r.amount }));
+  }
+  async credit(currency: string, address: string, amount: string): Promise<void> {
+    await prisma.$transaction(async (tx) => {
+      const row = await tx.cashBalance.findUnique({ where: { currency_address: { currency, address } } });
+      const next = (BigInt(row?.amount ?? "0") + BigInt(amount)).toString();
+      await tx.cashBalance.upsert({
+        where: { currency_address: { currency, address } },
+        create: { currency, address, amount: next },
+        update: { amount: next },
+      });
+    });
+  }
+  async transfer(currency: string, from: string, to: string, amount: string): Promise<void> {
+    const amt = BigInt(amount);
+    await prisma.$transaction(async (tx) => {
+      const fromRow = await tx.cashBalance.findUnique({ where: { currency_address: { currency, address: from } } });
+      const have = BigInt(fromRow?.amount ?? "0");
+      if (have < amt) throw new Error(`INSUFFICIENT_FUNDS: ${from} has ${have} ${currency}, needs ${amt}`);
+      await tx.cashBalance.update({ where: { currency_address: { currency, address: from } }, data: { amount: (have - amt).toString() } });
+      const toRow = await tx.cashBalance.findUnique({ where: { currency_address: { currency, address: to } } });
+      const next = (BigInt(toRow?.amount ?? "0") + amt).toString();
+      await tx.cashBalance.upsert({
+        where: { currency_address: { currency, address: to } },
+        create: { currency, address: to, amount: next },
+        update: { amount: next },
+      });
+    });
   }
 }

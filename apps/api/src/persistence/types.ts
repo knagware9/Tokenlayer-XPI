@@ -103,3 +103,18 @@ export interface UseCaseRepository extends UseCaseSource {
   create(def: UseCaseDefinition): Promise<UseCaseDefinition>;
   update(key: string, def: UseCaseDefinition): Promise<UseCaseDefinition>;
 }
+
+export interface CashBalanceRecord {
+  currency: string;
+  address: string;
+  amount: string;
+}
+
+export interface CashRepository {
+  balanceOf(currency: string, address: string): Promise<string>;
+  balancesOf(address: string): Promise<CashBalanceRecord[]>;
+  /** Mint/fund: add `amount` to (currency,address). */
+  credit(currency: string, address: string, amount: string): Promise<void>;
+  /** Payment leg: move `amount` from→to in `currency`; throws on insufficient funds. */
+  transfer(currency: string, from: string, to: string, amount: string): Promise<void>;
+}

@@ -72,3 +72,12 @@ model Account {
   address String @unique
   label   String
 }
+
+model CashBalance {
+  id       String @id @default(cuid())
+  currency String
+  address  String
+  amount   String @default("0")
+
+  @@unique([currency, address])
+}
