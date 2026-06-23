@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import bcrypt from "bcryptjs";
 import type { Role } from "@tokenlayer/core";
-import type { AccountRepository, UserRepository } from "./persistence/types.js";
+import type { AccountRepository, CashRepository, UserRepository } from "./persistence/types.js";
 
 export interface SeedUser {
   email: string;
@@ -50,8 +50,11 @@ export const DEFAULT_ACCOUNTS: { address: string; label: string }[] = [
   { address: "0xBcd4042DE499D14e55001CcbB24a551F3b954096", label: "Summit Tech Net-Zero" },
 ];
 
+const DEFAULT_CBDC = "CBDC-INR";
+const DEMO_CBDC_AMOUNT = "1000000";
+
 /** Idempotently seeds the default users and demo accounts. */
-export async function seedDefaults(users: UserRepository, accounts: AccountRepository): Promise<void> {
+export async function seedDefaults(users: UserRepository, accounts: AccountRepository, cash?: CashRepository): Promise<void> {
   for (const a of DEFAULT_ACCOUNTS) {
     await accounts.upsert(a.address, a.label);
   }
@@ -64,12 +67,31 @@ export async function seedDefaults(users: UserRepository, accounts: AccountRepos
     }
     await users.create({ email: u.email, passwordHash: bcrypt.hashSync(u.password, 10), role: u.role, useCaseKey: u.useCaseKey, accountId, active: true, kycStatus: "approved", kyc: null });
   }
+
+  if (cash) {
+    // Identify buyer wallet addresses: users with role "Buyer" that have a walletLabel
+    const buyerWalletLabels = DEFAULT_USERS
+      .filter((u) => u.role === "Buyer" && u.walletLabel)
+      .map((u) => u.walletLabel as string);
+    const buyerAccounts = DEFAULT_ACCOUNTS.filter((a) => buyerWalletLabels.includes(a.label));
+
+    let funded = 0;
+    for (const acct of buyerAccounts) {
+      // Idempotent: only credit if balance is currently zero
+      const current = await cash.balanceOf(DEFAULT_CBDC, acct.address);
+      if (current === "0") {
+        await cash.credit(DEFAULT_CBDC, acct.address, DEMO_CBDC_AMOUNT);
+        funded++;
+      }
+    }
+    console.log(`Funded ${funded} buyer wallets with ${DEMO_CBDC_AMOUNT} ${DEFAULT_CBDC}.`);
+  }
 }
 
 // CLI entry: `tsx src/seed.ts` seeds the Prisma database.
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  const { PrismaUserRepository, PrismaAccountRepository, prisma } = await import("./persistence/prisma.js");
-  await seedDefaults(new PrismaUserRepository(), new PrismaAccountRepository());
+  const { PrismaUserRepository, PrismaAccountRepository, PrismaCashRepository, prisma } = await import("./persistence/prisma.js");
+  await seedDefaults(new PrismaUserRepository(), new PrismaAccountRepository(), new PrismaCashRepository());
   await prisma.$disconnect();
   console.log("Seeded default users and accounts.");
 }
