@@ -55,6 +55,7 @@ function AddUser({ useCaseKey, useCases, onAdded }: { useCaseKey: string; useCas
   async function create(e: React.FormEvent): Promise<void> {
     e.preventDefault();
     setError(null);
+    if (password.length < 6) { setError("Password must be at least 6 characters"); return; }
     try {
       await api.createUser(token!, { email, password, role, useCaseKey: isPlatform ? selUseCase : undefined, walletAddress: needsWallet ? walletAddress : undefined });
       setEmail(""); setPassword(""); setWalletAddress("");
