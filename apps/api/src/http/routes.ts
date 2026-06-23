@@ -46,6 +46,16 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return asset;
   }
 
+  // Accounts visible to the caller: a PlatformAdmin sees all; a scoped user sees only
+  // the wallets linked to users in their own use case (no cross-tenant account enumeration).
+  async function scopedAccounts(claims: TokenClaims) {
+    const all = await deps.accounts.list();
+    if (claims.role === "PlatformAdmin") return all;
+    const users = await deps.users.list(claims.useCaseKey ?? NO_USE_CASE);
+    const allowed = new Set(users.map((u) => u.accountId).filter((id): id is string => !!id));
+    return all.filter((a) => allowed.has(a.id));
+  }
+
   // --- auth ---------------------------------------------------------------
   app.post("/auth/login", { schema: S.login }, async (request, reply) => {
     if (loginThrottled(request.ip)) {
@@ -68,7 +78,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
 
   // --- catalog ------------------------------------------------------------
   app.get("/chains", { schema: S.chains, ...auth }, async () => deps.chains.list());
-  app.get("/accounts", { schema: S.accounts, ...auth }, async () => deps.accounts.list());
+  app.get("/accounts", { schema: S.accounts, ...auth }, async (request) => scopedAccounts(request.user as TokenClaims));
 
   app.get("/use-cases", { schema: S.listUseCases, ...auth }, async (request) => {
     const claims = request.user as TokenClaims;
@@ -136,11 +146,15 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   app.get("/assets/:id/accounts", { schema: S.assetAccounts, ...auth }, async (request, reply) => {
     const asset = await scopedAsset(request, reply, "read");
     if (!asset) return reply;
+    const claims = request.user as TokenClaims;
     const adapter = deps.chains.resolveAdapter(asset.chainId);
     const ref = contextOf(asset).ref;
-    const accounts = await deps.accounts.list();
-    return Promise.all(
-      accounts.map(async (acct) => ({
+    // Accounts linked to this use case's users (null = PlatformAdmin sees all).
+    const linked = claims.role === "PlatformAdmin" ? null : new Set((await scopedAccounts(claims)).map((a) => a.id));
+    const all = await deps.accounts.list();
+    const rows = await Promise.all(
+      all.map(async (acct) => ({
+        id: acct.id,
         address: acct.address,
         label: acct.label,
         balance: await adapter.balanceOf(ref, acct.address).catch(() => "0"),
@@ -148,6 +162,11 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         allowed: await adapter.isAllowed(ref, acct.address).catch(() => false),
       })),
     );
+    // Show accounts in the caller's use case, plus any account genuinely related to
+    // this asset (a holder, allowlisted, or frozen) — never the full cross-tenant roster.
+    return rows
+      .filter((r) => linked === null || linked.has(r.id) || r.allowed || r.frozen || r.balance !== "0")
+      .map(({ id, ...rest }) => rest);
   });
 
   app.get("/assets/:id/tokens", { schema: S.assetTokens, ...auth }, async (request, reply) => {
@@ -156,6 +175,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (asset.tokenType !== "nonfungible") return [];
     const adapter = deps.chains.resolveAdapter(asset.chainId);
     const ref = contextOf(asset).ref;
+    // Only actual token owners are emitted below, so the full account list is safe here.
     const accounts = await deps.accounts.list();
     const tokens: { tokenId: string; owner: string; ownerLabel: string; frozen: boolean }[] = [];
     for (const acct of accounts) {
