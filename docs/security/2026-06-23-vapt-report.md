@@ -124,3 +124,31 @@ Result observed: full PlatformAdmin access — list/create users, create/edit us
 5. **H2** — `pnpm audit --fix` + upgrade `@fastify/jwt`/`fast-jwt`, undici, lodash, etc. *(hours)*
 6. **H5/M2** — httpOnly cookie or short-token+refresh; add Helmet + CSP. *(0.5 day)*
 7. **M1/M3/M4/M5** + Lows — rate-limit login, sanitize error output, scope account listings, tighten schemas, gate docs, raise bcrypt cost, pin JWT alg. *(0.5–1 day)*
+
+---
+
+## Remediation status (2026-06-23)
+
+Fixes landed on branch `fix/security-hardening` (commits `982058c`, `f3f6532`), each verified by the regression suite (api 30 · core 38 · e2e-tenancy + e2e-carbon) and, for the runtime ones, by live re-testing.
+
+| # | Status | Notes |
+|---|--------|-------|
+| C1 | ✅ Fixed | `env.ts` fails fast on missing/weak/default `JWT_SECRET` + built-in `.env` loader; strong dev secret generated. Live: forged dev-secret token → 401. |
+| C2 | ✅ Hardened (by design) | Operator/transfer-agent model retained per product decision; transfer/burn now flagged `forced: true` and every audit entry records `actorRole`, so operator-initiated moves are explicitly attributable. |
+| H1 | ✅ Fixed | JWT `expiresIn` 8h + per-request `requireUser` re-validation revokes suspended/deleted sessions and refreshes role/scope. Live: suspended user's existing token → 401. |
+| H3 | ✅ Fixed | Demo user/account seeding gated to non-production. |
+| H4 | ✅ Fixed | CORS restricted to an explicit origin allowlist. Live: foreign origin gets no ACAO. |
+| H5 | ◑ Partial | Token TTL added (limits stolen-token window) + strict security headers/CSP reduce XSS blast radius. httpOnly-cookie storage remains a follow-up. |
+| H6 | ✅ Fixed | `.env.example` scrubbed (placeholder secret + operator key); `.env` remains gitignored/untracked. |
+| H2 | ⚠️ Deferred — manual | Requires a healthy package manager. This environment's pnpm (10.x, store v10) does not match `node_modules` (built by pnpm 11, store v11), so a reinstall/upgrade can't be done safely here. **Residual exploitability is low** given C1/L4: the `fast-jwt` empty-secret bypass needs an empty secret (now rejected) and HS256 is pinned; undici WS-DoS, lodash `_.template`, serialize-javascript, vitest-UI and tmp advisories are dev-only or unreachable in the API runtime. **To remediate in a healthy env:** `corepack use pnpm@11 && pnpm install && pnpm audit --fix && pnpm up @fastify/jwt undici` then re-run `pnpm -r test`. |
+| M1 | ✅ Fixed | Per-instance in-memory login throttle (429); covered by test. |
+| M2 | ✅ Fixed | Security headers (CSP/X-Frame-Options/X-Content-Type-Options/Referrer-Policy) on every response. |
+| M3 | ✅ Fixed | Adapter/unknown errors return a generic client message; detail logged server-side. |
+| M4 | ✅ Fixed | `/accounts` scoped to use-case-linked wallets; `/assets/:id/accounts` shows in-use-case + genuine asset participants only. Covered by test. |
+| M5 | ◑ Partial | 256 KB body limit added; per-field `maxLength`/email-`format` tightening remains a follow-up. |
+| L1 | ✅ Fixed | Swagger UI + `/openapi.json` only outside production. |
+| L2 | ✅ Fixed | bcrypt cost 10 → 12. |
+| L3 | ⚠️ Deferred | Asset metadata still tolerates unknown fields (low impact; React-escaped on render). |
+| L4 | ✅ Fixed | JWT verification pinned to `HS256`. |
+
+**Net:** all Criticals + all Highs except H2 (environment-blocked, low residual risk) are fixed; remaining items are partials/lows documented above.
