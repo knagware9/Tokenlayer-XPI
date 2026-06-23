@@ -205,12 +205,12 @@ export const S: Record<string, FastifySchema> = {
     response: { 200: { $ref: "UseCase#" }, ...errs(401, 404) },
   },
   createUseCase: {
-    tags: ["Use Cases"], summary: "Create a use case (Admin)", security: bearer,
+    tags: ["Use Cases"], summary: "Create a use case (PlatformAdmin)", security: bearer,
     body: { $ref: "UseCase#" },
     response: { 201: { $ref: "UseCase#" }, ...errs(400, 401, 403) },
   },
   updateUseCase: {
-    tags: ["Use Cases"], summary: "Update a use case (Admin)", security: bearer,
+    tags: ["Use Cases"], summary: "Update a use case (PlatformAdmin)", security: bearer,
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     body: { $ref: "UseCase#" },
     response: { 200: { $ref: "UseCase#" }, ...errs(400, 401, 403, 404) },
