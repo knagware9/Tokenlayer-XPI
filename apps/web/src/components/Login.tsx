@@ -3,17 +3,10 @@ import { ApiError } from "../api.js";
 import { useAuth } from "../auth.js";
 import { Logo } from "./Logo.js";
 
-const QUICK: { group: string; users: { label: string; email: string; password: string }[] }[] = [
-  { group: "Platform", users: [{ label: "Platform Admin", email: "admin@tokenlayer.dev", password: "admin123" }] },
-  { group: "Carbon Credit", users: ["admin", "issuer", "trader", "buyer", "auditor"].map((r) => ({ label: r, email: `carbon.${r}@tokenlayer.dev`, password: "carbon123" })) },
-  { group: "Gold Loan", users: ["admin", "issuer", "trader", "buyer", "auditor"].map((r) => ({ label: r, email: `gold.${r}@tokenlayer.dev`, password: "gold123" })) },
-  { group: "Corporate Bond", users: ["admin", "issuer", "trader", "buyer", "auditor"].map((r) => ({ label: r, email: `bond.${r}@tokenlayer.dev`, password: "bond123" })) },
-];
-
 export function Login(): JSX.Element {
   const { login } = useAuth();
-  const [email, setEmail] = useState("admin@tokenlayer.dev");
-  const [password, setPassword] = useState("admin123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -68,23 +61,6 @@ export function Login(): JSX.Element {
             {busy ? "Signing in…" : "Sign in"}
           </button>
         </form>
-        <div className="mt-6">
-          <p className="text-xs text-slate-400 mb-2">Quick login (demo)</p>
-          <div className="space-y-3">
-            {QUICK.map((g) => (
-              <div key={g.group}>
-                <p className="text-[11px] font-semibold text-slate-500 mb-1">{g.group}</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {g.users.map((q) => (
-                    <button key={q.email} onClick={() => { setEmail(q.email); setPassword(q.password); }} className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-medium text-slate-700 hover:border-brand-500 hover:text-brand-700">
-                      {q.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
         </div>
       </div>
     </div>
