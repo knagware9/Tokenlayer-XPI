@@ -25,3 +25,8 @@ const MATRIX: Record<Role, Action[]> = {
 export function can(role: Role, action: Action): boolean {
   return MATRIX[role].includes(action);
 }
+
+/** Roles that can manage a use case's user roster. */
+export function canManageUsers(role: Role): boolean {
+  return role === "PlatformAdmin" || role === "UseCaseAdmin";
+}

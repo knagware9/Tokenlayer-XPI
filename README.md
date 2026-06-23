@@ -29,8 +29,14 @@ ledger or standard an asset uses.
 - **RBAC** — six roles with strict per-use-case isolation, enforced server-side and mirrored in the UI (see [Users & Roles](#users--roles) below).
 - **API-driven** — Fastify + JWT over Prisma/SQLite; everything (issuance, lifecycle,
   use-case CRUD) is a REST endpoint.
-- **React dashboard** — login, use-case catalog, issuance, role-gated lifecycle actions
-  (fungible *and* NFT), holders + token tables, audit timeline, and the Use-Case Builder.
+- **React dashboard** — login, per-use-case routing (`/<use-case-key>`), and a two-section
+  nav structure:
+  - **Asset Management** (sub-tabs: Token Issuance · Marketplace · My Holdings) — role-gated
+    issuance, lifecycle actions (fungible *and* NFT), holders + token tables, audit timeline.
+  - **User Management** (sub-tabs: Add User · Manage Users) — invite users, reset passwords,
+    revoke/reactivate (suspended users cannot log in: `ACCOUNT_SUSPENDED`), and delete.
+  - **PlatformAdmin** lands on `/` (use-case catalog/switcher + the Use-Case Builder); scoped
+    users (Issuer, Trader, Buyer, Auditor, UseCaseAdmin) land directly on their own use case.
 
 ## Architecture
 
@@ -167,9 +173,11 @@ pnpm api:dev                                       # terminal 2
 
 ## Low-code: create a use case (no code)
 
-Sign in as **PlatformAdmin** → **Use Cases** tab. Pick a token standard, choose which DLTs it may
-deploy to, define metadata fields, toggle lifecycle actions and compliance, set roles, and
-create it. It is immediately available in **Issue Asset**. The same is available over the API:
+Sign in as **PlatformAdmin** → navigate to `/` (Platform home) → **Use-Case Builder** panel.
+Pick a token standard, choose which DLTs it may deploy to, define metadata fields, toggle
+lifecycle actions and compliance, set roles, and create it. It is immediately available
+in the **Token Issuance** sub-tab of any scoped user's **Asset Management** view. The same
+is available over the API:
 
 ```bash
 POST /use-cases     # create (PlatformAdmin)

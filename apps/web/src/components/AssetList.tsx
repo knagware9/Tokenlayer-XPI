@@ -7,9 +7,10 @@ interface Props {
   chains: ChainInfo[];
   refreshKey: number;
   onSelect: (id: string) => void;
+  useCaseKey?: string;
 }
 
-export function AssetList({ chains, refreshKey, onSelect }: Props): JSX.Element {
+export function AssetList({ chains, refreshKey, onSelect, useCaseKey }: Props): JSX.Element {
   const { token } = useAuth();
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
@@ -17,11 +18,11 @@ export function AssetList({ chains, refreshKey, onSelect }: Props): JSX.Element 
   useEffect(() => {
     if (!token) return;
     setLoading(true);
-    api.assets(token).then((a) => {
+    api.assets(token, useCaseKey).then((a) => {
       setAssets(a);
       setLoading(false);
     });
-  }, [token, refreshKey]);
+  }, [token, refreshKey, useCaseKey]);
 
   const chainLabel = (id: string): string => chains.find((c) => c.id === id)?.label ?? id;
 
@@ -29,7 +30,7 @@ export function AssetList({ chains, refreshKey, onSelect }: Props): JSX.Element 
   if (assets.length === 0)
     return (
       <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-sm text-slate-500">
-        No assets yet. Switch to <span className="font-medium text-slate-700">Issue Asset</span> to create one.
+        No assets yet. Switch to <span className="font-medium text-slate-700">Token Issuance</span> to create one.
       </div>
     );
 

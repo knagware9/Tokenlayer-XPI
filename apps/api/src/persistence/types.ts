@@ -7,6 +7,7 @@ export interface UserRecord {
   role: Role;
   useCaseKey: string | null;
   accountId: string | null;
+  active: boolean;
   createdAt: string;
 }
 
@@ -47,7 +48,7 @@ export interface UserRepository {
   findById(id: string): Promise<UserRecord | null>;
   create(input: Omit<UserRecord, "id" | "createdAt">): Promise<UserRecord>;
   list(useCaseKey?: string): Promise<UserRecord[]>;
-  update(id: string, patch: Partial<Pick<UserRecord, "passwordHash" | "accountId">>): Promise<UserRecord>;
+  update(id: string, patch: Partial<Pick<UserRecord, "passwordHash" | "accountId" | "active">>): Promise<UserRecord>;
   remove(id: string): Promise<void>;
 }
 
