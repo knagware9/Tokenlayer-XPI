@@ -62,10 +62,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  users: (token: string) => request<{ id: string; email: string; role: Role; useCaseKey: string | null; accountId: string | null; active: boolean }[]>("/users", token),
-  createUser: (token: string, input: { email: string; password: string; role: Role; useCaseKey?: string; walletAddress?: string }) =>
+  users: (token: string) => request<{ id: string; email: string; role: Role; useCaseKey: string | null; accountId: string | null; active: boolean; kycStatus: "pending" | "approved" | "rejected"; kyc: { legalName?: string; country?: string; idType?: string; idNumber?: string; documentRef?: string } | null }[]>("/users", token),
+  createUser: (token: string, input: { email: string; password: string; role: Role; useCaseKey?: string; walletAddress?: string; kyc?: { legalName?: string; country?: string; idType?: string; idNumber?: string; documentRef?: string } }) =>
     request<{ id: string; email: string; role: Role }>("/users", token, { method: "POST", body: JSON.stringify(input) }),
-  updateUser: (token: string, id: string, patch: { password?: string; active?: boolean }) =>
-    request<{ id: string; active: boolean }>(`/users/${id}`, token, { method: "PATCH", body: JSON.stringify(patch) }),
+  updateUser: (token: string, id: string, patch: { password?: string; active?: boolean; kycStatus?: "approved" | "rejected" }) =>
+    request<{ id: string }>(`/users/${id}`, token, { method: "PATCH", body: JSON.stringify(patch) }),
   deleteUser: (token: string, id: string) => request<void>(`/users/${id}`, token, { method: "DELETE" }),
 };
