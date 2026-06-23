@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 
 interface RouteState {
   path: string;
@@ -16,11 +16,11 @@ export function RouterProvider({ children }: { children: ReactNode }): JSX.Eleme
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
-  const navigate = (to: string): void => {
+  const navigate = useCallback((to: string): void => {
     if (to === window.location.pathname) return;
     window.history.pushState({}, "", to);
     setPath(to);
-  };
+  }, []);
   const useCaseKey = decodeURIComponent(path.split("/").filter(Boolean)[0] ?? "");
   return <RouterContext.Provider value={{ path, useCaseKey, navigate }}>{children}</RouterContext.Provider>;
 }

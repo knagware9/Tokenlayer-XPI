@@ -31,6 +31,9 @@ export function App(): JSX.Element {
     if (user && user.useCaseKey && routeKey !== user.useCaseKey) navigate(`/${user.useCaseKey}`);
   }, [user, routeKey, navigate]);
 
+  // Reset to the Asset Management section whenever the active use case changes.
+  useEffect(() => { setSection("assets"); }, [user?.role === "PlatformAdmin" ? routeKey : user?.useCaseKey]);
+
   if (!token || !user) return <Login />;
 
   const isPlatform = user.role === "PlatformAdmin";
