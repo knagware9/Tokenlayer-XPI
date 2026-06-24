@@ -10,7 +10,7 @@ interface Props {
 }
 
 const STANDARDS: TokenStandard[] = ["ERC-20", "ERC-721", "ERC-3643"];
-const ALL_ROLES: Role[] = ["UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"];
+const ALL_ROLES: Role[] = ["UseCaseAdmin", "Issuer", "Buyer", "Auditor"];
 interface FieldRow {
   name: string;
   type: PropertySchema["type"];

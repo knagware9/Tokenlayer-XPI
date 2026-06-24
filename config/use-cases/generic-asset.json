@@ -3,18 +3,49 @@
   "name": "Generic Asset",
   "description": "A fungible, transferable asset token (ERC-20) with allowlist + freeze compliance. A neutral template for tokenizing any divisible value on any DLT.",
   "tokenStandard": "ERC-20",
-  "allowedChainIds": ["besu", "mst", "fabric", "canton", "local-evm"],
+  "allowedChainIds": [
+    "besu",
+    "mst",
+    "fabric",
+    "canton",
+    "local-evm"
+  ],
   "defaultChainId": "besu",
   "metadataSchema": {
     "type": "object",
     "properties": {
-      "issuer": { "type": "string", "description": "Legal entity issuing the asset" },
-      "assetClass": { "type": "string", "description": "Free-form classification, e.g. commodity / security / credit" },
-      "valuation": { "type": "number", "description": "Reference valuation in the issuer's base currency" }
+      "issuer": {
+        "type": "string",
+        "description": "Legal entity issuing the asset"
+      },
+      "assetClass": {
+        "type": "string",
+        "description": "Free-form classification, e.g. commodity / security / credit"
+      },
+      "valuation": {
+        "type": "number",
+        "description": "Reference valuation in the issuer's base currency"
+      }
     },
-    "required": ["issuer", "assetClass"]
+    "required": [
+      "issuer",
+      "assetClass"
+    ]
   },
-  "lifecycle": { "mint": true, "transfer": true, "burn": true, "freeze": true },
-  "compliance": { "allowlist": true, "transferRestrictions": true },
-  "roles": ["UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"]
+  "lifecycle": {
+    "mint": true,
+    "transfer": true,
+    "burn": true,
+    "freeze": true
+  },
+  "compliance": {
+    "allowlist": true,
+    "transferRestrictions": true
+  },
+  "roles": [
+    "UseCaseAdmin",
+    "Issuer",
+    "Buyer",
+    "Auditor"
+  ]
 }

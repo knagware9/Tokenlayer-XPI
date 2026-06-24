@@ -105,42 +105,66 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
 
   // --- assets -------------------------------------------------------------
   app.post("/assets", { schema: S.issueAsset, ...auth }, async (request, reply) => {
-    const body = request.body as { useCaseKey: string; name: string; symbol: string; chainId: string; metadata?: Record<string, unknown>; sale?: { unitPrice: string; currency: string; treasuryAccount: string } };
+    const { useCaseKey: bUseCaseKey, name, symbol, chainId, metadata, treasuryAccount, initialSupply, sale } =
+      request.body as { useCaseKey: string; name: string; symbol: string; chainId: string; metadata?: Record<string, unknown>; treasuryAccount?: string; initialSupply?: string; sale?: { unitPrice: string; currency: string; treasuryAccount: string } };
     const claims = request.user as TokenClaims;
-    if (claims.role !== "PlatformAdmin" && body.useCaseKey !== claims.useCaseKey) {
+    if (claims.role !== "PlatformAdmin" && bUseCaseKey !== claims.useCaseKey) {
       return reply.code(403).send({ error: "WRONG_USE_CASE", message: "cannot issue into another use case" });
     }
     // Validate sale terms if provided
-    if (body.sale) {
-      if (!isSupportedCurrency(body.sale.currency)) {
-        return reply.code(400).send({ error: "UNSUPPORTED_CURRENCY", message: `currency '${body.sale.currency}' is not supported` });
+    if (sale) {
+      if (!isSupportedCurrency(sale.currency)) {
+        return reply.code(400).send({ error: "UNSUPPORTED_CURRENCY", message: `currency '${sale.currency}' is not supported` });
       }
-      if (!isPositiveIntString(body.sale.unitPrice)) {
+      if (!isPositiveIntString(sale.unitPrice)) {
         return reply.code(400).send({ error: "INVALID_PRICE", message: "unitPrice must be a positive integer" });
+      }
+    }
+    // The treasury holds the initial supply and is the seller for the marketplace.
+    const treasury = treasuryAccount ?? sale?.treasuryAccount;
+    const wantsSupply = initialSupply !== undefined && initialSupply !== "" && initialSupply !== "0";
+    if (wantsSupply) {
+      if (!/^\d+$/.test(initialSupply!)) {
+        return reply.code(400).send({ error: "INVALID_SUPPLY", message: "initialSupply must be a whole number" });
+      }
+      if (!treasury) {
+        return reply.code(400).send({ error: "MISSING_TREASURY", message: "a treasury account is required to mint initial supply" });
       }
     }
     const actor = actorOf(request);
     const id = randomUUID();
-    const result = await deps.engine.issue(actor, { ...body, id, metadata: body.metadata ?? {} });
-    const useCase = await deps.useCases.get(body.useCaseKey);
+    const result = await deps.engine.issue(actor, { useCaseKey: bUseCaseKey, name, symbol, chainId, id, metadata: metadata ?? {} });
+    const useCase = await deps.useCases.get(bUseCaseKey);
     const asset = await deps.assets.create({
       id,
-      useCaseKey: body.useCaseKey,
-      name: body.name,
-      symbol: body.symbol,
-      chainId: body.chainId,
+      useCaseKey: bUseCaseKey,
+      name,
+      symbol,
+      chainId,
       contractRef: result.ref.contractRef,
       tokenType: result.tokenType,
       tokenStandard: useCase.tokenStandard,
-      metadata: body.metadata ?? {},
+      metadata: metadata ?? {},
       status: "active",
       createdBy: actor.id,
       unitPrice: null,
       currency: null,
       treasuryAccount: null,
     });
-    if (body.sale) {
-      await deps.assets.setSaleTerms(id, body.sale);
+    if (sale) {
+      await deps.assets.setSaleTerms(id, sale);
+    }
+    // Auto-allowlist the treasury and mint the requested initial supply into it,
+    // so the asset is immediately funded and (if priced) available to buy.
+    if (wantsSupply) {
+      if (asset.tokenType !== "fungible") {
+        return reply.code(400).send({ error: "SUPPLY_UNSUPPORTED", message: "initial supply is only supported for fungible assets" });
+      }
+      const ctx = contextOf(await deps.assets.get(id) ?? asset);
+      if (useCase.compliance.allowlist) {
+        await deps.engine.setAllowed(actor, ctx, treasury!, true);
+      }
+      await deps.engine.mint(actor, ctx, treasury!, initialSupply!);
     }
     const finalAsset = await deps.assets.get(id) ?? asset;
     return reply.code(201).send({ asset: finalAsset, txHash: result.txHash });
@@ -151,7 +175,20 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const q = request.query as { useCaseKey?: string; chainId?: string; status?: string; limit: number; offset: number };
     const useCaseKey = claims.role === "PlatformAdmin" ? q.useCaseKey : claims.useCaseKey ?? NO_USE_CASE;
     const { items, total } = await deps.assets.list({ useCaseKey, chainId: q.chainId, status: q.status }, { limit: q.limit, offset: q.offset });
-    return { data: items, pagination: { limit: q.limit, offset: q.offset, total } };
+    // Enrich each row with on-chain total supply and the treasury's remaining
+    // sellable balance, so the marketplace can show supply + availability.
+    const actor = actorOf(request);
+    const data = await Promise.all(
+      items.map(async (a) => {
+        const ctx = contextOf(a);
+        const totalSupply = await deps.engine.totalSupply(actor, ctx).catch(() => null);
+        const availableSupply = a.treasuryAccount
+          ? await deps.engine.balanceOf(actor, ctx, a.treasuryAccount).catch(() => null)
+          : null;
+        return { ...a, totalSupply, availableSupply };
+      }),
+    );
+    return { data, pagination: { limit: q.limit, offset: q.offset, total } };
   });
 
   app.get("/assets/:id", { schema: S.getAsset, ...auth }, async (request, reply) => {

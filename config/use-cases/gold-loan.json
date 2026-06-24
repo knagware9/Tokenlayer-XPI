@@ -3,21 +3,62 @@
   "name": "Gold Loan",
   "description": "A gold-collateral-backed loan token (ERC-20). KYC allowlist for lenders/investors, freeze on default, and burn on repayment.",
   "tokenStandard": "ERC-20",
-  "allowedChainIds": ["besu", "mst", "fabric", "canton", "local-evm"],
+  "allowedChainIds": [
+    "besu",
+    "mst",
+    "fabric",
+    "canton",
+    "local-evm"
+  ],
   "defaultChainId": "besu",
   "metadataSchema": {
     "type": "object",
     "properties": {
-      "borrower": { "type": "string", "description": "Borrower name" },
-      "goldWeightGrams": { "type": "number", "description": "Collateral gold weight (g)" },
-      "goldPurity": { "type": "string", "description": "e.g. 22K" },
-      "loanAmountInr": { "type": "number", "description": "Principal in INR" },
-      "interestRate": { "type": "number", "description": "Annual interest %" },
-      "maturityDate": { "type": "string", "description": "ISO date" }
+      "borrower": {
+        "type": "string",
+        "description": "Borrower name"
+      },
+      "goldWeightGrams": {
+        "type": "number",
+        "description": "Collateral gold weight (g)"
+      },
+      "goldPurity": {
+        "type": "string",
+        "description": "e.g. 22K"
+      },
+      "loanAmountInr": {
+        "type": "number",
+        "description": "Principal in INR"
+      },
+      "interestRate": {
+        "type": "number",
+        "description": "Annual interest %"
+      },
+      "maturityDate": {
+        "type": "string",
+        "description": "ISO date"
+      }
     },
-    "required": ["borrower", "goldWeightGrams", "loanAmountInr"]
+    "required": [
+      "borrower",
+      "goldWeightGrams",
+      "loanAmountInr"
+    ]
   },
-  "lifecycle": { "mint": true, "transfer": true, "burn": true, "freeze": true },
-  "compliance": { "allowlist": true, "transferRestrictions": true },
-  "roles": ["UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"]
+  "lifecycle": {
+    "mint": true,
+    "transfer": true,
+    "burn": true,
+    "freeze": true
+  },
+  "compliance": {
+    "allowlist": true,
+    "transferRestrictions": true
+  },
+  "roles": [
+    "UseCaseAdmin",
+    "Issuer",
+    "Buyer",
+    "Auditor"
+  ]
 }

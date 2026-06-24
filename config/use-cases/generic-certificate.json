@@ -1,19 +1,46 @@
 {
   "key": "generic-certificate",
   "name": "Generic Certificate",
-  "description": "A non-fungible certificate (ERC-721) bound to its holder. Each certificate is a distinct token with its own id and URI; it can be frozen or burned but, by default, not transferred — a neutral template for credentials, registrations, or attestations.",
+  "description": "A non-fungible certificate (ERC-721) bound to its holder. Each certificate is a distinct token with its own id and URI; it can be frozen or burned but, by default, not transferred \u2014 a neutral template for credentials, registrations, or attestations.",
   "tokenStandard": "ERC-721",
-  "allowedChainIds": ["besu", "mst", "fabric", "canton", "local-evm"],
+  "allowedChainIds": [
+    "besu",
+    "mst",
+    "fabric",
+    "canton",
+    "local-evm"
+  ],
   "defaultChainId": "besu",
   "metadataSchema": {
     "type": "object",
     "properties": {
-      "category": { "type": "string", "description": "Kind of certificate, e.g. registration / attestation" },
-      "authority": { "type": "string", "description": "Issuing authority" }
+      "category": {
+        "type": "string",
+        "description": "Kind of certificate, e.g. registration / attestation"
+      },
+      "authority": {
+        "type": "string",
+        "description": "Issuing authority"
+      }
     },
-    "required": ["category"]
+    "required": [
+      "category"
+    ]
   },
-  "lifecycle": { "mint": true, "transfer": false, "burn": true, "freeze": true },
-  "compliance": { "allowlist": false, "transferRestrictions": false },
-  "roles": ["UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"]
+  "lifecycle": {
+    "mint": true,
+    "transfer": false,
+    "burn": true,
+    "freeze": true
+  },
+  "compliance": {
+    "allowlist": false,
+    "transferRestrictions": false
+  },
+  "roles": [
+    "UseCaseAdmin",
+    "Issuer",
+    "Buyer",
+    "Auditor"
+  ]
 }

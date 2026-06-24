@@ -166,7 +166,12 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
             </div>
           ))}
         </div>
-        <p className="mt-3 text-[11px] text-slate-400 font-mono break-all">ref: {asset.contractRef}</p>
+        <div className="mt-3 flex items-center gap-2 flex-wrap">
+          <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+            ⛓ Verified on-chain{chain ? ` · ${chain.label}` : ""}
+          </span>
+          <span className="text-[11px] text-slate-400 font-mono break-all">ref: {asset.contractRef}</span>
+        </div>
       </div>
 
       {error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2">{error}</div>}

@@ -28,7 +28,6 @@ async function main(): Promise<void> {
   const platform = await login(app, "admin@tokenlayer.dev", "admin123");
   const carbonAdmin = await login(app, "carbon.admin@tokenlayer.dev", "carbon123");
   const carbonIssuer = await login(app, "carbon.issuer@tokenlayer.dev", "carbon123");
-  const carbonTrader = await login(app, "carbon.trader@tokenlayer.dev", "carbon123");
   const goldIssuer = await login(app, "gold.issuer@tokenlayer.dev", "gold123");
 
   const buyerWallet = "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc";
@@ -45,7 +44,7 @@ async function main(): Promise<void> {
   check("Carbon Issuer mints to the buyer wallet", (await post(app, `/assets/${id}/actions/mint`, carbonIssuer, { to: buyerWallet, amount: "1000" })).status === 200);
 
   await post(app, `/assets/${id}/actions/allow`, carbonIssuer, { account: secondWallet });
-  check("Carbon Trader settles a transfer", (await post(app, `/assets/${id}/actions/transfer`, carbonTrader, { from: buyerWallet, to: secondWallet, amount: "100" })).status === 200);
+  check("Carbon Admin settles a transfer", (await post(app, `/assets/${id}/actions/transfer`, carbonAdmin, { from: buyerWallet, to: secondWallet, amount: "100" })).status === 200);
   check("Carbon Issuer cannot transfer (role)", (await post(app, `/assets/${id}/actions/transfer`, carbonIssuer, { from: buyerWallet, to: secondWallet, amount: "1" })).status === 403);
 
   check("Gold Issuer cannot read the carbon asset (404)", (await get(app, `/assets/${id}`, goldIssuer)).status === 404);

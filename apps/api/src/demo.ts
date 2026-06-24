@@ -94,7 +94,7 @@ async function main(): Promise<void> {
     metadataSchema: { type: "object", properties: { project: { type: "string" } }, required: ["project"] },
     lifecycle: { mint: true, transfer: true, burn: true, freeze: true },
     compliance: { allowlist: false, transferRestrictions: false },
-    roles: ["UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"],
+    roles: ["UseCaseAdmin", "Issuer", "Buyer", "Auditor"],
   });
   check("use case created (201)", createdUc.status === 201);
   const cc = await post(app, "/assets", token, { useCaseKey: "forest-offset", name: "Forest Offset", symbol: "CO2", chainId: "fabric", metadata: { project: "Amazon-1" } });

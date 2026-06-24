@@ -8,7 +8,7 @@ type Sub = "add" | "manage";
 
 const ROLE_OPTIONS: Record<string, Role[]> = {
   PlatformAdmin: ["UseCaseAdmin"],
-  UseCaseAdmin: ["Issuer", "Trader", "Buyer", "Auditor"],
+  UseCaseAdmin: ["Issuer", "Buyer", "Auditor"],
 };
 
 export function UserManagement({ useCaseKey, useCases }: { useCaseKey: string; useCases: UseCase[] }): JSX.Element {
@@ -55,7 +55,7 @@ function AddUser({ useCaseKey, useCases, onAdded }: { useCaseKey: string; useCas
   const [idNumber, setIdNumber] = useState("");
   const [documentRef, setDocumentRef] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const needsWallet = role === "Buyer" || role === "Trader";
+  const needsWallet = role === "Buyer";
 
   async function create(e: React.FormEvent): Promise<void> {
     e.preventDefault();
