@@ -57,6 +57,7 @@ export interface Asset {
   createdBy: string;
   createdAt: string;
   totalSupply?: string | null;
+  availableSupply?: string | null;
   unitPrice?: string | null;
   currency?: string | null;
   treasuryAccount?: string | null;

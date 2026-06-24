@@ -3,22 +3,66 @@
   "name": "Corporate Bond",
   "description": "A regulated corporate bond as an ERC-3643 security token. On EVM it deploys a real ONCHAINID + T-REX suite: every holder is identity-registered, transfers are identity-gated, with freeze + recovery and burn on redemption.",
   "tokenStandard": "ERC-3643",
-  "allowedChainIds": ["besu", "mst", "fabric", "canton", "local-evm"],
+  "allowedChainIds": [
+    "besu",
+    "mst",
+    "fabric",
+    "canton",
+    "local-evm"
+  ],
   "defaultChainId": "besu",
   "metadataSchema": {
     "type": "object",
     "properties": {
-      "issuer": { "type": "string", "description": "Issuing entity" },
-      "isin": { "type": "string", "description": "Securities identifier" },
-      "faceValue": { "type": "number", "description": "Face value per bond" },
-      "couponRate": { "type": "number", "description": "Annual coupon %" },
-      "maturityDate": { "type": "string", "description": "ISO date" },
-      "currency": { "type": "string", "description": "e.g. INR" },
-      "rating": { "type": "string", "description": "e.g. AA+" }
+      "issuer": {
+        "type": "string",
+        "description": "Issuing entity"
+      },
+      "isin": {
+        "type": "string",
+        "description": "Securities identifier"
+      },
+      "faceValue": {
+        "type": "number",
+        "description": "Face value per bond"
+      },
+      "couponRate": {
+        "type": "number",
+        "description": "Annual coupon %"
+      },
+      "maturityDate": {
+        "type": "string",
+        "description": "ISO date"
+      },
+      "currency": {
+        "type": "string",
+        "description": "e.g. INR"
+      },
+      "rating": {
+        "type": "string",
+        "description": "e.g. AA+"
+      }
     },
-    "required": ["issuer", "isin", "faceValue"]
+    "required": [
+      "issuer",
+      "isin",
+      "faceValue"
+    ]
   },
-  "lifecycle": { "mint": true, "transfer": true, "burn": true, "freeze": true },
-  "compliance": { "allowlist": true, "transferRestrictions": true },
-  "roles": ["UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"]
+  "lifecycle": {
+    "mint": true,
+    "transfer": true,
+    "burn": true,
+    "freeze": true
+  },
+  "compliance": {
+    "allowlist": true,
+    "transferRestrictions": true
+  },
+  "roles": [
+    "UseCaseAdmin",
+    "Issuer",
+    "Buyer",
+    "Auditor"
+  ]
 }

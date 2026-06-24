@@ -9,7 +9,7 @@ describe("user-policy", () => {
     expect(canCreateUser({ role: "PlatformAdmin", useCaseKey: null }, "Issuer", "carbon-credit")).toBe(false);
   });
   it("UseCaseAdmin may create roster roles only in their own use case", () => {
-    expect(assignableRoles("UseCaseAdmin")).toEqual(["Issuer", "Trader", "Buyer", "Auditor"]);
+    expect(assignableRoles("UseCaseAdmin")).toEqual(["Issuer", "Buyer", "Auditor"]);
     const admin = { role: "UseCaseAdmin", useCaseKey: "carbon-credit" } as const;
     expect(canCreateUser(admin, "Issuer", "carbon-credit")).toBe(true);
     expect(canCreateUser(admin, "Buyer", "carbon-credit")).toBe(true);

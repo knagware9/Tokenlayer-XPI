@@ -91,6 +91,10 @@ export const components: Record<string, unknown>[] = [
       createdBy: { type: "string" },
       createdAt: { type: "string" },
       totalSupply: { type: "string", nullable: true },
+      availableSupply: { type: "string", nullable: true },
+      unitPrice: { type: "string", nullable: true },
+      currency: { type: "string", nullable: true },
+      treasuryAccount: { type: "string", nullable: true },
     },
     required: ["id", "useCaseKey", "name", "symbol", "chainId", "contractRef", "tokenType", "tokenStandard", "status"],
   },
@@ -237,6 +241,8 @@ export const S: Record<string, FastifySchema> = {
         symbol: { type: "string" },
         chainId: { type: "string" },
         metadata: { type: "object", additionalProperties: true },
+        treasuryAccount: { type: "string" },
+        initialSupply: { type: "string" },
         sale: {
           type: "object",
           additionalProperties: false,
@@ -381,7 +387,7 @@ export const S: Record<string, FastifySchema> = {
       properties: {
         email: { type: "string" },
         password: { type: "string", minLength: 6 },
-        role: { type: "string", enum: ["UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"] },
+        role: { type: "string", enum: ["UseCaseAdmin", "Issuer", "Buyer", "Auditor"] },
         useCaseKey: { type: "string" },
         walletAddress: { type: "string" },
         kyc: {

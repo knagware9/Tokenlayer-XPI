@@ -8,18 +8,18 @@ export interface SeedUser {
   password: string;
   role: Role;
   useCaseKey: string | null;
-  walletLabel?: string; // links a Buyer/Trader to a DEFAULT_ACCOUNTS label
+  walletLabel?: string; // links a Buyer/Issuer to a DEFAULT_ACCOUNTS label
 }
 
 /** The single global Platform Admin. */
 export const PLATFORM_ADMIN: SeedUser = { email: "admin@tokenlayer.dev", password: "admin123", role: "PlatformAdmin", useCaseKey: null };
 
 /** Generates a full demo roster for one use case. */
-function rosterFor(useCaseKey: string, prefix: string, buyerWalletLabel: string, traderWalletLabel: string): SeedUser[] {
+function rosterFor(useCaseKey: string, prefix: string, buyerWalletLabel: string, treasuryWalletLabel: string): SeedUser[] {
   return [
     { email: `${prefix}.admin@tokenlayer.dev`, password: `${prefix}123`, role: "UseCaseAdmin", useCaseKey },
-    { email: `${prefix}.issuer@tokenlayer.dev`, password: `${prefix}123`, role: "Issuer", useCaseKey },
-    { email: `${prefix}.trader@tokenlayer.dev`, password: `${prefix}123`, role: "Trader", useCaseKey, walletLabel: traderWalletLabel },
+    // The Issuer owns the treasury wallet: it mints the initial supply and sells from it.
+    { email: `${prefix}.issuer@tokenlayer.dev`, password: `${prefix}123`, role: "Issuer", useCaseKey, walletLabel: treasuryWalletLabel },
     { email: `${prefix}.buyer@tokenlayer.dev`, password: `${prefix}123`, role: "Buyer", useCaseKey, walletLabel: buyerWalletLabel },
     { email: `${prefix}.auditor@tokenlayer.dev`, password: `${prefix}123`, role: "Auditor", useCaseKey },
   ];

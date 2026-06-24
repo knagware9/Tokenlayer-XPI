@@ -20,10 +20,11 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
   const [meta, setMeta] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [treasury, setTreasury] = useState("");
+  const [initialSupply, setInitialSupply] = useState("");
   const [listForSale, setListForSale] = useState(false);
   const [salePrice, setSalePrice] = useState("");
   const [saleCurrency, setSaleCurrency] = useState("");
-  const [saleTreasury, setSaleTreasury] = useState("");
   const [currencies, setCurrencies] = useState<Currency[]>([]);
   const [allAccounts, setAllAccounts] = useState<{ address: string; label: string }[]>([]);
 
@@ -33,6 +34,7 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
   }, [useCases, useCaseKey]);
 
   const useCase = useMemo(() => useCases.find((u) => u.key === useCaseKey), [useCases, useCaseKey]);
+  const isFungible = useCase?.tokenType === "fungible";
   // The chain picker is scoped to the use case's allowed DLTs that are actually available.
   const availableChains = useMemo(
     () => chains.filter((c) => useCase?.allowedChainIds.includes(c.id)),
@@ -78,17 +80,24 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
         if (raw === undefined || raw === "") continue;
         metadata[field] = prop.type === "number" ? Number(raw) : prop.type === "boolean" ? raw === "true" : raw;
       }
-      const sale = listForSale && salePrice && saleCurrency && saleTreasury
-        ? { unitPrice: salePrice, currency: saleCurrency, treasuryAccount: saleTreasury }
+      const sale = listForSale && salePrice && saleCurrency && treasury
+        ? { unitPrice: salePrice, currency: saleCurrency, treasuryAccount: treasury }
         : undefined;
-      const res = await api.issue(token, { useCaseKey, name, symbol, chainId, metadata, sale });
+      const supply = isFungible && /^\d+$/.test(initialSupply) && Number(initialSupply) > 0 ? initialSupply : undefined;
+      const res = await api.issue(token, {
+        useCaseKey, name, symbol, chainId, metadata,
+        treasuryAccount: treasury || undefined,
+        initialSupply: supply,
+        sale,
+      });
       setName("");
       setSymbol("");
       setMeta({});
+      setTreasury("");
+      setInitialSupply("");
       setListForSale(false);
       setSalePrice("");
       setSaleCurrency("");
-      setSaleTreasury("");
       onIssued(res.asset.id);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Issuance failed");
@@ -166,35 +175,46 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
         </div>
       )}
 
-      <div className="space-y-2">
-        <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
-          <input type="checkbox" checked={listForSale} onChange={(e) => setListForSale(e.target.checked)} />
-          List for sale
-        </label>
-        {listForSale && (
-          <div className="rounded-lg border border-slate-200 p-4 space-y-3 bg-slate-50">
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Unit price">
-                <input className="input" type="number" min="1" value={salePrice} onChange={(e) => setSalePrice(e.target.value)} placeholder="e.g. 5" />
-              </Field>
-              <Field label="Currency">
-                <select className="select" value={saleCurrency} onChange={(e) => setSaleCurrency(e.target.value)}>
-                  <option value="">Select currency…</option>
-                  {currencies.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}
-                </select>
-              </Field>
+      {isFungible && (
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Number of tokens" hint="Minted to the treasury at issuance (sets total supply)">
+            <input className="input" type="number" min="0" step="1" value={initialSupply} onChange={(e) => setInitialSupply(e.target.value)} placeholder="e.g. 100" />
+          </Field>
+          <Field label="Treasury account" hint="Holds the supply and sells it on the marketplace">
+            <select className="select" value={treasury} onChange={(e) => setTreasury(e.target.value)}>
+              <option value="">Select account…</option>
+              {allAccounts.map((a) => (
+                <option key={a.address} value={a.address}>{a.label}</option>
+              ))}
+            </select>
+          </Field>
+        </div>
+      )}
+
+      {isFungible && (
+        <div className="space-y-2">
+          <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+            <input type="checkbox" checked={listForSale} onChange={(e) => setListForSale(e.target.checked)} />
+            List for sale
+          </label>
+          {listForSale && (
+            <div className="rounded-lg border border-slate-200 p-4 space-y-3 bg-slate-50">
+              <div className="grid grid-cols-2 gap-4">
+                <Field label="Unit price">
+                  <input className="input" type="number" min="1" value={salePrice} onChange={(e) => setSalePrice(e.target.value)} placeholder="e.g. 5" />
+                </Field>
+                <Field label="Currency">
+                  <select className="select" value={saleCurrency} onChange={(e) => setSaleCurrency(e.target.value)}>
+                    <option value="">Select currency…</option>
+                    {currencies.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}
+                  </select>
+                </Field>
+              </div>
+              {!treasury && <p className="text-[11px] text-amber-600">Select a treasury account above to list this asset for sale.</p>}
             </div>
-            <Field label="Treasury account">
-              <select className="select" value={saleTreasury} onChange={(e) => setSaleTreasury(e.target.value)}>
-                <option value="">Select account…</option>
-                {allAccounts.map((a) => (
-                  <option key={a.address} value={a.address}>{a.label}</option>
-                ))}
-              </select>
-            </Field>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
       {error && <p className="text-sm text-red-600">{error}</p>}
       <button

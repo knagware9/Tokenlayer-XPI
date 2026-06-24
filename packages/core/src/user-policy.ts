@@ -14,7 +14,7 @@ export function canManageUsers(role: Role): boolean {
 /** Which roles a given manager may assign to a new user. */
 export function assignableRoles(role: Role): Role[] {
   if (role === "PlatformAdmin") return ["UseCaseAdmin"];
-  if (role === "UseCaseAdmin") return ["Issuer", "Trader", "Buyer", "Auditor"];
+  if (role === "UseCaseAdmin") return ["Issuer", "Buyer", "Auditor"];
   return [];
 }
 

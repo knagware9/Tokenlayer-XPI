@@ -4,9 +4,9 @@
  *
  *   - carbon.issuer   onboards the project, issues credits, manages the KYC allowlist,
  *                     applies compliance freeze/unfreeze
- *   - carbon.trader   runs the trading desk: settles trades and retires (burns) credits
+ *   - carbon.admin    UseCaseAdmin: settles trades and retires (burns) credits
+ *   - carbon.buyer    a KYC'd buyer (cannot manage the allowlist)
  *   - carbon.auditor  is a read-only auditor (write actions are forbidden)
- *   - carbon.admin    UseCaseAdmin (full access within the use case)
  *
  * 1 token = 1 tonne CO2e (a Verified Carbon Unit). Burning a credit permanently
  * retires it so it can never be double-counted.
@@ -62,7 +62,7 @@ async function main(): Promise<void> {
   // Per-use-case roster seeded by seedDefaults — password is "carbon123" for all.
   const carbonAdmin = await login(app, "carbon.admin@tokenlayer.dev", "carbon123");
   const issuer = await login(app, "carbon.issuer@tokenlayer.dev", "carbon123");
-  const trader = await login(app, "carbon.trader@tokenlayer.dev", "carbon123");
+  const buyer = await login(app, "carbon.buyer@tokenlayer.dev", "carbon123");
   const auditor = await login(app, "carbon.auditor@tokenlayer.dev", "carbon123");
 
   const evmAvailable = chains.list().some((c) => c.id === "local-evm");
@@ -99,32 +99,32 @@ async function main(): Promise<void> {
   for (const acct of [PROJECT, BROKER, BUYER]) await act(app, issuer, id, "allow", { account: acct });
   check("Issuer KYC-allowlists project developer + broker + corporate buyer", true);
 
-  // 3. RBAC: an Auditor cannot mint, and a Trader cannot manage the allowlist.
+  // 3. RBAC: an Auditor cannot mint, and a Buyer cannot manage the allowlist.
   const auditorMint = await act(app, auditor, id, "mint", { to: PROJECT, amount: "1" });
   check("RBAC: Auditor is read-only — mint forbidden (403)", auditorMint.status === 403 && auditorMint.body.error === "FORBIDDEN");
-  const traderAllow = await act(app, trader, id, "allow", { account: OUTSIDER });
-  check("RBAC: Trader cannot touch the KYC allowlist (403)", traderAllow.status === 403 && traderAllow.body.error === "FORBIDDEN");
+  const buyerAllow = await act(app, buyer, id, "allow", { account: OUTSIDER });
+  check("RBAC: Buyer cannot touch the KYC allowlist (403)", buyerAllow.status === 403 && buyerAllow.body.error === "FORBIDDEN");
 
   // 4. Issuance: Issuer mints 10,000 credits (tonnes CO2e) to the project developer.
   check("Issuance: Issuer mints 10,000 credits to the project developer", (await act(app, issuer, id, "mint", { to: PROJECT, amount: "10000" })).status === 200);
 
-  // 5. Trading desk (Trader): sell 4,000 credits to a broker, who sells 2,000 to a corporate buyer.
-  check("Trade: Trader settles 4,000 credits project→broker", (await act(app, trader, id, "transfer", { from: PROJECT, to: BROKER, amount: "4000" })).status === 200);
-  check("Trade: Trader settles 2,000 credits broker→corporate buyer", (await act(app, trader, id, "transfer", { from: BROKER, to: BUYER, amount: "2000" })).status === 200);
+  // 5. Settlement (UseCaseAdmin): sell 4,000 credits to a broker, who sells 2,000 to a corporate buyer.
+  check("Trade: Admin settles 4,000 credits project→broker", (await act(app, carbonAdmin, id, "transfer", { from: PROJECT, to: BROKER, amount: "4000" })).status === 200);
+  check("Trade: Admin settles 2,000 credits broker→corporate buyer", (await act(app, carbonAdmin, id, "transfer", { from: BROKER, to: BUYER, amount: "2000" })).status === 200);
 
   // 6. Compliance: a sale to a non-KYC'd party is rejected.
-  const toOutsider = await act(app, trader, id, "transfer", { from: PROJECT, to: OUTSIDER, amount: "100" });
+  const toOutsider = await act(app, carbonAdmin, id, "transfer", { from: PROJECT, to: OUTSIDER, amount: "100" });
   check("Compliance: transfer to non-KYC party (outsider) rejected", toOutsider.status === 400 && toOutsider.body.error === "NOT_ALLOWLISTED");
 
   // 7. Compliance hold: Issuer freezes the broker; transfers blocked; then lifts the hold.
   await act(app, issuer, id, "freeze", { account: BROKER });
-  const frozen = await act(app, trader, id, "transfer", { from: BROKER, to: BUYER, amount: "1" });
+  const frozen = await act(app, carbonAdmin, id, "transfer", { from: BROKER, to: BUYER, amount: "1" });
   check("Compliance hold: frozen broker cannot transfer", frozen.status === 400 && frozen.body.error === "ACCOUNT_FROZEN");
   await act(app, issuer, id, "unfreeze", { account: BROKER });
-  check("Hold lifted: broker can transfer again", (await act(app, trader, id, "transfer", { from: BROKER, to: BUYER, amount: "500" })).status === 200);
+  check("Hold lifted: broker can transfer again", (await act(app, carbonAdmin, id, "transfer", { from: BROKER, to: BUYER, amount: "500" })).status === 200);
 
-  // 8. Retirement: the corporate buyer retires (burns) 1,500 credits to offset its emissions.
-  check("Retirement: Trader burns 1,500 credits from the corporate buyer (offset claimed)", (await act(app, trader, id, "burn", { from: BUYER, amount: "1500" })).status === 200);
+  // 8. Retirement: the corporate buyer's credits are retired (burned) to offset emissions.
+  check("Retirement: Admin burns 1,500 credits from the corporate buyer (offset claimed)", (await act(app, carbonAdmin, id, "burn", { from: BUYER, amount: "1500" })).status === 200);
 
   // 9. Final ledger state — read by the Auditor.
   const accts = (await get(app, `/assets/${id}/accounts`, auditor)).body as { address: string; balance: string }[];
