@@ -27,6 +27,11 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
   const [currencies, setCurrencies] = useState<Currency[]>([]);
   const [allAccounts, setAllAccounts] = useState<{ address: string; label: string }[]>([]);
 
+  // Sync useCaseKey when useCases loads after mount (avoids empty chain dropdown on first render)
+  useEffect(() => {
+    if (!useCaseKey && useCases[0]?.key) setUseCaseKey(useCases[0].key);
+  }, [useCases, useCaseKey]);
+
   const useCase = useMemo(() => useCases.find((u) => u.key === useCaseKey), [useCases, useCaseKey]);
   // The chain picker is scoped to the use case's allowed DLTs that are actually available.
   const availableChains = useMemo(

@@ -2,6 +2,13 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "api",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "cd apps/api && node_modules/.bin/prisma db push --skip-generate && ../../node_modules/.bin/tsx src/seed.ts && CORS_ORIGINS=http://localhost:5173 exec ../../node_modules/.bin/tsx src/server.ts"],
+      "port": 4000,
+      "autoPort": false
+    },
+    {
       "name": "web",
       "runtimeExecutable": "sh",
       "runtimeArgs": ["-c", "cd apps/web && exec node_modules/.bin/vite --port 5173 --host"],
