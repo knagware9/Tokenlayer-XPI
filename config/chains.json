@@ -1,5 +1,5 @@
 [
-  { "id": "besu", "label": "Hyperledger Besu", "family": "evm", "kind": "evm", "rpcEnv": "BESU_RPC_URL", "keyEnv": "BESU_OPERATOR_KEY", "gas": "zero", "confirmations": 1, "simulatedFallback": true },
+  { "id": "besu", "label": "Hyperledger Besu", "family": "evm", "kind": "evm", "rpcEnv": "BESU_RPC_URL", "keyEnv": "BESU_OPERATOR_KEY", "gas": "auto", "confirmations": 1, "simulatedFallback": true },
   { "id": "mst", "label": "MST Blockchain", "family": "evm", "kind": "evm", "rpcEnv": "MST_RPC_URL", "keyEnv": "MST_OPERATOR_KEY", "gas": "auto", "confirmations": 2, "simulatedFallback": true },
   { "id": "fabric", "label": "Hyperledger Fabric (simulated)", "family": "fabric", "kind": "simulated" },
   { "id": "canton", "label": "Canton Network (simulated)", "family": "canton", "kind": "simulated" },
