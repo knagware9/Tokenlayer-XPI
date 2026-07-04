@@ -23,6 +23,8 @@ services:
       # Pre-funded account in the network's genesis (0xfe3b…bd73, ~200 ETH).
       # DEV/demo key — do not reuse on a production network.
       BESU_OPERATOR_KEY: "0x8f2a55949038a9610f50fb23b5883af3b4ecb3c3bb792cbcefbd1542c692be63"
+      # Real-chain deploy: refuse to start unless besu is configured AND reachable.
+      CHAIN_STRICT: "1"
 
 networks:
   # The bridge network created by the deposittokenization compose project.

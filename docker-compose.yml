@@ -17,6 +17,8 @@ services:
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env (see .env.example) — e.g. openssl rand -hex 32}
       # Allow the web origin to call the API (CORS).
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+      # Simulated-only stack: boot without the required besu chain (absent, never mocked).
+      CHAIN_STRICT: "0"
     volumes:
       - api-data:/data
     ports:
