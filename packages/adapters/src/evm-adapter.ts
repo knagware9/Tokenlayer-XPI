@@ -1,4 +1,4 @@
-import { Contract, ContractFactory, JsonRpcProvider, NonceManager, Wallet, ZeroAddress, type InterfaceAbi } from "ethers";
+import { Contract, ContractFactory, JsonRpcProvider, NonceManager, Wallet, ZeroAddress, formatEther, type InterfaceAbi } from "ethers";
 import type {
   AssetDeploymentSpec,
   AssetRef,
@@ -89,6 +89,13 @@ export class EvmLedgerAdapter implements LedgerAdapter {
     this.artifacts = config.artifacts;
     this.gas = config.gas ?? "auto";
     this.confirmations = config.confirmations ?? 1;
+  }
+
+  /** Boot-time probe: verifies the RPC answers and reports the operator account. */
+  async healthCheck(): Promise<{ chainId: string; operator: string; balance: string }> {
+    const network = await this.provider.getNetwork();
+    const balance = await this.provider.getBalance(this.wallet.address);
+    return { chainId: network.chainId.toString(), operator: this.wallet.address, balance: formatEther(balance) };
   }
 
   /** Per-transaction gas overrides; the signer owns the nonce. */
