@@ -10,7 +10,7 @@ ledger or standard an asset uses.
 ## What it does
 
 - **Multi-DLT** — one `LedgerAdapter` seam, many chains: an **EVM** family
-  (**Besu**, **MST** public EVM, `local-evm`) plus **Hyperledger Fabric** and **Canton**.
+  (**Besu**, **MST Testnet**, `local-evm`) plus **Hyperledger Fabric** and **Canton**.
   The default deploy (`make deploy`) runs the **real Besu** chain — it is required and
   refuses to boot if the RPC is unreachable. EVM chains are **real-or-absent** (never
   silently mocked); `fabric`/`canton` remain in-memory simulations (labeled as such in the
@@ -185,6 +185,23 @@ In the Docker deploy, `make deploy` wires Besu automatically via the `docker-com
 overlay; because `besu` is `required`, the default strict boot needs it reachable (see
 [DEPLOY.md](DEPLOY.md)).
 
+#### MST Testnet
+
+The `mst` chain is preconfigured for the public **MST Testnet** (chainId `91562037`, native
+`tMSTC`, explorer [testnet.mstscan.com](https://testnet.mstscan.com)). Fund an operator address
+with test `tMSTC` from the [MST faucet](https://faucet.mstblockchain.com/), then:
+
+```bash
+MST_RPC_URL=https://testnetrpc.mstblockchain.com \
+MST_OPERATOR_KEY=0x<funded-testnet-key> \
+CHAIN_STRICT=0 pnpm api:dev
+```
+
+`mst` then appears in the chain picker and deploys real contracts on the testnet; the dashboard
+links each asset's contract address and tx hashes to the MST explorer. At boot the API validates
+the RPC reports chainId `91562037` and refuses to start against the wrong network. (`CHAIN_STRICT=0`
+lets the API boot without the `required` `besu` chain while you work on MST.)
+
 ## Low-code: create a use case (no code)
 
 Sign in as **PlatformAdmin** → navigate to `/` (Platform home) → **Use-Case Builder** panel.
@@ -297,7 +314,7 @@ simulated adapter when unconfigured. Activation is by **configuration**.
 | Integration | Status | How to enable |
 | ----------- | ------ | ------------- |
 | **T-REX ERC-3643** (ONCHAINID + registries + modular compliance) | **Real & verified** — issued through the platform on any EVM chain | automatic for ERC-3643 use cases on an EVM chain |
-| **Besu / MST** (and any EVM) | **Real** — Besu is EVM; the adapter deploys real contracts incl. T-REX | [`infra/besu`](infra/besu/README.md): set `BESU_RPC_URL` / `MST_RPC_URL` + a funded key |
+| **Besu / MST Testnet** (and any EVM) | **Real** — the adapter deploys real contracts incl. T-REX; MST Testnet (chainId 91562037) is preconfigured with explorer links + a boot chainId guard | set `BESU_RPC_URL` (see [`infra/besu`](infra/besu/README.md)) or `MST_RPC_URL=https://testnetrpc.mstblockchain.com` + a funded key (faucet: https://faucet.mstblockchain.com/) |
 | **Hyperledger Fabric** | **Production scaffolding** (Go chaincode + `fabric-network` adapter); not run in this env | [`infra/fabric`](infra/fabric/README.md): set `FABRIC_CONNECTION_PROFILE` |
 | **Canton / Daml** | **Production scaffolding** (Daml model + JSON-API adapter); not run in this env | [`infra/canton`](infra/canton/README.md): set `CANTON_LEDGER_URL` + party/token/template |
 
@@ -309,9 +326,10 @@ engine enforcing identity + freeze policy.
 
 This is the foundational slice of the broader TokenLayer roadmap. The default deploy now runs on a
 **real** Hyperledger Besu (QBFT) network, and ERC-3643 issuance deploys the full T-REX stack.
-Deliberately deferred: **real** Fabric/Canton networks, public MST deployment, KYC/AML provider
-integrations, cross-chain bridging, secondary markets, payments/custody rails, AI analytics, and
-multi-tenant SaaS billing. The adapter seam, declarative use cases, and compliance hooks are
+The `mst` chain is preconfigured for the public MST Testnet. Deliberately deferred: **real**
+Fabric/Canton networks, MST mainnet / production key management, KYC/AML provider integrations,
+cross-chain bridging, secondary markets, payments/custody rails, AI analytics, and multi-tenant
+SaaS billing. The adapter seam, declarative use cases, and compliance hooks are
 designed so these attach without rework.
 
 ## Notes & limitations (MVP)

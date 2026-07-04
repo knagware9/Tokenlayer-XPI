@@ -103,6 +103,41 @@ The compiled contract artifacts (`packages/contracts/artifacts/`) must be presen
 the build context (they are baked into the API image). If you build from a clean
 clone where they're absent, run `pnpm --filter @tokenlayer/contracts build` first.
 
+## Run on the MST Testnet (public EVM)
+
+The `mst` chain is preconfigured for the public **MST Testnet**:
+
+| | |
+|---|---|
+| RPC URL | `https://testnetrpc.mstblockchain.com` |
+| Chain ID | `91562037` |
+| Currency | `tMSTC` |
+| Explorer | https://testnet.mstscan.com |
+| Faucet | https://faucet.mstblockchain.com/ |
+
+**1. Fund an operator address** with test `tMSTC` from the faucet (it becomes the sole
+operator that signs deployments and token operations).
+
+**2. Set the env and start the stack** (compose reads them from `.env`):
+
+```bash
+cat >> .env <<'EOF'
+MST_RPC_URL=https://testnetrpc.mstblockchain.com
+MST_OPERATOR_KEY=0x<your-funded-testnet-key>
+EOF
+
+# MST is not `required`, so it comes up on any stack. To run WITHOUT the real Besu
+# network, use the simulated base stack (besu absent) plus your MST env:
+make deploy-sim
+```
+
+The API validates at boot that the RPC reports chainId `91562037` and **refuses to start
+against the wrong network**. Once connected, any use case whose `allowedChainIds` includes
+`mst` issues real contracts on the testnet; the dashboard links each contract address and tx
+hash to the MST explorer. MST Testnet has a zero base fee (EIP-1559), so `mst` uses
+`gas: "auto"` in [config/chains.json](config/chains.json) and the operator pays the small
+priority fee from its faucet balance. **Never reuse a testnet key on a production network.**
+
 ## Common commands
 
 ```bash
