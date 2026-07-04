@@ -1,3 +1,11 @@
 packages:
   - "packages/*"
   - "apps/*"
+# Dependencies allowed to run postinstall build scripts (pnpm 11 blocks the rest).
+allowBuilds:
+  '@prisma/client': true
+  '@prisma/engines': true
+  esbuild: true
+  keccak: true
+  prisma: true
+  secp256k1: true
