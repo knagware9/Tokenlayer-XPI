@@ -103,11 +103,15 @@ for i in $(seq 1 30); do
 done
 
 # --- 5. smoke test ----------------------------------------------------------
+# The stack is already up and healthy at this point; only the functional smoke
+# test remains. If it fails, say so explicitly (the deployment itself succeeded)
+# and point at the logs — otherwise `set -e` would abort with a bare exit code.
 log "Running the smoke test…"
-if [[ "$MODE" == "besu" ]]; then
-  ./scripts/verify.sh --besu
-else
-  ./scripts/verify.sh
+smoke_args=(); [[ "$MODE" == "besu" ]] && smoke_args=(--besu)
+if ! ./scripts/verify.sh "${smoke_args[@]}"; then
+  printf '\033[1;31m[deploy] Smoke test FAILED — the stack is up but not behaving correctly.\033[0m\n' >&2
+  printf '\033[1;31m[deploy] Inspect it with: %s logs api\033[0m\n' "${COMPOSE[*]}" >&2
+  exit 1
 fi
 
 # --- 6. summary -------------------------------------------------------------
