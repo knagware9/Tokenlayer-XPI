@@ -17,7 +17,7 @@ import { seedUseCases } from "../src/use-cases.js";
 
 export async function buildTestApp(opts: { loginRateLimitMax?: number } = {}): Promise<FastifyInstance> {
   const rbac = new RbacPolicy();
-  const chains = buildChainRegistry({}); // simulated chains only — no EVM env
+  const chains = buildChainRegistry({ CHAIN_STRICT: "0" }); // simulated chains only — besu absent, never mocked
   const users = new MemoryUserRepository();
   const assets = new MemoryAssetRepository();
   const audit = new MemoryAuditRepository();
@@ -51,7 +51,7 @@ export async function issueAsset(app: FastifyInstance, token: string, useCaseKey
     method: "POST",
     url: `${V1}/assets`,
     headers: { authorization: `Bearer ${token}` },
-    payload: { useCaseKey, name: "T", symbol: "T", chainId: "besu", metadata: meta[useCaseKey] ?? {} },
+    payload: { useCaseKey, name: "T", symbol: "T", chainId: "fabric", metadata: meta[useCaseKey] ?? {} },
   });
   if (res.statusCode !== 201) throw new Error(`issueAsset(${useCaseKey}) failed: ${res.statusCode} ${res.body}`);
   return res.json().asset.id as string;

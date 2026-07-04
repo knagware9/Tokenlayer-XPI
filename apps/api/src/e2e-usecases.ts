@@ -46,7 +46,7 @@ function created(r: { status: number; body: { error?: string } }): boolean {
 
 async function main(): Promise<void> {
   const rbac = new RbacPolicy();
-  const chains = buildChainRegistry();
+  const chains = buildChainRegistry({ ...process.env, CHAIN_STRICT: process.env.CHAIN_STRICT ?? "0" });
   const users = new MemoryUserRepository();
   const assets = new MemoryAssetRepository();
   const audit = new MemoryAuditRepository();
@@ -67,7 +67,7 @@ async function main(): Promise<void> {
   // ============================================================
   section("USE CASE 1 — Gold Loan Tokenization (ERC-20, KYC allowlist + freeze)");
 
-  const goldChain = evmAvailable ? "local-evm" : "besu";
+  const goldChain = evmAvailable ? "local-evm" : "fabric";
   check(
     "Admin creates the 'gold-loan' use case (low-code, no deploy)",
     created(

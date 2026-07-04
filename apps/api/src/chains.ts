@@ -29,6 +29,7 @@ export interface ChainInfo {
   id: string;
   label: string;
   family: ChainFamily;
+  /** Descriptor class from chains.json ("evm" | "simulated" family group) — see `mode` for real vs simulated. */
   kind: "simulated" | "evm";
   /** "real" = live backend (EVM RPC / Fabric gateway / Canton JSON API); "simulated" = in-memory ledger. */
   mode: "real" | "simulated";
@@ -63,7 +64,7 @@ export function buildChainRegistry(env: Env = process.env): ChainRegistry {
   const descriptors = JSON.parse(readFileSync(CHAINS_FILE, "utf8")) as ChainDescriptor[];
   const adapters = new Map<string, LedgerAdapter>();
   const infos: ChainInfo[] = [];
-  const evmChains: { descriptor: ChainDescriptor; adapter: EvmLedgerAdapter; rpcUrl: string }[] = [];
+  const evmChains: { descriptor: ChainDescriptor; adapter: EvmLedgerAdapter }[] = [];
   let artifacts: Record<TokenStandard, ReturnType<typeof loadArtifact>> | null = null;
 
   for (const d of descriptors) {
@@ -81,7 +82,7 @@ export function buildChainRegistry(env: Env = process.env): ChainRegistry {
       const adapter = new EvmLedgerAdapter({ chainId: d.id, rpcUrl, privateKey, artifacts, gas: d.gas, confirmations: d.confirmations });
       adapters.set(d.id, adapter);
       infos.push({ id: d.id, label: d.label, family: d.family, kind: "evm", mode: "real" });
-      evmChains.push({ descriptor: d, adapter, rpcUrl });
+      evmChains.push({ descriptor: d, adapter });
     } else if (d.required && strict) {
       throw new Error(
         `chain '${d.id}' is required but not configured: set ${d.rpcEnv} and ${d.keyEnv}. ` +
@@ -102,13 +103,14 @@ export function buildChainRegistry(env: Env = process.env): ChainRegistry {
     },
     list: () => infos,
     async assertConnectivity(): Promise<void> {
-      for (const { descriptor: d, adapter, rpcUrl } of evmChains) {
+      for (const { descriptor: d, adapter } of evmChains) {
         try {
           const h = await adapter.healthCheck();
           console.log(`[chains] '${d.id}' connected: chainId=${h.chainId} operator=${h.operator} balance=${h.balance} ETH`);
         } catch (err) {
+          // Deliberately does NOT echo the RPC URL — hosted RPC URLs can embed API keys.
           throw new Error(
-            `chain '${d.id}' is configured (${d.rpcEnv}=${rpcUrl}) but unreachable: ${(err as Error).message}. ` +
+            `chain '${d.id}' is configured (via ${d.rpcEnv}) but unreachable: ${(err as Error).message}. ` +
               `Start the network (\`make deploy\`) or fix ${d.rpcEnv}.`,
           );
         }

@@ -24,7 +24,7 @@ async function issueGenericAsset(token: string): Promise<string> {
     method: "POST",
     url: "/assets",
     headers: auth(token),
-    payload: { useCaseKey: "generic-asset", name: "Demo Asset", symbol: "DEMO", chainId: "besu", metadata: { issuer: "ACME", assetClass: "commodity" } },
+    payload: { useCaseKey: "generic-asset", name: "Demo Asset", symbol: "DEMO", chainId: "fabric", metadata: { issuer: "ACME", assetClass: "commodity" } },
   });
   expect(res.statusCode).toBe(201);
   return res.json().asset.id as string;
@@ -64,7 +64,8 @@ describe("catalog", () => {
     expect(keys).toEqual(expect.arrayContaining(["generic-asset", "generic-certificate", "gold-loan", "corporate-bond"]));
     const chains = await inj({ method: "GET", url: "/chains", headers: auth(token) });
     const ids = chains.json().map((c: { id: string }) => c.id);
-    expect(ids).toEqual(expect.arrayContaining(["besu", "mst", "fabric", "canton"]));
+    expect(ids).toEqual(expect.arrayContaining(["fabric", "canton"]));
+    expect(ids).not.toContain("besu"); // EVM chains are never simulated
   });
 
   it("a scoped user only sees their own use case in the catalog", async () => {
@@ -89,7 +90,7 @@ describe("issuance + RBAC + validation", () => {
       method: "POST",
       url: "/assets",
       headers: auth(token),
-      payload: { useCaseKey: "carbon-credit", name: "VCU Batch", symbol: "VCU", chainId: "besu", metadata: { projectName: "Rainforest", registry: "Verra", vintage: 2023 } },
+      payload: { useCaseKey: "carbon-credit", name: "VCU Batch", symbol: "VCU", chainId: "fabric", metadata: { projectName: "Rainforest", registry: "Verra", vintage: 2023 } },
     });
     expect(res.statusCode).toBe(201);
   });
@@ -101,7 +102,7 @@ describe("issuance + RBAC + validation", () => {
       method: "POST",
       url: "/assets",
       headers: auth(token),
-      payload: { useCaseKey: "carbon-credit", name: "X", symbol: "X", chainId: "besu", metadata: { projectName: "X", registry: "Verra", vintage: 2024 } },
+      payload: { useCaseKey: "carbon-credit", name: "X", symbol: "X", chainId: "fabric", metadata: { projectName: "X", registry: "Verra", vintage: 2024 } },
     });
     expect(res.statusCode).toBe(403);
     expect(res.json().error).toBe("FORBIDDEN");
@@ -113,7 +114,7 @@ describe("issuance + RBAC + validation", () => {
       method: "POST",
       url: "/assets",
       headers: auth(token),
-      payload: { useCaseKey: "generic-asset", name: "X", chainId: "besu" }, // missing 'symbol'
+      payload: { useCaseKey: "generic-asset", name: "X", chainId: "fabric" }, // missing 'symbol'
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe("VALIDATION_ERROR");
@@ -125,7 +126,7 @@ describe("issuance + RBAC + validation", () => {
       method: "POST",
       url: "/assets",
       headers: auth(token),
-      payload: { useCaseKey: "generic-asset", name: "X", symbol: "X", chainId: "besu", metadata: { issuer: "A" } }, // missing 'assetClass'
+      payload: { useCaseKey: "generic-asset", name: "X", symbol: "X", chainId: "fabric", metadata: { issuer: "A" } }, // missing 'assetClass'
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe("INVALID_METADATA");
@@ -470,7 +471,7 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
         useCaseKey: "carbon-credit",
         name: "Carbon VCU",
         symbol: "VCU",
-        chainId: "besu",
+        chainId: "fabric",
         metadata: { projectName: "Amazon Rainforest", registry: "Verra", vintage: 2024 },
         sale: { unitPrice: "5", currency: "CBDC-INR", treasuryAccount: TREASURY_ADDR },
       },
@@ -552,7 +553,7 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
         useCaseKey: "carbon-credit",
         name: "Carbon VCU",
         symbol: "VCU",
-        chainId: "besu",
+        chainId: "fabric",
         metadata: { projectName: "Amazon Rainforest", registry: "Verra", vintage: 2024 },
         sale: { unitPrice: "5", currency: "CBDC-INR", treasuryAccount: TREASURY_ADDR },
       },
@@ -622,7 +623,7 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
         useCaseKey: "carbon-credit",
         name: "Carbon VCU",
         symbol: "VCU",
-        chainId: "besu",
+        chainId: "fabric",
         metadata: { projectName: "Amazon Rainforest", registry: "Verra", vintage: 2024 },
         sale: { unitPrice: "5", currency: "CBDC-INR", treasuryAccount: TREASURY_ADDR },
       },
@@ -661,7 +662,7 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
         useCaseKey: "carbon-credit",
         name: "Carbon VCU",
         symbol: "VCU",
-        chainId: "besu",
+        chainId: "fabric",
         metadata: { projectName: "Amazon Rainforest", registry: "Verra", vintage: 2024 },
         sale: { unitPrice: "5", currency: "CBDC-INR", treasuryAccount: TREASURY_ADDR },
       },
@@ -762,7 +763,7 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
         useCaseKey: "carbon-credit",
         name: "Carbon VCU",
         symbol: "VCU",
-        chainId: "besu",
+        chainId: "fabric",
         metadata: { projectName: "Amazon Rainforest", registry: "Verra", vintage: 2024 },
         sale: { unitPrice: "5", currency: "CBDC-INR", treasuryAccount: TREASURY_ADDR },
       },

@@ -31,15 +31,16 @@ describe("chain registry", () => {
     expect(canton?.mode).toBe("simulated");
   });
 
+  // Constructing an EVM adapter loads compiled contract artifacts — run `pnpm --filter @tokenlayer/contracts build` if these fail with ENOENT.
   it("registers a configured EVM chain as mode 'real' (no mock path exists)", () => {
-    const reg = buildChainRegistry({ BESU_RPC_URL: "http://127.0.0.1:59999", BESU_OPERATOR_KEY: KEY });
+    const reg = buildChainRegistry({ BESU_RPC_URL: "http://127.0.0.1:9", BESU_OPERATOR_KEY: KEY });
     const besu = reg.list().find((c) => c.id === "besu");
     expect(besu?.kind).toBe("evm");
     expect(besu?.mode).toBe("real");
   });
 
   it("assertConnectivity rejects with an actionable error when a configured EVM chain is unreachable", async () => {
-    const reg = buildChainRegistry({ BESU_RPC_URL: "http://127.0.0.1:59999", BESU_OPERATOR_KEY: KEY });
+    const reg = buildChainRegistry({ BESU_RPC_URL: "http://127.0.0.1:9", BESU_OPERATOR_KEY: KEY });
     await expect(reg.assertConnectivity()).rejects.toThrow(/besu.*unreachable/s);
   });
 

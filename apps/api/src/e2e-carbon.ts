@@ -47,7 +47,7 @@ function section(title: string): void {
 
 async function main(): Promise<void> {
   const rbac = new RbacPolicy();
-  const chains = buildChainRegistry();
+  const chains = buildChainRegistry({ ...process.env, CHAIN_STRICT: process.env.CHAIN_STRICT ?? "0" });
   const users = new MemoryUserRepository();
   const assets = new MemoryAssetRepository();
   const audit = new MemoryAuditRepository();
@@ -66,7 +66,7 @@ async function main(): Promise<void> {
   const auditor = await login(app, "carbon.auditor@tokenlayer.dev", "carbon123");
 
   const evmAvailable = chains.list().some((c) => c.id === "local-evm");
-  const chain = evmAvailable ? "local-evm" : "besu";
+  const chain = evmAvailable ? "local-evm" : "fabric";
   console.log(`Chains available: ${chains.list().map((c) => c.id).join(", ")}`);
 
   section("CARBON CREDIT TOKENIZATION (ERC-20, KYC allowlist + retire-by-burn)");
