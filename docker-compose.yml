@@ -1,0 +1,42 @@
+# TokenLayer — self-host stack (API + Web).
+# Usage:
+#   cp .env.example .env   # then set a strong JWT_SECRET (openssl rand -hex 32)
+#   docker compose up --build
+# Web:  http://localhost:8080
+# API:  http://localhost:4000  (Swagger UI at /docs)
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      PORT: "4000"
+      NODE_ENV: production
+      # SQLite lives on a named volume so data survives container restarts.
+      DATABASE_URL: "file:/data/dev.db"
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env (see .env.example) — e.g. openssl rand -hex 32}
+      # Allow the web origin to call the API (CORS).
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+      # Simulated-only stack: boot without the required besu chain (absent, never mocked).
+      CHAIN_STRICT: "0"
+    volumes:
+      - api-data:/data
+    ports:
+      - "${API_PORT:-4000}:4000"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # Where the browser reaches the API (host-published port).
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:4000}
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  api-data:

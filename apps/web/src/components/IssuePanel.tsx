@@ -124,7 +124,7 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
           <select className="select" value={chainId} onChange={(e) => setChainId(e.target.value)}>
             {availableChains.map((c) => (
               <option key={c.id} value={c.id}>
-                {c.label}
+                {c.label}{c.mode === "simulated" && !/simulat/i.test(c.label) ? " — simulated" : ""}
               </option>
             ))}
           </select>

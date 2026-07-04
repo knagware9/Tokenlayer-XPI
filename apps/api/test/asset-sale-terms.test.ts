@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { MemoryAssetRepository } from "../src/persistence/memory.js";
 
 const base = {
-  id: "a1", useCaseKey: "carbon-credit", name: "X", symbol: "X", chainId: "besu",
+  id: "a1", useCaseKey: "carbon-credit", name: "X", symbol: "X", chainId: "fabric",
   contractRef: "ref", tokenType: "fungible" as const, tokenStandard: "ERC-20" as const,
   metadata: {}, status: "active", createdBy: "u1",
   unitPrice: null, currency: null, treasuryAccount: null,

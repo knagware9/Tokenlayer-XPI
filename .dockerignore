@@ -1,0 +1,13 @@
+# Never copy host-built artifacts or secrets into the build context.
+**/node_modules
+**/dist
+**/.git
+**/*.db
+**/*.db-journal
+**/.env
+**/.env.local
+**/.DS_Store
+**/coverage
+**/.vscode
+**/.idea
+infra/**/data

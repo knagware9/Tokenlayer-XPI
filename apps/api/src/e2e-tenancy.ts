@@ -13,7 +13,7 @@ const check = (label: string, ok: boolean): void => { console.log(`   ${ok ? "âœ
 
 async function main(): Promise<void> {
   const rbac = new RbacPolicy();
-  const chains = buildChainRegistry();
+  const chains = buildChainRegistry({ ...process.env, CHAIN_STRICT: process.env.CHAIN_STRICT ?? "0" });
   const users = new MemoryUserRepository();
   const assets = new MemoryAssetRepository();
   const audit = new MemoryAuditRepository();
@@ -37,7 +37,7 @@ async function main(): Promise<void> {
   check("UseCaseAdmin creates a scoped Buyer with a wallet", newBuyer.status === 201 && newBuyer.body.useCaseKey === "carbon-credit");
   check("UseCaseAdmin cannot create a UseCaseAdmin", (await post(app, "/users", carbonAdmin, { email: "x@x.dev", password: "secret1", role: "UseCaseAdmin" })).status === 403);
 
-  const issue = await post(app, "/assets", carbonIssuer, { useCaseKey: "carbon-credit", name: "VCU Test", symbol: "VCUT", chainId: "besu", metadata: { projectName: "P", registry: "Verra", vintage: 2024 } });
+  const issue = await post(app, "/assets", carbonIssuer, { useCaseKey: "carbon-credit", name: "VCU Test", symbol: "VCUT", chainId: "fabric", metadata: { projectName: "P", registry: "Verra", vintage: 2024 } });
   check("Carbon Issuer issues a credit", issue.status === 201);
   const id = issue.body.asset.id as string;
   await post(app, `/assets/${id}/actions/allow`, carbonIssuer, { account: buyerWallet });
@@ -49,7 +49,7 @@ async function main(): Promise<void> {
 
   check("Gold Issuer cannot read the carbon asset (404)", (await get(app, `/assets/${id}`, goldIssuer)).status === 404);
   check("Gold Issuer cannot act on the carbon asset (403)", (await post(app, `/assets/${id}/actions/mint`, goldIssuer, { to: buyerWallet, amount: "1" })).status === 403);
-  const goldIssue = await post(app, "/assets", goldIssuer, { useCaseKey: "gold-loan", name: "GL Test", symbol: "GLT", chainId: "besu", metadata: { borrower: "R", goldWeightGrams: 1, loanAmountInr: 1 } });
+  const goldIssue = await post(app, "/assets", goldIssuer, { useCaseKey: "gold-loan", name: "GL Test", symbol: "GLT", chainId: "fabric", metadata: { borrower: "R", goldWeightGrams: 1, loanAmountInr: 1 } });
   check("Gold Issuer issues a gold-loan asset", goldIssue.status === 201);
   const goldList = await get(app, "/assets?limit=50", goldIssuer);
   const goldRows = goldList.body.data as { useCaseKey: string }[];

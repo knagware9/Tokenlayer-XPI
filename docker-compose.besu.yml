@@ -1,0 +1,33 @@
+# Besu overlay — run the stack against the EXISTING 5-node Hyperledger Besu
+# QBFT network from the `deposittokenization` project.
+#
+# Prereq: that network must be running (it owns the genesis, keys, validators):
+#   cd /Users/kamleshnagware/deposittokenization
+#   docker compose up -d besu-node1 besu-node2 besu-node3 besu-node4 besu-node5
+#   # (or ./besu-network/start-network.sh)
+#
+# Then run TokenLayer against it:
+#   docker compose -f docker-compose.yml -f docker-compose.besu.yml up -d
+#
+# The API joins that network and reaches the RPC at besu-node1:8545. With
+# BESU_RPC_URL + BESU_OPERATOR_KEY set, the "besu" chain (config/chains.json,
+# gas:"auto" for this London/EIP-1559 network) deploys REAL contracts on-chain.
+services:
+  api:
+    networks:
+      - default
+      - besu-net
+    environment:
+      # Reach node1's RPC over the shared QBFT network.
+      BESU_RPC_URL: http://besu-node1:8545
+      # Pre-funded account in the network's genesis (0xfe3b…bd73, ~200 ETH).
+      # DEV/demo key — do not reuse on a production network.
+      BESU_OPERATOR_KEY: "0x8f2a55949038a9610f50fb23b5883af3b4ecb3c3bb792cbcefbd1542c692be63"
+      # Real-chain deploy: refuse to start unless besu is configured AND reachable.
+      CHAIN_STRICT: "1"
+
+networks:
+  # The bridge network created by the deposittokenization compose project.
+  besu-net:
+    external: true
+    name: deposittokenization_besu-network
