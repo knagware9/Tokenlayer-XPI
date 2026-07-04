@@ -452,7 +452,8 @@ function ExplorerLink({
   value: string;
   children: React.ReactNode;
 }): JSX.Element {
-  if (!chain?.explorerUrl) return <>{children}</>;
+  // Only link genuine on-chain hex refs — never interpolate an untrusted value into an href.
+  if (!chain?.explorerUrl || !/^0x[0-9a-fA-F]+$/.test(value)) return <>{children}</>;
   const href = `${chain.explorerUrl.replace(/\/$/, "")}/${kind}/${value}`;
   return (
     <a href={href} target="_blank" rel="noreferrer" className="text-brand-600 hover:underline" title={`View on ${chain.label} explorer`}>
