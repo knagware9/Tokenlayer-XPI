@@ -48,4 +48,18 @@ describe("chain registry", () => {
     const reg = buildChainRegistry({ CHAIN_STRICT: "0" });
     await expect(reg.assertConnectivity()).resolves.toBeUndefined();
   });
+
+  it("surfaces explorer + currency metadata for a configured EVM chain (mst)", () => {
+    const reg = buildChainRegistry({ CHAIN_STRICT: "0", MST_RPC_URL: "http://127.0.0.1:9", MST_OPERATOR_KEY: KEY });
+    const mst = reg.list().find((c) => c.id === "mst");
+    expect(mst?.mode).toBe("real");
+    expect(mst?.explorerUrl).toBe("https://testnet.mstscan.com");
+    expect(mst?.currencySymbol).toBe("tMSTC");
+  });
+
+  it("does not attach explorer metadata to chains that have none (besu)", () => {
+    const reg = buildChainRegistry({ BESU_RPC_URL: "http://127.0.0.1:9", BESU_OPERATOR_KEY: KEY });
+    const besu = reg.list().find((c) => c.id === "besu");
+    expect(besu?.explorerUrl).toBeUndefined();
+  });
 });

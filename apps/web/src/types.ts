@@ -17,6 +17,8 @@ export interface ChainInfo {
   family: ChainFamily;
   kind: "simulated" | "evm";
   mode: "real" | "simulated";
+  explorerUrl?: string;
+  currencySymbol?: string;
 }
 
 export interface PropertySchema {
