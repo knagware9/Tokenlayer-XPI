@@ -11,15 +11,18 @@ ledger or standard an asset uses.
 
 - **Multi-DLT** — one `LedgerAdapter` seam, many chains: an **EVM** family
   (**Besu**, **MST** public EVM, `local-evm`) plus **Hyperledger Fabric** and **Canton**.
-  Out of the box every chain runs on an in-memory simulated ledger (no Docker/Daml/RPC
-  required) and upgrades to its real backend once its connection env is set. **Each use case
-  chooses which DLTs it may deploy to.** A single behavioural suite passes identically
-  against every adapter.
+  The default deploy (`make deploy`) runs the **real Besu** chain — it is required and
+  refuses to boot if the RPC is unreachable. EVM chains are **real-or-absent** (never
+  silently mocked); `fabric`/`canton` remain in-memory simulations (labeled as such in the
+  dashboard). A simulated-only stack is available via `make deploy-sim` / `CHAIN_STRICT=0`.
+  **Each use case chooses which DLTs it may deploy to.** A single behavioural suite passes
+  identically against every adapter.
 - **Multi-standard** — **ERC-20**, **ERC-721** (NFT), and **ERC-3643**. On EVM chains, ERC-3643
   issues a **full, official T-REX suite** (vendored `@tokenysolutions/t-rex` + `@onchain-id/solidity`):
   ONCHAINID identities, IdentityRegistry, TrustedIssuers, and ModularCompliance. The use case
   selects the standard; the engine handles fungible (amount) and non-fungible (token-id)
-  operations uniformly. The simulated ledger mirrors the rules so behaviour matches everywhere.
+  operations uniformly. The simulated ledger (fabric/canton/local dev) mirrors the rules so
+  behaviour matches everywhere.
 - **Low-code use cases** — token behaviour (standard, allowed chains, required metadata,
   lifecycle actions, compliance) is declarative config, stored in a DB and editable via a
   **dashboard Use-Case Builder**. New asset types need **no code**.
@@ -88,8 +91,11 @@ pnpm api:dev      # API on http://localhost:4000   (terminal 1)
 pnpm web:dev      # dashboard on http://localhost:5173 (terminal 2)
 ```
 
-Open http://localhost:5173 and log in with any of the seeded demo accounts below. Out of the box
-you get four DLTs (Besu, MST, Fabric, Canton) and three standards.
+Open http://localhost:5173 and log in with any of the seeded demo accounts below. For pure
+local dev without a chain, boot non-strict (`CHAIN_STRICT=0 pnpm api:dev`) to explore with the
+simulated `fabric`/`canton` chains, or point `BESU_RPC_URL` at a real Besu node to make the
+required `besu` chain available. Three standards (ERC-20 / ERC-721 / ERC-3643) are available
+regardless.
 
 ## Users & Roles
 
@@ -174,6 +180,10 @@ pnpm api:dev                                       # terminal 2
 `local-evm` now appears in the chain picker and deploys real `ComplianceToken` /
 `ComplianceNFT` / `ComplianceToken3643` contracts. Besu and MST work the same way via
 `BESU_RPC_URL` / `MST_RPC_URL` (see `config/chains.json` and `apps/api/.env.example`).
+
+In the Docker deploy, `make deploy` wires Besu automatically via the `docker-compose.besu.yml`
+overlay; because `besu` is `required`, the default strict boot needs it reachable (see
+[DEPLOY.md](DEPLOY.md)).
 
 ## Low-code: create a use case (no code)
 
@@ -280,8 +290,9 @@ suite skips rather than failing.
 ## Real DLT integrations
 
 Every chain runs behind one `LedgerAdapter` seam, so the platform code is identical whether a
-chain is simulated or real. Real integrations activate by **configuration**, falling back to the
-simulated adapter otherwise — the platform always runs.
+chain is simulated or real. EVM chains (besu/mst/local-evm) are **real when their RPC + key are
+configured, otherwise absent** — never silently mocked; `fabric`/`canton` fall back to the
+simulated adapter when unconfigured. Activation is by **configuration**.
 
 | Integration | Status | How to enable |
 | ----------- | ------ | ------------- |
@@ -296,17 +307,21 @@ engine enforcing identity + freeze policy.
 
 ## Roadmap context
 
-This is the foundational slice of the broader TokenLayer roadmap. Deliberately deferred:
-**real** Fabric/Canton networks and full T-REX (ONCHAINID, modular compliance, trusted issuers),
-real Besu/MST public deployments, KYC/AML provider integrations, cross-chain bridging, secondary
-markets, payments/custody rails, AI analytics, and multi-tenant SaaS billing. The adapter seam,
-declarative use cases, and compliance hooks are designed so these attach without rework.
+This is the foundational slice of the broader TokenLayer roadmap. The default deploy now runs on a
+**real** Hyperledger Besu (QBFT) network, and ERC-3643 issuance deploys the full T-REX stack.
+Deliberately deferred: **real** Fabric/Canton networks, public MST deployment, KYC/AML provider
+integrations, cross-chain bridging, secondary markets, payments/custody rails, AI analytics, and
+multi-tenant SaaS billing. The adapter seam, declarative use cases, and compliance hooks are
+designed so these attach without rework.
 
 ## Notes & limitations (MVP)
 
-- Unconfigured chains (Besu, MST, Fabric, Canton) run on the in-memory simulated ledger:
-  balances reset when the API restarts; set each chain's RPC/connection env to use its real backend
-  (asset + use-case records persist in SQLite). EVM chains persist for the life of the node.
+- Unconfigured **fabric/canton** chains run on the in-memory simulated ledger (balances reset when
+  the API restarts); set each chain's connection env to use its real backend. **EVM chains (besu,
+  mst, local-evm) are real-or-absent** — with no RPC + key they simply don't appear, never mocked;
+  `besu` is required, so a strict boot (the default) needs it reachable, or set `CHAIN_STRICT=0` to
+  boot without it. Asset + use-case records persist in SQLite; EVM chain state persists for the life
+  of the node.
 - ERC-721 token ids on EVM chains are numeric (the contract uses `uint256`); the simulated
   ledger accepts any string id.
 - Fabric/Canton are behaviourally faithful simulations, not live networks; real SDK-backed

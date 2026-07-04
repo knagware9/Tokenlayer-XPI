@@ -26,7 +26,7 @@ function check(label: string, ok: boolean): void {
 
 async function main(): Promise<void> {
   const rbac = new RbacPolicy();
-  const chains = buildChainRegistry(); // includes EVM chains if their RPC envs are set
+  const chains = buildChainRegistry({ ...process.env, CHAIN_STRICT: process.env.CHAIN_STRICT ?? "0" }); // includes EVM chains if their RPC envs are set
   const users = new MemoryUserRepository();
   const assets = new MemoryAssetRepository();
   const audit = new MemoryAuditRepository();

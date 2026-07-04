@@ -2,9 +2,8 @@
 # ============================================================================
 # TokenLayer XPI — one-command Docker deployment
 #
-#   ./scripts/deploy.sh            # simulated ledgers (no external chain)
-#   ./scripts/deploy.sh --besu     # run the "besu" chain on the real 5-node
-#                                   # Hyperledger Besu QBFT network
+#   ./scripts/deploy.sh            # REAL Besu (default): starts the 5-node QBFT network + deploys on-chain
+#   ./scripts/deploy.sh --sim      # simulated ledgers only (no external chain)
 #
 # Idempotent: generates a JWT secret if missing, (optionally) starts + waits for
 # the Besu network, builds + starts the stack, and waits until it's healthy.
@@ -16,7 +15,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 # --- config (override via env) ----------------------------------------------
-MODE="simulated"
+MODE="besu"
 BESU_PROJECT_DIR="${BESU_PROJECT_DIR:-/Users/kamleshnagware/deposittokenization}"
 API_PORT="${API_PORT:-4000}"
 WEB_PORT="${WEB_PORT:-8080}"
@@ -28,6 +27,7 @@ ADMIN_PASS="admin123"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --besu) MODE="besu" ;;
+    --sim) MODE="simulated" ;;
     --besu-dir) BESU_PROJECT_DIR="$2"; shift ;;
     -h|--help)
       grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -102,7 +102,19 @@ for i in $(seq 1 30); do
   sleep 2
 done
 
-# --- 5. summary -------------------------------------------------------------
+# --- 5. smoke test ----------------------------------------------------------
+# The stack is already up and healthy at this point; only the functional smoke
+# test remains. If it fails, say so explicitly (the deployment itself succeeded)
+# and point at the logs — otherwise `set -e` would abort with a bare exit code.
+log "Running the smoke test…"
+smoke_args=(); [[ "$MODE" == "besu" ]] && smoke_args=(--besu)
+if ! ./scripts/verify.sh "${smoke_args[@]}"; then
+  printf '\033[1;31m[deploy] Smoke test FAILED — the stack is up but not behaving correctly.\033[0m\n' >&2
+  printf '\033[1;31m[deploy] Inspect it with: %s logs api\033[0m\n' "${COMPOSE[*]}" >&2
+  exit 1
+fi
+
+# --- 6. summary -------------------------------------------------------------
 cat <<EOF
 
   ┌──────────────────────────────────────────────────────────────┐
@@ -113,6 +125,4 @@ cat <<EOF
 $([ "$MODE" = besu ] && echo "  │  Besu RPC      : http://localhost:${BESU_RPC_PORT}  (chainId 1337, 5 validators)")
   │  Sign in       : carbon.admin@tokenlayer.dev / carbon123
   └──────────────────────────────────────────────────────────────┘
-
-  Smoke test:  ./scripts/verify.sh$([ "$MODE" = besu ] && echo " --besu")
 EOF

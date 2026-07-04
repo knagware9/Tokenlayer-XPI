@@ -42,7 +42,7 @@ function section(title: string): void {
 
 async function main(): Promise<void> {
   const rbac = new RbacPolicy();
-  const chains = buildChainRegistry();
+  const chains = buildChainRegistry({ ...process.env, CHAIN_STRICT: process.env.CHAIN_STRICT ?? "0" });
   const users = new MemoryUserRepository();
   const assets = new MemoryAssetRepository();
   const audit = new MemoryAuditRepository();
@@ -65,7 +65,7 @@ async function main(): Promise<void> {
     useCaseKey: "carbon-credit",
     name: "DvP Test",
     symbol: "DVP",
-    chainId: "besu",
+    chainId: "fabric",
     metadata: {
       projectName: "DvP Test Project",
       registry: "Gold Standard",
@@ -151,7 +151,7 @@ async function main(): Promise<void> {
     useCaseKey: "carbon-credit",
     name: "DvP Test 2",
     symbol: "DVP2",
-    chainId: "besu",
+    chainId: "fabric",
     metadata: {
       projectName: "DvP Test Project 2",
       registry: "Gold Standard",

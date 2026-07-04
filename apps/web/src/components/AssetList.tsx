@@ -37,7 +37,7 @@ export function AssetList({ chains, refreshKey, onSelect, useCaseKey }: Props): 
     });
   }, [token, refreshKey, useCaseKey]);
 
-  const chainLabel = (id: string): string => chains.find((c) => c.id === id)?.label ?? id;
+  const chainOf = (id: string): ChainInfo | undefined => chains.find((c) => c.id === id);
 
   if (loading) return <p className="text-sm text-slate-400">Loading assets…</p>;
   if (assets.length === 0)
@@ -79,9 +79,16 @@ export function AssetList({ chains, refreshKey, onSelect, useCaseKey }: Props): 
                 </td>
                 <td className="px-4 py-3 text-right font-mono text-slate-700">{a.totalSupply ?? "—"}</td>
                 <td className="px-4 py-3">
-                  <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700" title={a.contractRef}>
-                    ⛓ {chainLabel(a.chainId)}
-                  </span>
+                  {(() => {
+                    const chain = chainOf(a.chainId);
+                    const real = chain?.mode === "real";
+                    const tone = real ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500";
+                    return (
+                      <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${tone}`} title={a.contractRef}>
+                        {real ? "⛓" : "🧪"} {chain?.label ?? a.chainId}{real ? "" : " · sim"}
+                      </span>
+                    );
+                  })()}
                 </td>
                 <td className="px-4 py-3">
                   {avail === "available" && <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Available</span>}

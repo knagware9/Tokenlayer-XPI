@@ -5,16 +5,18 @@ The whole stack — API and web dashboard — runs from `docker-compose.yml`.
 ## One-command deploy (automated)
 
 ```bash
-make deploy         # simulated ledgers (no external chain)
-make deploy-besu    # run the 'besu' chain on the real 5-node QBFT network
-make verify-besu    # smoke test: issue + auto-mint + buy, assert on-chain contract
+make deploy         # REAL Besu (default): starts the 5-node QBFT network, deploys on-chain, runs the smoke test
+make deploy-sim     # simulated ledgers only (no external chain)
+make verify         # re-run the on-chain smoke test
 make help           # list all targets (status, logs, down, rebuild, …)
 ```
 
 `scripts/deploy.sh` is idempotent: it generates a `JWT_SECRET` if missing,
-(for `--besu`) starts and waits for the 5-node Besu network, builds + starts the
-stack, and blocks until the API and web are healthy. Run it directly as
-`./scripts/deploy.sh [--besu]` if you prefer not to use `make`.
+defaults to the real Besu path (starts and waits for the 5-node Besu network,
+builds + starts the stack with the besu overlay, and runs the on-chain smoke
+test), and blocks until the API and web are healthy. Pass `--sim` for the
+simulated-only stack. Run it directly as `./scripts/deploy.sh [--sim]` if you
+prefer not to use `make`.
 
 ## Quick start (manual)
 
@@ -53,15 +55,20 @@ swap the Prisma datasource provider.
 | `VITE_API_URL` | `http://localhost:4000` | API origin baked into the web bundle (the browser must be able to reach it). |
 | `WEB_PORT` | `8080` | Host port for the dashboard. |
 | `API_PORT` | `4000` | Host port for the API. |
+| `CHAIN_STRICT` | `1` | `0` boots the API without required chains (they become absent — never simulated). Set automatically by `make deploy-sim`. |
 
 > If you deploy behind real hostnames, set `VITE_API_URL` to the public API URL and
 > add the web origin to `CORS_ORIGINS`, then rebuild the web image (`VITE_API_URL`
 > is compiled in at build time).
 
-## Run on the real 5-node Hyperledger Besu (QBFT) network
+## Run on the real 5-node Hyperledger Besu (QBFT) network — the default
 
-By default every chain (incl. `besu`) uses the in-memory simulated ledger. The Besu
-overlay points the API at the **existing 5-node QBFT network** from the
+`make deploy` runs this path automatically. The `besu` chain is **required and always
+real**: the API refuses to start if it can't reach the Besu RPC. The simulated-only
+stack (`make deploy-sim`) boots with `CHAIN_STRICT=0`, which leaves besu **absent
+(never silently simulated)**, while `fabric`/`canton` remain available as clearly-labeled
+simulated chains. The steps below are what `make deploy` performs — run them manually for
+reference. The Besu overlay points the API at the **existing 5-node QBFT network** from the
 `deposittokenization` project, so the `besu` chain deploys real `ComplianceToken` /
 `ComplianceNFT` / T-REX contracts on-chain.
 

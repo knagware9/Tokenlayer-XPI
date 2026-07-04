@@ -167,9 +167,15 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
           ))}
         </div>
         <div className="mt-3 flex items-center gap-2 flex-wrap">
-          <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
-            ⛓ Verified on-chain{chain ? ` · ${chain.label}` : ""}
-          </span>
+          {chain?.mode === "real" ? (
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+              ⛓ Verified on-chain{chain ? ` · ${chain.label}` : ""}
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">
+              🧪 Simulated ledger{chain ? ` · ${chain.label}` : ""}
+            </span>
+          )}
           <span className="text-[11px] text-slate-400 font-mono break-all">ref: {asset.contractRef}</span>
         </div>
       </div>
@@ -425,8 +431,14 @@ function OpForm({
 }
 
 function ChainPill({ chain }: { chain?: ChainInfo }): JSX.Element {
-  const tone = chain?.family === "evm" ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600";
-  return <span className={`px-1.5 py-0.5 rounded font-medium ${tone}`}>{chain?.label ?? "unknown chain"}</span>;
+  const real = chain?.mode === "real";
+  const tone = real ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600";
+  return (
+    <span className={`px-1.5 py-0.5 rounded font-medium ${tone}`}>
+      {chain?.label ?? "unknown chain"}
+      <span className="ml-1 opacity-70">{real ? "· on-chain" : "· simulated"}</span>
+    </span>
+  );
 }
 
 function Pill({ tone, children }: { tone: "red" | "green" | "gray"; children: React.ReactNode }): JSX.Element {

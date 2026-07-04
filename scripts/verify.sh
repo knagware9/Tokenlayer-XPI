@@ -2,20 +2,21 @@
 # ============================================================================
 # TokenLayer XPI — deployment smoke test (runs against the live API)
 #
-#   ./scripts/verify.sh            # issue + buy on the "besu" chain
-#   ./scripts/verify.sh --besu     # also assert the contract is a real 0x address
+#   ./scripts/verify.sh            # issue + buy on the simulated "fabric" chain
+#   ./scripts/verify.sh --besu     # issue + buy on the real "besu" chain and
+#                                   # assert the contract is a real 0x address
 #
 # Exercises the real flow end-to-end: login → issue (auto-mint to treasury) →
 # allow buyer → buy → assert on-chain balances moved.
 # ============================================================================
 set -euo pipefail
 API="http://localhost:${API_PORT:-4000}/api/v1"
-EXPECT_ONCHAIN="no"
-[[ "${1:-}" == "--besu" ]] && EXPECT_ONCHAIN="yes"
+EXPECT_ONCHAIN="no"; CHAIN="fabric"
+[[ "${1:-}" == "--besu" ]] && { EXPECT_ONCHAIN="yes"; CHAIN="besu"; }
 
-python3 - "$API" "$EXPECT_ONCHAIN" <<'PY'
+python3 - "$API" "$EXPECT_ONCHAIN" "$CHAIN" <<'PY'
 import json, sys, urllib.request, time
-API, EXPECT = sys.argv[1], sys.argv[2]
+API, EXPECT, CHAIN = sys.argv[1], sys.argv[2], sys.argv[3]
 def call(method, path, token=None, body=None):
     req = urllib.request.Request(API+path,
         data=json.dumps(body).encode() if body else None,
@@ -38,10 +39,10 @@ stamp=str(int(time.time()))[-6:]
 s,a = call("POST","/auth/login",body={"email":"carbon.admin@tokenlayer.dev","password":"carbon123"})
 check("admin login", s==200); admin=a.get("token")
 
-s,iss = call("POST","/assets",admin,{"useCaseKey":"carbon-credit","chainId":"besu",
+s,iss = call("POST","/assets",admin,{"useCaseKey":"carbon-credit","chainId":CHAIN,
     "name":f"Smoke {stamp}","symbol":f"SMK{stamp}","metadata":{"projectName":"Smoke","registry":"Verra","vintage":2025},
     "treasuryAccount":TRE,"initialSupply":"100","sale":{"unitPrice":"5","currency":"CBDC-INR","treasuryAccount":TRE}})
-check("issue on besu with auto-mint (201)", s==201, iss.get("asset",{}).get("contractRef",""))
+check(f"issue on {CHAIN} with auto-mint (201)", s==201, iss.get("asset",{}).get("contractRef",""))
 aid=iss["asset"]["id"]; ref=iss["asset"]["contractRef"]
 
 if EXPECT=="yes":

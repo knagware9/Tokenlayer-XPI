@@ -18,6 +18,7 @@ import { seedUseCases } from "./use-cases.js";
 async function main(): Promise<void> {
   const rbac = new RbacPolicy();
   const chains = buildChainRegistry();
+  await chains.assertConnectivity(); // fail fast: configured EVM chains must be reachable
 
   const users = new PrismaUserRepository();
   const assets = new PrismaAssetRepository();

@@ -16,6 +16,7 @@ export interface ChainInfo {
   label: string;
   family: ChainFamily;
   kind: "simulated" | "evm";
+  mode: "real" | "simulated";
 }
 
 export interface PropertySchema {

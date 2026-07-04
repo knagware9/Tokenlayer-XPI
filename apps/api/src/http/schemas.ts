@@ -41,8 +41,9 @@ export const components: Record<string, unknown>[] = [
       label: { type: "string" },
       family: { type: "string", enum: ["evm", "fabric", "canton", "mock"] },
       kind: { type: "string", enum: ["simulated", "evm"] },
+      mode: { type: "string", enum: ["real", "simulated"] },
     },
-    required: ["id", "label", "family", "kind"],
+    required: ["id", "label", "family", "kind", "mode"],
   },
   {
     $id: "MetadataSchema",

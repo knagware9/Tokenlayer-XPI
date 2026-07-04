@@ -5,23 +5,26 @@ COMPOSE      := docker compose -f docker-compose.yml
 COMPOSE_BESU := docker compose -f docker-compose.yml -f docker-compose.besu.yml
 
 .DEFAULT_GOAL := help
-.PHONY: help deploy deploy-besu verify verify-besu down down-besu besu-up besu-down logs status rebuild
+.PHONY: help deploy deploy-besu deploy-sim verify verify-sim down down-besu besu-up besu-down logs status rebuild
 
 help: ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
 	  awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
-deploy: ## Deploy the stack on simulated ledgers (one command)
+deploy: ## Deploy on the REAL 5-node Besu QBFT network (default)
 	./scripts/deploy.sh
 
-deploy-besu: ## Deploy + run the 'besu' chain on the real 5-node QBFT network
-	./scripts/deploy.sh --besu
+deploy-besu: ## Alias of deploy
+	./scripts/deploy.sh
 
-verify: ## Smoke test the running deployment (issue + buy)
-	./scripts/verify.sh
+deploy-sim: ## Deploy on simulated ledgers only (no external chain)
+	./scripts/deploy.sh --sim
 
-verify-besu: ## Smoke test and assert real on-chain contract deployment
+verify: ## Smoke test: issue + buy, assert real on-chain contract
 	./scripts/verify.sh --besu
+
+verify-sim: ## Smoke test against the simulated stack
+	./scripts/verify.sh
 
 besu-up: ## Start only the external 5-node Besu network
 	docker compose -f $${BESU_PROJECT_DIR:-/Users/kamleshnagware/deposittokenization}/docker-compose.yml \
