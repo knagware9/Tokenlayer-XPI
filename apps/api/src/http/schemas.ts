@@ -42,6 +42,8 @@ export const components: Record<string, unknown>[] = [
       family: { type: "string", enum: ["evm", "fabric", "canton", "mock"] },
       kind: { type: "string", enum: ["simulated", "evm"] },
       mode: { type: "string", enum: ["real", "simulated"] },
+      explorerUrl: { type: "string" },
+      currencySymbol: { type: "string" },
     },
     required: ["id", "label", "family", "kind", "mode"],
   },

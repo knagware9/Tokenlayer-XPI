@@ -23,6 +23,14 @@ interface ChainDescriptor {
   confirmations?: number;
   /** EVM chains: the API refuses to start unless this chain is configured and reachable (CHAIN_STRICT=0 skips, leaving the chain absent). */
   required?: boolean;
+  /** EVM chains: the numeric chain id the RPC must report; a mismatch aborts startup (guards against pointing at the wrong network). */
+  expectedChainId?: number;
+  /** Public block explorer base URL (no trailing slash), e.g. https://testnet.mstscan.com — used to link addresses/txs in the dashboard. */
+  explorerUrl?: string;
+  /** Native gas-token symbol, e.g. tMSTC — informational. */
+  currencySymbol?: string;
+  /** Faucet URL for obtaining test funds — informational (surfaced in docs, not the API). */
+  faucetUrl?: string;
 }
 
 export interface ChainInfo {
@@ -33,6 +41,10 @@ export interface ChainInfo {
   kind: "simulated" | "evm";
   /** "real" = live backend (EVM RPC / Fabric gateway / Canton JSON API); "simulated" = in-memory ledger. */
   mode: "real" | "simulated";
+  /** Public block-explorer base URL (no trailing slash), when the chain has one — lets the UI link contract addresses and tx hashes. */
+  explorerUrl?: string;
+  /** Native gas-token symbol (e.g. tMSTC), when known. */
+  currencySymbol?: string;
 }
 
 export interface ChainRegistry {
@@ -81,7 +93,7 @@ export function buildChainRegistry(env: Env = process.env): ChainRegistry {
       artifacts ??= evmArtifacts();
       const adapter = new EvmLedgerAdapter({ chainId: d.id, rpcUrl, privateKey, artifacts, gas: d.gas, confirmations: d.confirmations });
       adapters.set(d.id, adapter);
-      infos.push({ id: d.id, label: d.label, family: d.family, kind: "evm", mode: "real" });
+      infos.push({ id: d.id, label: d.label, family: d.family, kind: "evm", mode: "real", explorerUrl: d.explorerUrl, currencySymbol: d.currencySymbol });
       evmChains.push({ descriptor: d, adapter });
     } else if (d.required && strict) {
       throw new Error(
@@ -104,9 +116,9 @@ export function buildChainRegistry(env: Env = process.env): ChainRegistry {
     list: () => infos,
     async assertConnectivity(): Promise<void> {
       for (const { descriptor: d, adapter } of evmChains) {
+        let h: { chainId: string; operator: string; balance: string };
         try {
-          const h = await adapter.healthCheck();
-          console.log(`[chains] '${d.id}' connected: chainId=${h.chainId} operator=${h.operator} balance=${h.balance} ETH`);
+          h = await adapter.healthCheck();
         } catch (err) {
           // Deliberately does NOT echo the RPC URL — hosted RPC URLs can embed API keys.
           throw new Error(
@@ -114,6 +126,14 @@ export function buildChainRegistry(env: Env = process.env): ChainRegistry {
               `Start the network (\`make deploy\`) or fix ${d.rpcEnv}.`,
           );
         }
+        // Guard against pointing an env at the wrong network (e.g. mainnet vs testnet).
+        if (d.expectedChainId !== undefined && h.chainId !== String(d.expectedChainId)) {
+          throw new Error(
+            `chain '${d.id}' connected to the wrong network: expected chainId ${d.expectedChainId} but the RPC (${d.rpcEnv}) reports ${h.chainId}. ` +
+              `Point ${d.rpcEnv} at the correct network.`,
+          );
+        }
+        console.log(`[chains] '${d.id}' connected: chainId=${h.chainId} operator=${h.operator} balance=${h.balance} ${d.currencySymbol ?? "ETH"}`);
       }
     },
   };
