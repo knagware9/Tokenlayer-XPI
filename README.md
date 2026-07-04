@@ -307,11 +307,12 @@ engine enforcing identity + freeze policy.
 
 ## Roadmap context
 
-This is the foundational slice of the broader TokenLayer roadmap. Deliberately deferred:
-**real** Fabric/Canton networks and full T-REX (ONCHAINID, modular compliance, trusted issuers),
-real Besu/MST public deployments, KYC/AML provider integrations, cross-chain bridging, secondary
-markets, payments/custody rails, AI analytics, and multi-tenant SaaS billing. The adapter seam,
-declarative use cases, and compliance hooks are designed so these attach without rework.
+This is the foundational slice of the broader TokenLayer roadmap. The default deploy now runs on a
+**real** Hyperledger Besu (QBFT) network, and ERC-3643 issuance deploys the full T-REX stack.
+Deliberately deferred: **real** Fabric/Canton networks, public MST deployment, KYC/AML provider
+integrations, cross-chain bridging, secondary markets, payments/custody rails, AI analytics, and
+multi-tenant SaaS billing. The adapter seam, declarative use cases, and compliance hooks are
+designed so these attach without rework.
 
 ## Notes & limitations (MVP)
 
