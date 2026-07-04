@@ -176,7 +176,9 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
               🧪 Simulated ledger{chain ? ` · ${chain.label}` : ""}
             </span>
           )}
-          <span className="text-[11px] text-slate-400 font-mono break-all">ref: {asset.contractRef}</span>
+          <span className="text-[11px] text-slate-400 font-mono break-all">
+            ref: <ExplorerLink chain={chain} kind="address" value={asset.contractRef}>{asset.contractRef}</ExplorerLink>
+          </span>
         </div>
       </div>
 
@@ -301,7 +303,11 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
               <span className="mt-0.5 inline-block w-20 shrink-0 text-[11px] font-semibold text-brand-600 uppercase">{e.action}</span>
               <span className="flex-1 text-slate-600">
                 {summarize(e)}
-                {e.txHash && <span className="ml-2 font-mono text-[10px] text-slate-400">{e.txHash.slice(0, 14)}…</span>}
+                {e.txHash && (
+                  <span className="ml-2 font-mono text-[10px] text-slate-400">
+                    <ExplorerLink chain={chain} kind="tx" value={e.txHash}>{e.txHash.slice(0, 14)}…</ExplorerLink>
+                  </span>
+                )}
               </span>
               <span className="text-[11px] text-slate-400">{new Date(e.createdAt).toLocaleTimeString()}</span>
             </li>
@@ -427,6 +433,31 @@ function OpForm({
         {title}
       </button>
     </div>
+  );
+}
+
+/**
+ * Renders `value` as a link to the chain's block explorer (address or tx page)
+ * when the chain exposes one; otherwise renders it as plain text. Simulated
+ * chains have no explorer, so their refs/hashes stay non-clickable.
+ */
+function ExplorerLink({
+  chain,
+  kind,
+  value,
+  children,
+}: {
+  chain?: ChainInfo;
+  kind: "address" | "tx";
+  value: string;
+  children: React.ReactNode;
+}): JSX.Element {
+  if (!chain?.explorerUrl) return <>{children}</>;
+  const href = `${chain.explorerUrl.replace(/\/$/, "")}/${kind}/${value}`;
+  return (
+    <a href={href} target="_blank" rel="noreferrer" className="text-brand-600 hover:underline" title={`View on ${chain.label} explorer`}>
+      {children}
+    </a>
   );
 }
 
