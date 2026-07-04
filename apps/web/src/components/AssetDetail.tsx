@@ -167,9 +167,15 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
           ))}
         </div>
         <div className="mt-3 flex items-center gap-2 flex-wrap">
-          <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
-            ⛓ Verified on-chain{chain ? ` · ${chain.label}` : ""}
-          </span>
+          {chain?.mode === "real" ? (
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+              ⛓ Verified on-chain{chain ? ` · ${chain.label}` : ""}
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">
+              🧪 Simulated ledger{chain ? ` · ${chain.label}` : ""}
+            </span>
+          )}
           <span className="text-[11px] text-slate-400 font-mono break-all">ref: {asset.contractRef}</span>
         </div>
       </div>
