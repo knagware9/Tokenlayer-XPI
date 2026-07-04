@@ -73,8 +73,8 @@ console.log(`[fabric-wallet] wrote identity '${identity}' (${mspId}) -> ${idFile
 console.log(`[fabric-wallet] copied connection profile -> ${ccpOut}`);
 console.log("");
 console.log("Set these to run the API against real Fabric:");
-console.log(`  export FABRIC_CONNECTION_PROFILE=${ccpOut}`);
-console.log(`  export FABRIC_WALLET=${walletDir}`);
-console.log(`  export FABRIC_IDENTITY=${identity}`);
-console.log("  export FABRIC_CHANNEL=mychannel");
-console.log("  export FABRIC_CHAINCODE=tokenlayer");
+console.log(`  export FABRIC_CONNECTION_PROFILE="${ccpOut}"`);
+console.log(`  export FABRIC_WALLET="${walletDir}"`);
+console.log(`  export FABRIC_IDENTITY="${identity}"`);
+console.log('  export FABRIC_CHANNEL="mychannel"');
+console.log('  export FABRIC_CHAINCODE="tokenlayer"');
