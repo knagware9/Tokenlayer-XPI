@@ -15,7 +15,8 @@
   },
   "dependencies": {
     "@tokenlayer/core": "workspace:*",
-    "ethers": "^6.13.4"
+    "ethers": "^6.13.4",
+    "fabric-network": "^2.2.20"
   },
   "devDependencies": {
     "vitest": "^2.1.8"

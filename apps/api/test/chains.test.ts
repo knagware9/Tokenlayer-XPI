@@ -62,4 +62,21 @@ describe("chain registry", () => {
     const besu = reg.list().find((c) => c.id === "besu");
     expect(besu?.explorerUrl).toBeUndefined();
   });
+
+  it("fabric is simulated with no connection env, and is not probed at boot", async () => {
+    const reg = buildChainRegistry({ CHAIN_STRICT: "0" });
+    expect(reg.list().find((c) => c.id === "fabric")?.mode).toBe("simulated");
+    await expect(reg.assertConnectivity()).resolves.toBeUndefined();
+  });
+
+  it("fabric is real when FABRIC_CONNECTION_PROFILE is set, and boot probes it (fails fast when the network is absent)", async () => {
+    const reg = buildChainRegistry({
+      CHAIN_STRICT: "0",
+      FABRIC_CONNECTION_PROFILE: "/nonexistent/connection-org1.json",
+      FABRIC_WALLET: "/nonexistent/wallet",
+      FABRIC_IDENTITY: "appUser",
+    });
+    expect(reg.list().find((c) => c.id === "fabric")?.mode).toBe("real");
+    await expect(reg.assertConnectivity()).rejects.toThrow(/fabric.*real ledger but unreachable/s);
+  });
 });

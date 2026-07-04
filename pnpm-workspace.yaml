@@ -7,5 +7,9 @@ allowBuilds:
   '@prisma/engines': true
   esbuild: true
   keccak: true
+  # HSM binding — native build not needed; we use filesystem wallets, not PKCS#11.
+  pkcs11js: false
   prisma: true
+  # protobufjs works via its JS fallback; the postinstall codegen is optional.
+  protobufjs: false
   secp256k1: true

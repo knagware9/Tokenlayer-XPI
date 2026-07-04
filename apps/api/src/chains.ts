@@ -77,6 +77,9 @@ export function buildChainRegistry(env: Env = process.env): ChainRegistry {
   const adapters = new Map<string, LedgerAdapter>();
   const infos: ChainInfo[] = [];
   const evmChains: { descriptor: ChainDescriptor; adapter: EvmLedgerAdapter }[] = [];
+  // Real non-EVM adapters (e.g. a configured Fabric gateway) that expose a healthCheck —
+  // probed at boot just like EVM chains so a configured-but-down network fails fast.
+  const realProbes: { id: string; adapter: { healthCheck(): Promise<{ chainId: string; operator: string; balance: string }> } }[] = [];
   let artifacts: Record<TokenStandard, ReturnType<typeof loadArtifact>> | null = null;
 
   for (const d of descriptors) {
@@ -84,6 +87,9 @@ export function buildChainRegistry(env: Env = process.env): ChainRegistry {
       const { adapter, real } = makeSimulatedOrReal(d.id, d.family, env);
       adapters.set(d.id, adapter);
       infos.push({ id: d.id, label: d.label, family: d.family, kind: "simulated", mode: real ? "real" : "simulated" });
+      if (real && typeof (adapter as { healthCheck?: unknown }).healthCheck === "function") {
+        realProbes.push({ id: d.id, adapter: adapter as unknown as (typeof realProbes)[number]["adapter"] });
+      }
       continue;
     }
     // EVM chain — real when its RPC + operator key are configured, otherwise absent.
@@ -134,6 +140,18 @@ export function buildChainRegistry(env: Env = process.env): ChainRegistry {
           );
         }
         console.log(`[chains] '${d.id}' connected: chainId=${h.chainId} operator=${h.operator} balance=${h.balance} ${d.currencySymbol ?? "ETH"}`);
+      }
+      // Real non-EVM ledgers (e.g. a configured Fabric network) — same fail-fast contract.
+      for (const { id, adapter } of realProbes) {
+        try {
+          const h = await adapter.healthCheck();
+          console.log(`[chains] '${id}' connected (real): operator=${h.operator} ${h.balance}`);
+        } catch (err) {
+          throw new Error(
+            `chain '${id}' is configured as a real ledger but unreachable: ${(err as Error).message}. ` +
+              `Bring its network up (e.g. \`make fabric-up\`) or fix its connection env.`,
+          );
+        }
       }
     },
   };

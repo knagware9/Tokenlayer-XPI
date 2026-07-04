@@ -77,6 +77,18 @@ export class FabricLedgerAdapter implements LedgerAdapter {
     return Buffer.from(result).toString("utf8");
   }
 
+  /**
+   * Boot probe: a successful read proves the wallet identity, connection profile,
+   * peer reachability, channel membership, AND that the `tokenlayer` chaincode is
+   * deployed and responding. `TotalSupply` returns "0" for an unknown ref, so this
+   * never mutates state. Any failure means the Fabric network/chaincode is unreachable.
+   * Shaped like the EVM healthCheck so the registry can probe both uniformly.
+   */
+  async healthCheck(): Promise<{ chainId: string; operator: string; balance: string }> {
+    const supply = await this.evaluate("TotalSupply", "healthcheck:probe");
+    return { chainId: this.chainId, operator: `${this.config.identity}@${this.channel}`, balance: `probe-supply=${supply}` };
+  }
+
   async deployAsset(spec: AssetDeploymentSpec): Promise<DeployResult> {
     const ref = `fabric:${spec.id}`;
     await this.submit("DeployAsset", ref, spec.tokenType, String(spec.allowlistEnabled));
