@@ -425,8 +425,14 @@ function OpForm({
 }
 
 function ChainPill({ chain }: { chain?: ChainInfo }): JSX.Element {
-  const tone = chain?.family === "evm" ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600";
-  return <span className={`px-1.5 py-0.5 rounded font-medium ${tone}`}>{chain?.label ?? "unknown chain"}</span>;
+  const real = chain?.mode === "real";
+  const tone = real ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600";
+  return (
+    <span className={`px-1.5 py-0.5 rounded font-medium ${tone}`}>
+      {chain?.label ?? "unknown chain"}
+      <span className="ml-1 opacity-70">{real ? "· on-chain" : "· simulated"}</span>
+    </span>
+  );
 }
 
 function Pill({ tone, children }: { tone: "red" | "green" | "gray"; children: React.ReactNode }): JSX.Element {
