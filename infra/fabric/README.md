@@ -1,45 +1,49 @@
 # Hyperledger Fabric (real) for TokenLayer
 
-A production path for the `fabric` chain: the [`tokenlayer` Go chaincode](chaincode/tokenlayer)
+A real ledger for the `fabric` chain: the [`tokenlayer` Go chaincode](chaincode/tokenlayer)
 enforces the same compliance-asset rules (fungible + NFT, allowlist + freeze) as the EVM
 contracts and the simulated ledger, and [`FabricLedgerAdapter`](../../packages/adapters/src/fabric/fabric-adapter.ts)
 drives it through the `fabric-network` Gateway SDK.
 
-> **Not exercised in this build environment** (no Docker daemon / Fabric binaries). This is
-> runnable scaffolding: stand up a Fabric network, deploy the chaincode, install the SDK, set
-> the env below, and the `fabric` chain switches from the simulated adapter to the real one.
+The `fabric-network` SDK is a dependency of `@tokenlayer/adapters`. `fabric` runs **real** when
+`FABRIC_CONNECTION_PROFILE` is set (and is probed at boot — a configured-but-down network fails
+fast), and falls back to the in-memory **simulated** Fabric adapter otherwise, so the platform
+always runs.
 
-## 1. Bring up a network and deploy the chaincode
-
-Using the Fabric samples `test-network`:
-
-```bash
-# in fabric-samples/test-network
-./network.sh up createChannel -c mychannel -ca
-./network.sh deployCC -c mychannel \
-  -ccn tokenlayer \
-  -ccp /path/to/TokenLayer/infra/fabric/chaincode/tokenlayer \
-  -ccl go
-```
-
-This produces a connection profile and an admin identity you import into a wallet.
-
-## 2. Install the SDK and configure the platform
+## One command: bring it up
 
 ```bash
-pnpm --filter @tokenlayer/adapters add fabric-network
-
-export FABRIC_CONNECTION_PROFILE=/path/to/connection-org1.json
-export FABRIC_WALLET=/path/to/wallet
-export FABRIC_IDENTITY=appUser
-export FABRIC_CHANNEL=mychannel
-export FABRIC_CHAINCODE=tokenlayer
-pnpm api:dev
+make fabric-up      # test-network up + deploy the tokenlayer chaincode + emit wallet/profile
+make fabric-down    # tear it down and remove infra/fabric/.runtime/
 ```
 
-When `FABRIC_CONNECTION_PROFILE` is set, `buildChainRegistry` uses the real
-`FabricLedgerAdapter`; otherwise it falls back to the in-memory simulated Fabric adapter, so the
-platform always runs.
+`fabric-up` uses the Fabric samples `test-network` (override its location with
+`FABRIC_SAMPLES_DIR`, default `~/fabric-samples`), deploys the chaincode on channel `mychannel`,
+then runs [`scripts/fabric-wallet.mjs`](scripts/fabric-wallet.mjs) to write an `appUser` wallet
+identity + a copy of the connection profile under `infra/fabric/.runtime/` (gitignored). It prints
+the `FABRIC_*` env to set.
+
+> Needs Docker with enough memory for the peers/orderer (~2–3 GiB free in the Docker VM).
+
+## Run the platform against it
+
+```bash
+# paste the FABRIC_* block that `make fabric-up` printed, then:
+CHAIN_STRICT=0 pnpm api:dev
+```
+
+At boot the API logs `fabric` as connected (real) via a chaincode `TotalSupply` health probe, and
+`GET /chains` reports `fabric` with `mode: "real"`. Issuing on `fabric` invokes the chaincode.
+
+Manual equivalent of `fabric-up` (for reference):
+
+```bash
+cd $FABRIC_SAMPLES_DIR/test-network
+./network.sh up createChannel -c mychannel
+./network.sh deployCC -c mychannel -ccn tokenlayer \
+  -ccp /path/to/TokenLayer/infra/fabric/chaincode/tokenlayer -ccl go
+node /path/to/TokenLayer/infra/fabric/scripts/fabric-wallet.mjs
+```
 
 ## Operation mapping
 

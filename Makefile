@@ -5,7 +5,7 @@ COMPOSE      := docker compose -f docker-compose.yml
 COMPOSE_BESU := docker compose -f docker-compose.yml -f docker-compose.besu.yml
 
 .DEFAULT_GOAL := help
-.PHONY: help deploy deploy-besu deploy-sim verify verify-sim down down-besu besu-up besu-down logs status rebuild
+.PHONY: help deploy deploy-besu deploy-sim verify verify-sim down down-besu besu-up besu-down fabric-up fabric-down logs status rebuild
 
 help: ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -35,6 +35,12 @@ besu-down: ## Stop the external 5-node Besu network
 	docker compose -f $${BESU_PROJECT_DIR:-/Users/kamleshnagware/deposittokenization}/docker-compose.yml \
 	  --project-directory $${BESU_PROJECT_DIR:-/Users/kamleshnagware/deposittokenization} \
 	  stop besu-node1 besu-node2 besu-node3 besu-node4 besu-node5
+
+fabric-up: ## Bring up a real Hyperledger Fabric network + deploy the tokenlayer chaincode
+	./infra/fabric/fabric-up.sh
+
+fabric-down: ## Tear down the Fabric network and remove runtime artifacts
+	./infra/fabric/fabric-down.sh
 
 status: ## Show running containers
 	$(COMPOSE_BESU) ps

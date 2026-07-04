@@ -138,6 +138,34 @@ hash to the MST explorer. MST Testnet has a zero base fee (EIP-1559), so `mst` u
 `gas: "auto"` in [config/chains.json](config/chains.json) and the operator pays the small
 priority fee from its faucet balance. **Never reuse a testnet key on a production network.**
 
+## Run on real Hyperledger Fabric
+
+The `fabric` chain runs on a real Hyperledger Fabric network (the `tokenlayer` Go
+chaincode) — or the in-memory simulated adapter when unconfigured.
+
+```bash
+make fabric-up      # test-network up + deploy the tokenlayer chaincode + emit wallet/profile
+make fabric-down    # tear it down
+```
+
+`make fabric-up` uses the Fabric samples `test-network` (`FABRIC_SAMPLES_DIR`, default
+`~/fabric-samples`), deploys the chaincode on channel `mychannel`, and writes an `appUser`
+wallet + connection profile under `infra/fabric/.runtime/` (gitignored), printing the
+`FABRIC_*` env to set. Then run the API with that env (and `CHAIN_STRICT=0` so besu isn't
+required):
+
+```bash
+FABRIC_CONNECTION_PROFILE=infra/fabric/.runtime/connection-org1.json \
+FABRIC_WALLET=infra/fabric/.runtime/wallet FABRIC_IDENTITY=appUser \
+FABRIC_CHANNEL=mychannel FABRIC_CHAINCODE=tokenlayer \
+CHAIN_STRICT=0 pnpm api:dev
+```
+
+`fabric` then reports `mode: "real"` and issuing on it invokes the chaincode. The API probes
+Fabric at boot (a `TotalSupply` chaincode read) and refuses to start if the configured network
+is unreachable. Fabric needs ~2–3 GiB free in the Docker VM for its peers/orderer. See
+[infra/fabric/README.md](infra/fabric/README.md) for details.
+
 ## Common commands
 
 ```bash
