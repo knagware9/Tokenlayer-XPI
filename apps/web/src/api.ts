@@ -1,4 +1,4 @@
-import type { AccountState, Asset, AuditEntry, ChainInfo, Role, SessionUser, TokenInfo, UseCase } from "./types.js";
+import type { AccountState, AnalyticsSummary, Asset, AuditEntry, ChainInfo, Role, SessionUser, TokenInfo, UseCase } from "./types.js";
 
 export interface Currency { code: string; label: string; }
 export interface CashBalance { currency: string; address: string; amount: string; }
@@ -47,6 +47,13 @@ export const api = {
     }),
   chains: (token: string) => request<ChainInfo[]>("/chains", token),
   useCases: (token: string) => request<UseCase[]>("/use-cases", token),
+  analytics: (token: string, opts: { useCaseKey?: string; days?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.useCaseKey) q.set("useCaseKey", opts.useCaseKey);
+    if (opts.days) q.set("days", String(opts.days));
+    const qs = q.toString();
+    return request<AnalyticsSummary>(`/analytics${qs ? `?${qs}` : ""}`, token);
+  },
   accounts: (token: string) => request<{ address: string; label: string }[]>("/accounts", token),
   createUseCase: (token: string, def: UseCase) =>
     request<UseCase>("/use-cases", token, { method: "POST", body: JSON.stringify(def) }),

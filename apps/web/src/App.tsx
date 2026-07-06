@@ -3,6 +3,7 @@ import { api } from "./api.js";
 import { useAuth } from "./auth.js";
 import { useRoute } from "./router.js";
 import { AssetManagement } from "./components/AssetManagement.js";
+import { Dashboard } from "./components/Dashboard.js";
 import { Header } from "./components/Header.js";
 import { Login } from "./components/Login.js";
 import { PlatformHome } from "./components/PlatformHome.js";
@@ -10,7 +11,7 @@ import { UserManagement } from "./components/UserManagement.js";
 import { canManageUsers } from "./rbac.js";
 import type { ChainInfo, UseCase } from "./types.js";
 
-type Section = "assets" | "users";
+type Section = "overview" | "assets" | "users";
 
 export function App(): JSX.Element {
   const { token, user } = useAuth();
@@ -31,8 +32,8 @@ export function App(): JSX.Element {
     if (user && user.useCaseKey && routeKey !== user.useCaseKey) navigate(`/${user.useCaseKey}`);
   }, [user, routeKey, navigate]);
 
-  // Reset to the Asset Management section whenever the active use case changes.
-  useEffect(() => { setSection("assets"); }, [user?.role === "PlatformAdmin" ? routeKey : user?.useCaseKey]);
+  // Reset to the Overview section whenever the active use case changes.
+  useEffect(() => { setSection("overview"); }, [user?.role === "PlatformAdmin" ? routeKey : user?.useCaseKey]);
 
   if (!token || !user) return <Login />;
 
@@ -51,6 +52,7 @@ export function App(): JSX.Element {
   }
 
   const sections: { id: Section; label: string }[] = [
+    { id: "overview", label: "Overview" },
     { id: "assets", label: "Asset Management" },
     ...(canManageUsers(user.role) ? [{ id: "users" as Section, label: "User Management" }] : []),
   ];
@@ -70,6 +72,7 @@ export function App(): JSX.Element {
             </button>
           ))}
         </div>
+        {section === "overview" && <Dashboard useCaseKey={activeUseCase} />}
         {section === "assets" && <AssetManagement useCaseKey={activeUseCase} useCases={useCases} chains={chains} />}
         {section === "users" && <UserManagement useCaseKey={activeUseCase} useCases={useCases} />}
       </main>

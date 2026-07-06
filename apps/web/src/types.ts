@@ -99,3 +99,21 @@ export interface AuditEntry {
   chainId?: string;
   createdAt: string;
 }
+
+export interface AnalyticsSummary {
+  scope: "platform" | "use-case";
+  useCaseKey: string | null;
+  totals: {
+    assets: number;
+    useCases: number;
+    holders: number;
+    supply: string;
+    valueByCurrency: Record<string, string>;
+    tradedByCurrency: Record<string, string>;
+    trades: number;
+  };
+  byLedger: { chainId: string; mode: "real" | "simulated"; assets: number; supply: string; holders: number }[];
+  byUseCase: { useCaseKey: string; name: string; symbol: string; chainId: string; supply: string; holders: number; valueByCurrency: Record<string, string> }[];
+  activity: { date: string; count: number; tradedByCurrency: Record<string, string> }[];
+  recent: { at: string; action: string; assetId: string; assetName: string; chainId: string; summary: string }[];
+}
