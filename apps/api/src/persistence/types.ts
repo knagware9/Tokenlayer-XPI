@@ -100,6 +100,8 @@ export interface AssetRepository {
 export interface AuditRepository {
   append(entry: Omit<AuditEntryRecord, "id" | "createdAt"> & { createdAt?: string }): Promise<AuditEntryRecord>;
   listByAsset(assetId: string, page?: Page): Promise<Paged<AuditEntryRecord>>;
+  /** Cross-asset audit query: entries for any of `assetIds`, ordered createdAt ascending (oldest→newest). Empty ids → empty result. */
+  listByAssetIds(assetIds: string[], page?: Page): Promise<Paged<AuditEntryRecord>>;
 }
 
 export interface AccountRepository {

@@ -168,19 +168,44 @@ export class PrismaAuditRepository implements AuditRepository {
       prisma.auditLog.count({ where: { assetId } }),
     ]);
     return {
-      items: rows.map((r) => ({
-        id: r.id,
-        assetId: r.assetId ?? undefined,
-        actorId: r.actorId,
-        action: r.action as LifecycleAction,
-        payload: JSON.parse(r.payload) as Record<string, unknown>,
-        txHash: r.txHash ?? undefined,
-        chainId: r.chainId ?? undefined,
-        createdAt: r.createdAt.toISOString(),
-      })),
+      items: rows.map(toAuditRecord),
       total,
     };
   }
+  async listByAssetIds(assetIds: string[], page: Page = {}): Promise<Paged<AuditEntryRecord>> {
+    if (assetIds.length === 0) return { items: [], total: 0 };
+    const where = { assetId: { in: assetIds } };
+    const [rows, total] = await Promise.all([
+      prisma.auditLog.findMany({ where, orderBy: { createdAt: "asc" }, skip: page.offset ?? 0, take: page.limit ?? 10000 }),
+      prisma.auditLog.count({ where }),
+    ]);
+    return {
+      items: rows.map(toAuditRecord),
+      total,
+    };
+  }
+}
+
+function toAuditRecord(r: {
+  id: string;
+  assetId: string | null;
+  actorId: string;
+  action: string;
+  payload: string;
+  txHash: string | null;
+  chainId: string | null;
+  createdAt: Date;
+}): AuditEntryRecord {
+  return {
+    id: r.id,
+    assetId: r.assetId ?? undefined,
+    actorId: r.actorId,
+    action: r.action as LifecycleAction,
+    payload: JSON.parse(r.payload) as Record<string, unknown>,
+    txHash: r.txHash ?? undefined,
+    chainId: r.chainId ?? undefined,
+    createdAt: r.createdAt.toISOString(),
+  };
 }
 
 export class PrismaAccountRepository implements AccountRepository {

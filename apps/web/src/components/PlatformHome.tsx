@@ -1,11 +1,16 @@
 import { useRoute } from "../router.js";
 import type { ChainInfo, UseCase } from "../types.js";
+import { Dashboard } from "./Dashboard.js";
 import { UseCaseBuilder } from "./UseCaseBuilder.js";
 
 export function PlatformHome({ useCases, chains, onReloadUseCases }: { useCases: UseCase[]; chains: ChainInfo[]; onReloadUseCases: () => void }): JSX.Element {
   const { navigate } = useRoute();
   return (
     <div className="space-y-8">
+      <div>
+        <h2 className="font-semibold text-slate-900 mb-3">Platform overview</h2>
+        <Dashboard />
+      </div>
       <div>
         <h2 className="font-semibold text-slate-900 mb-3">Use cases</h2>
         {useCases.length === 0 ? (

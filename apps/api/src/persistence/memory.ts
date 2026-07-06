@@ -97,6 +97,14 @@ export class MemoryAuditRepository implements AuditRepository {
     const matched = this.entries.filter((e) => e.assetId === assetId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     return paginate(matched, page);
   }
+  async listByAssetIds(assetIds: string[], page: Page = {}): Promise<Paged<AuditEntryRecord>> {
+    if (assetIds.length === 0) return { items: [], total: 0 };
+    const ids = new Set(assetIds);
+    const matched = this.entries
+      .filter((e) => e.assetId !== undefined && ids.has(e.assetId))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return paginate(matched, page);
+  }
 }
 
 function paginate<T>(rows: T[], page: Page): Paged<T> {
