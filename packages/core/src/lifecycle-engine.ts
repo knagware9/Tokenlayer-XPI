@@ -113,6 +113,9 @@ export class LifecycleEngine {
     validateMetadata(input.metadata, useCase.metadataSchema);
 
     const ref: AssetRef = { id: input.id, chainId: input.chainId, contractRef: contract.contractRef };
+    // The "issue" audit tx is the use-case contract's deploy tx — issuance is a
+    // registration step, not itself an on-chain mint. The actual mint of initial
+    // supply / token-ids happens in the API layer and is audited separately.
     await this.write(actor, "issue", {
       assetId: input.id,
       txHash: contract.deployTxHash,

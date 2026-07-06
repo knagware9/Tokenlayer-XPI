@@ -227,15 +227,74 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
         <ul className="space-y-2">
           {existing.map((u) => (
             <li key={u.key} className="text-sm">
-              <div className="font-medium text-slate-700">{u.name}</div>
-              <div className="text-[11px] text-slate-400">
-                {u.tokenStandard} · {u.allowedChainIds.length} chain(s)
+              <div className="font-medium text-slate-700">{u.name} <span className="text-slate-400 font-normal">· {u.symbol}</span></div>
+              <div className="text-[11px] text-slate-400 mb-1">{u.tokenStandard}</div>
+              <div className="flex flex-wrap gap-1">
+                {u.allowedChainIds.map((cid) => (
+                  <ChainDeployBadge key={cid} useCaseKey={u.key} chainId={cid} chain={chains.find((c) => c.id === cid)} deployed={u.contracts?.[cid]} onDeployed={onCreated} />
+                ))}
               </div>
             </li>
           ))}
         </ul>
       </div>
     </div>
+  );
+}
+
+/** Per-chain deployment status for a use case: a contract link when deployed, or a Deploy button when pending. */
+function ChainDeployBadge({
+  useCaseKey,
+  chainId,
+  chain,
+  deployed,
+  onDeployed,
+}: {
+  useCaseKey: string;
+  chainId: string;
+  chain?: ChainInfo;
+  deployed?: { contractRef: string };
+  onDeployed: () => void;
+}): JSX.Element {
+  const { token } = useAuth();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const label = chain?.label ?? chainId;
+
+  if (deployed) {
+    const href = chain?.explorerUrl && /^0x[0-9a-fA-F]+$/.test(deployed.contractRef)
+      ? `${chain.explorerUrl.replace(/\/$/, "")}/address/${deployed.contractRef}`
+      : undefined;
+    const body = <span title={deployed.contractRef}>⛓ {label}</span>;
+    return (
+      <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 text-[10px] font-medium">
+        {href ? <a href={href} target="_blank" rel="noreferrer" className="hover:underline">{body}</a> : body}
+      </span>
+    );
+  }
+
+  async function deploy(): Promise<void> {
+    if (!token) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.deployUseCase(token, useCaseKey, chainId);
+      onDeployed();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "deploy failed");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <button
+      onClick={deploy}
+      disabled={busy}
+      title={err ?? `Deploy the contract on ${label}`}
+      className={`px-1.5 py-0.5 rounded text-[10px] font-medium disabled:opacity-50 ${err ? "bg-red-100 text-red-700" : "bg-slate-200 text-slate-600 hover:bg-slate-300"}`}
+    >
+      {busy ? "deploying…" : err ? `⚠ ${label}` : `Deploy ${label}`}
+    </button>
   );
 }
 

@@ -50,6 +50,8 @@ export const api = {
   accounts: (token: string) => request<{ address: string; label: string }[]>("/accounts", token),
   createUseCase: (token: string, def: UseCase) =>
     request<UseCase>("/use-cases", token, { method: "POST", body: JSON.stringify(def) }),
+  deployUseCase: (token: string, key: string, chainId: string) =>
+    request<UseCase>(`/use-cases/${encodeURIComponent(key)}/deploy`, token, { method: "POST", body: JSON.stringify({ chainId }) }),
   assets: (token: string, useCaseKey?: string) =>
     request<Listed<Asset>>(`/assets?limit=200${useCaseKey ? `&useCaseKey=${encodeURIComponent(useCaseKey)}` : ""}`, token).then((r) => r.data),
   asset: (token: string, id: string) => request<Asset>(`/assets/${id}`, token),
