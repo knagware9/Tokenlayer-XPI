@@ -207,65 +207,78 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     }
     const actor = actorOf(request);
     const useCase = await deps.useCases.get(bUseCaseKey);
+    // Initial supply is fungible-only — reject up front, before charging any fee.
+    if (wantsSupply && useCase.tokenType !== "fungible") {
+      return reply.code(400).send({ error: "SUPPLY_UNSUPPORTED", message: "initial supply is only supported for fungible assets" });
+    }
 
     // Issuance fee: a flat CBDC amount charged from the issuer's linked cash
-    // account to the platform fee account BEFORE anything is minted/persisted.
-    // Applies only when: a fee account is configured, fees.issuanceFlat > 0, and
-    // a fee currency is determinable (sale currency, else saleTermsDefault). If
-    // no fee currency is determinable, the fee is skipped (issuance proceeds).
+    // account to the platform fee account. Applies only when: a fee account is
+    // configured, fees.issuanceFlat > 0, and a fee currency is determinable (sale
+    // currency, else saleTermsDefault). If no fee currency is determinable, the
+    // fee is skipped (issuance proceeds). The fee is REFUNDED if issuance then fails.
     const feeAccount = deps.platformFeeAccount;
     const issuanceFlat = useCase.fees?.issuanceFlat;
     let issuanceFeeCharged: { amount: string; currency: string } | null = null;
+    let feePayer: string | undefined;
     if (feeAccount && issuanceFlat && BigInt(issuanceFlat) > 0n) {
       const feeCurrency = sale?.currency ?? useCase.saleTermsDefault?.currency;
       if (feeCurrency && isSupportedCurrency(feeCurrency)) {
         const me = await deps.users.findById(claims.id);
-        const payer = me?.accountId ? (await deps.accounts.findById(me.accountId))?.address : undefined;
-        if (!payer) {
+        feePayer = me?.accountId ? (await deps.accounts.findById(me.accountId))?.address : undefined;
+        if (!feePayer) {
           return reply.code(400).send({ error: "NO_WALLET", message: "your account has no linked wallet to pay the issuance fee" });
         }
-        if (BigInt(await deps.cash.balanceOf(feeCurrency, payer)) < BigInt(issuanceFlat)) {
+        if (BigInt(await deps.cash.balanceOf(feeCurrency, feePayer)) < BigInt(issuanceFlat)) {
           return reply.code(400).send({ error: "INSUFFICIENT_FUNDS", message: `you need ${issuanceFlat} ${feeCurrency} to cover the issuance fee` });
         }
-        await deps.cash.transfer(feeCurrency, payer, feeAccount, issuanceFlat);
+        await deps.cash.transfer(feeCurrency, feePayer, feeAccount, issuanceFlat);
         issuanceFeeCharged = { amount: issuanceFlat, currency: feeCurrency };
       }
     }
 
     const id = randomUUID();
-    const result = await deps.engine.issue(actor, { useCaseKey: bUseCaseKey, chainId, id, metadata: metadata ?? {} });
-    const asset = await deps.assets.create({
-      id,
-      useCaseKey: bUseCaseKey,
-      name,
-      symbol: useCase.symbol,
-      chainId,
-      contractRef: result.ref.contractRef,
-      tokenType: result.tokenType,
-      tokenStandard: useCase.tokenStandard,
-      metadata: metadata ?? {},
-      status: "active",
-      createdBy: actor.id,
-      unitPrice: null,
-      currency: null,
-      treasuryAccount: null,
-    });
-    if (sale) {
-      await deps.assets.setSaleTerms(id, sale);
-    }
-    // Auto-allowlist the treasury and mint the requested initial supply into it,
-    // so the asset is immediately funded and (if priced) available to buy.
-    if (wantsSupply) {
-      if (asset.tokenType !== "fungible") {
-        return reply.code(400).send({ error: "SUPPLY_UNSUPPORTED", message: "initial supply is only supported for fungible assets" });
+    let result: Awaited<ReturnType<typeof deps.engine.issue>>;
+    try {
+      result = await deps.engine.issue(actor, { useCaseKey: bUseCaseKey, chainId, id, metadata: metadata ?? {} });
+      await deps.assets.create({
+        id,
+        useCaseKey: bUseCaseKey,
+        name,
+        symbol: useCase.symbol,
+        chainId,
+        contractRef: result.ref.contractRef,
+        tokenType: result.tokenType,
+        tokenStandard: useCase.tokenStandard,
+        metadata: metadata ?? {},
+        status: "active",
+        createdBy: actor.id,
+        unitPrice: null,
+        currency: null,
+        treasuryAccount: null,
+      });
+      if (sale) {
+        await deps.assets.setSaleTerms(id, sale);
       }
-      const ctx = contextOf(await deps.assets.get(id) ?? asset);
-      if (useCase.compliance.allowlist) {
-        await deps.engine.setAllowed(actor, ctx, treasury!, true);
+      // Auto-allowlist the treasury and mint the requested initial supply into it,
+      // so the asset is immediately funded and (if priced) available to buy.
+      if (wantsSupply) {
+        const created = await deps.assets.get(id);
+        const ctx = contextOf(created!);
+        if (useCase.compliance.allowlist) {
+          await deps.engine.setAllowed(actor, ctx, treasury!, true);
+        }
+        await deps.engine.mint(actor, ctx, treasury!, initialSupply!);
       }
-      await deps.engine.mint(actor, ctx, treasury!, initialSupply!);
+    } catch (err) {
+      // Issuance failed after the fee moved — refund it so the issuer isn't charged
+      // for an asset that was never created (mirrors the buy path's compensation).
+      if (issuanceFeeCharged && feePayer && feeAccount) {
+        await deps.cash.transfer(issuanceFeeCharged.currency, feeAccount, feePayer, issuanceFeeCharged.amount).catch(() => {});
+      }
+      throw err;
     }
-    const finalAsset = await deps.assets.get(id) ?? asset;
+    const finalAsset = await deps.assets.get(id);
     return reply.code(201).send({ asset: finalAsset, txHash: result.txHash, ...(issuanceFeeCharged ? { issuanceFee: issuanceFeeCharged } : {}) });
   });
 
