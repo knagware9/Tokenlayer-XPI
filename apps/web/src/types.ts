@@ -22,8 +22,12 @@ export interface ChainInfo {
 }
 
 export interface PropertySchema {
-  type: "string" | "number" | "boolean";
+  type: "string" | "number" | "boolean" | "document";
   description?: string;
+  enum?: string[];
+  min?: number;
+  max?: number;
+  pattern?: string;
 }
 
 export interface MetadataSchema {
@@ -50,7 +54,15 @@ export interface UseCase {
   contracts?: Record<string, UseCaseContract>;
   metadataSchema: MetadataSchema;
   lifecycle: { mint: boolean; transfer: boolean; burn: boolean; freeze: boolean };
-  compliance: { allowlist: boolean; transferRestrictions: boolean };
+  compliance: {
+    allowlist: boolean;
+    transferRestrictions: boolean;
+    maxHolders?: number;
+    lockupDays?: number;
+    allowedJurisdictions?: string[];
+  };
+  fees?: { marketplaceBps?: number; issuanceFlat?: string };
+  saleTermsDefault?: { unitPrice?: string; currency?: string };
   roles: Role[];
 }
 

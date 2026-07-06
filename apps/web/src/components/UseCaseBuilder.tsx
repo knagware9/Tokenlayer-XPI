@@ -11,10 +11,15 @@ interface Props {
 
 const STANDARDS: TokenStandard[] = ["ERC-20", "ERC-721", "ERC-3643"];
 const ALL_ROLES: Role[] = ["UseCaseAdmin", "Issuer", "Buyer", "Auditor"];
+type FieldKind = "string" | "number" | "boolean" | "enum" | "document";
 interface FieldRow {
   name: string;
-  type: PropertySchema["type"];
+  kind: FieldKind;
   required: boolean;
+  enumValues?: string;
+  min?: string;
+  max?: string;
+  pattern?: string;
 }
 
 export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Element {
@@ -27,9 +32,16 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
   const firstChain = chains[0]?.id ?? "besu";
   const [allowedChainIds, setAllowedChainIds] = useState<string[]>([firstChain]);
   const [defaultChainId, setDefaultChainId] = useState(firstChain);
-  const [fields, setFields] = useState<FieldRow[]>([{ name: "issuer", type: "string", required: true }]);
+  const [fields, setFields] = useState<FieldRow[]>([{ name: "issuer", kind: "string", required: true }]);
   const [lifecycle, setLifecycle] = useState({ mint: true, transfer: true, burn: true, freeze: true });
   const [compliance, setCompliance] = useState({ allowlist: true, transferRestrictions: true });
+  const [maxHolders, setMaxHolders] = useState("");
+  const [lockupDays, setLockupDays] = useState("");
+  const [allowedJurisdictions, setAllowedJurisdictions] = useState("");
+  const [marketplaceBps, setMarketplaceBps] = useState("");
+  const [issuanceFlat, setIssuanceFlat] = useState("");
+  const [defaultUnitPrice, setDefaultUnitPrice] = useState("");
+  const [defaultCurrency, setDefaultCurrency] = useState("");
   const [roles, setRoles] = useState<Role[]>([...ALL_ROLES]);
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
@@ -37,6 +49,10 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
 
   const tokenType = standard === "ERC-721" ? "nonfungible" : "fungible";
   const isAdmin = user?.role === "PlatformAdmin";
+  // Light guard: a named enum field must have at least one value before we post.
+  const hasEmptyEnum = fields.some(
+    (f) => f.name.trim() && f.kind === "enum" && !(f.enumValues ?? "").split(",").map((v) => v.trim()).filter(Boolean).length,
+  );
 
   const toggle = <T,>(list: T[], v: T): T[] => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
 
@@ -61,7 +77,42 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
     setOk(null);
     try {
       const properties: Record<string, PropertySchema> = {};
-      for (const f of fields) if (f.name.trim()) properties[f.name.trim()] = { type: f.type };
+      for (const f of fields) {
+        const nm = f.name.trim();
+        if (!nm) continue;
+        let prop: PropertySchema;
+        if (f.kind === "enum") {
+          const values = (f.enumValues ?? "").split(",").map((v) => v.trim()).filter(Boolean);
+          prop = { type: "string", enum: values };
+        } else if (f.kind === "document") {
+          prop = { type: "document" };
+        } else if (f.kind === "number") {
+          prop = { type: "number" };
+          if (f.min?.trim()) prop.min = Number(f.min);
+          if (f.max?.trim()) prop.max = Number(f.max);
+        } else if (f.kind === "string") {
+          prop = { type: "string" };
+          if (f.pattern?.trim()) prop.pattern = f.pattern.trim();
+        } else {
+          prop = { type: "boolean" };
+        }
+        properties[nm] = prop;
+      }
+
+      const complianceOut: UseCase["compliance"] = { ...compliance };
+      if (maxHolders.trim()) complianceOut.maxHolders = Number(maxHolders);
+      if (lockupDays.trim()) complianceOut.lockupDays = Number(lockupDays);
+      const jurisdictions = allowedJurisdictions.split(",").map((v) => v.trim()).filter(Boolean);
+      if (jurisdictions.length) complianceOut.allowedJurisdictions = jurisdictions;
+
+      const fees: NonNullable<UseCase["fees"]> = {};
+      if (marketplaceBps.trim()) fees.marketplaceBps = Number(marketplaceBps);
+      if (issuanceFlat.trim()) fees.issuanceFlat = issuanceFlat.trim();
+
+      const saleTermsDefault: NonNullable<UseCase["saleTermsDefault"]> = {};
+      if (defaultUnitPrice.trim()) saleTermsDefault.unitPrice = defaultUnitPrice.trim();
+      if (defaultCurrency.trim()) saleTermsDefault.currency = defaultCurrency.trim();
+
       const def: UseCase = {
         key: key.trim(),
         name: name.trim(),
@@ -73,7 +124,9 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
         defaultChainId,
         metadataSchema: { type: "object", properties, required: fields.filter((f) => f.required && f.name.trim()).map((f) => f.name.trim()) },
         lifecycle,
-        compliance,
+        compliance: complianceOut,
+        fees: Object.keys(fees).length ? fees : undefined,
+        saleTermsDefault: Object.keys(saleTermsDefault).length ? saleTermsDefault : undefined,
         roles,
       };
       const created = await api.createUseCase(token, def);
@@ -86,7 +139,14 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
       setName("");
       setSymbol("");
       setDescription("");
-      setFields([{ name: "issuer", type: "string", required: true }]);
+      setFields([{ name: "issuer", kind: "string", required: true }]);
+      setMaxHolders("");
+      setLockupDays("");
+      setAllowedJurisdictions("");
+      setMarketplaceBps("");
+      setIssuanceFlat("");
+      setDefaultUnitPrice("");
+      setDefaultCurrency("");
       onCreated();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not create use case");
@@ -159,26 +219,42 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
         <div>
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-medium text-slate-600">Metadata fields</span>
-            <button type="button" onClick={() => setFields((f) => [...f, { name: "", type: "string", required: false }])} className="text-xs text-brand-600 hover:text-brand-700">
+            <button type="button" onClick={() => setFields((f) => [...f, { name: "", kind: "string", required: false }])} className="text-xs text-brand-600 hover:text-brand-700">
               + add field
             </button>
           </div>
           <div className="space-y-2">
             {fields.map((f, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <input className="input flex-1" placeholder="field name" value={f.name} onChange={(e) => setFields((arr) => arr.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
-                <select className="select w-32" value={f.type} onChange={(e) => setFields((arr) => arr.map((x, j) => (j === i ? { ...x, type: e.target.value as PropertySchema["type"] } : x)))}>
-                  <option value="string">string</option>
-                  <option value="number">number</option>
-                  <option value="boolean">boolean</option>
-                </select>
-                <label className="flex items-center gap-1 text-xs text-slate-500">
-                  <input type="checkbox" checked={f.required} onChange={() => setFields((arr) => arr.map((x, j) => (j === i ? { ...x, required: !x.required } : x)))} />
-                  req
-                </label>
-                <button type="button" onClick={() => setFields((arr) => arr.filter((_, j) => j !== i))} className="text-slate-400 hover:text-red-500 text-sm px-1">
-                  ×
-                </button>
+              <div key={i} className="space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <input className="input flex-1" placeholder="field name" value={f.name} onChange={(e) => setFields((arr) => arr.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
+                  <select className="select w-32" value={f.kind} onChange={(e) => setFields((arr) => arr.map((x, j) => (j === i ? { ...x, kind: e.target.value as FieldKind } : x)))}>
+                    <option value="string">string</option>
+                    <option value="number">number</option>
+                    <option value="boolean">boolean</option>
+                    <option value="enum">enum</option>
+                    <option value="document">document (URL)</option>
+                  </select>
+                  <label className="flex items-center gap-1 text-xs text-slate-500">
+                    <input type="checkbox" checked={f.required} onChange={() => setFields((arr) => arr.map((x, j) => (j === i ? { ...x, required: !x.required } : x)))} />
+                    req
+                  </label>
+                  <button type="button" onClick={() => setFields((arr) => arr.filter((_, j) => j !== i))} className="text-slate-400 hover:text-red-500 text-sm px-1">
+                    ×
+                  </button>
+                </div>
+                {f.kind === "enum" && (
+                  <input className="input text-xs" placeholder="values (comma-separated)" value={f.enumValues ?? ""} onChange={(e) => setFields((arr) => arr.map((x, j) => (j === i ? { ...x, enumValues: e.target.value } : x)))} />
+                )}
+                {f.kind === "number" && (
+                  <div className="flex gap-2">
+                    <input className="input text-xs" type="number" placeholder="min" value={f.min ?? ""} onChange={(e) => setFields((arr) => arr.map((x, j) => (j === i ? { ...x, min: e.target.value } : x)))} />
+                    <input className="input text-xs" type="number" placeholder="max" value={f.max ?? ""} onChange={(e) => setFields((arr) => arr.map((x, j) => (j === i ? { ...x, max: e.target.value } : x)))} />
+                  </div>
+                )}
+                {f.kind === "string" && (
+                  <input className="input text-xs" placeholder="pattern (regex, optional)" value={f.pattern ?? ""} onChange={(e) => setFields((arr) => arr.map((x, j) => (j === i ? { ...x, pattern: e.target.value } : x)))} />
+                )}
               </div>
             ))}
           </div>
@@ -205,6 +281,41 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
           </L>
         </div>
 
+        <div className="rounded-lg border border-slate-200 p-4 space-y-3">
+          <p className="text-xs font-medium text-slate-600">Compliance rules</p>
+          <div className="grid grid-cols-2 gap-4">
+            <L label="Max holders" hint="Optional cap on distinct holders">
+              <input className="input" type="number" min="0" value={maxHolders} onChange={(e) => setMaxHolders(e.target.value)} placeholder="e.g. 100" />
+            </L>
+            <L label="Lockup (days)" hint="Optional post-issuance lockup">
+              <input className="input" type="number" min="0" value={lockupDays} onChange={(e) => setLockupDays(e.target.value)} placeholder="e.g. 30" />
+            </L>
+          </div>
+          <L label="Allowed jurisdictions" hint="Comma-separated country codes, e.g. US, GB, SG">
+            <input className="input" value={allowedJurisdictions} onChange={(e) => setAllowedJurisdictions(e.target.value)} placeholder="US, GB, SG" />
+          </L>
+        </div>
+
+        <div className="rounded-lg border border-slate-200 p-4 space-y-3">
+          <p className="text-xs font-medium text-slate-600">Fees &amp; default sale terms</p>
+          <div className="grid grid-cols-2 gap-4">
+            <L label="Marketplace fee" hint="basis points, e.g. 250 = 2.5%">
+              <input className="input" type="number" min="0" max="10000" value={marketplaceBps} onChange={(e) => setMarketplaceBps(e.target.value)} placeholder="e.g. 250" />
+            </L>
+            <L label="Issuance flat fee" hint="Optional flat fee (integer)">
+              <input className="input" type="number" min="0" step="1" value={issuanceFlat} onChange={(e) => setIssuanceFlat(e.target.value)} placeholder="e.g. 5" />
+            </L>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <L label="Default unit price" hint="Pre-fills the issue form's sale price">
+              <input className="input" type="number" min="0" value={defaultUnitPrice} onChange={(e) => setDefaultUnitPrice(e.target.value)} placeholder="e.g. 5" />
+            </L>
+            <L label="Default currency" hint="e.g. USD">
+              <input className="input" value={defaultCurrency} onChange={(e) => setDefaultCurrency(e.target.value.toUpperCase())} placeholder="e.g. USD" />
+            </L>
+          </div>
+        </div>
+
         <L label="Roles">
           <div className="flex flex-wrap gap-2">
             {ALL_ROLES.map((r) => (
@@ -217,7 +328,7 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
 
         {error && <p className="text-sm text-red-600">{error}</p>}
         {ok && <p className="text-sm text-emerald-600">{ok}</p>}
-        <button type="submit" disabled={busy || !key || !name || !symbol} className="rounded-lg bg-brand-600 text-white px-5 py-2 text-sm font-medium hover:bg-brand-700 disabled:opacity-50">
+        <button type="submit" disabled={busy || !key || !name || !symbol || hasEmptyEnum} className="rounded-lg bg-brand-600 text-white px-5 py-2 text-sm font-medium hover:bg-brand-700 disabled:opacity-50">
           {busy ? "Creating…" : "Create use case"}
         </button>
       </form>
