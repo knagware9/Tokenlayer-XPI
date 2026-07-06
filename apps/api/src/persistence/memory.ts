@@ -9,6 +9,8 @@ import type {
   AuditRepository,
   CashBalanceRecord,
   CashRepository,
+  ListingRecord,
+  ListingRepository,
   Page,
   Paged,
   SaleTerms,
@@ -138,6 +140,41 @@ export class MemoryUseCaseRepository implements UseCaseRepository {
     const def = normalizeUseCaseDefinition({ ...raw, key });
     this.byKey.set(key, def);
     return def;
+  }
+}
+
+export class MemoryListingRepository implements ListingRepository {
+  private readonly byId = new Map<string, ListingRecord>();
+  async create(input: Pick<ListingRecord, "assetId" | "seller" | "quantity" | "unitPrice" | "currency">): Promise<ListingRecord> {
+    const at = now();
+    const rec: ListingRecord = { ...input, id: id("listing"), status: "open", createdAt: at, updatedAt: at };
+    this.byId.set(rec.id, rec);
+    return rec;
+  }
+  async get(listingId: string): Promise<ListingRecord | null> {
+    return this.byId.get(listingId) ?? null;
+  }
+  async listByAsset(assetId: string, status?: string): Promise<ListingRecord[]> {
+    return [...this.byId.values()]
+      .filter((l) => l.assetId === assetId)
+      .filter((l) => (!status || l.status === status))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+  async decrement(listingId: string, by: string): Promise<ListingRecord> {
+    const rec = this.byId.get(listingId);
+    if (!rec) throw new Error(`unknown listing '${listingId}'`);
+    const remaining = BigInt(rec.quantity) - BigInt(by);
+    if (remaining < 0n) throw new Error(`listing '${listingId}' cannot go below zero (has ${rec.quantity}, decrement ${by})`);
+    rec.quantity = remaining.toString();
+    if (remaining === 0n) rec.status = "filled";
+    rec.updatedAt = now();
+    return rec;
+  }
+  async cancel(listingId: string): Promise<void> {
+    const rec = this.byId.get(listingId);
+    if (!rec) throw new Error(`unknown listing '${listingId}'`);
+    rec.status = "cancelled";
+    rec.updatedAt = now();
   }
 }
 

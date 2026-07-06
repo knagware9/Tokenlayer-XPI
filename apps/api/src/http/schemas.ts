@@ -304,6 +304,24 @@ export const components: Record<string, unknown>[] = [
     required: ["scope", "useCaseKey", "totals", "byLedger", "byUseCase", "activity", "recent"],
   },
   {
+    $id: "Listing",
+    type: "object",
+    additionalProperties: true,
+    description: "A secondary-market sell listing; `quantity` is the REMAINING quantity.",
+    properties: {
+      id: { type: "string" },
+      assetId: { type: "string" },
+      seller: { type: "string" },
+      quantity: { type: "string" },
+      unitPrice: { type: "string" },
+      currency: { type: "string" },
+      status: { type: "string", enum: ["open", "filled", "cancelled"] },
+      createdAt: { type: "string" },
+      updatedAt: { type: "string" },
+    },
+    required: ["id", "assetId", "seller", "quantity", "unitPrice", "currency", "status", "createdAt"],
+  },
+  {
     $id: "Receipt",
     type: "object",
     additionalProperties: true,
@@ -513,6 +531,104 @@ export const S: Record<string, FastifySchema> = {
       },
     },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
+  },
+
+  createListing: {
+    tags: ["Marketplace"], summary: "List tokens for sale (moves them into escrow)", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    body: {
+      type: "object",
+      additionalProperties: false,
+      required: ["quantity", "unitPrice", "currency"],
+      properties: {
+        quantity: { type: "string" },
+        unitPrice: { type: "string" },
+        currency: { type: "string" },
+      },
+    },
+    response: { 201: { $ref: "Listing#" }, ...errs(400, 401, 403, 404, 503) },
+  },
+  listListings: {
+    tags: ["Marketplace"], summary: "Open sell listings for an asset (price asc)", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    response: {
+      200: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: true,
+          properties: {
+            id: { type: "string" },
+            seller: { type: "string" },
+            quantity: { type: "string" },
+            unitPrice: { type: "string" },
+            currency: { type: "string" },
+            createdAt: { type: "string" },
+          },
+          required: ["id", "seller", "quantity", "unitPrice", "currency", "createdAt"],
+        },
+      },
+      ...errs(401, 404, 503),
+    },
+  },
+  takeListing: {
+    tags: ["Marketplace"], summary: "Take (buy from) a listing — escrowed DvP with fee split", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    body: {
+      type: "object",
+      additionalProperties: false,
+      required: ["quantity"],
+      properties: {
+        quantity: { type: "string" },
+      },
+    },
+    response: {
+      200: {
+        type: "object",
+        additionalProperties: true,
+        properties: {
+          listing: { $ref: "Listing#" },
+          txHash: { type: "string" },
+          fee: {
+            type: "object",
+            additionalProperties: true,
+            nullable: true,
+            properties: { amount: { type: "string" }, account: { type: "string" } },
+          },
+        },
+        required: ["listing", "txHash"],
+      },
+      ...errs(400, 401, 403, 404, 503),
+    },
+  },
+  cancelListing: {
+    tags: ["Marketplace"], summary: "Cancel a listing (returns remaining tokens to the seller)", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    response: { 204: { type: "null" }, ...errs(400, 401, 403, 404, 503) },
+  },
+  assetTrades: {
+    tags: ["Marketplace"], summary: "Recent trades for an asset (from the audit stream, newest first)", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    response: {
+      200: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: true,
+          properties: {
+            at: { type: "string" },
+            amount: { type: "string", nullable: true },
+            unitPrice: { type: "string", nullable: true },
+            currency: { type: "string", nullable: true },
+            from: { type: "string", nullable: true },
+            to: { type: "string", nullable: true },
+            secondary: { type: "boolean" },
+          },
+          required: ["at", "secondary"],
+        },
+      },
+      ...errs(401, 404, 503),
+    },
   },
 
   creditCash: {

@@ -116,6 +116,31 @@ export interface UseCaseRepository extends UseCaseSource {
   update(key: string, def: UseCaseDefinition): Promise<UseCaseDefinition>;
 }
 
+/** A secondary-market sell listing. `quantity` is the REMAINING quantity. */
+export interface ListingRecord {
+  id: string;
+  assetId: string;
+  seller: string; // wallet address
+  quantity: string; // REMAINING quantity (decrements on takes)
+  unitPrice: string;
+  currency: string;
+  status: string; // open | filled | cancelled
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ListingRepository {
+  create(input: Pick<ListingRecord, "assetId" | "seller" | "quantity" | "unitPrice" | "currency">): Promise<ListingRecord>;
+  get(id: string): Promise<ListingRecord | null>;
+  listByAsset(assetId: string, status?: string): Promise<ListingRecord[]>;
+  /**
+   * Subtract `by` from the remaining quantity (BigInt math); sets status
+   * "filled" when the remainder reaches 0. Throws if it would go negative.
+   */
+  decrement(id: string, by: string): Promise<ListingRecord>;
+  cancel(id: string): Promise<void>;
+}
+
 export interface CashBalanceRecord {
   currency: string;
   address: string;

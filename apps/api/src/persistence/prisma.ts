@@ -21,6 +21,8 @@ import type {
   CashRepository,
   KycDetails,
   KycStatus,
+  ListingRecord,
+  ListingRepository,
   Page,
   Paged,
   SaleTerms,
@@ -320,6 +322,61 @@ export class PrismaUseCaseRepository implements UseCaseRepository {
     const { key: _omit, ...data } = useCaseToData(def);
     await prisma.useCase.update({ where: { key }, data });
     return def;
+  }
+}
+
+const toListing = (r: {
+  id: string;
+  assetId: string;
+  seller: string;
+  quantity: string;
+  unitPrice: string;
+  currency: string;
+  status: string;
+  createdAt: Date;
+  updatedAt: Date;
+}): ListingRecord => ({
+  id: r.id,
+  assetId: r.assetId,
+  seller: r.seller,
+  quantity: r.quantity,
+  unitPrice: r.unitPrice,
+  currency: r.currency,
+  status: r.status,
+  createdAt: r.createdAt.toISOString(),
+  updatedAt: r.updatedAt.toISOString(),
+});
+
+export class PrismaListingRepository implements ListingRepository {
+  async create(input: Pick<ListingRecord, "assetId" | "seller" | "quantity" | "unitPrice" | "currency">): Promise<ListingRecord> {
+    return toListing(await prisma.listing.create({ data: { ...input, status: "open" } }));
+  }
+  async get(id: string): Promise<ListingRecord | null> {
+    const r = await prisma.listing.findUnique({ where: { id } });
+    return r ? toListing(r) : null;
+  }
+  async listByAsset(assetId: string, status?: string): Promise<ListingRecord[]> {
+    const rows = await prisma.listing.findMany({
+      where: { assetId, ...(status ? { status } : {}) },
+      orderBy: { createdAt: "asc" },
+    });
+    return rows.map(toListing);
+  }
+  async decrement(id: string, by: string): Promise<ListingRecord> {
+    return prisma.$transaction(async (tx) => {
+      const r = await tx.listing.findUnique({ where: { id } });
+      if (!r) throw new Error(`unknown listing '${id}'`);
+      const remaining = BigInt(r.quantity) - BigInt(by);
+      if (remaining < 0n) throw new Error(`listing '${id}' cannot go below zero (has ${r.quantity}, decrement ${by})`);
+      const updated = await tx.listing.update({
+        where: { id },
+        data: { quantity: remaining.toString(), ...(remaining === 0n ? { status: "filled" } : {}) },
+      });
+      return toListing(updated);
+    });
+  }
+  async cancel(id: string): Promise<void> {
+    await prisma.listing.update({ where: { id }, data: { status: "cancelled" } });
   }
 }
 

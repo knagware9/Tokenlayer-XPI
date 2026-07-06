@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { AssetRecord, KycDetails, KycStatus } from "../persistence/types.js";
+import type { AssetRecord, KycDetails, KycStatus, ListingRecord } from "../persistence/types.js";
 import { canCreateUser, canManageUsers, normalizeUseCaseDefinition, PolicyError, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { isSupportedCurrency } from "../currencies.js";
@@ -533,6 +533,245 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       }
       throw err; // delivery failed but cash was refunded — surface the real cause
     }
+  });
+
+  // --- secondary market: escrowed sell-listings -----------------------------
+
+  // The market runs only when an escrow account is configured. When absent,
+  // every market endpoint answers 503 so clients can distinguish "disabled"
+  // from "not found" / "bad request".
+  function marketDisabled(reply: FastifyReply): FastifyReply | null {
+    if (deps.marketEscrowAccount) return null;
+    return reply.code(503).send({ error: "MARKET_DISABLED", message: "the secondary market is not configured (MARKET_ESCROW_ACCOUNT is unset)" });
+  }
+
+  // The caller's linked wallet address (seller on list, buyer on take), or null.
+  async function walletOf(claims: TokenClaims): Promise<string | null> {
+    const me = await deps.users.findById(claims.id);
+    if (!me?.accountId) return null;
+    return (await deps.accounts.findById(me.accountId))?.address ?? null;
+  }
+
+  // Loads a listing and its asset, enforcing use-case scope through the asset.
+  // Out-of-scope callers get the same 404 as a missing listing (hides existence).
+  async function scopedListing(request: FastifyRequest, reply: FastifyReply): Promise<{ listing: ListingRecord; asset: AssetRecord } | null> {
+    const { id } = request.params as { id: string };
+    const listing = await deps.listings.get(id);
+    const asset = listing ? await deps.assets.get(listing.assetId) : null;
+    if (!listing || !asset || !scopedToCaller(request.user as TokenClaims, asset.useCaseKey)) {
+      notFound(reply, "listing not found");
+      return null;
+    }
+    return { listing, asset };
+  }
+
+  app.post("/assets/:id/listings", { schema: S.createListing, ...auth }, async (request, reply) => {
+    if (marketDisabled(reply)) return reply;
+    const escrow = deps.marketEscrowAccount!;
+    const asset = await scopedAsset(request, reply, "read"); // 404 pattern, like /buy
+    if (!asset) return reply;
+    if (asset.tokenType !== "fungible") {
+      return reply.code(400).send({ error: "WRONG_TOKEN_TYPE", message: "only fungible assets can be listed on the market" });
+    }
+    if (asset.status !== "active") {
+      return reply.code(400).send({ error: "ASSET_NOT_ACTIVE", message: "this asset is not active" });
+    }
+    const { quantity, unitPrice, currency } = request.body as { quantity: string; unitPrice: string; currency: string };
+    if (!isPositiveIntString(quantity)) return reply.code(400).send({ error: "INVALID_QUANTITY", message: "quantity must be a positive integer" });
+    if (!isPositiveIntString(unitPrice)) return reply.code(400).send({ error: "INVALID_PRICE", message: "unitPrice must be a positive integer" });
+    if (!isSupportedCurrency(currency)) return reply.code(400).send({ error: "UNSUPPORTED_CURRENCY", message: `currency '${currency}' is not supported` });
+
+    const claims = request.user as TokenClaims;
+    const actor = actorOf(request);
+    const seller = await walletOf(claims);
+    if (!seller) return reply.code(400).send({ error: "NO_WALLET", message: "your account has no linked wallet to sell from" });
+
+    const ctx = contextOf(asset);
+    // Clean pre-check: the engine would reject the escrow transfer anyway, but a
+    // typed INSUFFICIENT_BALANCE beats an opaque ledger revert.
+    if (BigInt(await deps.engine.balanceOf(actor, ctx, seller).catch(() => "0")) < BigInt(quantity)) {
+      return reply.code(400).send({ error: "INSUFFICIENT_BALANCE", message: `you hold fewer than ${quantity} tokens of this asset` });
+    }
+
+    // Auto-allowlist the escrow on this asset on first use (mirrors the issue
+    // route's treasury auto-allowlisting). Listing callers (Buyer/Trader) lack
+    // the "allow" RBAC right, so when the caller cannot allow we act as the
+    // platform operator — the audit entry records the operator actor.
+    const useCase = await deps.useCases.get(asset.useCaseKey);
+    if (useCase.compliance.allowlist) {
+      const adapter = deps.chains.resolveAdapter(asset.chainId);
+      if (!(await adapter.isAllowed(ctx.ref, escrow).catch(() => false))) {
+        const allowActor = deps.rbac.can(actor.role, "allow") ? actor : { id: "platform-operator", role: "PlatformAdmin" as const };
+        await deps.engine.setAllowed(allowActor, ctx, escrow, true);
+      }
+    }
+
+    // Escrow the tokens (engine enforces RBAC, lifecycle.transfer, allowlist,
+    // freeze, and the seller's lockup), then create the row. If the row create
+    // fails, compensate by releasing the escrowed tokens back to the seller.
+    await deps.engine.escrowList(actor, ctx, seller, escrow, quantity);
+    let listing;
+    try {
+      listing = await deps.listings.create({ assetId: asset.id, seller, quantity, unitPrice, currency });
+    } catch (err) {
+      try {
+        await deps.engine.escrowRelease(actor, ctx, escrow, seller, quantity);
+      } catch (releaseErr) {
+        request.log.error({ err, releaseErr, seller, escrow, quantity, assetId: asset.id }, "listing row create failed AND escrow release failed — manual reconciliation required");
+        throw releaseErr;
+      }
+      throw err;
+    }
+    return reply.code(201).send(listing);
+  });
+
+  app.get("/assets/:id/listings", { schema: S.listListings, ...auth }, async (request, reply) => {
+    if (marketDisabled(reply)) return reply;
+    const asset = await scopedAsset(request, reply, "read");
+    if (!asset) return reply;
+    const open = await deps.listings.listByAsset(asset.id, "open");
+    return open
+      .sort((a, b) => {
+        const byPrice = BigInt(a.unitPrice) < BigInt(b.unitPrice) ? -1 : BigInt(a.unitPrice) > BigInt(b.unitPrice) ? 1 : 0;
+        return byPrice !== 0 ? byPrice : a.createdAt.localeCompare(b.createdAt);
+      })
+      .map((l) => ({ id: l.id, seller: l.seller, quantity: l.quantity, unitPrice: l.unitPrice, currency: l.currency, createdAt: l.createdAt }));
+  });
+
+  app.post("/listings/:id/take", { schema: S.takeListing, ...auth }, async (request, reply) => {
+    if (marketDisabled(reply)) return reply;
+    const escrow = deps.marketEscrowAccount!;
+    const scoped = await scopedListing(request, reply);
+    if (!scoped) return reply;
+    const { listing, asset } = scoped;
+
+    // Guards, in order: open → wallet → not own listing → quantity → funds.
+    if (listing.status !== "open") {
+      return reply.code(400).send({ error: "LISTING_NOT_OPEN", message: `this listing is ${listing.status}` });
+    }
+    const claims = request.user as TokenClaims;
+    const buyerWallet = await walletOf(claims);
+    if (!buyerWallet) return reply.code(400).send({ error: "NO_WALLET", message: "your account has no linked wallet to receive tokens" });
+    if (buyerWallet === listing.seller) {
+      return reply.code(400).send({ error: "OWN_LISTING", message: "you cannot take your own listing" });
+    }
+    const quantity = (request.body as { quantity: string }).quantity;
+    if (!isPositiveIntString(quantity)) return reply.code(400).send({ error: "INVALID_QUANTITY", message: "quantity must be a positive integer" });
+    if (BigInt(quantity) > BigInt(listing.quantity)) {
+      return reply.code(400).send({ error: "TAKE_EXCEEDS_REMAINING", message: `only ${listing.quantity} remain on this listing` });
+    }
+    const { unitPrice, currency, seller } = listing;
+    const cost = (BigInt(unitPrice) * BigInt(quantity)).toString();
+    if (BigInt(await deps.cash.balanceOf(currency, buyerWallet)) < BigInt(cost)) {
+      return reply.code(400).send({ error: "INSUFFICIENT_FUNDS", message: `you need ${cost} ${currency}` });
+    }
+
+    // Marketplace fee — same rules as the primary /buy: a bps slice of the
+    // payment goes to the platform fee account, the remainder to the SELLER.
+    const useCase = await deps.useCases.get(asset.useCaseKey);
+    const feeAccount = deps.platformFeeAccount;
+    const bps = feeAccount ? (useCase.fees?.marketplaceBps ?? 0) : 0;
+    const fee = ((BigInt(cost) * BigInt(bps)) / 10000n).toString();
+    const toSeller = (BigInt(cost) - BigInt(fee)).toString();
+
+    // Payment-first with compensation: fee leg, then seller leg; if the seller
+    // leg fails, refund the fee leg so the buyer is made whole.
+    if (BigInt(fee) > 0n && feeAccount) {
+      await deps.cash.transfer(currency, buyerWallet, feeAccount, fee);
+    }
+    try {
+      await deps.cash.transfer(currency, buyerWallet, seller, toSeller);
+    } catch (err) {
+      if (BigInt(fee) > 0n && feeAccount) {
+        try {
+          await deps.cash.transfer(currency, feeAccount, buyerWallet, fee);
+        } catch (refundErr) {
+          request.log.error({ err, refundErr, buyerWallet, feeAccount, currency, fee }, "take seller leg failed AND fee refund failed — manual reconciliation required");
+          throw refundErr;
+        }
+      }
+      throw err;
+    }
+
+    const actor = actorOf(request);
+    const ctx = contextOf(asset);
+    let receipt;
+    try {
+      // Delivery leg: escrow → buyer. The engine enforces buyer-side compliance
+      // (allowlist, freeze, jurisdiction, holder-limit) and audits as a
+      // secondary "buy" with the price + fee metadata.
+      const meta = { unitPrice, currency, cost, ...(fee !== "0" ? { fee, feeAccount } : {}) };
+      receipt = await deps.engine.settleFromEscrow(actor, ctx, escrow, buyerWallet, quantity, meta);
+    } catch (err) {
+      // Delivery failed — reverse BOTH cash legs, then surface the real cause.
+      try {
+        await deps.cash.transfer(currency, seller, buyerWallet, toSeller);
+        if (BigInt(fee) > 0n && feeAccount) await deps.cash.transfer(currency, feeAccount, buyerWallet, fee);
+      } catch (refundErr) {
+        request.log.error({ err, refundErr, buyerWallet, seller, feeAccount, currency, cost }, "take delivery failed AND cash refund failed — manual reconciliation required");
+        throw refundErr;
+      }
+      throw err;
+    }
+
+    // Tokens are delivered and cash settled — the trade is done. If the row
+    // decrement fails, log loudly (reconciliation case), never fail the request.
+    let updated = listing;
+    try {
+      updated = await deps.listings.decrement(listing.id, quantity);
+    } catch (err) {
+      request.log.error({ err, listingId: listing.id, quantity }, "listing decrement failed AFTER delivery — listing row out of sync, manual reconciliation required");
+      updated = { ...listing, quantity: (BigInt(listing.quantity) - BigInt(quantity)).toString() };
+    }
+    return reply.code(200).send({ listing: updated, txHash: receipt.txHash, ...(BigInt(fee) > 0n && feeAccount ? { fee: { amount: fee, account: feeAccount } } : {}) });
+  });
+
+  app.delete("/listings/:id", { schema: S.cancelListing, ...auth }, async (request, reply) => {
+    if (marketDisabled(reply)) return reply;
+    const escrow = deps.marketEscrowAccount!;
+    const scoped = await scopedListing(request, reply);
+    if (!scoped) return reply;
+    const { listing, asset } = scoped;
+    const claims = request.user as TokenClaims;
+
+    // Only the seller (own listing) or an admin may cancel.
+    const isAdmin = claims.role === "UseCaseAdmin" || claims.role === "PlatformAdmin";
+    if (!isAdmin && (await walletOf(claims)) !== listing.seller) {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "only the seller or an admin may cancel this listing" });
+    }
+    if (listing.status !== "open") {
+      return reply.code(400).send({ error: "LISTING_NOT_OPEN", message: `this listing is ${listing.status}` });
+    }
+    if (BigInt(listing.quantity) > 0n) {
+      await deps.engine.escrowRelease(actorOf(request), contextOf(asset), escrow, listing.seller, listing.quantity);
+    }
+    await deps.listings.cancel(listing.id);
+    return reply.code(204).send();
+  });
+
+  app.get("/assets/:id/trades", { schema: S.assetTrades, ...auth }, async (request, reply) => {
+    if (marketDisabled(reply)) return reply;
+    const asset = await scopedAsset(request, reply, "read");
+    if (!asset) return reply;
+    // Trades = the asset's audit "buy" entries (primary + secondary), newest
+    // first. Fetch a generous page then filter, since buys interleave with
+    // other lifecycle entries. Older entries may lack price fields — tolerated.
+    const { items } = await deps.audit.listByAsset(asset.id, { limit: 1000 });
+    return items
+      .filter((e) => e.action === "buy")
+      .slice(0, 50)
+      .map((e) => {
+        const p = e.payload as Record<string, unknown>;
+        return {
+          at: e.createdAt,
+          amount: typeof p.amount === "string" ? p.amount : null,
+          unitPrice: typeof p.unitPrice === "string" ? p.unitPrice : null,
+          currency: typeof p.currency === "string" ? p.currency : null,
+          from: typeof p.from === "string" ? p.from : null,
+          to: typeof p.to === "string" ? p.to : null,
+          secondary: p.secondary === true,
+        };
+      });
   });
 
   // --- cash (CBDC) --------------------------------------------------------
