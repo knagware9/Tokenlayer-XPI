@@ -30,6 +30,7 @@ import type {
   UserRecord,
   UserRepository,
 } from "./types.js";
+import { ListingConflictError } from "./types.js";
 
 export const prisma = new PrismaClient();
 
@@ -362,21 +363,70 @@ export class PrismaListingRepository implements ListingRepository {
     });
     return rows.map(toListing);
   }
-  async decrement(id: string, by: string): Promise<ListingRecord> {
-    return prisma.$transaction(async (tx) => {
-      const r = await tx.listing.findUnique({ where: { id } });
+  // Optimistic CAS, NOT a `quantity: { gte: by }` filter: `quantity` is a
+  // string column, so SQL comparisons would be lexicographic ("9" > "100").
+  // Each attempt reads the row, validates with BigInt, then updates guarded on
+  // the exact (status, quantity) it read — `count === 0` means a concurrent
+  // writer moved the row first, so re-read and retry (bounded).
+  private static readonly CAS_ATTEMPTS = 3;
+
+  async reserve(id: string, by: string): Promise<ListingRecord> {
+    for (let attempt = 0; attempt < PrismaListingRepository.CAS_ATTEMPTS; attempt++) {
+      const r = await prisma.listing.findUnique({ where: { id } });
       if (!r) throw new Error(`unknown listing '${id}'`);
+      if (r.status !== "open") throw new ListingConflictError("LISTING_NOT_OPEN", `listing '${id}' is ${r.status}`);
       const remaining = BigInt(r.quantity) - BigInt(by);
-      if (remaining < 0n) throw new Error(`listing '${id}' cannot go below zero (has ${r.quantity}, decrement ${by})`);
-      const updated = await tx.listing.update({
-        where: { id },
-        data: { quantity: remaining.toString(), ...(remaining === 0n ? { status: "filled" } : {}) },
+      if (remaining < 0n) throw new ListingConflictError("TAKE_EXCEEDS_REMAINING", `only ${r.quantity} remain on listing '${id}'`);
+      const newStatus = remaining === 0n ? "filled" : "open";
+      const { count } = await prisma.listing.updateMany({
+        where: { id, status: r.status, quantity: r.quantity },
+        data: { quantity: remaining.toString(), status: newStatus },
       });
-      return toListing(updated);
-    });
+      if (count === 1) return { ...toListing(r), quantity: remaining.toString(), status: newStatus, updatedAt: new Date().toISOString() };
+    }
+    throw new ListingConflictError("LISTING_CONFLICT", `listing '${id}' kept changing under concurrent takes — retry`);
   }
-  async cancel(id: string): Promise<void> {
-    await prisma.listing.update({ where: { id }, data: { status: "cancelled" } });
+  async restore(id: string, by: string): Promise<ListingRecord> {
+    for (let attempt = 0; attempt < PrismaListingRepository.CAS_ATTEMPTS; attempt++) {
+      const r = await prisma.listing.findUnique({ where: { id } });
+      if (!r) throw new Error(`unknown listing '${id}'`);
+      const newQty = (BigInt(r.quantity) + BigInt(by)).toString();
+      const newStatus = r.status === "filled" ? "open" : r.status;
+      const { count } = await prisma.listing.updateMany({
+        where: { id, status: r.status, quantity: r.quantity },
+        data: { quantity: newQty, status: newStatus },
+      });
+      if (count === 1) return { ...toListing(r), quantity: newQty, status: newStatus, updatedAt: new Date().toISOString() };
+    }
+    throw new ListingConflictError("LISTING_CONFLICT", `listing '${id}' kept changing while restoring ${by} — manual reconciliation may be required`);
+  }
+  async cancel(id: string): Promise<ListingRecord> {
+    for (let attempt = 0; attempt < PrismaListingRepository.CAS_ATTEMPTS; attempt++) {
+      const r = await prisma.listing.findUnique({ where: { id } });
+      if (!r) throw new Error(`unknown listing '${id}'`);
+      if (r.status !== "open") throw new ListingConflictError("LISTING_NOT_OPEN", `listing '${id}' is ${r.status}`);
+      // Guard on the exact quantity read so a cancel racing a take never
+      // releases more than the post-take remainder — the retry re-reads it.
+      const { count } = await prisma.listing.updateMany({
+        where: { id, status: "open", quantity: r.quantity },
+        data: { status: "cancelled" },
+      });
+      if (count === 1) return { ...toListing(r), status: "cancelled", updatedAt: new Date().toISOString() };
+    }
+    throw new ListingConflictError("LISTING_CONFLICT", `listing '${id}' kept changing under concurrent activity — retry`);
+  }
+  async reopen(id: string): Promise<ListingRecord> {
+    for (let attempt = 0; attempt < PrismaListingRepository.CAS_ATTEMPTS; attempt++) {
+      const r = await prisma.listing.findUnique({ where: { id } });
+      if (!r) throw new Error(`unknown listing '${id}'`);
+      if (r.status === "open") return toListing(r);
+      const { count } = await prisma.listing.updateMany({
+        where: { id, status: r.status, quantity: r.quantity },
+        data: { status: "open" },
+      });
+      if (count === 1) return { ...toListing(r), status: "open", updatedAt: new Date().toISOString() };
+    }
+    throw new ListingConflictError("LISTING_CONFLICT", `listing '${id}' kept changing while reopening — manual reconciliation may be required`);
   }
 }
 

@@ -129,16 +129,53 @@ export interface ListingRecord {
   updatedAt: string;
 }
 
+/**
+ * Typed conflict signal from listing state transitions, so the HTTP layer can
+ * map races to precise status codes instead of opaque 500s.
+ * - LISTING_NOT_OPEN: the listing is filled/cancelled (or became so under our feet)
+ * - TAKE_EXCEEDS_REMAINING: the reservation asks for more than remains
+ * - LISTING_CONFLICT: optimistic-concurrency retries exhausted (concurrent writer)
+ */
+export class ListingConflictError extends Error {
+  constructor(
+    public readonly code: "LISTING_CONFLICT" | "TAKE_EXCEEDS_REMAINING" | "LISTING_NOT_OPEN",
+    message: string,
+  ) {
+    super(message);
+    this.name = "ListingConflictError";
+  }
+}
+
 export interface ListingRepository {
   create(input: Pick<ListingRecord, "assetId" | "seller" | "quantity" | "unitPrice" | "currency">): Promise<ListingRecord>;
   get(id: string): Promise<ListingRecord | null>;
   listByAsset(assetId: string, status?: string): Promise<ListingRecord[]>;
   /**
-   * Subtract `by` from the remaining quantity (BigInt math); sets status
-   * "filled" when the remainder reaches 0. Throws if it would go negative.
+   * Atomically reserve `by` tokens from the remaining quantity — the take
+   * route's single defence against concurrent over-delivery from the pooled
+   * escrow. Decrements ONLY if status is "open" AND remaining ≥ `by` (BigInt
+   * math); sets status "filled" when the remainder reaches 0. Throws
+   * ListingConflictError (LISTING_NOT_OPEN / TAKE_EXCEEDS_REMAINING /
+   * LISTING_CONFLICT) otherwise — never partially applies.
    */
-  decrement(id: string, by: string): Promise<ListingRecord>;
-  cancel(id: string): Promise<void>;
+  reserve(id: string, by: string): Promise<ListingRecord>;
+  /**
+   * Compensation for a failed take AFTER reserve: add `by` back to the
+   * remaining quantity and re-open a "filled" listing.
+   */
+  restore(id: string, by: string): Promise<ListingRecord>;
+  /**
+   * Atomically flip an "open" listing to "cancelled" (CAS) and return the row
+   * as of cancellation — callers release exactly the returned `quantity` from
+   * escrow. Throws ListingConflictError when the listing is not open (lost
+   * race with a cancel) or the CAS keeps losing to concurrent takes.
+   */
+  cancel(id: string): Promise<ListingRecord>;
+  /**
+   * Compensation for a failed escrow release AFTER cancel: flip a "cancelled"
+   * listing back to "open" with its quantity untouched.
+   */
+  reopen(id: string): Promise<ListingRecord>;
 }
 
 export interface CashBalanceRecord {

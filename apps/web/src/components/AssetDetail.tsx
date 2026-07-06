@@ -430,7 +430,7 @@ function Market({
   const doTake = (l: Listing): Promise<void> =>
     act(async () => {
       const qty = takeQty[l.id];
-      if (!qty || !/^\d+$/.test(qty)) throw new ApiError("Quantity must be a whole number", 400, "INVALID_QUANTITY");
+      if (!qty || !/^\d+$/.test(qty) || BigInt(qty) === 0n) throw new ApiError("Quantity must be a positive whole number", 400, "INVALID_QUANTITY");
       await api.takeListing(token!, l.id, qty);
       setTakeQty((s) => ({ ...s, [l.id]: "" }));
     }, "Take failed");
@@ -450,8 +450,11 @@ function Market({
   if (!loaded) return null;
 
   const canBuy = can(role, "buy");
+  const canList = can(role, "list");
+  const canCancelListing = can(role, "cancel-listing");
+  const posInt = (s: string): boolean => /^\d+$/.test(s) && BigInt(s) > 0n;
   const myListings = wallet ? listings.filter((l) => l.seller.toLowerCase() === wallet) : [];
-  const sellReady = /^\d+$/.test(sellQty) && /^\d+$/.test(sellPrice) && sellCurrency !== "";
+  const sellReady = posInt(sellQty) && posInt(sellPrice) && sellCurrency !== "";
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
@@ -495,7 +498,7 @@ function Market({
                               onChange={(e) => setTakeQty((s) => ({ ...s, [l.id]: e.target.value }))}
                             />
                             <button
-                              disabled={busy || own || !/^\d+$/.test(takeQty[l.id] ?? "")}
+                              disabled={busy || own || !posInt(takeQty[l.id] ?? "")}
                               title={own ? "your listing" : undefined}
                               onClick={() => void doTake(l)}
                               className="btn-sm border-slate-200 text-slate-600 hover:border-brand-500 disabled:opacity-40"
@@ -517,7 +520,7 @@ function Market({
             </table>
           </div>
 
-          {user?.walletAddress && (
+          {canList && user?.walletAddress && (
             <div className="space-y-2">
               <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Sell tokens</div>
               <div className="grid grid-cols-3 gap-3">
@@ -547,13 +550,15 @@ function Market({
                     <span className="font-mono">{l.quantity}</span>
                     <span>@ {l.unitPrice} {l.currency}</span>
                     <span className="text-[11px] text-slate-400">{new Date(l.createdAt).toLocaleString()}</span>
-                    <button
-                      disabled={busy}
-                      onClick={() => void doCancel(l.id)}
-                      className="ml-auto btn-sm border-slate-200 text-slate-600 hover:border-red-400 disabled:opacity-40"
-                    >
-                      Cancel
-                    </button>
+                    {canCancelListing && (
+                      <button
+                        disabled={busy}
+                        onClick={() => void doCancel(l.id)}
+                        className="ml-auto btn-sm border-slate-200 text-slate-600 hover:border-red-400 disabled:opacity-40"
+                      >
+                        Cancel
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>

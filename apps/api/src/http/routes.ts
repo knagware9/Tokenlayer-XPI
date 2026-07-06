@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AssetRecord, KycDetails, KycStatus, ListingRecord } from "../persistence/types.js";
+import { ListingConflictError } from "../persistence/types.js";
 import { canCreateUser, canManageUsers, normalizeUseCaseDefinition, PolicyError, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { isSupportedCurrency } from "../currencies.js";
@@ -674,21 +675,18 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const fee = ((BigInt(cost) * BigInt(bps)) / 10000n).toString();
     const toSeller = (BigInt(cost) - BigInt(fee)).toString();
 
-    // Payment-first with compensation: fee leg, then seller leg; if the seller
-    // leg fails, refund the fee leg so the buyer is made whole.
-    if (BigInt(fee) > 0n && feeAccount) {
-      await deps.cash.transfer(currency, buyerWallet, feeAccount, fee);
-    }
+    // ATOMIC RESERVE — the guards above are read-only prechecks; this is the
+    // real defence. The escrow account is POOLED across every listing of the
+    // asset, so a settle can "succeed" against another seller's escrowed tokens
+    // — the listing row's remaining quantity is the only per-listing ledger.
+    // Reserving it atomically BEFORE any value moves means two concurrent takes
+    // can never both draw on the same remainder.
+    let updated: ListingRecord;
     try {
-      await deps.cash.transfer(currency, buyerWallet, seller, toSeller);
+      updated = await deps.listings.reserve(listing.id, quantity);
     } catch (err) {
-      if (BigInt(fee) > 0n && feeAccount) {
-        try {
-          await deps.cash.transfer(currency, feeAccount, buyerWallet, fee);
-        } catch (refundErr) {
-          request.log.error({ err, refundErr, buyerWallet, feeAccount, currency, fee }, "take seller leg failed AND fee refund failed — manual reconciliation required");
-          throw refundErr;
-        }
+      if (err instanceof ListingConflictError) {
+        return reply.code(err.code === "LISTING_CONFLICT" ? 409 : 400).send({ error: err.code, message: err.message });
       }
       throw err;
     }
@@ -697,32 +695,52 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const ctx = contextOf(asset);
     let receipt;
     try {
-      // Delivery leg: escrow → buyer. The engine enforces buyer-side compliance
-      // (allowlist, freeze, jurisdiction, holder-limit) and audits as a
-      // secondary "buy" with the price + fee metadata.
-      const meta = { unitPrice, currency, cost, ...(fee !== "0" ? { fee, feeAccount } : {}) };
-      receipt = await deps.engine.settleFromEscrow(actor, ctx, escrow, buyerWallet, quantity, meta);
-    } catch (err) {
-      // Delivery failed — reverse BOTH cash legs, then surface the real cause.
-      try {
-        await deps.cash.transfer(currency, seller, buyerWallet, toSeller);
-        if (BigInt(fee) > 0n && feeAccount) await deps.cash.transfer(currency, feeAccount, buyerWallet, fee);
-      } catch (refundErr) {
-        request.log.error({ err, refundErr, buyerWallet, seller, feeAccount, currency, cost }, "take delivery failed AND cash refund failed — manual reconciliation required");
-        throw refundErr;
+      // Payment-first with compensation: fee leg, then seller leg; if the seller
+      // leg fails, refund the fee leg so the buyer is made whole.
+      if (BigInt(fee) > 0n && feeAccount) {
+        await deps.cash.transfer(currency, buyerWallet, feeAccount, fee);
       }
+      try {
+        await deps.cash.transfer(currency, buyerWallet, seller, toSeller);
+      } catch (err) {
+        if (BigInt(fee) > 0n && feeAccount) {
+          try {
+            await deps.cash.transfer(currency, feeAccount, buyerWallet, fee);
+          } catch (refundErr) {
+            request.log.error({ err, refundErr, buyerWallet, feeAccount, currency, fee }, "take seller leg failed AND fee refund failed — manual reconciliation required");
+            throw refundErr;
+          }
+        }
+        throw err;
+      }
+
+      try {
+        // Delivery leg: escrow → buyer. The engine enforces buyer-side compliance
+        // (allowlist, freeze, jurisdiction, holder-limit) and audits as a
+        // secondary "buy" with the price + fee metadata. `seller` rides along so
+        // audit folds debit the SELLER (the economic sender), not the pooled escrow.
+        const meta = { unitPrice, currency, cost, seller, ...(fee !== "0" ? { fee, feeAccount } : {}) };
+        receipt = await deps.engine.settleFromEscrow(actor, ctx, escrow, buyerWallet, quantity, meta);
+      } catch (err) {
+        // Delivery failed — reverse BOTH cash legs, then surface the real cause.
+        try {
+          await deps.cash.transfer(currency, seller, buyerWallet, toSeller);
+          if (BigInt(fee) > 0n && feeAccount) await deps.cash.transfer(currency, feeAccount, buyerWallet, fee);
+        } catch (refundErr) {
+          request.log.error({ err, refundErr, buyerWallet, seller, feeAccount, currency, cost }, "take delivery failed AND cash refund failed — manual reconciliation required");
+          throw refundErr;
+        }
+        throw err;
+      }
+    } catch (err) {
+      // Anything failed after the reserve — give the reserved quantity back so
+      // other buyers can take it (the cash legs were compensated above).
+      await deps.listings.restore(listing.id, quantity).catch((restoreErr) => {
+        request.log.error({ err, restoreErr, listingId: listing.id, quantity }, "take failed AFTER reserve AND listing restore failed — listing under-counts remaining, manual reconciliation required");
+      });
       throw err;
     }
 
-    // Tokens are delivered and cash settled — the trade is done. If the row
-    // decrement fails, log loudly (reconciliation case), never fail the request.
-    let updated = listing;
-    try {
-      updated = await deps.listings.decrement(listing.id, quantity);
-    } catch (err) {
-      request.log.error({ err, listingId: listing.id, quantity }, "listing decrement failed AFTER delivery — listing row out of sync, manual reconciliation required");
-      updated = { ...listing, quantity: (BigInt(listing.quantity) - BigInt(quantity)).toString() };
-    }
     return reply.code(200).send({ listing: updated, txHash: receipt.txHash, ...(BigInt(fee) > 0n && feeAccount ? { fee: { amount: fee, account: feeAccount } } : {}) });
   });
 
@@ -742,10 +760,33 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (listing.status !== "open") {
       return reply.code(400).send({ error: "LISTING_NOT_OPEN", message: `this listing is ${listing.status}` });
     }
-    if (BigInt(listing.quantity) > 0n) {
-      await deps.engine.escrowRelease(actorOf(request), contextOf(asset), escrow, listing.seller, listing.quantity);
+
+    // Flip the status FIRST (atomic CAS): once the row is "cancelled" no
+    // concurrent take can reserve from it and no concurrent cancel can pass the
+    // CAS, so the escrow can only be released once — and only for the remaining
+    // quantity as of the flip (a racing partial take re-runs the CAS read).
+    let cancelled: ListingRecord;
+    try {
+      cancelled = await deps.listings.cancel(listing.id);
+    } catch (err) {
+      if (err instanceof ListingConflictError) {
+        return reply.code(err.code === "LISTING_CONFLICT" ? 409 : 400).send({ error: err.code, message: err.message });
+      }
+      throw err;
     }
-    await deps.listings.cancel(listing.id);
+    if (BigInt(cancelled.quantity) > 0n) {
+      try {
+        await deps.engine.escrowRelease(actorOf(request), contextOf(asset), escrow, listing.seller, cancelled.quantity);
+      } catch (err) {
+        // Release failed — re-open the listing so it never sits "cancelled"
+        // while the escrow still holds the seller's tokens.
+        await deps.listings.reopen(listing.id).catch((reopenErr) => {
+          request.log.error({ err, reopenErr, listingId: listing.id, quantity: cancelled.quantity }, "cancel escrow release failed AND listing reopen failed — cancelled listing still holds escrow, manual reconciliation required");
+        });
+        request.log.error({ err, listingId: listing.id, seller: listing.seller, quantity: cancelled.quantity }, "cancel escrow release failed — listing re-opened");
+        throw err;
+      }
+    }
     return reply.code(204).send();
   });
 
@@ -756,18 +797,24 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     // Trades = the asset's audit "buy" entries (primary + secondary), newest
     // first. Fetch a generous page then filter, since buys interleave with
     // other lifecycle entries. Older entries may lack price fields — tolerated.
+    // TODO: the 1000-entry window means very active assets can push old buys
+    // out of the feed before 50 trades are collected — replace with an
+    // action-filtered repository query (paged on buys, not on all entries).
     const { items } = await deps.audit.listByAsset(asset.id, { limit: 1000 });
     return items
       .filter((e) => e.action === "buy")
       .slice(0, 50)
       .map((e) => {
         const p = e.payload as Record<string, unknown>;
+        // Secondary buys record `from = escrow` but carry the seller in the
+        // payload — surface the seller so trades read seller→buyer.
+        const from = typeof p.seller === "string" ? p.seller : typeof p.from === "string" ? p.from : null;
         return {
           at: e.createdAt,
           amount: typeof p.amount === "string" ? p.amount : null,
           unitPrice: typeof p.unitPrice === "string" ? p.unitPrice : null,
           currency: typeof p.currency === "string" ? p.currency : null,
-          from: typeof p.from === "string" ? p.from : null,
+          from,
           to: typeof p.to === "string" ? p.to : null,
           secondary: p.secondary === true,
         };

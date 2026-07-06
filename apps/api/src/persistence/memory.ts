@@ -18,6 +18,7 @@ import type {
   UserRecord,
   UserRepository,
 } from "./types.js";
+import { ListingConflictError } from "./types.js";
 
 let counter = 0;
 const id = (prefix: string): string => `${prefix}_${(++counter).toString(36)}`;
@@ -160,21 +161,44 @@ export class MemoryListingRepository implements ListingRepository {
       .filter((l) => (!status || l.status === status))
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
-  async decrement(listingId: string, by: string): Promise<ListingRecord> {
+  // Each method below is a single synchronous mutation per call — the JS event
+  // loop makes it atomic with respect to concurrent requests (no await between
+  // the check and the write), mirroring the Prisma repo's CAS semantics.
+  async reserve(listingId: string, by: string): Promise<ListingRecord> {
     const rec = this.byId.get(listingId);
     if (!rec) throw new Error(`unknown listing '${listingId}'`);
+    if (rec.status !== "open") throw new ListingConflictError("LISTING_NOT_OPEN", `listing '${listingId}' is ${rec.status}`);
     const remaining = BigInt(rec.quantity) - BigInt(by);
-    if (remaining < 0n) throw new Error(`listing '${listingId}' cannot go below zero (has ${rec.quantity}, decrement ${by})`);
+    if (remaining < 0n) throw new ListingConflictError("TAKE_EXCEEDS_REMAINING", `only ${rec.quantity} remain on listing '${listingId}'`);
     rec.quantity = remaining.toString();
     if (remaining === 0n) rec.status = "filled";
     rec.updatedAt = now();
-    return rec;
+    return { ...rec };
   }
-  async cancel(listingId: string): Promise<void> {
+  async restore(listingId: string, by: string): Promise<ListingRecord> {
     const rec = this.byId.get(listingId);
     if (!rec) throw new Error(`unknown listing '${listingId}'`);
+    rec.quantity = (BigInt(rec.quantity) + BigInt(by)).toString();
+    if (rec.status === "filled") rec.status = "open";
+    rec.updatedAt = now();
+    return { ...rec };
+  }
+  async cancel(listingId: string): Promise<ListingRecord> {
+    const rec = this.byId.get(listingId);
+    if (!rec) throw new Error(`unknown listing '${listingId}'`);
+    if (rec.status !== "open") throw new ListingConflictError("LISTING_NOT_OPEN", `listing '${listingId}' is ${rec.status}`);
     rec.status = "cancelled";
     rec.updatedAt = now();
+    return { ...rec };
+  }
+  async reopen(listingId: string): Promise<ListingRecord> {
+    const rec = this.byId.get(listingId);
+    if (!rec) throw new Error(`unknown listing '${listingId}'`);
+    if (rec.status !== "open") {
+      rec.status = "open";
+      rec.updatedAt = now();
+    }
+    return { ...rec };
   }
 }
 

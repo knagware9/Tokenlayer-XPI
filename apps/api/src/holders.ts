@@ -49,7 +49,15 @@ export function foldAsset(entries: AuditEntryRecord[]): AssetState {
       }
       case "buy": {
         const amt = amountOf(p, "amount");
-        bump(p.from, -amt);
+        // Secondary-market buys record `from = escrow` (the pooled market
+        // escrow account) but carry the economic sender in `seller`. Debit the
+        // seller so the escrow never enters balances: the seller keeps the
+        // balance while escrowed (unsold inventory — `list`/`cancel-listing`
+        // stay no-ops below) and loses it exactly when a take fills. Folding
+        // the escrow instead leaves a fully-exited seller with a phantom
+        // credit, over-counting holders (false HOLDER_LIMIT_EXCEEDED).
+        const debit = p.secondary === true && typeof p.seller === "string" ? p.seller : p.from;
+        bump(debit, -amt);
         bump(p.to, amt);
         break;
       }
@@ -60,7 +68,7 @@ export function foldAsset(entries: AuditEntryRecord[]): AssetState {
         break;
       }
       default:
-        break; // issue/freeze/unfreeze/allow/disallow/read: no supply/balance effect
+        break; // issue/freeze/unfreeze/allow/disallow/read/list/cancel-listing: no supply/balance effect
     }
   }
   return { supply, balances };

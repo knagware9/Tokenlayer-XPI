@@ -77,6 +77,26 @@ async function setupMarket() {
   return { app, platform, carbonAdmin, seller, buyer2, assetId };
 }
 
+/** Onboard a fresh KYC-approved, allowlisted (and optionally funded) Buyer; returns their login token. */
+async function onboardBuyer(
+  ctx: { app: FastifyInstance; platform: string; carbonAdmin: string; assetId: string },
+  email: string,
+  wallet: string,
+  fundAmount?: string,
+): Promise<string> {
+  const { app, platform, carbonAdmin, assetId } = ctx;
+  const u = (await app.inject({
+    method: "POST", url: `${V1}/users`, headers: auth(carbonAdmin),
+    payload: { email, password: "secret1", role: "Buyer", walletAddress: wallet, kyc: { country: "IN" } },
+  })).json();
+  await app.inject({ method: "PATCH", url: `${V1}/users/${u.id}`, headers: auth(carbonAdmin), payload: { kycStatus: "approved" } });
+  await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: auth(carbonAdmin), payload: { account: wallet } });
+  if (fundAmount) {
+    await app.inject({ method: "POST", url: `${V1}/cash/credit`, headers: auth(platform), payload: { account: wallet, currency: CBDC, amount: fundAmount } });
+  }
+  return loginAs(app, email, "secret1");
+}
+
 describe("secondary market: escrowed sell-listings", () => {
   it("full lifecycle: list (escrow moves) → partial take (cash split + fee) → filling take → cancel returns remaining", async () => {
     const { app, platform, seller, buyer2, assetId } = await setupMarket();
@@ -225,9 +245,111 @@ describe("secondary market: escrowed sell-listings", () => {
 
     const trades = (await app.inject({ method: "GET", url: `${V1}/assets/${assetId}/trades`, headers: auth(buyer2) })).json();
     expect(trades).toHaveLength(2);
-    // Newest first: the secondary take, then the primary treasury buy.
-    expect(trades[0]).toMatchObject({ amount: "25", unitPrice: "7", currency: CBDC, from: TEST_MARKET_ESCROW, to: BUYER2_WALLET, secondary: true });
+    // Newest first: the secondary take, then the primary treasury buy. The
+    // secondary trade shows the SELLER as `from` — never the pooled escrow.
+    expect(trades[0]).toMatchObject({ amount: "25", unitPrice: "7", currency: CBDC, from: SELLER_WALLET, to: BUYER2_WALLET, secondary: true });
+    expect(trades[0].from).not.toBe(TEST_MARKET_ESCROW);
     expect(trades[0].at).toBeTruthy();
     expect(trades[1]).toMatchObject({ amount: "100", unitPrice: "5", currency: CBDC, from: TREASURY_ADDR, to: SELLER_WALLET, secondary: false });
+  });
+
+  it("concurrency: two takes racing for more than the remainder — exactly one wins, the pooled escrow never over-delivers", async () => {
+    const ctx = await setupMarket();
+    const { app, platform, seller, buyer2, assetId } = ctx;
+
+    // Give the seller 200 tokens (fixture bought 100; buy 100 more) and onboard
+    // a second funded buyer so BOTH takes clear the read-only funds guard.
+    const more = await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/buy`, headers: auth(seller), payload: { quantity: "100" } });
+    expect(more.statusCode).toBe(200);
+    const buyer3 = await onboardBuyer(ctx, "buyer3@x.dev", BUYER3_WALLET, "1000");
+
+    const listing = (await app.inject({
+      method: "POST", url: `${V1}/assets/${assetId}/listings`, headers: auth(seller),
+      payload: { quantity: "150", unitPrice: "4", currency: CBDC },
+    })).json();
+    expect(listing.status).toBe("open");
+
+    // THE RACE: 100 + 100 > 150. The escrow is POOLED across all listings of
+    // the asset, so without an atomic reserve both settles would "succeed" and
+    // the second one would draw on some other seller's escrowed tokens.
+    const [r1, r2] = await Promise.all([
+      app.inject({ method: "POST", url: `${V1}/listings/${listing.id}/take`, headers: auth(buyer2), payload: { quantity: "100" } }),
+      app.inject({ method: "POST", url: `${V1}/listings/${listing.id}/take`, headers: auth(buyer3), payload: { quantity: "100" } }),
+    ]);
+
+    // Tolerant of WHICH request wins — assert on the outcome set.
+    const outcomes = [
+      { res: r1, wallet: BUYER2_WALLET },
+      { res: r2, wallet: BUYER3_WALLET },
+    ];
+    const winners = outcomes.filter((o) => o.res.statusCode === 200);
+    const losers = outcomes.filter((o) => o.res.statusCode !== 200);
+    expect(winners).toHaveLength(1);
+    expect(losers).toHaveLength(1);
+    expect([400, 409]).toContain(losers[0]!.res.statusCode);
+    expect(["TAKE_EXCEEDS_REMAINING", "LISTING_CONFLICT"]).toContain(losers[0]!.res.json().error);
+
+    // Total delivered ≤ 150, and listing remaining + delivered = 150.
+    expect(await tokenBalance(app, platform, assetId, winners[0]!.wallet)).toBe("100");
+    expect(await tokenBalance(app, platform, assetId, losers[0]!.wallet)).toBe("0");
+    const open = (await app.inject({ method: "GET", url: `${V1}/assets/${assetId}/listings`, headers: auth(seller) })).json();
+    expect(open).toHaveLength(1);
+    expect(open[0]).toMatchObject({ id: listing.id, quantity: "50" }); // 150 reserved-down by exactly one take
+
+    // The failed buyer's cash is untouched; the winner paid exactly 400 (100 @ 4).
+    expect(await cashBalance(app, platform, losers[0]!.wallet)).toBe("1000");
+    expect(await cashBalance(app, platform, winners[0]!.wallet)).toBe("600");
+  });
+
+  it("concurrency: two cancels race — one 204, one conflict, and the escrow is released exactly once", async () => {
+    const { app, platform, seller, assetId } = await setupMarket();
+    const listing = (await app.inject({
+      method: "POST", url: `${V1}/assets/${assetId}/listings`, headers: auth(seller),
+      payload: { quantity: "20", unitPrice: "5", currency: CBDC },
+    })).json();
+    expect(await tokenBalance(app, platform, assetId, SELLER_WALLET)).toBe("80");
+
+    const [c1, c2] = await Promise.all([
+      app.inject({ method: "DELETE", url: `${V1}/listings/${listing.id}`, headers: auth(seller) }),
+      app.inject({ method: "DELETE", url: `${V1}/listings/${listing.id}`, headers: auth(seller) }),
+    ]);
+    const statuses = [c1.statusCode, c2.statusCode].sort((a, b) => a - b);
+    expect(statuses[0]).toBe(204);
+    expect(statuses[1]).toBeGreaterThanOrEqual(400); // LISTING_NOT_OPEN (400) or LISTING_CONFLICT (409) — never a second 204
+
+    // The seller got the remaining 20 back exactly ONCE: 80 + 20, not 80 + 40.
+    expect(await tokenBalance(app, platform, assetId, SELLER_WALLET)).toBe("100");
+    expect((await app.inject({ method: "GET", url: `${V1}/assets/${assetId}/listings`, headers: auth(seller) })).json()).toHaveLength(0);
+  });
+
+  it("holder-count: a seller that fully exits via the market stops counting — new holders are not falsely blocked", async () => {
+    const ctx = await setupMarket();
+    const { app, platform, seller, buyer2, assetId } = ctx;
+
+    // Cap holders at 3. Current genuine holders: treasury + seller = 2.
+    const carbon = (await app.inject({ method: "GET", url: `${V1}/use-cases/carbon-credit`, headers: auth(platform) })).json();
+    const put = await app.inject({
+      method: "PUT", url: `${V1}/use-cases/carbon-credit`, headers: auth(platform),
+      payload: { ...carbon, compliance: { ...carbon.compliance, maxHolders: 3 } },
+    });
+    expect(put.statusCode).toBe(200);
+
+    // Seller lists ALL 100 tokens; buyer2 takes all → the seller has fully exited.
+    const listing = (await app.inject({
+      method: "POST", url: `${V1}/assets/${assetId}/listings`, headers: auth(seller),
+      payload: { quantity: "100", unitPrice: "5", currency: CBDC },
+    })).json();
+    const take = await app.inject({ method: "POST", url: `${V1}/listings/${listing.id}/take`, headers: auth(buyer2), payload: { quantity: "100" } });
+    expect(take.statusCode).toBe(200);
+    expect(await tokenBalance(app, platform, assetId, SELLER_WALLET)).toBe("0");
+
+    // Holders are now {treasury, buyer2} = 2 < 3. Before the fold fix the
+    // secondary buy debited the ESCROW, so the exited seller kept a phantom
+    // credit ({treasury, seller, buyer2} = 3 ≥ 3) and this brand-new holder's
+    // primary buy failed with a false HOLDER_LIMIT_EXCEEDED.
+    const buyer3 = await onboardBuyer(ctx, "buyer3@x.dev", BUYER3_WALLET, "1000");
+    const buy = await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/buy`, headers: auth(buyer3), payload: { quantity: "10" } });
+    expect(buy.statusCode).toBe(200);
+    expect(await tokenBalance(app, platform, assetId, BUYER3_WALLET)).toBe("10");
   });
 });
