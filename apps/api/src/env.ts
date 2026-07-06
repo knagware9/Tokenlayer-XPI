@@ -36,6 +36,13 @@ if (!jwtSecret || jwtSecret === INSECURE_SECRET || jwtSecret.length < 16) {
   );
 }
 
+/**
+ * Demo platform fee account seeded when PLATFORM_FEE_ACCOUNT is unset but fees
+ * should still be exercisable (dev/demo). A recognisable Hardhat dev address not
+ * used as a buyer/treasury in the seed roster.
+ */
+export const DEMO_PLATFORM_FEE_ACCOUNT = "0xdF3e18d64BC6A983f673Ab319CCaE4f1a57C7097";
+
 export interface Env {
   port: number;
   nodeEnv: string;
@@ -43,7 +50,17 @@ export interface Env {
   corsOrigins: string[];
   evmRpcUrl?: string;
   evmOperatorKey?: string;
+  /**
+   * Platform fee account (address). When unset, marketplace/issuance fees are
+   * DISABLED (treated as 0) regardless of use-case config. Defaults to a demo
+   * address outside production so fees are usable out of the box for demos.
+   */
+  platformFeeAccount?: string;
 }
+
+const platformFeeAccount =
+  process.env.PLATFORM_FEE_ACCOUNT ??
+  (process.env.NODE_ENV === "production" ? undefined : DEMO_PLATFORM_FEE_ACCOUNT);
 
 export const env: Env = {
   port: Number(process.env.PORT ?? 4000),
@@ -53,4 +70,5 @@ export const env: Env = {
   corsOrigins: (process.env.CORS_ORIGINS ?? "http://localhost:5173").split(",").map((s) => s.trim()).filter(Boolean),
   evmRpcUrl: process.env.EVM_RPC_URL,
   evmOperatorKey: process.env.EVM_OPERATOR_KEY,
+  platformFeeAccount,
 };

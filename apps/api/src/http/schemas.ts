@@ -48,12 +48,26 @@ export const components: Record<string, unknown>[] = [
     required: ["id", "label", "family", "kind", "mode"],
   },
   {
+    $id: "PropertySchema",
+    type: "object",
+    additionalProperties: true,
+    description: "A single metadata field's schema: type + optional validation constraints.",
+    properties: {
+      type: { type: "string", enum: ["string", "number", "boolean", "document"] },
+      description: { type: "string" },
+      enum: { type: "array", items: { type: "string" } },
+      min: { type: "number" },
+      max: { type: "number" },
+      pattern: { type: "string" },
+    },
+  },
+  {
     $id: "MetadataSchema",
     type: "object",
     additionalProperties: true,
     properties: {
       type: { type: "string" },
-      properties: { type: "object", additionalProperties: true },
+      properties: { type: "object", additionalProperties: { $ref: "PropertySchema#" } },
       required: { type: "array", items: { type: "string" } },
     },
   },
@@ -81,7 +95,33 @@ export const components: Record<string, unknown>[] = [
       },
       metadataSchema: { $ref: "MetadataSchema#" },
       lifecycle: { type: "object", additionalProperties: true },
-      compliance: { type: "object", additionalProperties: true },
+      compliance: {
+        type: "object",
+        additionalProperties: true,
+        properties: {
+          allowlist: { type: "boolean" },
+          transferRestrictions: { type: "boolean" },
+          maxHolders: { type: "integer" },
+          lockupDays: { type: "integer" },
+          allowedJurisdictions: { type: "array", items: { type: "string" } },
+        },
+      },
+      fees: {
+        type: "object",
+        additionalProperties: true,
+        properties: {
+          marketplaceBps: { type: "integer", minimum: 0, maximum: 10000 },
+          issuanceFlat: { type: "string" },
+        },
+      },
+      saleTermsDefault: {
+        type: "object",
+        additionalProperties: true,
+        properties: {
+          unitPrice: { type: "string" },
+          currency: { type: "string" },
+        },
+      },
       roles: { type: "array", items: { type: "string" } },
     },
     required: ["key", "name", "tokenStandard", "symbol", "allowedChainIds", "defaultChainId", "metadataSchema", "lifecycle", "compliance", "roles"],
@@ -362,7 +402,15 @@ export const S: Record<string, FastifySchema> = {
       },
     },
     response: {
-      201: { type: "object", properties: { asset: { $ref: "Asset#" }, txHash: { type: "string" } }, required: ["asset"] },
+      201: {
+        type: "object",
+        properties: {
+          asset: { $ref: "Asset#" },
+          txHash: { type: "string" },
+          issuanceFee: { type: "object", additionalProperties: true, nullable: true },
+        },
+        required: ["asset"],
+      },
       ...errs(400, 401, 403),
     },
   },

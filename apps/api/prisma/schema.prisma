@@ -52,6 +52,8 @@ model UseCase {
   metadataSchema  String // JSON object
   lifecycle       String // JSON object
   compliance      String // JSON object
+  fees             String   @default("{}") // JSON object: { marketplaceBps?, issuanceFlat? }
+  saleTermsDefault String   @default("{}") // JSON object: { unitPrice?, currency? }
   roles           String // JSON array
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
