@@ -56,28 +56,41 @@ describe("LifecycleEngine", () => {
     nftCtx = { ref: { id: "n1", chainId: "fake", contractRef: "fake:n1" }, useCaseKey: "transferable-nft" };
   });
 
-  it("issues an asset, validating metadata and recording audit", async () => {
+  it("issues an asset into the use-case contract, validating metadata and recording audit", async () => {
     const res = await engine.issue(ADMIN, {
       useCaseKey: "generic-asset",
       id: "asset-1",
-      name: "Demo",
-      symbol: "DEMO",
       chainId: "fake",
       metadata: { issuer: "ACME" },
     });
-    expect(res.ref.contractRef).toBe("fake:asset-1");
+    // The asset shares the use case's deployed contract (not a per-asset deploy).
+    expect(res.ref.contractRef).toBe("fake:generic-asset");
     expect(audit.entries.at(-1)?.action).toBe("issue");
   });
 
   it("rejects issuance to a chain the use case does not allow", async () => {
     await expect(
-      engine.issue(ADMIN, { useCaseKey: "generic-asset", id: "a", name: "n", symbol: "S", chainId: "other", metadata: { issuer: "X" } }),
-    ).rejects.toThrowError(/cannot deploy to chain 'other'/);
+      engine.issue(ADMIN, { useCaseKey: "generic-asset", id: "a", chainId: "other", metadata: { issuer: "X" } }),
+    ).rejects.toThrowError(/cannot issue on chain 'other'/);
+  });
+
+  it("rejects issuance on an allowed chain with no deployed contract", async () => {
+    const source = new StaticUseCaseSource([{ ...FUNGIBLE_USE_CASE, allowedChainIds: ["fake", "pending"], contracts: { fake: FUNGIBLE_USE_CASE.contracts!.fake } }]);
+    const eng = new LifecycleEngine({ useCases: source, rbac: new RbacPolicy(), resolveAdapter: () => adapter, audit, now: () => "2026-01-01T00:00:00.000Z" });
+    await expect(
+      eng.issue(ADMIN, { useCaseKey: "generic-asset", id: "a", chainId: "pending", metadata: { issuer: "X" } }),
+    ).rejects.toThrowError(/no contract deployed on chain 'pending'/);
+  });
+
+  it("deployUseCaseContract deploys the use case's contract on a chain", async () => {
+    const contract = await engine.deployUseCaseContract(FUNGIBLE_USE_CASE, "fake");
+    expect(contract.contractRef).toBe("fake:generic-asset");
+    expect(contract.deployTxHash).toMatch(/^0x/);
   });
 
   it("rejects issuance with invalid metadata", async () => {
     await expect(
-      engine.issue(ADMIN, { useCaseKey: "generic-asset", id: "a", name: "n", symbol: "S", chainId: "fake", metadata: {} }),
+      engine.issue(ADMIN, { useCaseKey: "generic-asset", id: "a", chainId: "fake", metadata: {} }),
     ).rejects.toThrowError(/missing required field 'issuer'/);
   });
 

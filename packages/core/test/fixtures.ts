@@ -91,8 +91,10 @@ export const FUNGIBLE_USE_CASE: UseCaseDefinition = {
   name: "Generic Asset",
   tokenStandard: "ERC-20",
   tokenType: "fungible",
+  symbol: "GEN",
   allowedChainIds: ["fake"],
   defaultChainId: "fake",
+  contracts: { fake: { contractRef: "fake:generic-asset", deployTxHash: "0xdeploy-gen" } },
   metadataSchema: {
     type: "object",
     properties: {
@@ -111,8 +113,10 @@ export const NO_TRANSFER_USE_CASE: UseCaseDefinition = {
   name: "Generic Certificate",
   tokenStandard: "ERC-721",
   tokenType: "nonfungible",
+  symbol: "CERT",
   allowedChainIds: ["fake"],
   defaultChainId: "fake",
+  contracts: { fake: { contractRef: "fake:generic-certificate", deployTxHash: "0xdeploy-cert" } },
   metadataSchema: {
     type: "object",
     properties: { holder: { type: "string" } },

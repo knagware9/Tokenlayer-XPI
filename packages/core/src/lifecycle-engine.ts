@@ -11,6 +11,7 @@ import type {
   LifecycleAction,
   TokenType,
   TxReceipt,
+  UseCaseContract,
   UseCaseDefinition,
   UseCaseSource,
 } from "./types.js";
@@ -18,8 +19,6 @@ import type {
 export interface IssueInput {
   useCaseKey: string;
   id: string;
-  name: string;
-  symbol: string;
   chainId: string;
   metadata: Record<string, unknown>;
 }
@@ -66,38 +65,61 @@ export class LifecycleEngine {
     this.now = deps.now ?? (() => new Date().toISOString());
   }
 
+  /**
+   * Deploy the use case's contract on one chain (config time). The use case owns
+   * the contract; issuing assets later mints/registers within it. Returns the
+   * contract handle to store on the use case. Throws if the chain is not
+   * configured (resolveAdapter) or the deploy fails.
+   */
+  async deployUseCaseContract(useCase: UseCaseDefinition, chainId: string): Promise<UseCaseContract> {
+    const adapter = this.resolveAdapter(chainId);
+    const deploy = await adapter.deployAsset({
+      id: useCase.key,
+      name: useCase.name,
+      symbol: useCase.symbol,
+      useCaseKey: useCase.key,
+      tokenType: useCase.tokenType,
+      tokenStandard: useCase.tokenStandard,
+      allowlistEnabled: useCase.compliance.allowlist,
+      metadata: {},
+    });
+    return { contractRef: deploy.contractRef, deployTxHash: deploy.txHash };
+  }
+
+  /**
+   * Bring an asset into existence WITHIN the use case's already-deployed contract
+   * on the chosen chain (no per-asset deploy). Fungible assets are tranches minted
+   * into the shared token; NFTs are token-ids in the shared collection. The API
+   * layer performs the actual mint of initial supply / token-ids around this.
+   */
   async issue(actor: Actor, input: IssueInput): Promise<IssueResult> {
     this.rbac.authorize(actor, "issue");
     const useCase = await this.useCases.get(input.useCaseKey);
     if (!useCase.allowedChainIds.includes(input.chainId)) {
-      throw new PolicyError("CHAIN_NOT_ALLOWED", `use case '${useCase.key}' cannot deploy to chain '${input.chainId}'`, {
+      throw new PolicyError("CHAIN_NOT_ALLOWED", `use case '${useCase.key}' cannot issue on chain '${input.chainId}'`, {
         useCase: useCase.key,
         chainId: input.chainId,
         allowedChainIds: useCase.allowedChainIds,
       });
     }
+    const contract = useCase.contracts?.[input.chainId];
+    if (!contract) {
+      throw new PolicyError(
+        "USE_CASE_NOT_DEPLOYED_ON_CHAIN",
+        `use case '${useCase.key}' has no contract deployed on chain '${input.chainId}' yet`,
+        { useCase: useCase.key, chainId: input.chainId },
+      );
+    }
     validateMetadata(input.metadata, useCase.metadataSchema);
 
-    const adapter = this.resolveAdapter(input.chainId);
-    const deploy = await adapter.deployAsset({
-      id: input.id,
-      name: input.name,
-      symbol: input.symbol,
-      useCaseKey: useCase.key,
-      tokenType: useCase.tokenType,
-      tokenStandard: useCase.tokenStandard,
-      allowlistEnabled: useCase.compliance.allowlist,
-      metadata: input.metadata,
-    });
-
-    const ref: AssetRef = { id: input.id, chainId: input.chainId, contractRef: deploy.contractRef };
+    const ref: AssetRef = { id: input.id, chainId: input.chainId, contractRef: contract.contractRef };
     await this.write(actor, "issue", {
       assetId: input.id,
-      txHash: deploy.txHash,
+      txHash: contract.deployTxHash,
       chainId: input.chainId,
-      payload: { useCaseKey: useCase.key, name: input.name, symbol: input.symbol, tokenStandard: useCase.tokenStandard },
+      payload: { useCaseKey: useCase.key, symbol: useCase.symbol, tokenStandard: useCase.tokenStandard, contractRef: contract.contractRef },
     });
-    return { ref, tokenType: useCase.tokenType, txHash: deploy.txHash };
+    return { ref, tokenType: useCase.tokenType, txHash: contract.deployTxHash };
   }
 
   // --- fungible operations (ERC-20 / ERC-3643) -----------------------------
