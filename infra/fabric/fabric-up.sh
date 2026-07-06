@@ -31,13 +31,30 @@ command -v docker >/dev/null || die "docker is not installed / not on PATH."
 export PATH="$SAMPLES/bin:$PATH"
 export FABRIC_CFG_PATH="$SAMPLES/config"
 
+# network.sh's chaincode packaging breaks on paths containing spaces (this repo is
+# "Tokenlayer XPI"), and the peer build needs the Go deps resolvable. Stage the
+# chaincode into a space-free temp dir with go.sum + a vendor/ tree, and deploy that.
+stage_chaincode() {
+  command -v go >/dev/null || die "Go is required to stage the chaincode (go build deps)."
+  local stage
+  stage="$(mktemp -d "${TMPDIR:-/tmp}/tokenlayer-cc.XXXXXX")"
+  case "$stage" in *" "*) die "temp dir has a space ($stage); set TMPDIR to a space-free path." ;; esac
+  cp "$CC_PATH"/*.go "$CC_PATH"/go.mod "$stage/"
+  [[ -f "$CC_PATH/go.sum" ]] && cp "$CC_PATH/go.sum" "$stage/"
+  log "Vendoring chaincode deps in $stage …" >&2
+  ( cd "$stage" && go mod tidy && go mod vendor ) >/dev/null 2>&1 || die "go mod vendor failed (needs network on first run)."
+  echo "$stage"
+}
+
 cd "$SAMPLES/test-network"
 
 log "Bringing up the network and creating channel '$CHANNEL'…"
 ./network.sh up createChannel -c "$CHANNEL"
 
-log "Deploying the '$CC_NAME' chaincode from $CC_PATH …"
-./network.sh deployCC -c "$CHANNEL" -ccn "$CC_NAME" -ccp "$CC_PATH" -ccl go
+CC_STAGE="$(stage_chaincode)"
+log "Deploying the '$CC_NAME' chaincode (staged at $CC_STAGE)…"
+./network.sh deployCC -c "$CHANNEL" -ccn "$CC_NAME" -ccp "$CC_STAGE" -ccl go
+rm -rf "$CC_STAGE"
 
 log "Emitting wallet + connection profile to infra/fabric/.runtime/ …"
 node "$REPO/infra/fabric/scripts/fabric-wallet.mjs" --samples "$SAMPLES"
