@@ -16,7 +16,6 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
   const [useCaseKey, setUseCaseKey] = useState(useCases[0]?.key ?? "");
   const [chainId, setChainId] = useState("");
   const [name, setName] = useState("");
-  const [symbol, setSymbol] = useState("");
   const [meta, setMeta] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -35,9 +34,10 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
 
   const useCase = useMemo(() => useCases.find((u) => u.key === useCaseKey), [useCases, useCaseKey]);
   const isFungible = useCase?.tokenType === "fungible";
-  // The chain picker is scoped to the use case's allowed DLTs that are actually available.
+  // Issuance mints into the use case's contract, so the chain picker is scoped to the
+  // chains this use case has actually DEPLOYED a contract on (allowed ∩ deployed ∩ available).
   const availableChains = useMemo(
-    () => chains.filter((c) => useCase?.allowedChainIds.includes(c.id)),
+    () => chains.filter((c) => useCase?.allowedChainIds.includes(c.id) && useCase?.contracts?.[c.id]),
     [chains, useCase],
   );
 
@@ -85,13 +85,12 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
         : undefined;
       const supply = isFungible && /^\d+$/.test(initialSupply) && Number(initialSupply) > 0 ? initialSupply : undefined;
       const res = await api.issue(token, {
-        useCaseKey, name, symbol, chainId, metadata,
+        useCaseKey, name, chainId, metadata,
         treasuryAccount: treasury || undefined,
         initialSupply: supply,
         sale,
       });
       setName("");
-      setSymbol("");
       setMeta({});
       setTreasury("");
       setInitialSupply("");
@@ -149,8 +148,8 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
         <Field label="Name">
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Series A Note" />
         </Field>
-        <Field label="Symbol">
-          <input className="input" value={symbol} onChange={(e) => setSymbol(e.target.value.toUpperCase())} placeholder="e.g. SAN" />
+        <Field label="Symbol" hint="Inherited from the use case's contract">
+          <input className="input bg-slate-50 text-slate-500" value={useCase?.symbol ?? ""} disabled />
         </Field>
       </div>
 
@@ -219,7 +218,7 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
       {error && <p className="text-sm text-red-600">{error}</p>}
       <button
         type="submit"
-        disabled={busy || !name || !symbol}
+        disabled={busy || !name || !chainId}
         className="rounded-lg bg-brand-600 text-white px-5 py-2 text-sm font-medium hover:bg-brand-700 disabled:opacity-50"
       >
         {busy ? "Issuing…" : "Issue asset"}

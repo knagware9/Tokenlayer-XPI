@@ -21,6 +21,7 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
   const { token, user } = useAuth();
   const [key, setKey] = useState("");
   const [name, setName] = useState("");
+  const [symbol, setSymbol] = useState("");
   const [description, setDescription] = useState("");
   const [standard, setStandard] = useState<TokenStandard>("ERC-20");
   const firstChain = chains[0]?.id ?? "besu";
@@ -64,6 +65,7 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
       const def: UseCase = {
         key: key.trim(),
         name: name.trim(),
+        symbol: symbol.trim().toUpperCase(),
         description: description.trim() || undefined,
         tokenStandard: standard,
         tokenType,
@@ -75,9 +77,14 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
         roles,
       };
       const created = await api.createUseCase(token, def);
-      setOk(`Created "${created.name}" (${created.tokenStandard}).`);
+      const deployed = Object.keys(created.contracts ?? {});
+      setOk(
+        `Created "${created.name}" (${created.symbol}, ${created.tokenStandard}). ` +
+          (deployed.length ? `Contract deployed on: ${deployed.join(", ")}.` : "No contract deployed yet."),
+      );
       setKey("");
       setName("");
+      setSymbol("");
       setDescription("");
       setFields([{ name: "issuer", type: "string", required: true }]);
       onCreated();
@@ -101,6 +108,10 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
             <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Carbon Credit" />
           </L>
         </div>
+
+        <L label="Token symbol" hint="The symbol of the use case's contract (deployed on save)">
+          <input className="input" value={symbol} onChange={(e) => setSymbol(e.target.value.toUpperCase())} placeholder="e.g. VCU" />
+        </L>
 
         <L label="Description">
           <input className="input" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What this asset type represents" />
@@ -206,7 +217,7 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
 
         {error && <p className="text-sm text-red-600">{error}</p>}
         {ok && <p className="text-sm text-emerald-600">{ok}</p>}
-        <button type="submit" disabled={busy || !key || !name} className="rounded-lg bg-brand-600 text-white px-5 py-2 text-sm font-medium hover:bg-brand-700 disabled:opacity-50">
+        <button type="submit" disabled={busy || !key || !name || !symbol} className="rounded-lg bg-brand-600 text-white px-5 py-2 text-sm font-medium hover:bg-brand-700 disabled:opacity-50">
           {busy ? "Creating…" : "Create use case"}
         </button>
       </form>
@@ -228,11 +239,12 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
   );
 }
 
-function L({ label, children }: { label: string; children: React.ReactNode }): JSX.Element {
+function L({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }): JSX.Element {
   return (
     <label className="block">
       <span className="block text-xs font-medium text-slate-600 mb-1">{label}</span>
       {children}
+      {hint && <span className="block text-[11px] text-slate-400 mt-1">{hint}</span>}
     </label>
   );
 }
