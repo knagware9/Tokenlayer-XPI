@@ -118,7 +118,7 @@ export function Dashboard({ useCaseKey }: { useCaseKey?: string }): JSX.Element 
         <Card title="Recent activity">
           <ol className="space-y-1.5">
             {data.recent.slice(0, 8).map((e, i) => (
-              <li key={i} className="flex items-start gap-2 text-xs">
+              <li key={`${e.at}-${e.assetId}-${i}`} className="flex items-start gap-2 text-xs">
                 <span className="mt-0.5 w-16 shrink-0 text-[10px] font-semibold text-brand-600 uppercase">{e.action}</span>
                 <span className="flex-1 text-slate-600">
                   <span className="text-slate-800">{e.assetName}</span> · {e.summary}

@@ -157,7 +157,7 @@ function collectPositiveHolders(states: AssetState[]): Set<string> {
       if (bal > 0n) net.set(addr, true);
     }
   }
-  return new Set([...net.keys()].filter((a) => net.get(a)));
+  return new Set(net.keys());
 }
 
 /** Short human summary for a recent event. */
