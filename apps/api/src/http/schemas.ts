@@ -67,14 +67,24 @@ export const components: Record<string, unknown>[] = [
       description: { type: "string" },
       tokenStandard: TOKEN_STANDARD,
       tokenType: TOKEN_TYPE,
+      symbol: { type: "string" },
       allowedChainIds: { type: "array", items: { type: "string" } },
       defaultChainId: { type: "string" },
+      // Server-managed: the deployed contract per chainId. Absent/empty until deployed.
+      contracts: {
+        type: "object",
+        additionalProperties: {
+          type: "object",
+          properties: { contractRef: { type: "string" }, deployTxHash: { type: "string" } },
+          required: ["contractRef", "deployTxHash"],
+        },
+      },
       metadataSchema: { $ref: "MetadataSchema#" },
       lifecycle: { type: "object", additionalProperties: true },
       compliance: { type: "object", additionalProperties: true },
       roles: { type: "array", items: { type: "string" } },
     },
-    required: ["key", "name", "tokenStandard", "allowedChainIds", "defaultChainId", "metadataSchema", "lifecycle", "compliance", "roles"],
+    required: ["key", "name", "tokenStandard", "symbol", "allowedChainIds", "defaultChainId", "metadataSchema", "lifecycle", "compliance", "roles"],
   },
   {
     $id: "Asset",
@@ -232,15 +242,22 @@ export const S: Record<string, FastifySchema> = {
     body: { $ref: "UseCase#" },
     response: { 200: { $ref: "UseCase#" }, ...errs(400, 401, 403, 404) },
   },
+  deployUseCase: {
+    tags: ["Use Cases"], summary: "Deploy a use case's contract on one allowed chain (PlatformAdmin)", security: bearer,
+    params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
+    body: { type: "object", additionalProperties: false, required: ["chainId"], properties: { chainId: { type: "string" } } },
+    response: { 200: { $ref: "UseCase#" }, ...errs(400, 401, 403, 404, 502) },
+  },
 
   issueAsset: {
     tags: ["Assets"], summary: "Issue (tokenize) a new asset", security: bearer,
     body: {
       type: "object",
-      required: ["useCaseKey", "name", "symbol", "chainId"],
+      required: ["useCaseKey", "name", "chainId"],
       properties: {
         useCaseKey: { type: "string" },
         name: { type: "string" },
+        // Optional + ignored: the symbol is inherited from the use case's contract.
         symbol: { type: "string" },
         chainId: { type: "string" },
         metadata: { type: "object", additionalProperties: true },

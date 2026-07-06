@@ -2,9 +2,10 @@ import { randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AssetRecord, KycDetails, KycStatus } from "../persistence/types.js";
-import { canCreateUser, canManageUsers, type Role, type UseCaseDefinition } from "@tokenlayer/core";
+import { canCreateUser, canManageUsers, normalizeUseCaseDefinition, PolicyError, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { isSupportedCurrency } from "../currencies.js";
+import { deployUseCaseContracts } from "../use-cases.js";
 import { S } from "./schemas.js";
 import { actorOf, contextOf, isPositiveIntString, notFound, requireUser, scopedToCaller, type TokenClaims } from "./support.js";
 
@@ -95,18 +96,90 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   });
   app.post("/use-cases", { schema: S.createUseCase, ...auth }, async (request, reply) => {
     if ((request.user as TokenClaims).role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only the Platform Admin may create use cases" });
-    return reply.code(201).send(await deps.useCases.create(request.body as UseCaseDefinition));
+    // Normalise (validates shape + fills tokenType) before deploying so an invalid
+    // definition fails fast without deploying any contract.
+    let definition: UseCaseDefinition;
+    try {
+      definition = normalizeUseCaseDefinition(request.body as UseCaseDefinition);
+    } catch (err) {
+      if (err instanceof PolicyError) return reply.code(400).send({ error: err.code, message: err.message });
+      throw err;
+    }
+    // Deploy the use case's contract on each allowed chain that is available in the
+    // registry (fabric is always available in the simulated stack). Best-effort per
+    // chain: a failure leaves that chain pending; we require at least one success.
+    const available = new Set(deps.chains.list().map((c) => c.id));
+    const contracts = await deployUseCaseContracts(
+      definition,
+      available,
+      (def, chainId) => deps.engine.deployUseCaseContract(def, chainId),
+      (m) => request.log.warn(m),
+    );
+    if (Object.keys(contracts).length === 0) {
+      return reply.code(400).send({
+        error: "NO_DEPLOYABLE_CHAIN",
+        message: `no allowed chain is available to deploy '${definition.key}'; configure at least one of: ${definition.allowedChainIds.join(", ")}`,
+      });
+    }
+    return reply.code(201).send(await deps.useCases.create({ ...definition, contracts }));
   });
+
+  app.post("/use-cases/:key/deploy", { schema: S.deployUseCase, ...auth }, async (request, reply) => {
+    if ((request.user as TokenClaims).role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only the Platform Admin may deploy use-case contracts" });
+    const { key } = request.params as { key: string };
+    if (!(await deps.useCases.has(key))) return notFound(reply, `unknown use case '${key}'`);
+    const useCase = await deps.useCases.get(key);
+    const { chainId } = request.body as { chainId: string };
+    if (!useCase.allowedChainIds.includes(chainId)) {
+      return reply.code(400).send({ error: "CHAIN_NOT_ALLOWED", message: `chain '${chainId}' is not in the allowed chains for '${key}'` });
+    }
+    if (useCase.contracts?.[chainId]) {
+      return reply.code(400).send({ error: "ALREADY_DEPLOYED", message: `'${key}' already has a contract deployed on chain '${chainId}'` });
+    }
+    let contract;
+    try {
+      contract = await deps.engine.deployUseCaseContract(useCase, chainId);
+    } catch (err) {
+      return reply.code(502).send({ error: "DEPLOY_FAILED", message: `deploy of '${key}' on chain '${chainId}' failed: ${(err as Error).message}` });
+    }
+    const merged = { ...useCase, contracts: { ...(useCase.contracts ?? {}), [chainId]: contract } };
+    return deps.useCases.update(key, merged);
+  });
+
   app.put("/use-cases/:key", { schema: S.updateUseCase, ...auth }, async (request, reply) => {
     if ((request.user as TokenClaims).role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only the Platform Admin may edit use cases" });
     const { key } = request.params as { key: string };
-    return deps.useCases.update(key, request.body as UseCaseDefinition);
+    if (!(await deps.useCases.has(key))) return notFound(reply, `unknown use case '${key}'`);
+    const existing = await deps.useCases.get(key);
+    const existingContracts = existing.contracts ?? {};
+    const hasDeployed = Object.keys(existingContracts).length > 0;
+
+    let incoming: UseCaseDefinition;
+    try {
+      // Preserve deployed contracts: never let an update wipe them.
+      incoming = normalizeUseCaseDefinition({ ...(request.body as UseCaseDefinition), key, contracts: existingContracts });
+    } catch (err) {
+      if (err instanceof PolicyError) return reply.code(400).send({ error: err.code, message: err.message });
+      throw err;
+    }
+    // Once any contract is deployed, the contract-defining fields are immutable.
+    if (hasDeployed) {
+      if (incoming.tokenStandard !== existing.tokenStandard || incoming.symbol !== existing.symbol) {
+        return reply.code(400).send({ error: "IMMUTABLE_FIELD", message: "tokenStandard and symbol cannot change once a contract is deployed" });
+      }
+      // Cannot remove an allowedChainId that has a deployed contract.
+      const removed = Object.keys(existingContracts).filter((c) => !incoming.allowedChainIds.includes(c));
+      if (removed.length > 0) {
+        return reply.code(400).send({ error: "IMMUTABLE_FIELD", message: `cannot remove chain(s) with a deployed contract: ${removed.join(", ")}` });
+      }
+    }
+    return deps.useCases.update(key, incoming);
   });
 
   // --- assets -------------------------------------------------------------
   app.post("/assets", { schema: S.issueAsset, ...auth }, async (request, reply) => {
-    const { useCaseKey: bUseCaseKey, name, symbol, chainId, metadata, treasuryAccount, initialSupply, sale } =
-      request.body as { useCaseKey: string; name: string; symbol: string; chainId: string; metadata?: Record<string, unknown>; treasuryAccount?: string; initialSupply?: string; sale?: { unitPrice: string; currency: string; treasuryAccount: string } };
+    const { useCaseKey: bUseCaseKey, name, chainId, metadata, treasuryAccount, initialSupply, sale } =
+      request.body as { useCaseKey: string; name: string; chainId: string; metadata?: Record<string, unknown>; treasuryAccount?: string; initialSupply?: string; sale?: { unitPrice: string; currency: string; treasuryAccount: string } };
     const claims = request.user as TokenClaims;
     if (claims.role !== "PlatformAdmin" && bUseCaseKey !== claims.useCaseKey) {
       return reply.code(403).send({ error: "WRONG_USE_CASE", message: "cannot issue into another use case" });
@@ -133,13 +206,13 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     }
     const actor = actorOf(request);
     const id = randomUUID();
-    const result = await deps.engine.issue(actor, { useCaseKey: bUseCaseKey, name, symbol, chainId, id, metadata: metadata ?? {} });
+    const result = await deps.engine.issue(actor, { useCaseKey: bUseCaseKey, chainId, id, metadata: metadata ?? {} });
     const useCase = await deps.useCases.get(bUseCaseKey);
     const asset = await deps.assets.create({
       id,
       useCaseKey: bUseCaseKey,
       name,
-      symbol,
+      symbol: useCase.symbol,
       chainId,
       contractRef: result.ref.contractRef,
       tokenType: result.tokenType,

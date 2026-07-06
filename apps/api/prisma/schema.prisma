@@ -45,8 +45,10 @@ model UseCase {
   name            String
   description     String?
   tokenStandard   String
+  symbol          String
   defaultChainId  String
   allowedChainIds String // JSON array
+  contracts       String   @default("{}") // JSON-encoded map: chainId -> { contractRef, deployTxHash }
   metadataSchema  String // JSON object
   lifecycle       String // JSON object
   compliance      String // JSON object

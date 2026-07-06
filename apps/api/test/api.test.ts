@@ -114,7 +114,7 @@ describe("issuance + RBAC + validation", () => {
       method: "POST",
       url: "/assets",
       headers: auth(token),
-      payload: { useCaseKey: "generic-asset", name: "X", chainId: "fabric" }, // missing 'symbol'
+      payload: { name: "X", chainId: "fabric" }, // missing required 'useCaseKey'
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe("VALIDATION_ERROR");
@@ -218,7 +218,7 @@ describe("lifecycle + compliance + audit", () => {
       url: "/use-cases",
       headers: auth(admin),
       payload: {
-        key: "besu-only-asset", name: "Besu Only", tokenStandard: "ERC-20", allowedChainIds: ["besu"], defaultChainId: "besu",
+        key: "fabric-only-asset", name: "Fabric Only", symbol: "FAB", tokenStandard: "ERC-20", allowedChainIds: ["fabric"], defaultChainId: "fabric",
         metadataSchema: { type: "object", properties: {} }, lifecycle: { mint: true, transfer: true, burn: true, freeze: true },
         compliance: { allowlist: false, transferRestrictions: false }, roles: ["UseCaseAdmin", "Issuer"],
       },
@@ -228,7 +228,7 @@ describe("lifecycle + compliance + audit", () => {
       method: "POST",
       url: "/assets",
       headers: auth(admin),
-      payload: { useCaseKey: "besu-only-asset", name: "X", symbol: "X", chainId: "canton", metadata: {} },
+      payload: { useCaseKey: "fabric-only-asset", name: "X", chainId: "canton", metadata: {} },
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe("CHAIN_NOT_ALLOWED");
@@ -243,7 +243,7 @@ describe("low-code use-case builder", () => {
       method: "POST",
       url: "/use-cases",
       headers: auth(buyer),
-      payload: { key: "x", name: "X", tokenStandard: "ERC-20", allowedChainIds: ["besu"], defaultChainId: "besu", metadataSchema: { type: "object", properties: {} }, lifecycle: { mint: true, transfer: true, burn: true, freeze: true }, compliance: { allowlist: false, transferRestrictions: false }, roles: ["UseCaseAdmin"] },
+      payload: { key: "x", name: "X", symbol: "X", tokenStandard: "ERC-20", allowedChainIds: ["besu"], defaultChainId: "besu", metadataSchema: { type: "object", properties: {} }, lifecycle: { mint: true, transfer: true, burn: true, freeze: true }, compliance: { allowlist: false, transferRestrictions: false }, roles: ["UseCaseAdmin"] },
     });
     expect(forbidden.statusCode).toBe(403);
 
@@ -254,7 +254,7 @@ describe("low-code use-case builder", () => {
       url: "/use-cases",
       headers: auth(admin),
       payload: {
-        key: "supply-chain-token", name: "Supply Chain Token", tokenStandard: "ERC-20", allowedChainIds: ["besu", "fabric"], defaultChainId: "fabric",
+        key: "supply-chain-token", name: "Supply Chain Token", symbol: "SCT", tokenStandard: "ERC-20", allowedChainIds: ["besu", "fabric"], defaultChainId: "fabric",
         metadataSchema: { type: "object", properties: { product: { type: "string" } }, required: ["product"] },
         lifecycle: { mint: true, transfer: true, burn: true, freeze: true }, compliance: { allowlist: true, transferRestrictions: true },
         roles: ["UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"],

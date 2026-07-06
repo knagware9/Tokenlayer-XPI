@@ -19,9 +19,12 @@ async function main(): Promise<void> {
   const audit = new MemoryAuditRepository();
   const accounts = new MemoryAccountRepository();
   const useCases = new MemoryUseCaseRepository();
-  await seedUseCases(useCases);
   await seedDefaults(users, accounts); // Platform Admin + per-use-case rosters
   const engine = createEngine(useCases, rbac, chains, audit);
+  await seedUseCases(useCases, {
+    availableChainIds: new Set(chains.list().map((c) => c.id)),
+    deploy: (def, chainId) => engine.deployUseCaseContract(def, chainId),
+  });
   const cash = new MemoryCashRepository();
   const app = await buildApp({ useCases, rbac, engine, users, assets, audit, accounts, chains, cash, currencies: loadCurrencies(), jwtSecret: "e2e" });
 

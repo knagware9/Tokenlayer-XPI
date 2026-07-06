@@ -3,6 +3,7 @@
   "name": "Carbon Credit",
   "description": "A tradable carbon credit (ERC-20) where 1 token = 1 tonne of CO2e (a Verified Carbon Unit). Minting issues credits from a verified project, transfers trade them between KYC-verified registry participants, and burning permanently retires a credit so it can never be double-counted. Freeze places a compliance hold on an account.",
   "tokenStandard": "ERC-20",
+  "symbol": "VCU",
   "allowedChainIds": [
     "besu",
     "mst",

@@ -54,8 +54,11 @@ async function main(): Promise<void> {
   const accounts = new MemoryAccountRepository();
   const useCases = new MemoryUseCaseRepository();
   await seedDefaults(users, accounts);
-  await seedUseCases(useCases); // seeds carbon-credit.json from config/use-cases
   const engine = createEngine(useCases, rbac, chains, audit);
+  await seedUseCases(useCases, { // seeds carbon-credit.json from config/use-cases
+    availableChainIds: new Set(chains.list().map((c) => c.id)),
+    deploy: (def, chainId) => engine.deployUseCaseContract(def, chainId),
+  });
   const cash = new MemoryCashRepository();
   const app = await buildApp({ useCases, rbac, engine, users, assets, audit, accounts, chains, cash, currencies: loadCurrencies(), jwtSecret: "e2e" });
 
