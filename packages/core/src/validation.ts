@@ -3,7 +3,22 @@ import { ROLES, tokenTypeForStandard, type MetadataSchema, type TokenStandard, t
 
 const VALID_ROLES: ReadonlySet<Role> = new Set<Role>(ROLES);
 const VALID_TOKEN_STANDARDS = new Set<string>(["ERC-20", "ERC-721", "ERC-3643"]);
-const VALID_PROP_TYPES = new Set(["string", "number", "boolean"]);
+const VALID_PROP_TYPES = new Set(["string", "number", "boolean", "document"]);
+/** Field types whose runtime value is a string (document values are URL strings). */
+const STRING_LIKE_PROP_TYPES = new Set(["string", "document"]);
+
+function isNonNegativeIntegerString(v: unknown): boolean {
+  return typeof v === "string" && /^\d+$/.test(v);
+}
+
+function isHttpUrl(v: string): boolean {
+  try {
+    const u = new URL(v);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Validate a use-case definition's shape at registry load time. Throws a
@@ -55,6 +70,10 @@ export function validateUseCaseDefinition(def: unknown): asserts def is UseCaseD
       fail(`use case '${String(d.key)}' compliance.${flag} must be a boolean`);
     }
   }
+  validateCompliance(compliance as Record<string, unknown>, String(d.key), fail);
+
+  if (d.fees !== undefined) validateFees(d.fees, String(d.key), fail);
+  if (d.saleTermsDefault !== undefined) validateSaleTermsDefault(d.saleTermsDefault, String(d.key), fail);
 
   if (!Array.isArray(d.roles) || d.roles.length === 0) fail(`use case '${String(d.key)}' needs a non-empty 'roles' array`);
   for (const r of d.roles as unknown[]) {
@@ -73,8 +92,9 @@ function validateMetadataSchema(
   if (typeof s.properties !== "object" || s.properties === null) fail(`use case '${key}' metadataSchema.properties must be an object`);
   for (const [name, prop] of Object.entries(s.properties as Record<string, unknown>)) {
     if (typeof prop !== "object" || prop === null || !VALID_PROP_TYPES.has((prop as Record<string, unknown>).type as string)) {
-      fail(`use case '${key}' property '${name}' must declare a type of string|number|boolean`);
+      fail(`use case '${key}' property '${name}' must declare a type of string|number|boolean|document`);
     }
+    validatePropertySchema(prop as Record<string, unknown>, name, key, fail);
   }
   if (s.required !== undefined) {
     if (!Array.isArray(s.required)) fail(`use case '${key}' metadataSchema.required must be an array`);
@@ -83,6 +103,102 @@ function validateMetadataSchema(
         fail(`use case '${key}' requires unknown property '${String(req)}'`);
       }
     }
+  }
+}
+
+/** Reject contradictory per-field constraints (e.g. enum on a number, min>max). */
+function validatePropertySchema(
+  prop: Record<string, unknown>,
+  name: string,
+  key: string,
+  fail: (msg: string) => never,
+): void {
+  const type = prop.type as string;
+  const isString = type === "string";
+  const isNumber = type === "number";
+
+  if (prop.enum !== undefined) {
+    if (!isString) fail(`use case '${key}' property '${name}' may only use 'enum' on a string field`);
+    if (!Array.isArray(prop.enum) || prop.enum.length === 0) {
+      fail(`use case '${key}' property '${name}' enum must be a non-empty array`);
+    }
+    for (const e of prop.enum as unknown[]) {
+      if (typeof e !== "string") fail(`use case '${key}' property '${name}' enum values must be strings`);
+    }
+  }
+
+  if (prop.min !== undefined || prop.max !== undefined) {
+    if (!isNumber) fail(`use case '${key}' property '${name}' may only use 'min'/'max' on a number field`);
+    if (prop.min !== undefined && typeof prop.min !== "number") fail(`use case '${key}' property '${name}' min must be a number`);
+    if (prop.max !== undefined && typeof prop.max !== "number") fail(`use case '${key}' property '${name}' max must be a number`);
+    if (typeof prop.min === "number" && typeof prop.max === "number" && prop.min > prop.max) {
+      fail(`use case '${key}' property '${name}' has min > max`);
+    }
+  }
+
+  if (prop.pattern !== undefined) {
+    if (!isString) fail(`use case '${key}' property '${name}' may only use 'pattern' on a string field`);
+    if (typeof prop.pattern !== "string") fail(`use case '${key}' property '${name}' pattern must be a string`);
+    try {
+      new RegExp(prop.pattern as string);
+    } catch {
+      fail(`use case '${key}' property '${name}' pattern is not a valid RegExp`);
+    }
+  }
+}
+
+/** Validate the optional data-dependent compliance rules. */
+function validateCompliance(
+  compliance: Record<string, unknown>,
+  key: string,
+  fail: (msg: string) => never,
+): void {
+  const { maxHolders, lockupDays, allowedJurisdictions } = compliance;
+  if (maxHolders !== undefined) {
+    if (typeof maxHolders !== "number" || !Number.isInteger(maxHolders) || maxHolders <= 0) {
+      fail(`use case '${key}' compliance.maxHolders must be a positive integer`);
+    }
+  }
+  if (lockupDays !== undefined) {
+    if (typeof lockupDays !== "number" || !Number.isInteger(lockupDays) || lockupDays < 0) {
+      fail(`use case '${key}' compliance.lockupDays must be a non-negative integer`);
+    }
+  }
+  if (allowedJurisdictions !== undefined) {
+    if (!Array.isArray(allowedJurisdictions) || allowedJurisdictions.length === 0) {
+      fail(`use case '${key}' compliance.allowedJurisdictions must be a non-empty array`);
+    }
+    for (const j of allowedJurisdictions as unknown[]) {
+      if (typeof j !== "string" || j.length === 0) {
+        fail(`use case '${key}' compliance.allowedJurisdictions entries must be non-empty strings`);
+      }
+    }
+  }
+}
+
+/** Validate the optional fee configuration. */
+function validateFees(fees: unknown, key: string, fail: (msg: string) => never): void {
+  if (typeof fees !== "object" || fees === null) fail(`use case '${key}' 'fees' must be an object`);
+  const f = fees as Record<string, unknown>;
+  if (f.marketplaceBps !== undefined) {
+    if (typeof f.marketplaceBps !== "number" || !Number.isInteger(f.marketplaceBps) || f.marketplaceBps < 0 || f.marketplaceBps > 10000) {
+      fail(`use case '${key}' fees.marketplaceBps must be an integer between 0 and 10000`);
+    }
+  }
+  if (f.issuanceFlat !== undefined && !isNonNegativeIntegerString(f.issuanceFlat)) {
+    fail(`use case '${key}' fees.issuanceFlat must be a non-negative integer string`);
+  }
+}
+
+/** Validate the optional default sale-terms shape (not enforced at runtime). */
+function validateSaleTermsDefault(terms: unknown, key: string, fail: (msg: string) => never): void {
+  if (typeof terms !== "object" || terms === null) fail(`use case '${key}' 'saleTermsDefault' must be an object`);
+  const t = terms as Record<string, unknown>;
+  if (t.unitPrice !== undefined && typeof t.unitPrice !== "string") {
+    fail(`use case '${key}' saleTermsDefault.unitPrice must be a string`);
+  }
+  if (t.currency !== undefined && typeof t.currency !== "string") {
+    fail(`use case '${key}' saleTermsDefault.currency must be a string`);
   }
 }
 
@@ -102,9 +218,33 @@ export function validateMetadata(metadata: Record<string, unknown>, schema: Meta
   for (const [name, value] of Object.entries(metadata)) {
     const prop = schema.properties[name];
     if (!prop) continue; // extra fields are tolerated, not rejected
+
+    // A document field's runtime value is a string URL — treat its expected type as string.
+    const expectedRuntimeType = STRING_LIKE_PROP_TYPES.has(prop.type) ? "string" : prop.type;
     const actual = typeof value;
-    if (actual !== prop.type) {
-      problems.push(`field '${name}' should be ${prop.type} but got ${actual}`);
+    if (actual !== expectedRuntimeType) {
+      problems.push(`field '${name}' should be ${expectedRuntimeType} but got ${actual}`);
+      continue; // constraint checks below assume the value is the right type
+    }
+
+    if (prop.type === "document") {
+      if (!isHttpUrl(value as string)) {
+        problems.push(`field '${name}' must be an http(s) URL`);
+      }
+    }
+    if (prop.enum !== undefined && !prop.enum.includes(value as string)) {
+      problems.push(`field '${name}' must be one of: ${prop.enum.join(", ")}`);
+    }
+    if (typeof value === "number") {
+      if (prop.min !== undefined && value < prop.min) {
+        problems.push(`field '${name}' must be >= ${prop.min}`);
+      }
+      if (prop.max !== undefined && value > prop.max) {
+        problems.push(`field '${name}' must be <= ${prop.max}`);
+      }
+    }
+    if (prop.pattern !== undefined && typeof value === "string" && !new RegExp(prop.pattern).test(value)) {
+      problems.push(`field '${name}' must match pattern ${prop.pattern}`);
     }
   }
 

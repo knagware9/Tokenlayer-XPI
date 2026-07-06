@@ -34,6 +34,84 @@ describe("validateUseCaseDefinition", () => {
     };
     expect(() => validateUseCaseDefinition(bad)).toThrowError(/requires unknown property/);
   });
+
+  it("accepts a document field type", () => {
+    const ok = {
+      ...FUNGIBLE_USE_CASE,
+      metadataSchema: { type: "object", properties: { prospectus: { type: "document" } } },
+    };
+    expect(() => validateUseCaseDefinition(ok)).not.toThrow();
+  });
+
+  it("rejects enum on a non-string field", () => {
+    const bad = {
+      ...FUNGIBLE_USE_CASE,
+      metadataSchema: { type: "object", properties: { n: { type: "number", enum: ["a"] } } },
+    };
+    expect(() => validateUseCaseDefinition(bad)).toThrowError(/enum/);
+  });
+
+  it("rejects an empty enum", () => {
+    const bad = {
+      ...FUNGIBLE_USE_CASE,
+      metadataSchema: { type: "object", properties: { s: { type: "string", enum: [] } } },
+    };
+    expect(() => validateUseCaseDefinition(bad)).toThrowError(/enum must be a non-empty array/);
+  });
+
+  it("rejects min > max on a number field", () => {
+    const bad = {
+      ...FUNGIBLE_USE_CASE,
+      metadataSchema: { type: "object", properties: { n: { type: "number", min: 10, max: 5 } } },
+    };
+    expect(() => validateUseCaseDefinition(bad)).toThrowError(/min > max/);
+  });
+
+  it("rejects min/max on a non-number field", () => {
+    const bad = {
+      ...FUNGIBLE_USE_CASE,
+      metadataSchema: { type: "object", properties: { s: { type: "string", min: 1 } } },
+    };
+    expect(() => validateUseCaseDefinition(bad)).toThrowError(/min'\/'max/);
+  });
+
+  it("rejects a pattern that does not compile", () => {
+    const bad = {
+      ...FUNGIBLE_USE_CASE,
+      metadataSchema: { type: "object", properties: { s: { type: "string", pattern: "(" } } },
+    };
+    expect(() => validateUseCaseDefinition(bad)).toThrowError(/not a valid RegExp/);
+  });
+
+  it("rejects a marketplaceBps out of range", () => {
+    const bad = { ...FUNGIBLE_USE_CASE, fees: { marketplaceBps: 20000 } };
+    expect(() => validateUseCaseDefinition(bad)).toThrowError(/marketplaceBps/);
+  });
+
+  it("rejects a negative issuanceFlat", () => {
+    const bad = { ...FUNGIBLE_USE_CASE, fees: { issuanceFlat: "-5" } };
+    expect(() => validateUseCaseDefinition(bad)).toThrowError(/issuanceFlat/);
+  });
+
+  it("accepts valid fees and compliance rules", () => {
+    const ok = {
+      ...FUNGIBLE_USE_CASE,
+      compliance: { ...FUNGIBLE_USE_CASE.compliance, maxHolders: 3, lockupDays: 30, allowedJurisdictions: ["IN"] },
+      fees: { marketplaceBps: 250, issuanceFlat: "100" },
+      saleTermsDefault: { unitPrice: "5", currency: "CBDC-INR" },
+    };
+    expect(() => validateUseCaseDefinition(ok)).not.toThrow();
+  });
+
+  it("rejects a non-positive maxHolders", () => {
+    const bad = { ...FUNGIBLE_USE_CASE, compliance: { ...FUNGIBLE_USE_CASE.compliance, maxHolders: 0 } };
+    expect(() => validateUseCaseDefinition(bad)).toThrowError(/maxHolders/);
+  });
+
+  it("rejects an empty allowedJurisdictions", () => {
+    const bad = { ...FUNGIBLE_USE_CASE, compliance: { ...FUNGIBLE_USE_CASE.compliance, allowedJurisdictions: [] } };
+    expect(() => validateUseCaseDefinition(bad)).toThrowError(/allowedJurisdictions/);
+  });
 });
 
 describe("validateMetadata", () => {
@@ -53,5 +131,33 @@ describe("validateMetadata", () => {
 
   it("tolerates extra fields", () => {
     expect(() => validateMetadata({ issuer: "ACME", extra: true }, schema)).not.toThrow();
+  });
+
+  it("enforces enum membership", () => {
+    const s = { type: "object" as const, properties: { grade: { type: "string" as const, enum: ["A", "B"] } } };
+    expect(() => validateMetadata({ grade: "A" }, s)).not.toThrow();
+    expect(() => validateMetadata({ grade: "C" }, s)).toThrowError(/must be one of/);
+  });
+
+  it("enforces numeric min/max at the boundary (inclusive)", () => {
+    const s = { type: "object" as const, properties: { pct: { type: "number" as const, min: 0, max: 100 } } };
+    expect(() => validateMetadata({ pct: 0 }, s)).not.toThrow();
+    expect(() => validateMetadata({ pct: 100 }, s)).not.toThrow();
+    expect(() => validateMetadata({ pct: -1 }, s)).toThrowError(/must be >= 0/);
+    expect(() => validateMetadata({ pct: 101 }, s)).toThrowError(/must be <= 100/);
+  });
+
+  it("enforces string pattern", () => {
+    const s = { type: "object" as const, properties: { code: { type: "string" as const, pattern: "^[A-Z]{3}$" } } };
+    expect(() => validateMetadata({ code: "ABC" }, s)).not.toThrow();
+    expect(() => validateMetadata({ code: "abc" }, s)).toThrowError(/must match pattern/);
+  });
+
+  it("enforces document URL format", () => {
+    const s = { type: "object" as const, properties: { doc: { type: "document" as const } } };
+    expect(() => validateMetadata({ doc: "https://example.com/x.pdf" }, s)).not.toThrow();
+    expect(() => validateMetadata({ doc: "not-a-url" }, s)).toThrowError(/http\(s\) URL/);
+    // a non-string document value fails the string type check
+    expect(() => validateMetadata({ doc: 42 }, s)).toThrowError(/should be string/);
   });
 });

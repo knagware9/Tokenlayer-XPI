@@ -5,8 +5,10 @@ import {
   StaticUseCaseSource,
   type Actor,
   type AssetContext,
+  type AssetRef,
   type AuditRecord,
   type AuditSink,
+  type ComplianceProvider,
   type UseCaseDefinition,
 } from "../src/index.js";
 import { FakeAdapter, FUNGIBLE_USE_CASE, NO_TRANSFER_USE_CASE } from "./fixtures.js";
@@ -208,3 +210,129 @@ describe("LifecycleEngine", () => {
     ).rejects.toThrow(/ACCOUNT_FROZEN|frozen/);
   });
 });
+
+// A configurable fake ComplianceProvider for the data-dependent rules.
+class FakeCompliance implements ComplianceProvider {
+  holders = 0;
+  acquired = new Map<string, string | null>();
+  jurisdictions = new Map<string, string | null>();
+  async holderCount(_ref: AssetRef): Promise<number> {
+    return this.holders;
+  }
+  async acquiredAt(_ref: AssetRef, account: string): Promise<string | null> {
+    return this.acquired.get(account) ?? null;
+  }
+  async jurisdictionOf(account: string): Promise<string | null> {
+    return this.jurisdictions.get(account) ?? null;
+  }
+}
+
+describe("LifecycleEngine — engine-enforced compliance rules", () => {
+  let adapter: FakeAdapter;
+  let audit: MemoryAudit;
+  let provider: FakeCompliance;
+
+  // No allowlist so the compliance rules are exercised in isolation.
+  const HOLDER_LIMIT_UC: UseCaseDefinition = {
+    ...FUNGIBLE_USE_CASE,
+    key: "holder-limit",
+    compliance: { allowlist: false, transferRestrictions: true, maxHolders: 2 },
+  };
+  const LOCKUP_UC: UseCaseDefinition = {
+    ...FUNGIBLE_USE_CASE,
+    key: "lockup",
+    compliance: { allowlist: false, transferRestrictions: true, lockupDays: 30 },
+  };
+  const JURISDICTION_UC: UseCaseDefinition = {
+    ...FUNGIBLE_USE_CASE,
+    key: "jurisdiction",
+    compliance: { allowlist: false, transferRestrictions: true, allowedJurisdictions: ["IN"] },
+  };
+
+  const holderCtx: AssetContext = { ref: { id: "h1", chainId: "fake", contractRef: "fake:h1" }, useCaseKey: "holder-limit" };
+  const lockupCtx: AssetContext = { ref: { id: "l1", chainId: "fake", contractRef: "fake:l1" }, useCaseKey: "lockup" };
+  const jurCtx: AssetContext = { ref: { id: "j1", chainId: "fake", contractRef: "fake:j1" }, useCaseKey: "jurisdiction" };
+
+  function makeEngine(now: () => string): LifecycleEngine {
+    return new LifecycleEngine({
+      useCases: new StaticUseCaseSource([HOLDER_LIMIT_UC, LOCKUP_UC, JURISDICTION_UC]),
+      rbac: new RbacPolicy(),
+      resolveAdapter: () => adapter,
+      audit,
+      now,
+      compliance: provider,
+    });
+  }
+
+  beforeEach(() => {
+    adapter = new FakeAdapter();
+    audit = new MemoryAudit();
+    provider = new FakeCompliance();
+  });
+
+  it("holder limit: allows up to the limit, blocks the limit-exceeding new holder, existing holder unaffected", async () => {
+    const engine = makeEngine(() => "2026-01-01T00:00:00.000Z");
+    // limit = 2. Currently 0 holders.
+    provider.holders = 0;
+    await engine.mint(ADMIN, holderCtx, "alice", "100"); // new holder ok (0 < 2)
+    provider.holders = 1;
+    await engine.mint(ADMIN, holderCtx, "bob", "100"); // new holder ok (1 < 2)
+    provider.holders = 2;
+    // carol is a NEW holder (balance 0) → 2 >= 2 → blocked
+    await expect(engine.mint(ADMIN, holderCtx, "carol", "100")).rejects.toThrow(/HOLDER_LIMIT_EXCEEDED|at most 2 holders/);
+    // alice already holds → not counted as new → allowed even at the cap
+    await expect(engine.mint(ADMIN, holderCtx, "alice", "50")).resolves.toBeDefined();
+  });
+
+  it("lockup: blocks a transfer before lockupDays and allows it after", async () => {
+    provider.acquired.set("alice", "2026-01-01T00:00:00.000Z");
+    await adapter.mint(lockupCtx.ref, "alice", "100"); // seed balance directly
+
+    // 10 days later → still within 30-day lockup → blocked
+    const early = makeEngine(() => "2026-01-11T00:00:00.000Z");
+    await expect(engine_transfer(early, lockupCtx, "alice", "bob", "10")).rejects.toThrow(/LOCKUP_ACTIVE|lockup/);
+
+    // 31 days later → lockup elapsed → allowed
+    const late = makeEngine(() => "2026-02-01T00:00:00.000Z");
+    await expect(engine_transfer(late, lockupCtx, "alice", "bob", "10")).resolves.toBeDefined();
+  });
+
+  it("lockup: a never-acquired sender (null acquiredAt) is not locked", async () => {
+    const engine = makeEngine(() => "2026-01-11T00:00:00.000Z");
+    await adapter.mint(lockupCtx.ref, "treasury", "100");
+    // provider.acquiredAt('treasury') is null → allowed
+    await expect(engine_transfer(engine, lockupCtx, "treasury", "bob", "10")).resolves.toBeDefined();
+  });
+
+  it("jurisdiction: allows an in-list holder, blocks out-of-list and null", async () => {
+    const engine = makeEngine(() => "2026-01-01T00:00:00.000Z");
+    provider.jurisdictions.set("in-holder", "IN");
+    provider.jurisdictions.set("us-holder", "US");
+    // null-jurisdiction holder not set → jurisdictionOf returns null
+
+    await expect(engine.mint(ADMIN, jurCtx, "in-holder", "10")).resolves.toBeDefined();
+    await expect(engine.mint(ADMIN, jurCtx, "us-holder", "10")).rejects.toThrow(/JURISDICTION_NOT_ALLOWED|not allowed/);
+    await expect(engine.mint(ADMIN, jurCtx, "unknown-holder", "10")).rejects.toThrow(/JURISDICTION_NOT_ALLOWED|not allowed/);
+  });
+
+  it("no provider / no rule: engine without a ComplianceProvider skips the rules", async () => {
+    // Engine constructed WITHOUT a compliance provider, use case WITH maxHolders set.
+    const engine = new LifecycleEngine({
+      useCases: new StaticUseCaseSource([HOLDER_LIMIT_UC]),
+      rbac: new RbacPolicy(),
+      resolveAdapter: () => adapter,
+      audit,
+      now: () => "2026-01-01T00:00:00.000Z",
+      // no compliance
+    });
+    provider.holders = 99; // would exceed if consulted
+    // No provider wired → holder-limit rule is skipped entirely.
+    await expect(engine.mint(ADMIN, holderCtx, "alice", "10")).resolves.toBeDefined();
+    await expect(engine.mint(ADMIN, holderCtx, "bob", "10")).resolves.toBeDefined();
+  });
+});
+
+// helper: transfer via the Trader (buy/transfer both use the transfer lifecycle flag).
+function engine_transfer(engine: LifecycleEngine, ctx: AssetContext, from: string, to: string, amount: string) {
+  return engine.transfer(TRADER, ctx, from, to, amount);
+}
