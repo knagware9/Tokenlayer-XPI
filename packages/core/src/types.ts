@@ -117,8 +117,17 @@ export interface MetadataSchema {
 }
 
 export interface PropertySchema {
-  type: "string" | "number" | "boolean";
+  /** A `document` field's runtime value is a string URL (http/https). */
+  type: "string" | "number" | "boolean" | "document";
   description?: string;
+  /** string fields → a fixed choice list (value must be one of these). */
+  enum?: string[];
+  /** number fields → inclusive lower bound. */
+  min?: number;
+  /** number fields → inclusive upper bound. */
+  max?: number;
+  /** string fields → RegExp source the value must match (new RegExp(pattern)). */
+  pattern?: string;
 }
 
 /** A contract deployed for a use case on one chain. */
@@ -157,8 +166,39 @@ export interface UseCaseDefinition {
   compliance: {
     allowlist: boolean;
     transferRestrictions: boolean;
+    /** Cap on the number of distinct positive-balance holders. */
+    maxHolders?: number;
+    /** No transfer of tokens within N days of the sender's acquisition. */
+    lockupDays?: number;
+    /** Holder KYC country codes permitted to receive tokens. */
+    allowedJurisdictions?: string[];
+  };
+  /** Optional fee configuration; the API layer applies the cash movements. */
+  fees?: {
+    /** Marketplace fee in basis points (0..10000) taken on a DvP buy. */
+    marketplaceBps?: number;
+    /** Flat CBDC amount (non-negative integer string) charged at issuance. */
+    issuanceFlat?: string;
+  };
+  /** Default sale terms used to pre-fill the issue form; not enforced. */
+  saleTermsDefault?: {
+    unitPrice?: string;
+    currency?: string;
   };
   roles: Role[];
+}
+
+/**
+ * Supplies holder/KYC/timing data the engine needs to enforce data-dependent
+ * compliance rules. Wired by the API from its repos.
+ */
+export interface ComplianceProvider {
+  /** Distinct positive-balance holders of the asset. */
+  holderCount(ref: AssetRef): Promise<number>;
+  /** ISO of that account's first acquisition, or null if never acquired. */
+  acquiredAt(ref: AssetRef, account: string): Promise<string | null>;
+  /** Holder address → KYC country code, or null if unknown. */
+  jurisdictionOf(account: string): Promise<string | null>;
 }
 
 /**

@@ -10,7 +10,10 @@ export type PolicyErrorCode =
   | "CHAIN_NOT_ALLOWED"
   | "USE_CASE_NOT_DEPLOYED_ON_CHAIN"
   | "WRONG_TOKEN_TYPE"
-  | "INSUFFICIENT_FUNDS";
+  | "INSUFFICIENT_FUNDS"
+  | "HOLDER_LIMIT_EXCEEDED"
+  | "LOCKUP_ACTIVE"
+  | "JURISDICTION_NOT_ALLOWED";
 
 /** Raised when a request violates RBAC, lifecycle, or compliance policy. */
 export class PolicyError extends Error {

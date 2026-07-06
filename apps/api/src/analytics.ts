@@ -5,6 +5,7 @@
  * deterministic and unit-testable. All token/money math is done as BigInt over
  * integer strings; outputs are decimal strings (never floats).
  */
+import { amountOf, collectPositiveHolders, foldAsset, type AssetState } from "./holders.js";
 import type { AssetRecord, AuditEntryRecord } from "./persistence/types.js";
 
 export interface AnalyticsInput {
@@ -75,13 +76,6 @@ export interface AnalyticsSummary {
   recent: RecentEvent[];
 }
 
-/** Read an integer-string field from an audit payload; missing/invalid → 0n. */
-function amountOf(payload: Record<string, unknown>, field: string): bigint {
-  const v = payload[field];
-  if (typeof v === "string" && /^\d+$/.test(v)) return BigInt(v);
-  return 0n;
-}
-
 /** Add `amount` into a currency-keyed bigint accumulator. */
 function addCurrency(acc: Map<string, bigint>, currency: string, amount: bigint): void {
   acc.set(currency, (acc.get(currency) ?? 0n) + amount);
@@ -97,67 +91,6 @@ function currencyMapToStrings(acc: Map<string, bigint>): Record<string, string> 
 /** UTC calendar date (YYYY-MM-DD) of an ISO timestamp. */
 function utcDate(iso: string): string {
   return new Date(iso).toISOString().slice(0, 10);
-}
-
-/** Per-asset fold of the audit stream: net supply, positive-balance holders. */
-interface AssetState {
-  supply: bigint;
-  balances: Map<string, bigint>; // address → net balance
-}
-
-function foldAsset(entries: AuditEntryRecord[]): AssetState {
-  const balances = new Map<string, bigint>();
-  const bump = (addr: unknown, delta: bigint): void => {
-    if (typeof addr !== "string" || addr === "") return;
-    balances.set(addr, (balances.get(addr) ?? 0n) + delta);
-  };
-  let supply = 0n;
-  for (const e of entries) {
-    const p = e.payload ?? {};
-    switch (e.action) {
-      case "mint": {
-        const amt = amountOf(p, "amount");
-        supply += amt;
-        bump(p.to, amt);
-        break;
-      }
-      case "transfer": {
-        const amt = amountOf(p, "amount");
-        bump(p.from, -amt);
-        bump(p.to, amt);
-        break;
-      }
-      case "buy": {
-        const amt = amountOf(p, "amount");
-        bump(p.from, -amt);
-        bump(p.to, amt);
-        break;
-      }
-      case "burn": {
-        const amt = amountOf(p, "amount");
-        supply -= amt;
-        bump(p.from, -amt);
-        break;
-      }
-      default:
-        break; // issue/freeze/unfreeze/allow/disallow/read: no supply/balance effect
-    }
-  }
-  return { supply, balances };
-}
-
-/** Distinct addresses with a strictly positive net balance across a set of assets. */
-function collectPositiveHolders(states: AssetState[]): Set<string> {
-  // Deduplicate a holder across assets by address: an address counts once if it
-  // holds a positive balance in ANY asset in the subset. (An address net-positive
-  // in asset A but zero in asset B is still a holder of the subset.)
-  const net = new Map<string, boolean>();
-  for (const s of states) {
-    for (const [addr, bal] of s.balances) {
-      if (bal > 0n) net.set(addr, true);
-    }
-  }
-  return new Set(net.keys());
 }
 
 /** Short human summary for a recent event. */

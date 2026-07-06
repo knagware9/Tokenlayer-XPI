@@ -206,42 +206,80 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       }
     }
     const actor = actorOf(request);
-    const id = randomUUID();
-    const result = await deps.engine.issue(actor, { useCaseKey: bUseCaseKey, chainId, id, metadata: metadata ?? {} });
     const useCase = await deps.useCases.get(bUseCaseKey);
-    const asset = await deps.assets.create({
-      id,
-      useCaseKey: bUseCaseKey,
-      name,
-      symbol: useCase.symbol,
-      chainId,
-      contractRef: result.ref.contractRef,
-      tokenType: result.tokenType,
-      tokenStandard: useCase.tokenStandard,
-      metadata: metadata ?? {},
-      status: "active",
-      createdBy: actor.id,
-      unitPrice: null,
-      currency: null,
-      treasuryAccount: null,
-    });
-    if (sale) {
-      await deps.assets.setSaleTerms(id, sale);
+    // Initial supply is fungible-only — reject up front, before charging any fee.
+    if (wantsSupply && useCase.tokenType !== "fungible") {
+      return reply.code(400).send({ error: "SUPPLY_UNSUPPORTED", message: "initial supply is only supported for fungible assets" });
     }
-    // Auto-allowlist the treasury and mint the requested initial supply into it,
-    // so the asset is immediately funded and (if priced) available to buy.
-    if (wantsSupply) {
-      if (asset.tokenType !== "fungible") {
-        return reply.code(400).send({ error: "SUPPLY_UNSUPPORTED", message: "initial supply is only supported for fungible assets" });
+
+    // Issuance fee: a flat CBDC amount charged from the issuer's linked cash
+    // account to the platform fee account. Applies only when: a fee account is
+    // configured, fees.issuanceFlat > 0, and a fee currency is determinable (sale
+    // currency, else saleTermsDefault). If no fee currency is determinable, the
+    // fee is skipped (issuance proceeds). The fee is REFUNDED if issuance then fails.
+    const feeAccount = deps.platformFeeAccount;
+    const issuanceFlat = useCase.fees?.issuanceFlat;
+    let issuanceFeeCharged: { amount: string; currency: string } | null = null;
+    let feePayer: string | undefined;
+    if (feeAccount && issuanceFlat && BigInt(issuanceFlat) > 0n) {
+      const feeCurrency = sale?.currency ?? useCase.saleTermsDefault?.currency;
+      if (feeCurrency && isSupportedCurrency(feeCurrency)) {
+        const me = await deps.users.findById(claims.id);
+        feePayer = me?.accountId ? (await deps.accounts.findById(me.accountId))?.address : undefined;
+        if (!feePayer) {
+          return reply.code(400).send({ error: "NO_WALLET", message: "your account has no linked wallet to pay the issuance fee" });
+        }
+        if (BigInt(await deps.cash.balanceOf(feeCurrency, feePayer)) < BigInt(issuanceFlat)) {
+          return reply.code(400).send({ error: "INSUFFICIENT_FUNDS", message: `you need ${issuanceFlat} ${feeCurrency} to cover the issuance fee` });
+        }
+        await deps.cash.transfer(feeCurrency, feePayer, feeAccount, issuanceFlat);
+        issuanceFeeCharged = { amount: issuanceFlat, currency: feeCurrency };
       }
-      const ctx = contextOf(await deps.assets.get(id) ?? asset);
-      if (useCase.compliance.allowlist) {
-        await deps.engine.setAllowed(actor, ctx, treasury!, true);
-      }
-      await deps.engine.mint(actor, ctx, treasury!, initialSupply!);
     }
-    const finalAsset = await deps.assets.get(id) ?? asset;
-    return reply.code(201).send({ asset: finalAsset, txHash: result.txHash });
+
+    const id = randomUUID();
+    let result: Awaited<ReturnType<typeof deps.engine.issue>>;
+    try {
+      result = await deps.engine.issue(actor, { useCaseKey: bUseCaseKey, chainId, id, metadata: metadata ?? {} });
+      await deps.assets.create({
+        id,
+        useCaseKey: bUseCaseKey,
+        name,
+        symbol: useCase.symbol,
+        chainId,
+        contractRef: result.ref.contractRef,
+        tokenType: result.tokenType,
+        tokenStandard: useCase.tokenStandard,
+        metadata: metadata ?? {},
+        status: "active",
+        createdBy: actor.id,
+        unitPrice: null,
+        currency: null,
+        treasuryAccount: null,
+      });
+      if (sale) {
+        await deps.assets.setSaleTerms(id, sale);
+      }
+      // Auto-allowlist the treasury and mint the requested initial supply into it,
+      // so the asset is immediately funded and (if priced) available to buy.
+      if (wantsSupply) {
+        const created = await deps.assets.get(id);
+        const ctx = contextOf(created!);
+        if (useCase.compliance.allowlist) {
+          await deps.engine.setAllowed(actor, ctx, treasury!, true);
+        }
+        await deps.engine.mint(actor, ctx, treasury!, initialSupply!);
+      }
+    } catch (err) {
+      // Issuance failed after the fee moved — refund it so the issuer isn't charged
+      // for an asset that was never created (mirrors the buy path's compensation).
+      if (issuanceFeeCharged && feePayer && feeAccount) {
+        await deps.cash.transfer(issuanceFeeCharged.currency, feeAccount, feePayer, issuanceFeeCharged.amount).catch(() => {});
+      }
+      throw err;
+    }
+    const finalAsset = await deps.assets.get(id);
+    return reply.code(201).send({ asset: finalAsset, txHash: result.txHash, ...(issuanceFeeCharged ? { issuanceFee: issuanceFeeCharged } : {}) });
   });
 
   app.get("/assets", { schema: S.listAssets, ...auth }, async (request) => {
@@ -443,6 +481,15 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const ctx = contextOf(asset);
     const adapter = deps.chains.resolveAdapter(asset.chainId);
 
+    // Marketplace fee: a slice of the payment goes to the platform fee account,
+    // the remainder to the treasury. Disabled (fee = 0) unless the use case sets
+    // marketplaceBps > 0 AND a platform fee account is configured.
+    const useCase = await deps.useCases.get(asset.useCaseKey);
+    const feeAccount = deps.platformFeeAccount;
+    const bps = feeAccount ? (useCase.fees?.marketplaceBps ?? 0) : 0;
+    const fee = ((BigInt(cost) * BigInt(bps)) / 10000n).toString();
+    const toTreasury = (BigInt(cost) - BigInt(fee)).toString();
+
     // Pre-checks (no state change yet)
     if (BigInt(await deps.cash.balanceOf(currency, wallet)) < BigInt(cost)) {
       return reply.code(400).send({ error: "INSUFFICIENT_FUNDS", message: `you need ${cost} ${currency}` });
@@ -451,16 +498,37 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       return reply.code(400).send({ error: "INSUFFICIENT_TREASURY", message: "the treasury does not hold enough tokens" });
     }
 
-    // Payment-first with compensation
-    await deps.cash.transfer(currency, wallet, treasuryAccount, cost);
-    try {
-      const receipt = await deps.engine.buy(actor, ctx, treasuryAccount, wallet, quantity, { unitPrice, currency, cost });
-      return reply.code(200).send({ receipt, paid: { amount: cost, currency }, delivered: { amount: quantity, to: wallet } });
-    } catch (err) {
+    // Payment-first with compensation. Split the payment into (treasury, fee)
+    // legs; the buyer needs `cost` total either way. If either leg or delivery
+    // fails, refund the FULL cost to the buyer.
+    await deps.cash.transfer(currency, wallet, treasuryAccount, toTreasury);
+    if (BigInt(fee) > 0n && feeAccount) {
       try {
-        await deps.cash.transfer(currency, treasuryAccount, wallet, cost); // compensate
+        await deps.cash.transfer(currency, wallet, feeAccount, fee);
+      } catch (feeErr) {
+        // Undo the treasury leg so the buyer is made whole, then surface.
+        try {
+          await deps.cash.transfer(currency, treasuryAccount, wallet, toTreasury);
+        } catch (refundErr) {
+          request.log.error({ feeErr, refundErr, wallet, treasuryAccount, currency, toTreasury }, "buy fee leg failed AND treasury refund failed — manual reconciliation required");
+          throw refundErr;
+        }
+        throw feeErr;
+      }
+    }
+    try {
+      // Record the fee split in the buy audit metadata. The engine spreads this
+      // object into the audit payload; the extra keys carry the fee accounting.
+      const buyMeta = { unitPrice, currency, cost, ...(fee !== "0" ? { fee, feeAccount } : {}) };
+      const receipt = await deps.engine.buy(actor, ctx, treasuryAccount, wallet, quantity, buyMeta);
+      return reply.code(200).send({ receipt, paid: { amount: cost, currency }, delivered: { amount: quantity, to: wallet }, fee: { amount: fee, account: fee !== "0" ? feeAccount ?? null : null } });
+    } catch (err) {
+      // Refund the FULL cost: reverse the treasury leg, and the fee leg if it ran.
+      try {
+        await deps.cash.transfer(currency, treasuryAccount, wallet, toTreasury);
+        if (BigInt(fee) > 0n && feeAccount) await deps.cash.transfer(currency, feeAccount, wallet, fee);
       } catch (refundErr) {
-        request.log.error({ err, refundErr, wallet, treasuryAccount, currency, cost }, "buy delivery failed AND cash refund failed — manual reconciliation required");
+        request.log.error({ err, refundErr, wallet, treasuryAccount, feeAccount, currency, cost }, "buy delivery failed AND cash refund failed — manual reconciliation required");
         throw refundErr;
       }
       throw err; // delivery failed but cash was refunded — surface the real cause

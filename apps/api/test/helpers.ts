@@ -15,7 +15,7 @@ import {
 import { DEFAULT_USERS, seedDefaults } from "../src/seed.js";
 import { seedUseCases } from "../src/use-cases.js";
 
-export async function buildTestApp(opts: { loginRateLimitMax?: number } = {}): Promise<FastifyInstance> {
+export async function buildTestApp(opts: { loginRateLimitMax?: number; platformFeeAccount?: string } = {}): Promise<FastifyInstance> {
   const rbac = new RbacPolicy();
   const chains = buildChainRegistry({ CHAIN_STRICT: "0" }); // simulated chains only — besu absent, never mocked
   const users = new MemoryUserRepository();
@@ -25,13 +25,13 @@ export async function buildTestApp(opts: { loginRateLimitMax?: number } = {}): P
   const useCases = new MemoryUseCaseRepository();
   const cash = new MemoryCashRepository();
   await seedDefaults(users, accounts);
-  const engine = createEngine(useCases, rbac, chains, audit);
+  const engine = createEngine(useCases, rbac, chains, audit, { users, accounts });
   await seedUseCases(useCases, {
     availableChainIds: new Set(chains.list().map((c) => c.id)),
     deploy: (def, chainId) => engine.deployUseCaseContract(def, chainId),
   });
   // The suite makes many logins from one IP; raise the throttle unless a test opts into it.
-  return buildApp({ useCases, rbac, engine, users, assets, audit, accounts, chains, cash, currencies: loadCurrencies(), jwtSecret: "test-secret", loginRateLimitMax: opts.loginRateLimitMax ?? 100000 });
+  return buildApp({ useCases, rbac, engine, users, assets, audit, accounts, chains, cash, currencies: loadCurrencies(), jwtSecret: "test-secret", loginRateLimitMax: opts.loginRateLimitMax ?? 100000, platformFeeAccount: opts.platformFeeAccount });
 }
 
 /** All v1 API routes live under this prefix. */

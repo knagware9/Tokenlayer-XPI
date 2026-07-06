@@ -7,6 +7,7 @@ import type {
   AssetRef,
   AuditRecord,
   AuditSink,
+  ComplianceProvider,
   LedgerAdapter,
   LifecycleAction,
   TokenType,
@@ -37,6 +38,12 @@ export interface LifecycleEngineDeps {
   audit: AuditSink;
   /** Injectable clock for deterministic tests. */
   now?: () => string;
+  /**
+   * Supplies holder/KYC/timing data for data-dependent compliance rules
+   * (maxHolders / lockupDays / allowedJurisdictions). Optional: when absent,
+   * those rules are skipped so existing use cases behave exactly as before.
+   */
+  compliance?: ComplianceProvider;
 }
 
 /**
@@ -56,6 +63,7 @@ export class LifecycleEngine {
   private readonly resolveAdapter: (chainId: string) => LedgerAdapter;
   private readonly audit: AuditSink;
   private readonly now: () => string;
+  private readonly compliance?: ComplianceProvider;
 
   constructor(deps: LifecycleEngineDeps) {
     this.useCases = deps.useCases;
@@ -63,6 +71,7 @@ export class LifecycleEngine {
     this.resolveAdapter = deps.resolveAdapter;
     this.audit = deps.audit;
     this.now = deps.now ?? (() => new Date().toISOString());
+    this.compliance = deps.compliance;
   }
 
   /**
@@ -132,6 +141,8 @@ export class LifecycleEngine {
     this.requireFungible(useCase);
     this.requireLifecycle(useCase, "mint");
     await this.requireAllowed(adapter, ctx.ref, useCase, [to]);
+    await this.requireJurisdiction(useCase, to);
+    await this.requireHolderLimit(ctx.ref, useCase, adapter, to);
     const receipt = await adapter.mint(ctx.ref, to, amount);
     await this.writeReceipt(actor, "mint", ctx, receipt, { to, amount });
     return receipt;
@@ -143,6 +154,9 @@ export class LifecycleEngine {
     this.requireLifecycle(useCase, "transfer");
     await this.requireAllowed(adapter, ctx.ref, useCase, [from, to]);
     await this.requireNotFrozen(adapter, ctx.ref, [from, to]);
+    await this.requireJurisdiction(useCase, to);
+    await this.requireHolderLimit(ctx.ref, useCase, adapter, to);
+    await this.requireLockup(ctx.ref, useCase, from);
     const receipt = await adapter.transfer(ctx.ref, from, to, amount);
     await this.writeReceipt(actor, "transfer", ctx, receipt, { from, to, amount, forced: true });
     return receipt;
@@ -168,6 +182,9 @@ export class LifecycleEngine {
     this.requireLifecycle(useCase, "transfer");
     await this.requireAllowed(adapter, ctx.ref, useCase, [from, to]);
     await this.requireNotFrozen(adapter, ctx.ref, [from, to]);
+    await this.requireJurisdiction(useCase, to);
+    await this.requireHolderLimit(ctx.ref, useCase, adapter, to);
+    await this.requireLockup(ctx.ref, useCase, from);
     const receipt = await adapter.transfer(ctx.ref, from, to, amount);
     await this.writeReceipt(actor, "buy", ctx, receipt, { from, to, amount, forced: false, ...meta });
     return receipt;
@@ -189,6 +206,8 @@ export class LifecycleEngine {
     this.requireNonFungible(useCase);
     this.requireLifecycle(useCase, "mint");
     await this.requireAllowed(adapter, ctx.ref, useCase, [to]);
+    await this.requireJurisdiction(useCase, to);
+    await this.requireHolderLimit(ctx.ref, useCase, adapter, to);
     const receipt = await adapter.mintToken(ctx.ref, to, tokenId, uri);
     await this.writeReceipt(actor, "mint", ctx, receipt, { to, tokenId, uri });
     return receipt;
@@ -200,6 +219,9 @@ export class LifecycleEngine {
     this.requireLifecycle(useCase, "transfer");
     await this.requireAllowed(adapter, ctx.ref, useCase, [from, to]);
     await this.requireNotFrozen(adapter, ctx.ref, [from, to]);
+    await this.requireJurisdiction(useCase, to);
+    await this.requireHolderLimit(ctx.ref, useCase, adapter, to);
+    await this.requireLockup(ctx.ref, useCase, from);
     const receipt = await adapter.transferToken(ctx.ref, from, to, tokenId);
     await this.writeReceipt(actor, "transfer", ctx, receipt, { from, to, tokenId, forced: true });
     return receipt;
@@ -315,6 +337,73 @@ export class LifecycleEngine {
       if (await adapter.isFrozen(ref, account)) {
         throw new PolicyError("ACCOUNT_FROZEN", `account '${account}' is frozen`, { account });
       }
+    }
+  }
+
+  /**
+   * Cap the number of distinct holders. Only a recipient that currently holds
+   * nothing (a NEW holder) counts against the cap. No-op unless the rule is set
+   * on the use case AND a ComplianceProvider is wired.
+   */
+  private async requireHolderLimit(
+    ref: AssetRef,
+    useCase: UseCaseDefinition,
+    adapter: LedgerAdapter,
+    to: string,
+  ): Promise<void> {
+    const maxHolders = useCase.compliance.maxHolders;
+    if (maxHolders === undefined || !this.compliance) return;
+    const isNewHolder = (await adapter.balanceOf(ref, to)) === "0";
+    if (!isNewHolder) return;
+    const count = await this.compliance.holderCount(ref);
+    if (count >= maxHolders) {
+      throw new PolicyError(
+        "HOLDER_LIMIT_EXCEEDED",
+        `use case '${useCase.key}' allows at most ${maxHolders} holders`,
+        { useCase: useCase.key, maxHolders, holderCount: count, account: to },
+      );
+    }
+  }
+
+  /**
+   * Block a sender from transferring within `lockupDays` of acquiring. A null
+   * acquisition time means the sender never acquired (e.g. the mint path) and is
+   * allowed. No-op unless the rule is set AND a ComplianceProvider is wired.
+   */
+  private async requireLockup(ref: AssetRef, useCase: UseCaseDefinition, from: string): Promise<void> {
+    const lockupDays = useCase.compliance.lockupDays;
+    if (lockupDays === undefined || !this.compliance) return;
+    const acq = await this.compliance.acquiredAt(ref, from);
+    if (acq === null) return; // never acquired → not locked (mint path)
+    const acquiredMs = Date.parse(acq);
+    const nowMs = Date.parse(this.now());
+    const dayMs = 24 * 60 * 60 * 1000;
+    const elapsedDays = (nowMs - acquiredMs) / dayMs;
+    if (elapsedDays < lockupDays) {
+      const remaining = Math.ceil(lockupDays - elapsedDays);
+      throw new PolicyError(
+        "LOCKUP_ACTIVE",
+        `account '${from}' is within the ${lockupDays}-day lockup (${remaining} day(s) remaining)`,
+        { useCase: useCase.key, lockupDays, account: from, daysRemaining: remaining },
+      );
+    }
+  }
+
+  /**
+   * Require the recipient's KYC jurisdiction to be in the allowed set. A holder
+   * with no known jurisdiction is rejected (fail closed). No-op unless the rule
+   * is set AND a ComplianceProvider is wired.
+   */
+  private async requireJurisdiction(useCase: UseCaseDefinition, to: string): Promise<void> {
+    const allowed = useCase.compliance.allowedJurisdictions;
+    if (allowed === undefined || !this.compliance) return;
+    const j = await this.compliance.jurisdictionOf(to);
+    if (j === null || !allowed.includes(j)) {
+      throw new PolicyError(
+        "JURISDICTION_NOT_ALLOWED",
+        `account '${to}' jurisdiction '${j ?? "unknown"}' is not allowed (permitted: ${allowed.join(", ")})`,
+        { useCase: useCase.key, account: to, jurisdiction: j, allowedJurisdictions: allowed },
+      );
     }
   }
 

@@ -47,6 +47,12 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
     setChainId(preferred?.id ?? "");
   }, [useCaseKey, useCase, availableChains]);
 
+  // Default the sale price/currency from the use case's saleTermsDefault when it changes.
+  useEffect(() => {
+    setSalePrice(useCase?.saleTermsDefault?.unitPrice ?? "");
+    setSaleCurrency(useCase?.saleTermsDefault?.currency ?? "");
+  }, [useCase]);
+
   useEffect(() => {
     if (!token) return;
     void api.currencies(token).then(setCurrencies).catch(() => {});
@@ -159,14 +165,49 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
           <div className="grid grid-cols-2 gap-4">
             {Object.entries(useCase.metadataSchema.properties).map(([field, prop]) => {
               const required = useCase.metadataSchema.required?.includes(field);
+              const value = meta[field] ?? "";
+              const onChange = (v: string) => setMeta((m) => ({ ...m, [field]: v }));
               return (
                 <Field key={field} label={`${field}${required ? " *" : ""}`} hint={prop.description}>
-                  <input
-                    className="input"
-                    type={prop.type === "number" ? "number" : "text"}
-                    value={meta[field] ?? ""}
-                    onChange={(e) => setMeta((m) => ({ ...m, [field]: e.target.value }))}
-                  />
+                  {prop.enum ? (
+                    <select className="select" value={value} onChange={(e) => onChange(e.target.value)}>
+                      <option value="">select…</option>
+                      {prop.enum.map((opt) => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                  ) : prop.type === "number" ? (
+                    <input
+                      className="input"
+                      type="number"
+                      min={prop.min}
+                      max={prop.max}
+                      value={value}
+                      onChange={(e) => onChange(e.target.value)}
+                    />
+                  ) : prop.type === "document" ? (
+                    <input
+                      className="input"
+                      type="url"
+                      placeholder="https://…"
+                      value={value}
+                      onChange={(e) => onChange(e.target.value)}
+                    />
+                  ) : prop.type === "boolean" ? (
+                    <select className="select" value={value} onChange={(e) => onChange(e.target.value)}>
+                      <option value="">select…</option>
+                      <option value="true">true</option>
+                      <option value="false">false</option>
+                    </select>
+                  ) : (
+                    <input
+                      className="input"
+                      type="text"
+                      pattern={prop.pattern}
+                      value={value}
+                      onChange={(e) => onChange(e.target.value)}
+                    />
+                  )}
                 </Field>
               );
             })}

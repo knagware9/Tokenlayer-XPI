@@ -237,10 +237,25 @@ interface UseCaseRow {
   metadataSchema: string;
   lifecycle: string;
   compliance: string;
+  fees: string;
+  saleTermsDefault: string;
   roles: string;
 }
 
+/** Parse a JSON object column, tolerating null/empty/invalid → `{}`. */
+function parseJsonObject(raw: string | null | undefined): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const v = JSON.parse(raw);
+    return v && typeof v === "object" ? (v as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
 function rowToUseCase(r: UseCaseRow): UseCaseDefinition {
+  const fees = parseJsonObject(r.fees);
+  const saleTermsDefault = parseJsonObject(r.saleTermsDefault);
   return normalizeUseCaseDefinition({
     key: r.key,
     name: r.name,
@@ -253,6 +268,9 @@ function rowToUseCase(r: UseCaseRow): UseCaseDefinition {
     metadataSchema: JSON.parse(r.metadataSchema),
     lifecycle: JSON.parse(r.lifecycle),
     compliance: JSON.parse(r.compliance),
+    // Omit empty objects so normalization leaves the optional fields unset.
+    ...(Object.keys(fees).length > 0 ? { fees } : {}),
+    ...(Object.keys(saleTermsDefault).length > 0 ? { saleTermsDefault } : {}),
     roles: JSON.parse(r.roles),
   });
 }
@@ -270,6 +288,8 @@ function useCaseToData(def: UseCaseDefinition) {
     metadataSchema: JSON.stringify(def.metadataSchema),
     lifecycle: JSON.stringify(def.lifecycle),
     compliance: JSON.stringify(def.compliance),
+    fees: JSON.stringify(def.fees ?? {}),
+    saleTermsDefault: JSON.stringify(def.saleTermsDefault ?? {}),
     roles: JSON.stringify(def.roles),
   };
 }
