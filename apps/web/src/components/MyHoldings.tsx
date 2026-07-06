@@ -59,13 +59,25 @@ export function MyHoldings({ onSelect }: { onSelect: (id: string) => void }): JS
       )}
       {holdings.length > 0 && <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
       <table className="w-full text-sm">
-        <thead className="text-xs text-slate-500 bg-slate-50"><tr><th className="text-left px-4 py-2">Asset</th><th className="text-left px-4 py-2">Symbol</th><th className="text-right px-4 py-2">Balance</th></tr></thead>
+        <thead className="text-xs text-slate-500 bg-slate-50"><tr><th className="text-left px-4 py-2">Asset</th><th className="text-left px-4 py-2">Symbol</th><th className="text-right px-4 py-2">Balance</th><th className="text-right px-4 py-2"></th></tr></thead>
         <tbody>
           {holdings.map((h) => (
             <tr key={h.asset.id} className="border-t border-slate-100 cursor-pointer hover:bg-slate-50" onClick={() => onSelect(h.asset.id)}>
               <td className="px-4 py-2">{h.asset.name}</td>
               <td className="px-4 py-2 text-slate-500">{h.asset.symbol}</td>
               <td className="px-4 py-2 text-right font-medium">{h.balance}</td>
+              <td className="px-4 py-2 text-right">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelect(h.asset.id);
+                  }}
+                  title="Sell on the asset's market"
+                  className="text-xs font-medium text-brand-600 hover:underline"
+                >
+                  Sell
+                </button>
+              </td>
             </tr>
           ))}
         </tbody>
