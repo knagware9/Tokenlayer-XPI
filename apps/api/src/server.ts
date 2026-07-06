@@ -28,9 +28,14 @@ async function main(): Promise<void> {
   const cash = new PrismaCashRepository();
   // Demo users/accounts (with predictable passwords) are seeded only outside production.
   if (env.nodeEnv !== "production") await seedDefaults(users, accounts);
-  await seedUseCases(useCases);
 
   const engine = createEngine(useCases, rbac, chains, audit);
+  // Seed default use cases and deploy their contracts on each allowed+available
+  // chain (best-effort; never crashes boot). Available = present in the registry.
+  await seedUseCases(useCases, {
+    availableChainIds: new Set(chains.list().map((c) => c.id)),
+    deploy: (def, chainId) => engine.deployUseCaseContract(def, chainId),
+  });
   const app = await buildApp({
     useCases,
     rbac,

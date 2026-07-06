@@ -205,8 +205,10 @@ interface UseCaseRow {
   name: string;
   description: string | null;
   tokenStandard: string;
+  symbol: string;
   defaultChainId: string;
   allowedChainIds: string;
+  contracts: string;
   metadataSchema: string;
   lifecycle: string;
   compliance: string;
@@ -219,8 +221,10 @@ function rowToUseCase(r: UseCaseRow): UseCaseDefinition {
     name: r.name,
     description: r.description ?? undefined,
     tokenStandard: r.tokenStandard,
+    symbol: r.symbol,
     defaultChainId: r.defaultChainId,
     allowedChainIds: JSON.parse(r.allowedChainIds),
+    contracts: JSON.parse(r.contracts),
     metadataSchema: JSON.parse(r.metadataSchema),
     lifecycle: JSON.parse(r.lifecycle),
     compliance: JSON.parse(r.compliance),
@@ -234,8 +238,10 @@ function useCaseToData(def: UseCaseDefinition) {
     name: def.name,
     description: def.description ?? null,
     tokenStandard: def.tokenStandard,
+    symbol: def.symbol,
     defaultChainId: def.defaultChainId,
     allowedChainIds: JSON.stringify(def.allowedChainIds),
+    contracts: JSON.stringify(def.contracts ?? {}),
     metadataSchema: JSON.stringify(def.metadataSchema),
     lifecycle: JSON.stringify(def.lifecycle),
     compliance: JSON.stringify(def.compliance),

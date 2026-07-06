@@ -25,8 +25,11 @@ export async function buildTestApp(opts: { loginRateLimitMax?: number } = {}): P
   const useCases = new MemoryUseCaseRepository();
   const cash = new MemoryCashRepository();
   await seedDefaults(users, accounts);
-  await seedUseCases(useCases);
   const engine = createEngine(useCases, rbac, chains, audit);
+  await seedUseCases(useCases, {
+    availableChainIds: new Set(chains.list().map((c) => c.id)),
+    deploy: (def, chainId) => engine.deployUseCaseContract(def, chainId),
+  });
   // The suite makes many logins from one IP; raise the throttle unless a test opts into it.
   return buildApp({ useCases, rbac, engine, users, assets, audit, accounts, chains, cash, currencies: loadCurrencies(), jwtSecret: "test-secret", loginRateLimitMax: opts.loginRateLimitMax ?? 100000 });
 }

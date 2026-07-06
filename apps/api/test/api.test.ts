@@ -114,7 +114,7 @@ describe("issuance + RBAC + validation", () => {
       method: "POST",
       url: "/assets",
       headers: auth(token),
-      payload: { useCaseKey: "generic-asset", name: "X", chainId: "fabric" }, // missing 'symbol'
+      payload: { name: "X", chainId: "fabric" }, // missing required 'useCaseKey'
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe("VALIDATION_ERROR");
@@ -218,7 +218,7 @@ describe("lifecycle + compliance + audit", () => {
       url: "/use-cases",
       headers: auth(admin),
       payload: {
-        key: "besu-only-asset", name: "Besu Only", tokenStandard: "ERC-20", allowedChainIds: ["besu"], defaultChainId: "besu",
+        key: "fabric-only-asset", name: "Fabric Only", symbol: "FAB", tokenStandard: "ERC-20", allowedChainIds: ["fabric"], defaultChainId: "fabric",
         metadataSchema: { type: "object", properties: {} }, lifecycle: { mint: true, transfer: true, burn: true, freeze: true },
         compliance: { allowlist: false, transferRestrictions: false }, roles: ["UseCaseAdmin", "Issuer"],
       },
@@ -228,7 +228,7 @@ describe("lifecycle + compliance + audit", () => {
       method: "POST",
       url: "/assets",
       headers: auth(admin),
-      payload: { useCaseKey: "besu-only-asset", name: "X", symbol: "X", chainId: "canton", metadata: {} },
+      payload: { useCaseKey: "fabric-only-asset", name: "X", chainId: "canton", metadata: {} },
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe("CHAIN_NOT_ALLOWED");
@@ -243,7 +243,7 @@ describe("low-code use-case builder", () => {
       method: "POST",
       url: "/use-cases",
       headers: auth(buyer),
-      payload: { key: "x", name: "X", tokenStandard: "ERC-20", allowedChainIds: ["besu"], defaultChainId: "besu", metadataSchema: { type: "object", properties: {} }, lifecycle: { mint: true, transfer: true, burn: true, freeze: true }, compliance: { allowlist: false, transferRestrictions: false }, roles: ["UseCaseAdmin"] },
+      payload: { key: "x", name: "X", symbol: "X", tokenStandard: "ERC-20", allowedChainIds: ["besu"], defaultChainId: "besu", metadataSchema: { type: "object", properties: {} }, lifecycle: { mint: true, transfer: true, burn: true, freeze: true }, compliance: { allowlist: false, transferRestrictions: false }, roles: ["UseCaseAdmin"] },
     });
     expect(forbidden.statusCode).toBe(403);
 
@@ -254,7 +254,7 @@ describe("low-code use-case builder", () => {
       url: "/use-cases",
       headers: auth(admin),
       payload: {
-        key: "supply-chain-token", name: "Supply Chain Token", tokenStandard: "ERC-20", allowedChainIds: ["besu", "fabric"], defaultChainId: "fabric",
+        key: "supply-chain-token", name: "Supply Chain Token", symbol: "SCT", tokenStandard: "ERC-20", allowedChainIds: ["besu", "fabric"], defaultChainId: "fabric",
         metadataSchema: { type: "object", properties: { product: { type: "string" } }, required: ["product"] },
         lifecycle: { mint: true, transfer: true, burn: true, freeze: true }, compliance: { allowlist: true, transferRestrictions: true },
         roles: ["UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"],
@@ -278,6 +278,84 @@ describe("low-code use-case builder", () => {
     expect(res.statusCode).toBe(400);
     // ERC-999 fails request-schema enum first; either VALIDATION_ERROR or INVALID_USECASE is acceptable.
     expect(["VALIDATION_ERROR", "INVALID_USECASE"]).toContain(res.json().error);
+  });
+});
+
+describe("use-case-owned contracts", () => {
+  const base = {
+    tokenStandard: "ERC-20" as const,
+    metadataSchema: { type: "object" as const, properties: {} },
+    lifecycle: { mint: true, transfer: true, burn: true, freeze: true },
+    compliance: { allowlist: false, transferRestrictions: false },
+    roles: ["UseCaseAdmin", "Issuer"],
+  };
+
+  it("deploys a contract per available allowed chain at create time", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const res = await app.inject({
+      method: "POST", url: "/api/v1/use-cases", headers: auth(admin),
+      payload: { ...base, key: "uc-multi", name: "UC Multi", symbol: "UCM", allowedChainIds: ["fabric", "canton"], defaultChainId: "fabric" },
+    });
+    expect(res.statusCode).toBe(201);
+    const contracts = res.json().contracts;
+    expect(contracts.fabric.contractRef).toBe("fabric:uc-multi");
+    expect(contracts.canton.contractRef).toBe("canton:uc-multi");
+  });
+
+  it("rejects create with NO_DEPLOYABLE_CHAIN when no allowed chain is available", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const res = await app.inject({
+      method: "POST", url: "/api/v1/use-cases", headers: auth(admin),
+      payload: { ...base, key: "uc-besu", name: "UC Besu", symbol: "UCB", allowedChainIds: ["besu"], defaultChainId: "besu" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("NO_DEPLOYABLE_CHAIN");
+  });
+
+  it("issues assets that share the use case's per-chain contract", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    await app.inject({ method: "POST", url: "/api/v1/use-cases", headers: auth(admin),
+      payload: { ...base, key: "uc-share", name: "UC Share", symbol: "UCS", allowedChainIds: ["fabric"], defaultChainId: "fabric" } });
+    const a = await app.inject({ method: "POST", url: "/api/v1/assets", headers: auth(admin), payload: { useCaseKey: "uc-share", name: "A", chainId: "fabric", metadata: {} } });
+    const b = await app.inject({ method: "POST", url: "/api/v1/assets", headers: auth(admin), payload: { useCaseKey: "uc-share", name: "B", chainId: "fabric", metadata: {} } });
+    expect(a.json().asset.contractRef).toBe("fabric:uc-share");
+    expect(b.json().asset.contractRef).toBe("fabric:uc-share");
+    expect(a.json().asset.symbol).toBe("UCS"); // inherited from the use case
+  });
+
+  it("deploys a pending chain via the deploy action, and rejects issuance before deploy", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    await app.inject({ method: "POST", url: "/api/v1/use-cases", headers: auth(admin),
+      payload: { ...base, key: "uc-grow", name: "UC Grow", symbol: "UCG", allowedChainIds: ["fabric"], defaultChainId: "fabric" } });
+    // Grow allowedChainIds to include canton (pending — not deployed yet).
+    const put = await app.inject({ method: "PUT", url: "/api/v1/use-cases/uc-grow", headers: auth(admin),
+      payload: { ...base, key: "uc-grow", name: "UC Grow", symbol: "UCG", allowedChainIds: ["fabric", "canton"], defaultChainId: "fabric" } });
+    expect(put.statusCode).toBe(200);
+    // Issuing on the pending chain is rejected.
+    const early = await app.inject({ method: "POST", url: "/api/v1/assets", headers: auth(admin), payload: { useCaseKey: "uc-grow", name: "X", chainId: "canton", metadata: {} } });
+    expect(early.statusCode).toBe(400);
+    expect(early.json().error).toBe("USE_CASE_NOT_DEPLOYED_ON_CHAIN");
+    // Deploy the pending chain, then issuance works.
+    const dep = await app.inject({ method: "POST", url: "/api/v1/use-cases/uc-grow/deploy", headers: auth(admin), payload: { chainId: "canton" } });
+    expect(dep.statusCode).toBe(200);
+    expect(dep.json().contracts.canton.contractRef).toBe("canton:uc-grow");
+    const ok = await app.inject({ method: "POST", url: "/api/v1/assets", headers: auth(admin), payload: { useCaseKey: "uc-grow", name: "Y", chainId: "canton", metadata: {} } });
+    expect(ok.statusCode).toBe(201);
+  });
+
+  it("rejects changing symbol on a deployed use case (IMMUTABLE_FIELD)", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    await app.inject({ method: "POST", url: "/api/v1/use-cases", headers: auth(admin),
+      payload: { ...base, key: "uc-lock", name: "UC Lock", symbol: "UCL", allowedChainIds: ["fabric"], defaultChainId: "fabric" } });
+    const res = await app.inject({ method: "PUT", url: "/api/v1/use-cases/uc-lock", headers: auth(admin),
+      payload: { ...base, key: "uc-lock", name: "UC Lock", symbol: "CHANGED", allowedChainIds: ["fabric"], defaultChainId: "fabric" } });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("IMMUTABLE_FIELD");
   });
 });
 

@@ -19,6 +19,7 @@ export function validateUseCaseDefinition(def: unknown): asserts def is UseCaseD
 
   if (typeof d.key !== "string" || d.key.length === 0) fail("use case 'key' must be a non-empty string");
   if (typeof d.name !== "string" || d.name.length === 0) fail(`use case '${String(d.key)}' needs a 'name'`);
+  if (typeof d.symbol !== "string" || d.symbol.length === 0) fail(`use case '${String(d.key)}' needs a token 'symbol'`);
   if (typeof d.tokenStandard !== "string" || !VALID_TOKEN_STANDARDS.has(d.tokenStandard)) {
     fail(`use case '${String(d.key)}' has invalid tokenStandard (expected ERC-20|ERC-721|ERC-3643)`);
   }

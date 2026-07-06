@@ -121,6 +121,12 @@ export interface PropertySchema {
   description?: string;
 }
 
+/** A contract deployed for a use case on one chain. */
+export interface UseCaseContract {
+  contractRef: string;
+  deployTxHash: string;
+}
+
 /** A declarative, config-driven use case. Adding one requires no code change. */
 export interface UseCaseDefinition {
   key: string;
@@ -129,10 +135,18 @@ export interface UseCaseDefinition {
   tokenStandard: TokenStandard;
   /** Derived from tokenStandard; kept explicit for convenience. */
   tokenType: TokenType;
+  /** Token symbol for the use case's contract(s). */
+  symbol: string;
   /** DLTs this use case may deploy to (chain ids). Must be non-empty. */
   allowedChainIds: string[];
   /** Default chain for issuance; must be in allowedChainIds. */
   defaultChainId: string;
+  /**
+   * The contract deployed for this use case, per chain. A chain is "deployed"
+   * iff it has an entry here. Populated at config time (create + deploy action);
+   * empty on a freshly-defined use case whose contracts haven't deployed yet.
+   */
+  contracts?: Record<string, UseCaseContract>;
   metadataSchema: MetadataSchema;
   lifecycle: {
     mint: boolean;

@@ -32,14 +32,22 @@ export interface MetadataSchema {
   required?: string[];
 }
 
+export interface UseCaseContract {
+  contractRef: string;
+  deployTxHash: string;
+}
+
 export interface UseCase {
   key: string;
   name: string;
   description?: string;
   tokenStandard: TokenStandard;
   tokenType: "fungible" | "nonfungible";
+  symbol: string;
   allowedChainIds: string[];
   defaultChainId: string;
+  /** Deployed contract per chainId; a chain is deployed iff it has an entry. */
+  contracts?: Record<string, UseCaseContract>;
   metadataSchema: MetadataSchema;
   lifecycle: { mint: boolean; transfer: boolean; burn: boolean; freeze: boolean };
   compliance: { allowlist: boolean; transferRestrictions: boolean };

@@ -50,6 +50,8 @@ export const api = {
   accounts: (token: string) => request<{ address: string; label: string }[]>("/accounts", token),
   createUseCase: (token: string, def: UseCase) =>
     request<UseCase>("/use-cases", token, { method: "POST", body: JSON.stringify(def) }),
+  deployUseCase: (token: string, key: string, chainId: string) =>
+    request<UseCase>(`/use-cases/${encodeURIComponent(key)}/deploy`, token, { method: "POST", body: JSON.stringify({ chainId }) }),
   assets: (token: string, useCaseKey?: string) =>
     request<Listed<Asset>>(`/assets?limit=200${useCaseKey ? `&useCaseKey=${encodeURIComponent(useCaseKey)}` : ""}`, token).then((r) => r.data),
   asset: (token: string, id: string) => request<Asset>(`/assets/${id}`, token),
@@ -58,7 +60,7 @@ export const api = {
   audit: (token: string, id: string) => request<Listed<AuditEntry>>(`/assets/${id}/audit?limit=200`, token).then((r) => r.data),
   issue: (
     token: string,
-    input: { useCaseKey: string; name: string; symbol: string; chainId: string; metadata: Record<string, unknown>; treasuryAccount?: string; initialSupply?: string; sale?: { unitPrice: string; currency: string; treasuryAccount: string } },
+    input: { useCaseKey: string; name: string; chainId: string; metadata: Record<string, unknown>; treasuryAccount?: string; initialSupply?: string; sale?: { unitPrice: string; currency: string; treasuryAccount: string } },
   ) => request<{ asset: Asset; txHash: string }>("/assets", token, { method: "POST", body: JSON.stringify(input) }),
   action: (token: string, id: string, action: string, body: Record<string, string>) =>
     request<{ receipt: { txHash: string } }>(`/assets/${id}/actions/${action}`, token, {
