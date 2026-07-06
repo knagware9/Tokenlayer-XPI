@@ -1,4 +1,4 @@
-import type { AccountState, AnalyticsSummary, Asset, AuditEntry, ChainInfo, Role, SessionUser, TokenInfo, UseCase } from "./types.js";
+import type { AccountState, AnalyticsSummary, Asset, AuditEntry, ChainInfo, Listing, Role, SessionUser, TokenInfo, Trade, UseCase } from "./types.js";
 
 export interface Currency { code: string; label: string; }
 export interface CashBalance { currency: string; address: string; amount: string; }
@@ -82,6 +82,15 @@ export const api = {
       `/assets/${id}/buy`, token, { method: "POST", body: JSON.stringify({ quantity }) }),
   setPrice: (token: string, id: string, terms: { unitPrice: string; currency: string; treasuryAccount: string }) =>
     request<{ ok: boolean }>(`/assets/${id}/actions/setPrice`, token, { method: "POST", body: JSON.stringify(terms) }),
+  listings: (token: string, assetId: string) => request<Listing[]>(`/assets/${assetId}/listings`, token),
+  createListing: (token: string, assetId: string, input: { quantity: string; unitPrice: string; currency: string }) =>
+    request<Listing>(`/assets/${assetId}/listings`, token, { method: "POST", body: JSON.stringify(input) }),
+  takeListing: (token: string, listingId: string, quantity: string) =>
+    request<{ listing: Listing; txHash: string; fee?: { amount: string; account: string } }>(
+      `/listings/${listingId}/take`, token, { method: "POST", body: JSON.stringify({ quantity }) }),
+  cancelListing: (token: string, listingId: string) =>
+    request<void>(`/listings/${listingId}`, token, { method: "DELETE" }),
+  trades: (token: string, assetId: string) => request<Trade[]>(`/assets/${assetId}/trades`, token),
   creditCash: (token: string, account: string, currency: string, amount: string) =>
     request<{ ok: boolean; balance: string }>("/cash/credit", token, { method: "POST", body: JSON.stringify({ account, currency, amount }) }),
   users: (token: string) => request<{ id: string; email: string; role: Role; useCaseKey: string | null; accountId: string | null; active: boolean; kycStatus: "pending" | "approved" | "rejected"; kyc: { legalName?: string; country?: string; idType?: string; idNumber?: string; documentRef?: string } | null }[]>("/users", token),

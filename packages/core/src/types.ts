@@ -22,6 +22,8 @@ export type LifecycleAction =
   | "allow"
   | "disallow"
   | "buy"
+  | "list"
+  | "cancel-listing"
   | "read";
 
 /** Kind of token a use case issues. */

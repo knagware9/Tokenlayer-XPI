@@ -336,3 +336,222 @@ describe("LifecycleEngine — engine-enforced compliance rules", () => {
 function engine_transfer(engine: LifecycleEngine, ctx: AssetContext, from: string, to: string, amount: string) {
   return engine.transfer(TRADER, ctx, from, to, amount);
 }
+
+describe("LifecycleEngine — secondary market escrow methods", () => {
+  const BUYER: Actor = { id: "buyer-1", role: "Buyer" };
+  const ESCROW = "escrow-account";
+  const META = { unitPrice: "5", currency: "CBDC-INR", cost: "50" };
+
+  // Fungible use case with transfer disabled (for the ACTION_DISABLED path).
+  const NO_TRANSFER_FUNGIBLE: UseCaseDefinition = {
+    ...FUNGIBLE_USE_CASE,
+    key: "no-transfer-fungible",
+    compliance: { allowlist: false, transferRestrictions: false },
+    lifecycle: { mint: true, transfer: false, burn: true, freeze: true },
+  };
+  const LOCKUP_UC: UseCaseDefinition = {
+    ...FUNGIBLE_USE_CASE,
+    key: "lockup",
+    compliance: { allowlist: false, transferRestrictions: true, lockupDays: 30 },
+  };
+  const RULES_UC: UseCaseDefinition = {
+    ...FUNGIBLE_USE_CASE,
+    key: "rules",
+    compliance: { allowlist: false, transferRestrictions: true, maxHolders: 2, allowedJurisdictions: ["IN"], lockupDays: 30 },
+  };
+
+  const ctx: AssetContext = { ref: { id: "asset-1", chainId: "fake", contractRef: "fake:asset-1" }, useCaseKey: "generic-asset" };
+  const certCtx: AssetContext = { ref: { id: "c1", chainId: "fake", contractRef: "fake:c1" }, useCaseKey: "generic-certificate" };
+  const noXferCtx: AssetContext = { ref: { id: "nx1", chainId: "fake", contractRef: "fake:nx1" }, useCaseKey: "no-transfer-fungible" };
+  const lockupCtx: AssetContext = { ref: { id: "l1", chainId: "fake", contractRef: "fake:l1" }, useCaseKey: "lockup" };
+  const rulesCtx: AssetContext = { ref: { id: "r1", chainId: "fake", contractRef: "fake:r1" }, useCaseKey: "rules" };
+
+  let adapter: FakeAdapter;
+  let audit: MemoryAudit;
+  let provider: FakeCompliance;
+
+  function makeEngine(now: () => string = () => "2026-01-01T00:00:00.000Z"): LifecycleEngine {
+    return new LifecycleEngine({
+      useCases: new StaticUseCaseSource([FUNGIBLE_USE_CASE, NO_TRANSFER_USE_CASE, NO_TRANSFER_FUNGIBLE, LOCKUP_UC, RULES_UC]),
+      rbac: new RbacPolicy(),
+      resolveAdapter: () => adapter,
+      audit,
+      now,
+      compliance: provider,
+    });
+  }
+
+  beforeEach(() => {
+    adapter = new FakeAdapter();
+    audit = new MemoryAudit();
+    provider = new FakeCompliance();
+  });
+
+  describe("escrowList", () => {
+    it("moves the seller's balance to the escrow and audits as 'list'", async () => {
+      const engine = makeEngine();
+      await engine.setAllowed(ADMIN, ctx, "seller", true);
+      await engine.setAllowed(ADMIN, ctx, ESCROW, true);
+      await engine.mint(ADMIN, ctx, "seller", "100");
+
+      await engine.escrowList(BUYER, ctx, "seller", ESCROW, "40");
+
+      expect(await adapter.balanceOf(ctx.ref, "seller")).toBe("60");
+      expect(await adapter.balanceOf(ctx.ref, ESCROW)).toBe("40");
+      const last = audit.entries.at(-1)!;
+      expect(last.action).toBe("list");
+      expect(last.payload).toMatchObject({ seller: "seller", escrow: ESCROW, amount: "40" });
+    });
+
+    it("fails loudly when the escrow is not allowlisted", async () => {
+      const engine = makeEngine();
+      await engine.setAllowed(ADMIN, ctx, "seller", true);
+      await engine.mint(ADMIN, ctx, "seller", "100");
+      await expect(engine.escrowList(BUYER, ctx, "seller", ESCROW, "10")).rejects.toThrow(/not on the allowlist/);
+    });
+
+    it("is blocked by LOCKUP_ACTIVE inside lockupDays and allowed after", async () => {
+      provider.acquired.set("seller", "2026-01-01T00:00:00.000Z");
+      await adapter.mint(lockupCtx.ref, "seller", "100"); // seed balance directly
+
+      // 10 days later → within the 30-day lockup → blocked
+      const early = makeEngine(() => "2026-01-11T00:00:00.000Z");
+      await expect(early.escrowList(BUYER, lockupCtx, "seller", ESCROW, "10")).rejects.toThrow(/LOCKUP_ACTIVE|lockup/);
+
+      // 31 days later → lockup elapsed → allowed
+      const late = makeEngine(() => "2026-02-01T00:00:00.000Z");
+      await expect(late.escrowList(BUYER, lockupCtx, "seller", ESCROW, "10")).resolves.toBeDefined();
+      expect(await adapter.balanceOf(lockupCtx.ref, ESCROW)).toBe("10");
+    });
+
+    it("is blocked when the seller is frozen", async () => {
+      const engine = makeEngine();
+      await engine.setAllowed(ADMIN, ctx, "seller", true);
+      await engine.setAllowed(ADMIN, ctx, ESCROW, true);
+      await engine.mint(ADMIN, ctx, "seller", "100");
+      await engine.setFrozen(ISSUER, ctx, "seller", true);
+      await expect(engine.escrowList(BUYER, ctx, "seller", ESCROW, "10")).rejects.toThrow(/ACCOUNT_FROZEN|frozen/);
+    });
+
+    it("is blocked when lifecycle.transfer is disabled (ACTION_DISABLED)", async () => {
+      const engine = makeEngine();
+      await adapter.mint(noXferCtx.ref, "seller", "100");
+      await expect(engine.escrowList(BUYER, noXferCtx, "seller", ESCROW, "10")).rejects.toThrow(/ACTION_DISABLED|does not allow 'transfer'/);
+    });
+
+    it("rejects a non-fungible use case (WRONG_TOKEN_TYPE)", async () => {
+      const engine = makeEngine();
+      await expect(engine.escrowList(BUYER, certCtx, "seller", ESCROW, "1")).rejects.toThrow(/WRONG_TOKEN_TYPE|non-fungible/);
+    });
+
+    it("RBAC — a Buyer may list, an Auditor may not", async () => {
+      const engine = makeEngine();
+      await engine.setAllowed(ADMIN, ctx, "seller", true);
+      await engine.setAllowed(ADMIN, ctx, ESCROW, true);
+      await engine.mint(ADMIN, ctx, "seller", "100");
+      await expect(engine.escrowList(AUDITOR, ctx, "seller", ESCROW, "10")).rejects.toThrow(/may not perform 'list'/);
+      await expect(engine.escrowList(BUYER, ctx, "seller", ESCROW, "10")).resolves.toBeDefined();
+    });
+  });
+
+  describe("settleFromEscrow", () => {
+    it("delivers escrow→buyer and audits as 'buy' with secondary + price meta", async () => {
+      const engine = makeEngine();
+      await engine.setAllowed(ADMIN, ctx, "seller", true);
+      await engine.setAllowed(ADMIN, ctx, ESCROW, true);
+      await engine.setAllowed(ADMIN, ctx, "buyer", true);
+      await engine.mint(ADMIN, ctx, "seller", "100");
+      await engine.escrowList(BUYER, ctx, "seller", ESCROW, "40");
+
+      await engine.settleFromEscrow(BUYER, ctx, ESCROW, "buyer", "10", META);
+
+      expect(await adapter.balanceOf(ctx.ref, ESCROW)).toBe("30");
+      expect(await adapter.balanceOf(ctx.ref, "buyer")).toBe("10");
+      const last = audit.entries.at(-1)!;
+      expect(last.action).toBe("buy");
+      expect(last.payload).toMatchObject({
+        from: ESCROW,
+        to: "buyer",
+        amount: "10",
+        forced: false,
+        secondary: true,
+        unitPrice: "5",
+        currency: "CBDC-INR",
+        cost: "50",
+      });
+    });
+
+    it("enforces jurisdiction on the buyer (out-of-list and null blocked)", async () => {
+      const engine = makeEngine();
+      await adapter.mint(rulesCtx.ref, ESCROW, "100"); // seed the escrow directly
+      provider.jurisdictions.set("us-buyer", "US");
+      // "unknown-buyer" not set → jurisdictionOf returns null
+      await expect(engine.settleFromEscrow(BUYER, rulesCtx, ESCROW, "us-buyer", "10", META)).rejects.toThrow(/JURISDICTION_NOT_ALLOWED|not allowed/);
+      await expect(engine.settleFromEscrow(BUYER, rulesCtx, ESCROW, "unknown-buyer", "10", META)).rejects.toThrow(/JURISDICTION_NOT_ALLOWED|not allowed/);
+    });
+
+    it("enforces the holder limit on a limit-exceeding NEW buyer", async () => {
+      const engine = makeEngine();
+      await adapter.mint(rulesCtx.ref, ESCROW, "100");
+      provider.jurisdictions.set("new-buyer", "IN");
+      provider.holders = 2; // at the cap of 2; new-buyer holds 0 → blocked
+      await expect(engine.settleFromEscrow(BUYER, rulesCtx, ESCROW, "new-buyer", "10", META)).rejects.toThrow(/HOLDER_LIMIT_EXCEEDED|at most 2 holders/);
+    });
+
+    it("does NOT lockup-check the escrow even when the escrow acquired recently (regression)", async () => {
+      // The escrow "acquired" yesterday — inside the 30-day lockup window. A
+      // plain transfer would throw LOCKUP_ACTIVE; settleFromEscrow must not.
+      provider.acquired.set(ESCROW, "2026-01-10T00:00:00.000Z");
+      provider.jurisdictions.set("buyer", "IN");
+      provider.holders = 0;
+      await adapter.mint(rulesCtx.ref, ESCROW, "100");
+
+      const engine = makeEngine(() => "2026-01-11T00:00:00.000Z");
+      // Sanity: the same movement via `transfer` IS blocked by the escrow's lockup.
+      await expect(engine.transfer(ADMIN, rulesCtx, ESCROW, "buyer", "10")).rejects.toThrow(/LOCKUP_ACTIVE|lockup/);
+      // The escrow-aware settle succeeds: lockup is a seller-side, list-time rule.
+      await expect(engine.settleFromEscrow(BUYER, rulesCtx, ESCROW, "buyer", "10", META)).resolves.toBeDefined();
+      expect(await adapter.balanceOf(rulesCtx.ref, "buyer")).toBe("10");
+      expect(audit.entries.at(-1)?.action).toBe("buy");
+    });
+  });
+
+  describe("escrowRelease", () => {
+    it("returns escrow→seller even when jurisdiction/holder rules would block the seller", async () => {
+      const engine = makeEngine();
+      await adapter.mint(rulesCtx.ref, ESCROW, "100");
+      // The seller would fail every buyer-side rule: unknown jurisdiction, at the
+      // holder cap with zero balance, and inside lockup. Release must ignore all.
+      provider.holders = 2;
+      provider.acquired.set("seller", "2026-01-01T00:00:00.000Z");
+
+      await engine.escrowRelease(BUYER, rulesCtx, ESCROW, "seller", "25");
+
+      expect(await adapter.balanceOf(rulesCtx.ref, ESCROW)).toBe("75");
+      expect(await adapter.balanceOf(rulesCtx.ref, "seller")).toBe("25");
+      const last = audit.entries.at(-1)!;
+      expect(last.action).toBe("cancel-listing");
+      expect(last.payload).toMatchObject({ escrow: ESCROW, seller: "seller", amount: "25" });
+    });
+
+    it("is blocked when the seller is frozen", async () => {
+      const engine = makeEngine();
+      await engine.setAllowed(ADMIN, ctx, "seller", true);
+      await engine.setAllowed(ADMIN, ctx, ESCROW, true);
+      await engine.mint(ADMIN, ctx, "seller", "100");
+      await engine.escrowList(BUYER, ctx, "seller", ESCROW, "40");
+      await engine.setFrozen(ISSUER, ctx, "seller", true);
+      await expect(engine.escrowRelease(BUYER, ctx, ESCROW, "seller", "40")).rejects.toThrow(/ACCOUNT_FROZEN|frozen/);
+    });
+
+    it("RBAC — a Buyer may cancel, an Auditor may not", async () => {
+      const engine = makeEngine();
+      await engine.setAllowed(ADMIN, ctx, "seller", true);
+      await engine.setAllowed(ADMIN, ctx, ESCROW, true);
+      await engine.mint(ADMIN, ctx, "seller", "100");
+      await engine.escrowList(BUYER, ctx, "seller", ESCROW, "40");
+      await expect(engine.escrowRelease(AUDITOR, ctx, ESCROW, "seller", "40")).rejects.toThrow(/may not perform 'cancel-listing'/);
+      await expect(engine.escrowRelease(BUYER, ctx, ESCROW, "seller", "40")).resolves.toBeDefined();
+    });
+  });
+});

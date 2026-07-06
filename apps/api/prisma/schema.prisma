@@ -74,6 +74,22 @@ model AuditLog {
   @@index([assetId])
 }
 
+// Secondary-market sell listing. `quantity` is the REMAINING quantity — it
+// decrements on takes and the row flips to "filled" when it reaches 0.
+model Listing {
+  id        String   @id @default(cuid())
+  assetId   String
+  seller    String // wallet address
+  quantity  String // REMAINING quantity (decrements on takes)
+  unitPrice String
+  currency  String
+  status    String   @default("open") // open | filled | cancelled
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([assetId, status])
+}
+
 model Account {
   id      String @id @default(cuid())
   address String @unique

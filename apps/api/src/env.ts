@@ -43,6 +43,13 @@ if (!jwtSecret || jwtSecret === INSECURE_SECRET || jwtSecret.length < 16) {
  */
 export const DEMO_PLATFORM_FEE_ACCOUNT = "0xdF3e18d64BC6A983f673Ab319CCaE4f1a57C7097";
 
+/**
+ * Demo secondary-market escrow account seeded when MARKET_ESCROW_ACCOUNT is
+ * unset outside production. Hardhat dev account #15 — distinct from the demo
+ * fee account (#14) and every seeded holder/treasury address (#1–#10).
+ */
+export const DEMO_MARKET_ESCROW_ACCOUNT = "0xcd3B766CCDd6AE721141F452C550Ca635964ce71";
+
 export interface Env {
   port: number;
   nodeEnv: string;
@@ -56,11 +63,21 @@ export interface Env {
    * address outside production so fees are usable out of the box for demos.
    */
   platformFeeAccount?: string;
+  /**
+   * Secondary-market escrow account (address) that holds listed tokens. When
+   * unset, ALL market endpoints return 503 MARKET_DISABLED. Defaults to a demo
+   * address outside production so the market is usable out of the box.
+   */
+  marketEscrowAccount?: string;
 }
 
 const platformFeeAccount =
   process.env.PLATFORM_FEE_ACCOUNT ??
   (process.env.NODE_ENV === "production" ? undefined : DEMO_PLATFORM_FEE_ACCOUNT);
+
+const marketEscrowAccount =
+  process.env.MARKET_ESCROW_ACCOUNT ??
+  (process.env.NODE_ENV === "production" ? undefined : DEMO_MARKET_ESCROW_ACCOUNT);
 
 export const env: Env = {
   port: Number(process.env.PORT ?? 4000),
@@ -71,4 +88,5 @@ export const env: Env = {
   evmRpcUrl: process.env.EVM_RPC_URL,
   evmOperatorKey: process.env.EVM_OPERATOR_KEY,
   platformFeeAccount,
+  marketEscrowAccount,
 };

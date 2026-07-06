@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../api.js";
 import { useAuth } from "../auth.js";
 import { can } from "../rbac.js";
-import type { AccountState, Asset, AuditEntry, ChainInfo, TokenInfo, UseCase } from "../types.js";
+import type { AccountState, Asset, AuditEntry, ChainInfo, Listing, Role, TokenInfo, Trade, UseCase } from "../types.js";
 
 interface Props {
   assetId: string;
@@ -51,15 +51,20 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
   }, [reload]);
 
   // Load buyer's cash balance when asset has sale terms
-  useEffect(() => {
+  const refreshBalance = useCallback(async () => {
     if (!token || !asset?.currency || !user?.walletAddress) return;
-    void api.cashBalances(token, user.walletAddress)
-      .then((balances) => {
-        const b = balances.find((b) => b.currency === asset.currency);
-        setMyBalance(b?.amount ?? "0");
-      })
-      .catch(() => setMyBalance(null));
+    try {
+      const balances = await api.cashBalances(token, user.walletAddress);
+      const b = balances.find((b) => b.currency === asset.currency);
+      setMyBalance(b?.amount ?? "0");
+    } catch {
+      setMyBalance(null);
+    }
   }, [token, asset?.currency, user?.walletAddress]);
+
+  useEffect(() => {
+    void refreshBalance();
+  }, [refreshBalance]);
 
   // Load available currencies for Fund CBDC
   useEffect(() => {
@@ -95,12 +100,7 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
       setBuyQty("");
       await reload();
       onChanged();
-      // refresh balance
-      if (user?.walletAddress && asset?.currency) {
-        const balances = await api.cashBalances(token, user.walletAddress);
-        const b = balances.find((b) => b.currency === asset.currency);
-        setMyBalance(b?.amount ?? "0");
-      }
+      await refreshBalance();
     } catch (err) {
       setBuyError(err instanceof ApiError ? `${err.code ?? "Error"}: ${err.message}` : "Buy failed");
     } finally {
@@ -218,6 +218,19 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
           </div>
           {buyError && <p className="text-sm text-red-600">{buyError}</p>}
         </div>
+      )}
+
+      {!isNft && (
+        <Market
+          asset={asset}
+          role={role}
+          currencies={availCurrencies}
+          onTraded={async () => {
+            await reload();
+            onChanged();
+            await refreshBalance();
+          }}
+        />
       )}
 
       <Operations role={role} useCase={useCase} isNft={isNft} accounts={accounts} busy={busy} onRun={run} />
@@ -340,6 +353,233 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
           {fundError && <p className="text-sm text-red-600">{fundError}</p>}
           {fundSuccess && <p className="text-sm text-emerald-600">{fundSuccess}</p>}
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Secondary market card for fungible assets: open asks (takeable), a sell
+ * form, the caller's own listings (cancellable), and recent trades. The API
+ * enforces balance/compliance/funds — the UI only gates by role and wallet.
+ */
+function Market({
+  asset,
+  role,
+  currencies,
+  onTraded,
+}: {
+  asset: Asset;
+  role: Role;
+  currencies: { code: string; label: string }[];
+  onTraded: () => Promise<void>;
+}): JSX.Element | null {
+  const { token, user } = useAuth();
+  const [listings, setListings] = useState<Listing[]>([]);
+  const [trades, setTrades] = useState<Trade[]>([]);
+  const [disabled, setDisabled] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [takeQty, setTakeQty] = useState<Record<string, string>>({});
+
+  // Sell form state
+  const [sellQty, setSellQty] = useState("");
+  const [sellPrice, setSellPrice] = useState("");
+  const [sellCurrency, setSellCurrency] = useState("");
+
+  const wallet = user?.walletAddress?.toLowerCase() ?? null;
+
+  const load = useCallback(async () => {
+    if (!token) return;
+    try {
+      const [ls, ts] = await Promise.all([api.listings(token, asset.id), api.trades(token, asset.id)]);
+      setListings(ls);
+      setTrades(ts);
+      setDisabled(false);
+    } catch (err) {
+      if (err instanceof ApiError && (err.status === 503 || err.code === "MARKET_DISABLED")) {
+        setDisabled(true);
+      } else {
+        setError(err instanceof ApiError ? `${err.code ?? "Error"}: ${err.message}` : "Failed to load market");
+      }
+    } finally {
+      setLoaded(true);
+    }
+  }, [token, asset.id]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function act(fn: () => Promise<void>, fallback: string): Promise<void> {
+    if (!token) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+      await load();
+      await onTraded();
+    } catch (err) {
+      setError(err instanceof ApiError ? `${err.code ?? "Error"}: ${err.message}` : fallback);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const doTake = (l: Listing): Promise<void> =>
+    act(async () => {
+      const qty = takeQty[l.id];
+      if (!qty || !/^\d+$/.test(qty) || BigInt(qty) === 0n) throw new ApiError("Quantity must be a positive whole number", 400, "INVALID_QUANTITY");
+      await api.takeListing(token!, l.id, qty);
+      setTakeQty((s) => ({ ...s, [l.id]: "" }));
+    }, "Take failed");
+
+  const doSell = (): Promise<void> =>
+    act(async () => {
+      await api.createListing(token!, asset.id, { quantity: sellQty, unitPrice: sellPrice, currency: sellCurrency });
+      setSellQty("");
+      setSellPrice("");
+    }, "Listing failed");
+
+  const doCancel = (id: string): Promise<void> =>
+    act(async () => {
+      await api.cancelListing(token!, id);
+    }, "Cancel failed");
+
+  if (!loaded) return null;
+
+  const canBuy = can(role, "buy");
+  const canList = can(role, "list");
+  const canCancelListing = can(role, "cancel-listing");
+  const posInt = (s: string): boolean => /^\d+$/.test(s) && BigInt(s) > 0n;
+  const myListings = wallet ? listings.filter((l) => l.seller.toLowerCase() === wallet) : [];
+  const sellReady = posInt(sellQty) && posInt(sellPrice) && sellCurrency !== "";
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
+      <div className="text-sm font-semibold text-slate-800">Market</div>
+      {disabled ? (
+        <p className="text-sm text-slate-500">Market is not enabled on this deployment.</p>
+      ) : (
+        <>
+          {error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2">{error}</div>}
+
+          <div>
+            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Open asks</div>
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-slate-400 text-[11px] uppercase">
+                <tr>
+                  <th className="text-left font-medium px-3 py-2">Seller</th>
+                  <th className="text-right font-medium px-3 py-2">Remaining</th>
+                  <th className="text-right font-medium px-3 py-2">Unit price</th>
+                  {canBuy && <th className="text-right font-medium px-3 py-2">Take</th>}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {listings.map((l) => {
+                  const own = wallet !== null && l.seller.toLowerCase() === wallet;
+                  return (
+                    <tr key={l.id}>
+                      <td className="px-3 py-2 font-mono text-[11px] text-slate-500">{short(l.seller)}{own && <Pill tone="gray">you</Pill>}</td>
+                      <td className="px-3 py-2 text-right font-mono text-slate-700">{l.quantity}</td>
+                      <td className="px-3 py-2 text-right text-slate-700">{l.unitPrice} {l.currency}</td>
+                      {canBuy && (
+                        <td className="px-3 py-2">
+                          <div className="flex justify-end gap-1.5">
+                            <input
+                              className="input w-20 text-xs"
+                              type="number"
+                              min="1"
+                              step="1"
+                              placeholder="Qty"
+                              disabled={own}
+                              value={takeQty[l.id] ?? ""}
+                              onChange={(e) => setTakeQty((s) => ({ ...s, [l.id]: e.target.value }))}
+                            />
+                            <button
+                              disabled={busy || own || !posInt(takeQty[l.id] ?? "")}
+                              title={own ? "your listing" : undefined}
+                              onClick={() => void doTake(l)}
+                              className="btn-sm border-slate-200 text-slate-600 hover:border-brand-500 disabled:opacity-40"
+                            >
+                              Take
+                            </button>
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+                {listings.length === 0 && (
+                  <tr>
+                    <td colSpan={canBuy ? 4 : 3} className="px-3 py-3 text-center text-sm text-slate-400">No open asks.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {canList && user?.walletAddress && (
+            <div className="space-y-2">
+              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Sell tokens</div>
+              <div className="grid grid-cols-3 gap-3">
+                <input className="input" type="number" min="1" step="1" placeholder="Quantity" value={sellQty} onChange={(e) => setSellQty(e.target.value)} />
+                <input className="input" type="number" min="1" step="1" placeholder="Unit price" value={sellPrice} onChange={(e) => setSellPrice(e.target.value)} />
+                <select className="select" value={sellCurrency} onChange={(e) => setSellCurrency(e.target.value)}>
+                  <option value="">Currency…</option>
+                  {currencies.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}
+                </select>
+              </div>
+              <button
+                disabled={busy || !sellReady}
+                onClick={() => void doSell()}
+                className="rounded-lg bg-brand-600 text-white px-4 py-1.5 text-sm font-medium hover:bg-brand-700 disabled:opacity-40"
+              >
+                {busy ? "Working…" : "List for sale"}
+              </button>
+            </div>
+          )}
+
+          {myListings.length > 0 && (
+            <div>
+              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">My listings</div>
+              <ul className="space-y-1.5">
+                {myListings.map((l) => (
+                  <li key={l.id} className="flex items-center gap-3 text-sm text-slate-600">
+                    <span className="font-mono">{l.quantity}</span>
+                    <span>@ {l.unitPrice} {l.currency}</span>
+                    <span className="text-[11px] text-slate-400">{new Date(l.createdAt).toLocaleString()}</span>
+                    {canCancelListing && (
+                      <button
+                        disabled={busy}
+                        onClick={() => void doCancel(l.id)}
+                        className="ml-auto btn-sm border-slate-200 text-slate-600 hover:border-red-400 disabled:opacity-40"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div>
+            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Recent trades</div>
+            <ol className="space-y-1.5">
+              {trades.map((t, i) => (
+                <li key={i} className="flex items-center gap-2 text-xs text-slate-600">
+                  <span className="font-mono">{t.amount ?? "?"} @ {t.unitPrice ?? "?"} {t.currency ?? ""}</span>
+                  <span className="text-slate-400">{short(t.from)} → {short(t.to)}</span>
+                  {t.secondary && <Pill tone="green">secondary</Pill>}
+                  <span className="ml-auto text-[11px] text-slate-400">{new Date(t.at).toLocaleString()}</span>
+                </li>
+              ))}
+              {trades.length === 0 && <li className="text-xs text-slate-400">No trades yet.</li>}
+            </ol>
+          </div>
+        </>
       )}
     </div>
   );

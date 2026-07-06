@@ -20,6 +20,7 @@ import {
   MemoryAssetRepository,
   MemoryAuditRepository,
   MemoryCashRepository,
+  MemoryListingRepository,
   MemoryUseCaseRepository,
   MemoryUserRepository,
 } from "./persistence/memory.js";
@@ -59,7 +60,8 @@ async function main(): Promise<void> {
     deploy: (def, chainId) => engine.deployUseCaseContract(def, chainId),
   });
   const cash = new MemoryCashRepository();
-  const app = await buildApp({ useCases, rbac, engine, users, assets, audit, accounts, chains, cash, currencies: loadCurrencies(), jwtSecret: "e2e" });
+  const listings = new MemoryListingRepository();
+  const app = await buildApp({ useCases, rbac, engine, users, assets, audit, accounts, chains, cash, listings, currencies: loadCurrencies(), jwtSecret: "e2e" });
 
   const admin = await login(app, "admin");
   const evmAvailable = chains.list().some((c) => c.id === "local-evm");

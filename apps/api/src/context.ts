@@ -8,6 +8,7 @@ import type {
   AssetRepository,
   AuditRepository,
   CashRepository,
+  ListingRepository,
   UseCaseRepository,
   UserRepository,
 } from "./persistence/types.js";
@@ -22,6 +23,7 @@ export interface AppDeps {
   accounts: AccountRepository;
   chains: ChainRegistry;
   cash: CashRepository;
+  listings: ListingRepository;
   currencies: Currency[];
   jwtSecret: string;
   /** CORS origin allowlist; defaults to the local dashboard when omitted (tests/demo). */
@@ -35,6 +37,12 @@ export interface AppDeps {
    * absent, fees are disabled (treated as 0) regardless of use-case config.
    */
   platformFeeAccount?: string;
+  /**
+   * Secondary-market escrow account (address) holding listed tokens. When
+   * absent, the market is disabled: all market endpoints return 503
+   * MARKET_DISABLED.
+   */
+  marketEscrowAccount?: string;
 }
 
 /**

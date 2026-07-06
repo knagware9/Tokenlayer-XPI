@@ -101,6 +101,30 @@ export interface AccountState {
   allowed: boolean;
 }
 
+export interface Listing {
+  id: string;
+  /** Present on create/take responses; the asset-scoped list omits it. */
+  assetId?: string;
+  seller: string;
+  /** REMAINING quantity on the listing. */
+  quantity: string;
+  unitPrice: string;
+  currency: string;
+  status?: "open" | "filled" | "cancelled";
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface Trade {
+  at: string;
+  amount: string | null;
+  unitPrice: string | null;
+  currency: string | null;
+  from: string | null;
+  to: string | null;
+  secondary: boolean;
+}
+
 export interface AuditEntry {
   id: string;
   assetId?: string;

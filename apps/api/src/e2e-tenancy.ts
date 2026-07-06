@@ -4,7 +4,8 @@ import { buildApp } from "./app.js";
 import { buildChainRegistry } from "./chains.js";
 import { createEngine } from "./context.js";
 import { loadCurrencies } from "./currencies.js";
-import { MemoryAccountRepository, MemoryAssetRepository, MemoryAuditRepository, MemoryCashRepository, MemoryUseCaseRepository, MemoryUserRepository } from "./persistence/memory.js";
+import { MemoryAccountRepository, MemoryAssetRepository, MemoryAuditRepository, MemoryCashRepository,
+  MemoryListingRepository, MemoryUseCaseRepository, MemoryUserRepository } from "./persistence/memory.js";
 import { seedDefaults } from "./seed.js";
 import { seedUseCases } from "./use-cases.js";
 
@@ -26,7 +27,8 @@ async function main(): Promise<void> {
     deploy: (def, chainId) => engine.deployUseCaseContract(def, chainId),
   });
   const cash = new MemoryCashRepository();
-  const app = await buildApp({ useCases, rbac, engine, users, assets, audit, accounts, chains, cash, currencies: loadCurrencies(), jwtSecret: "e2e" });
+  const listings = new MemoryListingRepository();
+  const app = await buildApp({ useCases, rbac, engine, users, assets, audit, accounts, chains, cash, listings, currencies: loadCurrencies(), jwtSecret: "e2e" });
 
   const platform = await login(app, "admin@tokenlayer.dev", "admin123");
   const carbonAdmin = await login(app, "carbon.admin@tokenlayer.dev", "carbon123");
