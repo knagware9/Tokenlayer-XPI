@@ -190,6 +190,72 @@ export class LifecycleEngine {
     return receipt;
   }
 
+  // --- secondary market (escrowed sell-listings) ----------------------------
+
+  /**
+   * Move a seller's tokens into the platform escrow account to open a listing.
+   * The escrow address is a parameter — the engine holds no environment/config.
+   * The escrow must already be allowlisted by the API layer; it is included in
+   * the allowlist check so a missing allow fails loudly here. The seller's
+   * lockup is enforced NOW (seller→escrow is the seller's transfer).
+   */
+  async escrowList(actor: Actor, ctx: AssetContext, seller: string, escrow: string, amount: string): Promise<TxReceipt> {
+    const { adapter, useCase } = await this.prepare(actor, ctx, "list");
+    this.requireFungible(useCase);
+    // market operations reuse the transfer lifecycle flag — no separate market flag per use case
+    this.requireLifecycle(useCase, "transfer");
+    await this.requireAllowed(adapter, ctx.ref, useCase, [seller, escrow]);
+    await this.requireNotFrozen(adapter, ctx.ref, [seller]);
+    await this.requireLockup(ctx.ref, useCase, seller);
+    const receipt = await adapter.transfer(ctx.ref, seller, escrow, amount);
+    await this.writeReceipt(actor, "list", ctx, receipt, { seller, escrow, amount });
+    return receipt;
+  }
+
+  /**
+   * Return escrowed tokens to the seller on listing cancellation. Beyond the
+   * freeze check on the seller there are no compliance checks — the tokens are
+   * the seller's prior property coming back (no allowlist / jurisdiction /
+   * holder-limit / lockup).
+   */
+  async escrowRelease(actor: Actor, ctx: AssetContext, escrow: string, seller: string, amount: string): Promise<TxReceipt> {
+    const { adapter, useCase } = await this.prepare(actor, ctx, "cancel-listing");
+    this.requireFungible(useCase);
+    this.requireLifecycle(useCase, "transfer");
+    await this.requireNotFrozen(adapter, ctx.ref, [seller]);
+    const receipt = await adapter.transfer(ctx.ref, escrow, seller, amount);
+    await this.writeReceipt(actor, "cancel-listing", ctx, receipt, { escrow, seller, amount });
+    return receipt;
+  }
+
+  /**
+   * Delivery leg of a secondary-market take: escrow→buyer. Buyer-side rules
+   * (allowlist, freeze, jurisdiction, holder-limit) all apply. Audited as `buy`
+   * with `secondary: true` plus the price meta so analytics' traded metrics
+   * count secondary trades automatically.
+   */
+  async settleFromEscrow(
+    actor: Actor,
+    ctx: AssetContext,
+    escrow: string,
+    to: string,
+    amount: string,
+    meta: { unitPrice: string; currency: string; cost: string } & Record<string, unknown>,
+  ): Promise<TxReceipt> {
+    const { adapter, useCase } = await this.prepare(actor, ctx, "buy");
+    this.requireFungible(useCase);
+    this.requireLifecycle(useCase, "transfer");
+    await this.requireAllowed(adapter, ctx.ref, useCase, [to]);
+    await this.requireNotFrozen(adapter, ctx.ref, [to]);
+    await this.requireJurisdiction(useCase, to);
+    await this.requireHolderLimit(ctx.ref, useCase, adapter, to);
+    // NO lockup check: the sender is the escrow (a system account, not a holder) —
+    // the seller's lockup was already enforced at list time (escrowList).
+    const receipt = await adapter.transfer(ctx.ref, escrow, to, amount);
+    await this.writeReceipt(actor, "buy", ctx, receipt, { from: escrow, to, amount, forced: false, secondary: true, ...meta });
+    return receipt;
+  }
+
   async burn(actor: Actor, ctx: AssetContext, from: string, amount: string): Promise<TxReceipt> {
     const { adapter, useCase } = await this.prepare(actor, ctx, "burn");
     this.requireFungible(useCase);
