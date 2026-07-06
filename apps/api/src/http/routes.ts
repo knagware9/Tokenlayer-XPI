@@ -6,6 +6,7 @@ import { canCreateUser, canManageUsers, normalizeUseCaseDefinition, PolicyError,
 import type { AppDeps } from "../context.js";
 import { isSupportedCurrency } from "../currencies.js";
 import { deployUseCaseContracts } from "../use-cases.js";
+import { computeAnalytics } from "../analytics.js";
 import { S } from "./schemas.js";
 import { actorOf, contextOf, isPositiveIntString, notFound, requireUser, scopedToCaller, type TokenClaims } from "./support.js";
 
@@ -320,6 +321,46 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const q = request.query as { limit: number; offset: number };
     const { items, total } = await deps.audit.listByAsset(asset.id, { limit: q.limit, offset: q.offset });
     return { data: items, pagination: { limit: q.limit, offset: q.offset, total } };
+  });
+
+  // --- analytics ----------------------------------------------------------
+  app.get("/analytics", { schema: S.analytics, ...auth }, async (request) => {
+    const claims = request.user as TokenClaims;
+    const q = request.query as { useCaseKey?: string; days?: number };
+    // Determine scope like /assets: PlatformAdmin sees the platform unless a
+    // useCaseKey is given (then that use case); a scoped user is clamped to their
+    // own use case and can never point the query at another tenant.
+    let scope: "platform" | "use-case";
+    let useCaseKey: string | null;
+    if (claims.role === "PlatformAdmin") {
+      if (q.useCaseKey) {
+        scope = "use-case";
+        useCaseKey = q.useCaseKey;
+      } else {
+        scope = "platform";
+        useCaseKey = null;
+      }
+    } else {
+      scope = "use-case";
+      useCaseKey = claims.useCaseKey ?? NO_USE_CASE;
+    }
+
+    const days = Math.min(90, Math.max(1, Math.trunc(q.days ?? 30)));
+    const { items: assets } = await deps.assets.list({ useCaseKey: useCaseKey ?? undefined }, { limit: 1000 });
+    const { items: audit } = await deps.audit.listByAssetIds(assets.map((a) => a.id), { limit: 10000 });
+    const useCases = (await deps.useCases.list()).map((u) => ({ key: u.key, name: u.name, symbol: u.symbol }));
+    const chains = deps.chains.list().map((c) => ({ id: c.id, mode: c.mode }));
+
+    return computeAnalytics({
+      scope,
+      useCaseKey,
+      assets,
+      audit,
+      useCases,
+      chains,
+      now: new Date().toISOString(),
+      days,
+    });
   });
 
   // --- lifecycle actions --------------------------------------------------

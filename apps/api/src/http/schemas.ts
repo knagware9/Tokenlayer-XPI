@@ -178,6 +178,92 @@ export const components: Record<string, unknown>[] = [
     required: ["data", "pagination"],
   },
   {
+    $id: "Analytics",
+    type: "object",
+    additionalProperties: true,
+    description: "Scope-aware dashboard summary aggregated from assets + audit log + chains.",
+    properties: {
+      scope: { type: "string", enum: ["platform", "use-case"] },
+      useCaseKey: { type: "string", nullable: true },
+      totals: {
+        type: "object",
+        additionalProperties: true,
+        properties: {
+          assets: { type: "integer" },
+          useCases: { type: "integer" },
+          holders: { type: "integer" },
+          supply: { type: "string" },
+          valueByCurrency: { type: "object", additionalProperties: true },
+          tradedByCurrency: { type: "object", additionalProperties: true },
+          trades: { type: "integer" },
+        },
+        required: ["assets", "useCases", "holders", "supply", "valueByCurrency", "tradedByCurrency", "trades"],
+      },
+      byLedger: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: true,
+          properties: {
+            chainId: { type: "string" },
+            mode: { type: "string", enum: ["real", "simulated"] },
+            assets: { type: "integer" },
+            supply: { type: "string" },
+            holders: { type: "integer" },
+          },
+          required: ["chainId", "mode", "assets", "supply", "holders"],
+        },
+      },
+      byUseCase: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: true,
+          properties: {
+            useCaseKey: { type: "string" },
+            name: { type: "string" },
+            symbol: { type: "string" },
+            chainId: { type: "string" },
+            supply: { type: "string" },
+            holders: { type: "integer" },
+            valueByCurrency: { type: "object", additionalProperties: true },
+          },
+          required: ["useCaseKey", "name", "symbol", "chainId", "supply", "holders", "valueByCurrency"],
+        },
+      },
+      activity: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: true,
+          properties: {
+            date: { type: "string" },
+            count: { type: "integer" },
+            tradedByCurrency: { type: "object", additionalProperties: true },
+          },
+          required: ["date", "count", "tradedByCurrency"],
+        },
+      },
+      recent: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: true,
+          properties: {
+            at: { type: "string" },
+            action: { type: "string" },
+            assetId: { type: "string" },
+            assetName: { type: "string" },
+            chainId: { type: "string" },
+            summary: { type: "string" },
+          },
+          required: ["at", "action", "assetId", "assetName", "chainId", "summary"],
+        },
+      },
+    },
+    required: ["scope", "useCaseKey", "totals", "byLedger", "byUseCase", "activity", "recent"],
+  },
+  {
     $id: "Receipt",
     type: "object",
     additionalProperties: true,
@@ -353,6 +439,18 @@ export const S: Record<string, FastifySchema> = {
       ] },
       ...errs(400, 401, 403, 404),
     },
+  },
+
+  analytics: {
+    tags: ["Analytics"], summary: "Scope-aware dashboard summary (assets + audit + chains)", security: bearer,
+    querystring: {
+      type: "object",
+      properties: {
+        useCaseKey: { type: "string" },
+        days: { type: "integer", minimum: 1, maximum: 90, default: 30 },
+      },
+    },
+    response: { 200: { $ref: "Analytics#" }, ...errs(401) },
   },
 
   buy: {
