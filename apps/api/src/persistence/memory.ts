@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from "node:crypto";
 import { normalizeUseCaseDefinition, PolicyError, type UseCaseDefinition } from "@tokenlayer/core";
 import type {
   AccountRecord,
@@ -9,8 +10,8 @@ import type {
   AuditRepository,
   CashBalanceRecord,
   CashRepository,
-  FinancingRecord,
-  FinancingRepository,
+  DocumentRecord,
+  DocumentRepository,
   ListingRecord,
   ListingRepository,
   Page,
@@ -58,11 +59,22 @@ export class MemoryUserRepository implements UserRepository {
 export class MemoryAssetRepository implements AssetRepository {
   private readonly byId = new Map<string, AssetRecord>();
   async create(input: Omit<AssetRecord, "createdAt">): Promise<AssetRecord> {
+    // Mirror the DB's (useCaseKey, uniqueKey) unique constraint: reject a second
+    // asset with the same non-null uniqueKey in the same use case (throws a
+    // P2002-shaped error the issue route maps to 409, same as Prisma).
+    if (input.uniqueKey != null) {
+      for (const a of this.byId.values()) {
+        if (a.useCaseKey === input.useCaseKey && a.uniqueKey === input.uniqueKey) {
+          throw Object.assign(new Error("Unique constraint failed on (useCaseKey, uniqueKey)"), { code: "P2002" });
+        }
+      }
+    }
     const rec: AssetRecord = {
       ...input,
       unitPrice: input.unitPrice ?? null,
       currency: input.currency ?? null,
       treasuryAccount: input.treasuryAccount ?? null,
+      uniqueKey: input.uniqueKey ?? null,
       createdAt: now(),
     };
     this.byId.set(rec.id, rec);
@@ -86,6 +98,13 @@ export class MemoryAssetRepository implements AssetRepository {
   async setSaleTerms(id: string, terms: SaleTerms): Promise<void> {
     const a = this.byId.get(id);
     if (a) { a.unitPrice = terms.unitPrice; a.currency = terms.currency; a.treasuryAccount = terms.treasuryAccount; }
+  }
+  async findByMetadata(useCaseKey: string, field: string, value: unknown): Promise<AssetRecord | null> {
+    if (value === undefined) return null; // never match on a missing field (undefined === undefined footgun)
+    for (const a of this.byId.values()) {
+      if (a.useCaseKey === useCaseKey && a.metadata?.[field] === value) return a;
+    }
+    return null;
   }
 }
 
@@ -204,27 +223,6 @@ export class MemoryListingRepository implements ListingRepository {
   }
 }
 
-export class MemoryFinancingRepository implements FinancingRepository {
-  private readonly byAsset = new Map<string, FinancingRecord>();
-  async create(input: Pick<FinancingRecord, "assetId" | "tokenId" | "financier" | "ratePct" | "tenorDays" | "faceValueInr" | "discountedInr" | "maturityDate">): Promise<FinancingRecord> {
-    const at = now();
-    const rec: FinancingRecord = { ...input, id: id("fin"), status: "financed", createdAt: at, updatedAt: at };
-    this.byAsset.set(rec.assetId, rec);
-    return { ...rec };
-  }
-  async getByAsset(assetId: string): Promise<FinancingRecord | null> {
-    const rec = this.byAsset.get(assetId);
-    return rec ? { ...rec } : null;
-  }
-  async setStatus(assetId: string, status: string): Promise<FinancingRecord> {
-    const rec = this.byAsset.get(assetId);
-    if (!rec) throw new Error(`no financing for asset '${assetId}'`);
-    rec.status = status;
-    rec.updatedAt = now();
-    return { ...rec };
-  }
-}
-
 export class MemoryCashRepository implements CashRepository {
   private readonly balances = new Map<string, bigint>(); // key: `${currency} ${address}`
   private key(currency: string, address: string): string {
@@ -255,6 +253,19 @@ export class MemoryCashRepository implements CashRepository {
     this.balances.set(fromKey, have - amt);
     const toKey = this.key(currency, to);
     this.balances.set(toKey, (this.balances.get(toKey) ?? 0n) + amt);
+  }
+}
+
+export class MemoryDocumentRepository implements DocumentRepository {
+  private readonly docs = new Map<string, DocumentRecord>();
+  async create({ contentType, bytes }: { contentType: string; bytes: Buffer }) {
+    const docId = randomUUID();
+    const sha256 = "0x" + createHash("sha256").update(bytes).digest("hex");
+    this.docs.set(docId, { id: docId, contentType, sha256, size: bytes.length, bytes, createdAt: now() });
+    return { id: docId, sha256, size: bytes.length };
+  }
+  async get(docId: string): Promise<DocumentRecord | null> {
+    return this.docs.get(docId) ?? null;
   }
 }
 

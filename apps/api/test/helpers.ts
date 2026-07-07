@@ -9,7 +9,7 @@ import {
   MemoryAssetRepository,
   MemoryAuditRepository,
   MemoryCashRepository,
-  MemoryFinancingRepository,
+  MemoryDocumentRepository,
   MemoryListingRepository,
   MemoryUseCaseRepository,
   MemoryUserRepository,
@@ -20,7 +20,7 @@ import { seedUseCases } from "../src/use-cases.js";
 /** Demo market escrow used by tests unless a test explicitly overrides it (pass `marketEscrowAccount: undefined` to disable the market). */
 export const TEST_MARKET_ESCROW = "0xcd3B766CCDd6AE721141F452C550Ca635964ce71";
 
-export async function buildTestApp(opts: { loginRateLimitMax?: number; platformFeeAccount?: string; marketEscrowAccount?: string; deepTierCapPct?: number } = {}): Promise<FastifyInstance> {
+export async function buildTestApp(opts: { loginRateLimitMax?: number; platformFeeAccount?: string; marketEscrowAccount?: string } = {}): Promise<FastifyInstance> {
   const rbac = new RbacPolicy();
   const chains = buildChainRegistry({ CHAIN_STRICT: "0" }); // simulated chains only — besu absent, never mocked
   const users = new MemoryUserRepository();
@@ -30,7 +30,7 @@ export async function buildTestApp(opts: { loginRateLimitMax?: number; platformF
   const useCases = new MemoryUseCaseRepository();
   const cash = new MemoryCashRepository();
   const listings = new MemoryListingRepository();
-  const financing = new MemoryFinancingRepository();
+  const documents = new MemoryDocumentRepository();
   await seedDefaults(users, accounts);
   const engine = createEngine(useCases, rbac, chains, audit, { users, accounts });
   await seedUseCases(useCases, {
@@ -39,10 +39,9 @@ export async function buildTestApp(opts: { loginRateLimitMax?: number; platformF
   });
   // The suite makes many logins from one IP; raise the throttle unless a test opts into it.
   return buildApp({
-    useCases, rbac, engine, users, assets, audit, accounts, chains, cash, listings, financing,
+    useCases, rbac, engine, users, assets, audit, accounts, chains, cash, listings, documents,
     currencies: loadCurrencies(), jwtSecret: "test-secret",
     loginRateLimitMax: opts.loginRateLimitMax ?? 100000,
-    deepTierCapPct: opts.deepTierCapPct ?? 80,
     platformFeeAccount: opts.platformFeeAccount,
     // Enabled by default so market routes are testable; an explicit
     // `marketEscrowAccount: undefined` disables the market (503s).

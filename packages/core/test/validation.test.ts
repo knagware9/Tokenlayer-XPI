@@ -112,6 +112,31 @@ describe("validateUseCaseDefinition", () => {
     const bad = { ...FUNGIBLE_USE_CASE, compliance: { ...FUNGIBLE_USE_CASE.compliance, allowedJurisdictions: [] } };
     expect(() => validateUseCaseDefinition(bad)).toThrowError(/allowedJurisdictions/);
   });
+
+  // A base definition that declares an `invoiceHash` metadata property, so the
+  // derivedFields/uniqueBy positive cases below have a real target field.
+  const withInvoiceHash = {
+    ...FUNGIBLE_USE_CASE,
+    metadataSchema: {
+      ...FUNGIBLE_USE_CASE.metadataSchema,
+      properties: { ...FUNGIBLE_USE_CASE.metadataSchema.properties, invoiceHash: { type: "string" as const } },
+    },
+  };
+
+  it("accepts derivedFields.invoiceHash = invoiceFingerprint and uniqueBy = invoiceHash", () => {
+    const def = { ...withInvoiceHash, derivedFields: { invoiceHash: "invoiceFingerprint" }, uniqueBy: "invoiceHash" };
+    expect(() => validateUseCaseDefinition(def)).not.toThrow();
+  });
+
+  it("rejects an unknown derivedFields generator", () => {
+    const def = { ...withInvoiceHash, derivedFields: { invoiceHash: "nope" } };
+    expect(() => validateUseCaseDefinition(def)).toThrow(/derivedFields/);
+  });
+
+  it("rejects uniqueBy that is not a declared metadata field", () => {
+    const def = { ...withInvoiceHash, uniqueBy: "notAField" };
+    expect(() => validateUseCaseDefinition(def)).toThrow(/uniqueBy/);
+  });
 });
 
 describe("validateMetadata", () => {

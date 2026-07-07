@@ -82,22 +82,28 @@ function addCurrency(acc: Map<string, bigint>, currency: string, amount: bigint)
 }
 
 /**
- * Per-token value + currency for an asset: the on-sale unitPrice when present,
- * else a use-case-declared valuation field read from the asset's metadata (e.g.
- * an invoice's face-value `amountInr` in INR). Returns null when neither yields
- * a non-negative integer amount. Callers multiply by the asset's live supply.
+ * Total on-book value + currency an asset contributes, given its live `supply`
+ * (0 → contributes nothing). Two semantics:
+ *  - `unitPrice`: a PER-TOKEN sale price → total = supply × unitPrice.
+ *  - a use-case `valuation` metadata field (e.g. an invoice's face-value
+ *    `amountInr`): a WHOLE-ASSET value → the face value counts ONCE while any
+ *    supply is live, independent of the token count (a ₹10L invoice split into
+ *    10,000 fractional tokens is still ₹10L tokenized, not ₹10L × 10,000).
+ * Returns null when neither applies.
  */
-function unitValueOf(
+function assetValueOf(
   a: AssetRecord,
   valuation: { metadataField: string; currency: string } | undefined,
-): { currency: string; unit: bigint } | null {
+  supply: bigint,
+): { currency: string; amount: bigint } | null {
+  if (supply <= 0n) return null;
   if (a.unitPrice && a.currency && /^\d+$/.test(a.unitPrice)) {
-    return { currency: a.currency, unit: BigInt(a.unitPrice) };
+    return { currency: a.currency, amount: supply * BigInt(a.unitPrice) };
   }
   if (valuation) {
     const raw = a.metadata?.[valuation.metadataField];
     const n = typeof raw === "number" ? raw : typeof raw === "string" && /^\d+(\.\d+)?$/.test(raw) ? Number(raw) : NaN;
-    if (Number.isFinite(n) && n >= 0) return { currency: valuation.currency, unit: BigInt(Math.round(n)) };
+    if (Number.isFinite(n) && n >= 0) return { currency: valuation.currency, amount: BigInt(Math.round(n)) };
   }
   return null;
 }
@@ -129,10 +135,6 @@ function summarize(action: string, p: Record<string, unknown>): string {
       return p.tokenId !== undefined ? `#${String(p.tokenId)}` : `${String(p.amount ?? "")} from ${short(p.from)}`;
     case "buy":
       return `${String(p.amount ?? "")} ${short(p.from)}→${short(p.to)} @ ${String(p.unitPrice ?? "")} ${String(p.currency ?? "")}`;
-    case "finance":
-      return `financed ${String(p.discountedInr ?? "")} ${String(p.currency ?? "")} → ${short(p.financier)}`;
-    case "repay":
-      return `repaid ${p.tokenId !== undefined ? `#${String(p.tokenId)}` : ""}`.trim();
     case "issue":
       return "issued";
     case "freeze":
@@ -173,8 +175,8 @@ export function computeAnalytics(input: AnalyticsInput): AnalyticsSummary {
   for (const a of assets) {
     const st = stateByAsset.get(a.id)!;
     totalSupply += st.supply;
-    const uv = unitValueOf(a, useCaseInfo.get(a.useCaseKey)?.valuation);
-    if (uv && st.supply > 0n) addCurrency(totalValue, uv.currency, st.supply * uv.unit);
+    const v = assetValueOf(a, useCaseInfo.get(a.useCaseKey)?.valuation, st.supply);
+    if (v) addCurrency(totalValue, v.currency, v.amount);
   }
   const totalHolders = collectPositiveHolders([...stateByAsset.values()]).size;
   const distinctUseCases = new Set(assets.map((a) => a.useCaseKey)).size;
@@ -200,13 +202,12 @@ export function computeAnalytics(input: AnalyticsInput): AnalyticsSummary {
     if (idx !== undefined) {
       activity[idx]!.count += 1;
     }
-    // Economic-volume events: a marketplace buy (cost) or an invoice financing
-    // disbursement (discountedInr — what the financier actually paid). Both count
-    // toward trades + traded value within the window.
-    if (e.action === "buy" || e.action === "finance") {
+    // Economic-volume events: a marketplace buy (cost) counts toward trades +
+    // traded value within the window.
+    if (e.action === "buy") {
       const p = e.payload ?? {};
       const currency = typeof p.currency === "string" ? p.currency : null;
-      const amount = e.action === "buy" ? amountOf(p, "cost") : amountOf(p, "discountedInr");
+      const amount = amountOf(p, "cost");
       if (idx !== undefined) {
         trades += 1;
         if (currency) {
@@ -258,8 +259,8 @@ export function computeAnalytics(input: AnalyticsInput): AnalyticsSummary {
         const info = useCaseInfo.get(key);
         for (const a of group) {
           const st = stateByAsset.get(a.id)!;
-          const uv = unitValueOf(a, info?.valuation);
-          if (uv && st.supply > 0n) addCurrency(value, uv.currency, st.supply * uv.unit);
+          const v = assetValueOf(a, info?.valuation, st.supply);
+          if (v) addCurrency(value, v.currency, v.amount);
         }
         // chainId: the (single) ledger this use case's assets sit on; if mixed, first by id.
         const chainId = [...new Set(group.map((a) => a.chainId))].sort()[0] ?? "";

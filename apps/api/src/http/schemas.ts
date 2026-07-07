@@ -322,49 +322,6 @@ export const components: Record<string, unknown>[] = [
     required: ["id", "assetId", "seller", "quantity", "unitPrice", "currency", "status", "createdAt"],
   },
   {
-    $id: "Financing",
-    type: "object",
-    additionalProperties: true,
-    description: "Record-only invoice financing: commercial terms + status for a financed invoice asset.",
-    properties: {
-      id: { type: "string" },
-      assetId: { type: "string" },
-      tokenId: { type: "string" },
-      financier: { type: "string" },
-      ratePct: { type: "string" },
-      tenorDays: { type: "integer" },
-      faceValueInr: { type: "string" },
-      discountedInr: { type: "string" },
-      maturityDate: { type: "string" },
-      status: { type: "string", enum: ["financed", "repaid"] },
-      createdAt: { type: "string" },
-      updatedAt: { type: "string" },
-    },
-    required: ["id", "assetId", "tokenId", "financier", "ratePct", "tenorDays", "faceValueInr", "discountedInr", "maturityDate", "status"],
-  },
-  {
-    $id: "TierChainNode",
-    type: "object",
-    additionalProperties: true,
-    description: "One node in an invoice's deep-tier chain (root → descendants).",
-    properties: {
-      assetId: { type: "string" },
-      invoiceNumber: { type: "string", nullable: true },
-      tier: { type: "integer" },
-      sellerGstin: { type: "string", nullable: true },
-      buyerGstin: { type: "string", nullable: true },
-      amountInr: { type: "number", nullable: true },
-      parentInvoiceHash: { type: "string", nullable: true },
-      financing: {
-        type: "object",
-        nullable: true,
-        additionalProperties: true,
-        properties: { financier: { type: "string" }, status: { type: "string" } },
-      },
-    },
-    required: ["assetId", "tier"],
-  },
-  {
     $id: "Receipt",
     type: "object",
     additionalProperties: true,
@@ -674,73 +631,6 @@ export const S: Record<string, FastifySchema> = {
     },
   },
 
-  financeAsset: {
-    tags: ["Financing"], summary: "Finance an invoice (record-only) — moves the token to the financier", security: bearer,
-    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
-    body: {
-      type: "object",
-      additionalProperties: false,
-      required: ["financier", "ratePct", "tenorDays"],
-      properties: {
-        financier: { type: "string" },
-        ratePct: { type: "number", minimum: 0, maximum: 100 },
-        tenorDays: { type: "integer", minimum: 1 },
-      },
-    },
-    response: {
-      201: { type: "object", required: ["financing"], properties: { financing: { $ref: "Financing#" } } },
-      ...errs(400, 401, 403, 404, 409),
-    },
-  },
-  repayAsset: {
-    tags: ["Financing"], summary: "Repay/close a financed invoice — burns the token, marks repaid", security: bearer,
-    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
-    response: {
-      200: { type: "object", required: ["financing"], properties: { financing: { $ref: "Financing#" } } },
-      ...errs(400, 401, 403, 404),
-    },
-  },
-  getFinancing: {
-    tags: ["Financing"], summary: "Get an invoice asset's financing record (or null)", security: bearer,
-    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
-    response: {
-      200: { type: "object", required: ["financing"], properties: { financing: { $ref: "Financing#", nullable: true } } },
-      ...errs(401, 404),
-    },
-  },
-  deepTier: {
-    tags: ["Financing"], summary: "Extend deep-tier credit — mint a linked child invoice against a financed parent", security: bearer,
-    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
-    body: {
-      type: "object",
-      additionalProperties: false,
-      required: ["invoiceNumber", "sellerGstin", "amountInr", "dueDate", "invoiceHash"],
-      properties: {
-        invoiceNumber: { type: "string" },
-        sellerGstin: { type: "string" },
-        buyerGstin: { type: "string" },
-        amountInr: { type: "number", minimum: 1 },
-        dueDate: { type: "string" },
-        invoiceHash: { type: "string", pattern: "^0x[0-9a-fA-F]{64}$" },
-        discountRatePct: { type: "number", minimum: 0, maximum: 100 },
-        invoiceDocUrl: { type: "string" },
-        mintTo: { type: "string" },
-      },
-    },
-    response: {
-      201: { type: "object", required: ["asset"], properties: { asset: { $ref: "Asset#" } } },
-      ...errs(400, 401, 403, 404, 409),
-    },
-  },
-  tierChain: {
-    tags: ["Financing"], summary: "The full deep-tier chain (root → descendants) for an invoice asset", security: bearer,
-    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
-    response: {
-      200: { type: "array", items: { $ref: "TierChainNode#" } },
-      ...errs(401, 404),
-    },
-  },
-
   creditCash: {
     tags: ["Cash"], summary: "Fund an account with CBDC / cash (Issuer / admin only)", security: bearer,
     body: {
@@ -790,6 +680,27 @@ export const S: Record<string, FastifySchema> = {
       },
     },
     response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403) },
+  },
+  uploadDocument: {
+    tags: ["Documents"], summary: "Upload a document (base64); returns its URL + sha256", security: bearer,
+    body: {
+      type: "object",
+      required: ["contentType", "dataBase64"],
+      properties: { contentType: { type: "string" }, dataBase64: { type: "string" } },
+    },
+    response: {
+      201: {
+        type: "object",
+        properties: { id: { type: "string" }, url: { type: "string" }, sha256: { type: "string" }, size: { type: "integer" } },
+        required: ["id", "url", "sha256", "size"],
+      },
+      ...errs(400, 401, 403, 413),
+    },
+  },
+  getDocument: {
+    tags: ["Documents"], summary: "Fetch a document's bytes by id", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    response: { ...errs(401, 404) },
   },
   deleteUser: { tags: ["Users"], summary: "Remove a user (scoped)", security: bearer, params: { type: "object", required: ["id"], properties: { id: { type: "string" } } }, response: { 204: { type: "null" }, ...errs(401, 403, 404) } },
   updateUser: {

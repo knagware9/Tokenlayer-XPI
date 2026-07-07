@@ -4,6 +4,7 @@ import type { Currency } from "../api.js";
 import { useAuth } from "../auth.js";
 import { can } from "../rbac.js";
 import type { ChainInfo, UseCase } from "../types.js";
+import { computeFingerprint } from "./InvoiceImport.js";
 
 interface Props {
   useCases: UseCase[];
@@ -17,6 +18,7 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
   const [chainId, setChainId] = useState("");
   const [name, setName] = useState("");
   const [meta, setMeta] = useState<Record<string, string>>({});
+  const [derived, setDerived] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [treasury, setTreasury] = useState("");
@@ -63,6 +65,17 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
     void api.accounts(token).then(setAllAccounts);
   }, [token]);
 
+  // Live-preview any server-derived metadata field (e.g. invoiceHash from the
+  // canonical invoice fields). The server ultimately derives + persists it.
+  useEffect(() => {
+    const gen = useCase?.derivedFields?.invoiceHash;
+    if (gen !== "invoiceFingerprint") { setDerived({}); return; }
+    const f = { invoiceNumber: meta.invoiceNumber, sellerGstin: meta.sellerGstin, buyerGstin: meta.buyerGstin, amountInr: meta.amountInr, dueDate: meta.dueDate };
+    if (Object.values(f).every((v) => (v ?? "").trim() !== "")) {
+      void computeFingerprint(f as Parameters<typeof computeFingerprint>[0]).then((h) => setDerived({ invoiceHash: h }));
+    } else setDerived({});
+  }, [useCase, meta.invoiceNumber, meta.sellerGstin, meta.buyerGstin, meta.amountInr, meta.dueDate]);
+
   const allowed = user ? can(user.role, "issue") : false;
 
   if (!allowed) {
@@ -82,6 +95,8 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
     try {
       const metadata: Record<string, unknown> = {};
       for (const [field, prop] of Object.entries(useCase.metadataSchema.properties)) {
+        // Server-derived fields (e.g. invoiceHash) are computed by the platform — never submit them.
+        if (useCase.derivedFields && field in useCase.derivedFields) continue;
         const raw = meta[field];
         if (raw === undefined || raw === "") continue;
         metadata[field] = prop.type === "number" ? Number(raw) : prop.type === "boolean" ? raw === "true" : raw;
@@ -98,6 +113,7 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
       });
       setName("");
       setMeta({});
+      setDerived({});
       setTreasury("");
       setInitialSupply("");
       setListForSale(false);
@@ -167,9 +183,42 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
               const required = useCase.metadataSchema.required?.includes(field);
               const value = meta[field] ?? "";
               const onChange = (v: string) => setMeta((m) => ({ ...m, [field]: v }));
+              const isDerived = !!useCase.derivedFields && field in useCase.derivedFields;
               return (
-                <Field key={field} label={`${field}${required ? " *" : ""}`} hint={prop.description}>
-                  {prop.enum ? (
+                <Field key={field} label={`${field}${required ? " *" : ""}`} hint={isDerived ? "Derived by the platform from the invoice fields" : prop.description}>
+                  {isDerived ? (
+                    <input
+                      className="input bg-slate-50 text-slate-500 font-mono text-xs"
+                      readOnly
+                      value={derived[field] ?? "(fill invoice fields to compute)"}
+                    />
+                  ) : prop.type === "document" ? (
+                    <div className="space-y-1">
+                      <input className="input" type="url" placeholder="https://… or upload →" value={value} onChange={(e) => onChange(e.target.value)} />
+                      <input
+                        type="file"
+                        accept="application/pdf,image/png,image/jpeg,image/webp,text/plain"
+                        disabled={busy}
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file || !token) return;
+                          try {
+                            // FileReader → data URL avoids the call-stack overflow of
+                            // spreading a large byte array into String.fromCharCode.
+                            const b64 = await fileToBase64(file);
+                            const r = await api.uploadDocument(token, file.type || "application/pdf", b64);
+                            onChange(r.url);
+                            setMeta((m) => ({ ...m, invoiceDocHash: r.sha256 }));
+                          } catch (err) {
+                            setError(err instanceof ApiError ? `${err.code ?? "Error"}: ${err.message}` : "Document upload failed");
+                          } finally {
+                            e.target.value = "";
+                          }
+                        }}
+                        className="block w-full text-xs file:mr-2 file:rounded file:border-0 file:bg-brand-600 file:text-white file:px-2 file:py-1 file:text-xs"
+                      />
+                    </div>
+                  ) : prop.enum ? (
                     <select className="select" value={value} onChange={(e) => onChange(e.target.value)}>
                       <option value="">select…</option>
                       {prop.enum.map((opt) => (
@@ -182,14 +231,6 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
                       type="number"
                       min={prop.min}
                       max={prop.max}
-                      value={value}
-                      onChange={(e) => onChange(e.target.value)}
-                    />
-                  ) : prop.type === "document" ? (
-                    <input
-                      className="input"
-                      type="url"
-                      placeholder="https://…"
                       value={value}
                       onChange={(e) => onChange(e.target.value)}
                     />
@@ -266,6 +307,20 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
       </button>
     </form>
   );
+}
+
+/** Read a File as base64 (no data-URL prefix) via FileReader — safe for MB-sized files. */
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("could not read file"));
+    reader.onload = () => {
+      const result = String(reader.result);
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }): JSX.Element {

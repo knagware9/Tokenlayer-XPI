@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import type { Asset } from "@prisma/client";
 import {
@@ -19,8 +20,8 @@ import type {
   AuditRepository,
   CashBalanceRecord,
   CashRepository,
-  FinancingRecord,
-  FinancingRepository,
+  DocumentRecord,
+  DocumentRepository,
   KycDetails,
   KycStatus,
   ListingRecord,
@@ -100,6 +101,7 @@ function toAsset(r: Asset, parsedMetadata?: Record<string, unknown>): AssetRecor
     unitPrice: r.unitPrice,
     currency: r.currency,
     treasuryAccount: r.treasuryAccount,
+    uniqueKey: r.uniqueKey,
   };
 }
 
@@ -108,6 +110,7 @@ export class PrismaAssetRepository implements AssetRepository {
     const r = await prisma.asset.create({
       data: {
         ...input,
+        uniqueKey: input.uniqueKey ?? null,
         metadata: JSON.stringify(input.metadata),
       },
     });
@@ -138,6 +141,14 @@ export class PrismaAssetRepository implements AssetRepository {
   }
   async setSaleTerms(id: string, terms: SaleTerms): Promise<void> {
     await prisma.asset.update({ where: { id }, data: { unitPrice: terms.unitPrice, currency: terms.currency, treasuryAccount: terms.treasuryAccount } });
+  }
+  // Metadata is stored as a JSON string column, so filter in-process over the
+  // (small) per-use-case set rather than with a JSON query.
+  async findByMetadata(useCaseKey: string, field: string, value: unknown): Promise<AssetRecord | null> {
+    if (value === undefined) return null; // never match on a missing field (undefined === undefined footgun)
+    const rows = await prisma.asset.findMany({ where: { useCaseKey } });
+    const hit = rows.find((r) => (JSON.parse(r.metadata) as Record<string, unknown>)?.[field] === value);
+    return hit ? toAsset(hit) : null;
   }
 }
 
@@ -213,6 +224,20 @@ function toAuditRecord(r: {
   };
 }
 
+export class PrismaDocumentRepository implements DocumentRepository {
+  async create({ contentType, bytes }: { contentType: string; bytes: Buffer }): Promise<{ id: string; sha256: string; size: number }> {
+    const sha256 = "0x" + createHash("sha256").update(bytes).digest("hex");
+    const row = await prisma.document.create({ data: { contentType, sha256, size: bytes.length, bytes } });
+    return { id: row.id, sha256, size: bytes.length };
+  }
+  async get(id: string): Promise<DocumentRecord | null> {
+    const r = await prisma.document.findUnique({ where: { id } });
+    return r
+      ? { id: r.id, contentType: r.contentType, sha256: r.sha256, size: r.size, bytes: Buffer.from(r.bytes), createdAt: r.createdAt.toISOString() }
+      : null;
+  }
+}
+
 export class PrismaAccountRepository implements AccountRepository {
   async list(): Promise<AccountRecord[]> {
     return prisma.account.findMany();
@@ -245,6 +270,8 @@ interface UseCaseRow {
   fees: string;
   saleTermsDefault: string;
   valuation: string;
+  derivedFields: string;
+  uniqueBy: string | null;
   roles: string;
 }
 
@@ -263,6 +290,7 @@ function rowToUseCase(r: UseCaseRow): UseCaseDefinition {
   const fees = parseJsonObject(r.fees);
   const saleTermsDefault = parseJsonObject(r.saleTermsDefault);
   const valuation = parseJsonObject(r.valuation);
+  const derivedFields = parseJsonObject(r.derivedFields);
   return normalizeUseCaseDefinition({
     key: r.key,
     name: r.name,
@@ -279,6 +307,8 @@ function rowToUseCase(r: UseCaseRow): UseCaseDefinition {
     ...(Object.keys(fees).length > 0 ? { fees } : {}),
     ...(Object.keys(saleTermsDefault).length > 0 ? { saleTermsDefault } : {}),
     ...(Object.keys(valuation).length > 0 ? { valuation } : {}),
+    ...(Object.keys(derivedFields).length > 0 ? { derivedFields: derivedFields as Record<string, "invoiceFingerprint"> } : {}),
+    ...(r.uniqueBy ? { uniqueBy: r.uniqueBy } : {}),
     roles: JSON.parse(r.roles),
   });
 }
@@ -299,6 +329,8 @@ function useCaseToData(def: UseCaseDefinition) {
     fees: JSON.stringify(def.fees ?? {}),
     saleTermsDefault: JSON.stringify(def.saleTermsDefault ?? {}),
     valuation: JSON.stringify(def.valuation ?? {}),
+    derivedFields: JSON.stringify(def.derivedFields ?? {}),
+    uniqueBy: def.uniqueBy ?? null,
     roles: JSON.stringify(def.roles),
   };
 }
@@ -433,47 +465,6 @@ export class PrismaListingRepository implements ListingRepository {
       if (count === 1) return { ...toListing(r), status: "open", updatedAt: new Date().toISOString() };
     }
     throw new ListingConflictError("LISTING_CONFLICT", `listing '${id}' kept changing while reopening — manual reconciliation may be required`);
-  }
-}
-
-const toFinancing = (r: {
-  id: string;
-  assetId: string;
-  tokenId: string;
-  financier: string;
-  ratePct: string;
-  tenorDays: number;
-  faceValueInr: string;
-  discountedInr: string;
-  maturityDate: string;
-  status: string;
-  createdAt: Date;
-  updatedAt: Date;
-}): FinancingRecord => ({
-  id: r.id,
-  assetId: r.assetId,
-  tokenId: r.tokenId,
-  financier: r.financier,
-  ratePct: r.ratePct,
-  tenorDays: r.tenorDays,
-  faceValueInr: r.faceValueInr,
-  discountedInr: r.discountedInr,
-  maturityDate: r.maturityDate,
-  status: r.status,
-  createdAt: r.createdAt.toISOString(),
-  updatedAt: r.updatedAt.toISOString(),
-});
-
-export class PrismaFinancingRepository implements FinancingRepository {
-  async create(input: Pick<FinancingRecord, "assetId" | "tokenId" | "financier" | "ratePct" | "tenorDays" | "faceValueInr" | "discountedInr" | "maturityDate">): Promise<FinancingRecord> {
-    return toFinancing(await prisma.financing.create({ data: { ...input, status: "financed" } }));
-  }
-  async getByAsset(assetId: string): Promise<FinancingRecord | null> {
-    const r = await prisma.financing.findUnique({ where: { assetId } });
-    return r ? toFinancing(r) : null;
-  }
-  async setStatus(assetId: string, status: string): Promise<FinancingRecord> {
-    return toFinancing(await prisma.financing.update({ where: { assetId }, data: { status } }));
   }
 }
 

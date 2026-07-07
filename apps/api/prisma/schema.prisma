@@ -36,6 +36,13 @@ model Asset {
   unitPrice       String?
   currency        String?
   treasuryAccount String?
+  // Value of the use case's `uniqueBy` metadata field (e.g. an invoice fingerprint),
+  // if any. The (useCaseKey, uniqueKey) unique index is the atomic backstop that
+  // makes "tokenize an invoice at most once" hold even under concurrent issue.
+  // NULL for use cases without a uniqueBy rule (SQLite treats NULLs as distinct).
+  uniqueKey       String?
+
+  @@unique([useCaseKey, uniqueKey])
 }
 
 // Low-code use-case definitions, editable via the dashboard builder. JSON
@@ -55,6 +62,8 @@ model UseCase {
   fees             String   @default("{}") // JSON object: { marketplaceBps?, issuanceFlat? }
   saleTermsDefault String   @default("{}") // JSON object: { unitPrice?, currency? }
   valuation        String   @default("{}") // JSON object: { metadataField, currency } (analytics valuation)
+  derivedFields    String   @default("{}") // JSON object: metadataField -> generator (server-derived on issue)
+  uniqueBy         String? // metadata field that must be unique across the use case's assets
   roles           String // JSON array
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -91,24 +100,6 @@ model Listing {
   @@index([assetId, status])
 }
 
-// Record-only invoice financing: one row per financed invoice asset. The token
-// itself moves to the financier through the compliance-checked engine transfer;
-// this row records the commercial terms + status (no cash leg in this iteration).
-model Financing {
-  id            String   @id @default(cuid())
-  assetId       String   @unique
-  tokenId       String
-  financier     String // wallet
-  ratePct       String // annualised discount rate, decimal string
-  tenorDays     Int
-  faceValueInr  String
-  discountedInr String // face × (1 − rate×tenor/365), floor
-  maturityDate  String // ISO date (yyyy-mm-dd)
-  status        String   @default("financed") // financed | repaid
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-}
-
 model Account {
   id      String @id @default(cuid())
   address String @unique
@@ -122,4 +113,15 @@ model CashBalance {
   amount   String @default("0")
 
   @@unique([currency, address])
+}
+
+// Uploaded documents (e.g. invoice PDFs). Bytes are stored inline; the asset
+// metadata references the document by its GET URL + sha256 hash.
+model Document {
+  id          String   @id @default(cuid())
+  contentType String
+  sha256      String
+  size        Int
+  bytes       Bytes
+  createdAt   DateTime @default(now())
 }

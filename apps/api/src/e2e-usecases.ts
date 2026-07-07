@@ -20,8 +20,8 @@ import {
   MemoryAssetRepository,
   MemoryAuditRepository,
   MemoryCashRepository,
+  MemoryDocumentRepository,
   MemoryListingRepository,
-  MemoryFinancingRepository,
   MemoryUseCaseRepository,
   MemoryUserRepository,
 } from "./persistence/memory.js";
@@ -62,8 +62,7 @@ async function main(): Promise<void> {
   });
   const cash = new MemoryCashRepository();
   const listings = new MemoryListingRepository();
-  const financing = new MemoryFinancingRepository();
-  const app = await buildApp({ useCases, rbac, engine, users, assets, audit, accounts, chains, cash, listings, financing, deepTierCapPct: 80, currencies: loadCurrencies(), jwtSecret: "e2e" });
+  const app = await buildApp({ useCases, rbac, engine, users, assets, audit, accounts, chains, cash, listings, documents: new MemoryDocumentRepository(), currencies: loadCurrencies(), jwtSecret: "e2e" });
 
   const admin = await login(app, "admin");
   const evmAvailable = chains.list().some((c) => c.id === "local-evm");

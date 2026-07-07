@@ -75,6 +75,8 @@ export function validateUseCaseDefinition(def: unknown): asserts def is UseCaseD
   if (d.fees !== undefined) validateFees(d.fees, String(d.key), fail);
   if (d.saleTermsDefault !== undefined) validateSaleTermsDefault(d.saleTermsDefault, String(d.key), fail);
   if (d.valuation !== undefined) validateValuation(d.valuation, String(d.key), fail);
+  if (d.derivedFields !== undefined) validateDerivedFields(d.derivedFields, d.metadataSchema, String(d.key), fail);
+  if (d.uniqueBy !== undefined) validateUniqueBy(d.uniqueBy, d.metadataSchema, String(d.key), fail);
 
   if (!Array.isArray(d.roles) || d.roles.length === 0) fail(`use case '${String(d.key)}' needs a non-empty 'roles' array`);
   for (const r of d.roles as unknown[]) {
@@ -213,6 +215,24 @@ function validateValuation(valuation: unknown, key: string, fail: (msg: string) 
   if (typeof v.currency !== "string" || v.currency === "") {
     fail(`use case '${key}' valuation.currency must be a non-empty string`);
   }
+}
+
+const DERIVED_GENERATORS = new Set(["invoiceFingerprint"]);
+
+/** Validate the optional server-derived metadata fields (target must be declared, generator known). */
+function validateDerivedFields(df: unknown, schema: unknown, key: string, fail: (msg: string) => never): void {
+  if (typeof df !== "object" || df === null) fail(`use case '${key}' 'derivedFields' must be an object`);
+  const props = (schema as { properties?: Record<string, unknown> } | undefined)?.properties ?? {};
+  for (const [field, gen] of Object.entries(df as Record<string, unknown>)) {
+    if (!(field in props)) fail(`use case '${key}' derivedFields target '${field}' is not a declared metadata field`);
+    if (typeof gen !== "string" || !DERIVED_GENERATORS.has(gen)) fail(`use case '${key}' derivedFields.${field} has unknown generator '${String(gen)}'`);
+  }
+}
+
+/** Validate the optional uniqueBy field (must name a declared metadata property). */
+function validateUniqueBy(uniqueBy: unknown, schema: unknown, key: string, fail: (msg: string) => never): void {
+  const props = (schema as { properties?: Record<string, unknown> } | undefined)?.properties ?? {};
+  if (typeof uniqueBy !== "string" || !(uniqueBy in props)) fail(`use case '${key}' uniqueBy '${String(uniqueBy)}' is not a declared metadata field`);
 }
 
 /**

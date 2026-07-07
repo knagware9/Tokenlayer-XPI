@@ -6,3 +6,4 @@ export * from "./use-case-source.js";
 export * from "./rbac.js";
 export * from "./lifecycle-engine.js";
 export * from "./user-policy.js";
+export { invoiceFingerprint, type InvoiceFingerprintInput } from "./invoice-fingerprint.js";

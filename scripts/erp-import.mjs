@@ -54,11 +54,14 @@ const EMAIL = arg("email");
 const PASSWORD = arg("password");
 const USE_CASE = arg("use-case", "invoice-tokenization");
 const CHAIN = arg("chain", "fabric");
-const FINANCIER = arg("financier");
+// The MSME seller that receives the tokenized invoice (formerly --financier). It
+// then lists the tokens on the marketplace for financiers to buy at a discount.
+const HOLDER = arg("holder", arg("financier"));
+const PAR = Math.max(1, parseInt(arg("par", "1"), 10) || 1); // ₹ face value per fungible token
 const FILE = arg("file", "samples/erp/invoices.csv");
 
-if (!EMAIL || !PASSWORD || !FINANCIER) {
-  console.error("usage: erp-import.mjs --api <url> --email <op> --password <pw> --financier <wallet> [--use-case k] [--chain c] [--file f]");
+if (!EMAIL || !PASSWORD || !HOLDER) {
+  console.error("usage: erp-import.mjs --api <url> --email <op> --password <pw> --holder <wallet> [--par <inr-per-token>] [--use-case k] [--chain c] [--file f]");
   process.exit(2);
 }
 
@@ -78,14 +81,16 @@ if (login.status !== 200) { console.error(`login failed (${login.status})`); pro
 const TOKEN = login.json.token;
 
 const rows = parseCsv(readFileSync(FILE, "utf8"));
-console.log(`ERP import: ${rows.length} invoice(s) from ${FILE} → use case '${USE_CASE}' on '${CHAIN}', financier ${FINANCIER}\n`);
+console.log(`ERP import: ${rows.length} invoice(s) from ${FILE} → use case '${USE_CASE}' on '${CHAIN}', holder ${HOLDER}, par ₹${PAR}/token\n`);
 
 const results = { TOKENIZED: 0, "DUPLICATE-BLOCKED": 0, INVALID: 0 };
 for (const inv of rows) {
   const label = `${inv.invoiceNumber} ₹${inv.amountInr}`;
-  const fingerprint = computeFingerprint(inv);
+  const fingerprint = computeFingerprint(inv); // display only — the server derives + enforces this
+  const supply = Math.max(1, Math.round(Number(inv.amountInr) / PAR));
   const metadata = {
-    invoiceHash: fingerprint,
+    // invoiceHash is intentionally omitted: the platform derives it server-side
+    // from the canonical fields and rejects duplicates (409 DUPLICATE_INVOICE).
     invoiceNumber: inv.invoiceNumber,
     sellerGstin: inv.sellerGstin,
     buyerGstin: inv.buyerGstin,
@@ -95,41 +100,26 @@ for (const inv of rows) {
     ...(inv.invoiceDocUrl ? { invoiceDocUrl: inv.invoiceDocUrl } : {}),
   };
 
-  // 1. issue the invoice asset (metadata validated by the platform)
+  // Tokenize the invoice into `supply` fungible tokens minted to the holder. The
+  // issue path auto-allowlists + mints the treasury, and rejects a duplicate
+  // fingerprint with 409 DUPLICATE_INVOICE (cross-channel double-financing block).
   const issued = await call("POST", "/assets", TOKEN, {
     useCaseKey: USE_CASE,
     name: `${inv.invoiceNumber} · ${inv.sellerGstin.slice(0, 4)}→${inv.buyerGstin.slice(0, 4)}`,
     chainId: CHAIN,
+    initialSupply: String(supply),
+    treasuryAccount: HOLDER,
     metadata,
   });
-  if (issued.status !== 201) {
-    results.INVALID += 1;
-    console.log(`  ✗ INVALID            ${label} — ${issued.json?.error}: ${String(issued.json?.message ?? "").slice(0, 80)}`);
-    continue;
-  }
-  const assetId = issued.json.asset.id;
-
-  // 2. allowlist the financier on this asset (idempotent; KYC-gated by the platform)
-  const allowed = await call("POST", `/assets/${assetId}/actions/allow`, TOKEN, { account: FINANCIER });
-  if (allowed.status !== 200) {
-    results.INVALID += 1;
-    console.log(`  ✗ INVALID            ${label} — allow failed: ${allowed.json?.error}`);
-    continue;
-  }
-
-  // 3. mint the token — tokenId IS the fingerprint; the ledger blocks duplicates
-  const minted = await call("POST", `/assets/${assetId}/actions/mint`, TOKEN, {
-    to: FINANCIER,
-    tokenId: fingerprint,
-    uri: inv.invoiceDocUrl || undefined,
-  });
-  if (minted.status === 200) {
+  if (issued.status === 201) {
     results.TOKENIZED += 1;
-    console.log(`  ✓ TOKENIZED          ${label} — token ${fingerprint.slice(0, 14)}…`);
-  } else {
-    // The ledger rejecting an existing tokenId = duplicate financing blocked.
+    console.log(`  ✓ TOKENIZED          ${label} → ${supply} tokens → holder (${fingerprint.slice(0, 14)}…)`);
+  } else if (issued.status === 409 && issued.json?.error === "DUPLICATE_INVOICE") {
     results["DUPLICATE-BLOCKED"] += 1;
     console.log(`  ⛔ DUPLICATE-BLOCKED ${label} — invoice already tokenized (${fingerprint.slice(0, 14)}…)`);
+  } else {
+    results.INVALID += 1;
+    console.log(`  ✗ INVALID            ${label} — ${issued.json?.error}: ${String(issued.json?.message ?? "").slice(0, 80)}`);
   }
 }
 

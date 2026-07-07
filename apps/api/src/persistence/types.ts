@@ -38,6 +38,8 @@ export interface AssetRecord {
   unitPrice: string | null;
   currency: string | null;
   treasuryAccount: string | null;
+  /** Value of the use case's `uniqueBy` field, enforced unique per use case. */
+  uniqueKey?: string | null;
 }
 
 export interface SaleTerms {
@@ -95,6 +97,8 @@ export interface AssetRepository {
   list(filter?: AssetFilter, page?: Page): Promise<Paged<AssetRecord>>;
   setStatus(id: string, status: string): Promise<void>;
   setSaleTerms(id: string, terms: SaleTerms): Promise<void>;
+  /** First asset in the use case whose metadata[field] === value, else null. */
+  findByMetadata(useCaseKey: string, field: string, value: unknown): Promise<AssetRecord | null>;
 }
 
 export interface AuditRepository {
@@ -178,36 +182,25 @@ export interface ListingRepository {
   reopen(id: string): Promise<ListingRecord>;
 }
 
-/**
- * Record-only invoice financing: the commercial terms + status for a financed
- * invoice asset. The token itself moves to the financier via the compliance-
- * checked engine transfer; this row carries no cash leg.
- */
-export interface FinancingRecord {
-  id: string;
-  assetId: string;
-  tokenId: string;
-  financier: string; // wallet
-  ratePct: string; // annualised discount rate, decimal string
-  tenorDays: number;
-  faceValueInr: string;
-  discountedInr: string; // face × (1 − rate×tenor/365), floor
-  maturityDate: string; // ISO date (yyyy-mm-dd)
-  status: string; // financed | repaid
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface FinancingRepository {
-  create(input: Pick<FinancingRecord, "assetId" | "tokenId" | "financier" | "ratePct" | "tenorDays" | "faceValueInr" | "discountedInr" | "maturityDate">): Promise<FinancingRecord>;
-  getByAsset(assetId: string): Promise<FinancingRecord | null>;
-  setStatus(assetId: string, status: string): Promise<FinancingRecord>;
-}
-
 export interface CashBalanceRecord {
   currency: string;
   address: string;
   amount: string;
+}
+
+/** An uploaded document (bytes + content-type), referenced from asset metadata. */
+export interface DocumentRecord {
+  id: string;
+  contentType: string;
+  sha256: string;
+  size: number;
+  bytes: Buffer;
+  createdAt: string;
+}
+
+export interface DocumentRepository {
+  create(input: { contentType: string; bytes: Buffer }): Promise<{ id: string; sha256: string; size: number }>;
+  get(id: string): Promise<DocumentRecord | null>;
 }
 
 export interface CashRepository {

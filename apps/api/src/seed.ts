@@ -28,7 +28,7 @@ function rosterFor(useCaseKey: string, prefix: string, buyerWalletLabel: string,
 /**
  * Invoice-tokenization (M1xchange TReDS POC) roster. Explicit rather than via
  * rosterFor so the desk-admin credential matches the demo login exactly. The
- * admin operates the desk (issue / allowlist / finance / deep-tier); token
+ * admin operates the desk (issue / allowlist / list); token
  * holders (suppliers/financiers) are onboarded through the desk with real IN
  * KYC, since the invoice use case gates receipt on IN jurisdiction.
  */
