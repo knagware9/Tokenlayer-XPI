@@ -180,32 +180,6 @@ export interface ListingRepository {
   reopen(id: string): Promise<ListingRecord>;
 }
 
-/**
- * Record-only invoice financing: the commercial terms + status for a financed
- * invoice asset. The token itself moves to the financier via the compliance-
- * checked engine transfer; this row carries no cash leg.
- */
-export interface FinancingRecord {
-  id: string;
-  assetId: string;
-  tokenId: string;
-  financier: string; // wallet
-  ratePct: string; // annualised discount rate, decimal string
-  tenorDays: number;
-  faceValueInr: string;
-  discountedInr: string; // face × (1 − rate×tenor/365), floor
-  maturityDate: string; // ISO date (yyyy-mm-dd)
-  status: string; // financed | repaid
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface FinancingRepository {
-  create(input: Pick<FinancingRecord, "assetId" | "tokenId" | "financier" | "ratePct" | "tenorDays" | "faceValueInr" | "discountedInr" | "maturityDate">): Promise<FinancingRecord>;
-  getByAsset(assetId: string): Promise<FinancingRecord | null>;
-  setStatus(assetId: string, status: string): Promise<FinancingRecord>;
-}
-
 export interface CashBalanceRecord {
   currency: string;
   address: string;

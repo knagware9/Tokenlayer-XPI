@@ -9,7 +9,6 @@ import {
   PrismaAssetRepository,
   PrismaAuditRepository,
   PrismaCashRepository,
-  PrismaFinancingRepository,
   PrismaListingRepository,
   PrismaUseCaseRepository,
   PrismaUserRepository,
@@ -29,7 +28,6 @@ async function main(): Promise<void> {
   const useCases = new PrismaUseCaseRepository();
   const cash = new PrismaCashRepository();
   const listings = new PrismaListingRepository();
-  const financing = new PrismaFinancingRepository();
   // Demo users/accounts (with predictable passwords) are seeded only outside production.
   if (env.nodeEnv !== "production") await seedDefaults(users, accounts);
 
@@ -51,14 +49,12 @@ async function main(): Promise<void> {
     chains,
     cash,
     listings,
-    financing,
     currencies: loadCurrencies(),
     jwtSecret: env.jwtSecret,
     corsOrigins: env.corsOrigins,
     isProduction: env.nodeEnv === "production",
     platformFeeAccount: env.platformFeeAccount,
     marketEscrowAccount: env.marketEscrowAccount,
-    deepTierCapPct: env.deepTierCapPct,
   });
 
   await app.listen({ port: env.port, host: "0.0.0.0" });

@@ -129,10 +129,6 @@ function summarize(action: string, p: Record<string, unknown>): string {
       return p.tokenId !== undefined ? `#${String(p.tokenId)}` : `${String(p.amount ?? "")} from ${short(p.from)}`;
     case "buy":
       return `${String(p.amount ?? "")} ${short(p.from)}→${short(p.to)} @ ${String(p.unitPrice ?? "")} ${String(p.currency ?? "")}`;
-    case "finance":
-      return `financed ${String(p.discountedInr ?? "")} ${String(p.currency ?? "")} → ${short(p.financier)}`;
-    case "repay":
-      return `repaid ${p.tokenId !== undefined ? `#${String(p.tokenId)}` : ""}`.trim();
     case "issue":
       return "issued";
     case "freeze":
@@ -200,13 +196,12 @@ export function computeAnalytics(input: AnalyticsInput): AnalyticsSummary {
     if (idx !== undefined) {
       activity[idx]!.count += 1;
     }
-    // Economic-volume events: a marketplace buy (cost) or an invoice financing
-    // disbursement (discountedInr — what the financier actually paid). Both count
-    // toward trades + traded value within the window.
-    if (e.action === "buy" || e.action === "finance") {
+    // Economic-volume events: a marketplace buy (cost) counts toward trades +
+    // traded value within the window.
+    if (e.action === "buy") {
       const p = e.payload ?? {};
       const currency = typeof p.currency === "string" ? p.currency : null;
-      const amount = e.action === "buy" ? amountOf(p, "cost") : amountOf(p, "discountedInr");
+      const amount = amountOf(p, "cost");
       if (idx !== undefined) {
         trades += 1;
         if (currency) {

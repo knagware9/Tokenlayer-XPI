@@ -9,8 +9,6 @@ import type {
   AuditRepository,
   CashBalanceRecord,
   CashRepository,
-  FinancingRecord,
-  FinancingRepository,
   ListingRecord,
   ListingRepository,
   Page,
@@ -206,27 +204,6 @@ export class MemoryListingRepository implements ListingRepository {
       rec.status = "open";
       rec.updatedAt = now();
     }
-    return { ...rec };
-  }
-}
-
-export class MemoryFinancingRepository implements FinancingRepository {
-  private readonly byAsset = new Map<string, FinancingRecord>();
-  async create(input: Pick<FinancingRecord, "assetId" | "tokenId" | "financier" | "ratePct" | "tenorDays" | "faceValueInr" | "discountedInr" | "maturityDate">): Promise<FinancingRecord> {
-    const at = now();
-    const rec: FinancingRecord = { ...input, id: id("fin"), status: "financed", createdAt: at, updatedAt: at };
-    this.byAsset.set(rec.assetId, rec);
-    return { ...rec };
-  }
-  async getByAsset(assetId: string): Promise<FinancingRecord | null> {
-    const rec = this.byAsset.get(assetId);
-    return rec ? { ...rec } : null;
-  }
-  async setStatus(assetId: string, status: string): Promise<FinancingRecord> {
-    const rec = this.byAsset.get(assetId);
-    if (!rec) throw new Error(`no financing for asset '${assetId}'`);
-    rec.status = status;
-    rec.updatedAt = now();
     return { ...rec };
   }
 }

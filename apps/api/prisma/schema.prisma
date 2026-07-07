@@ -91,24 +91,6 @@ model Listing {
   @@index([assetId, status])
 }
 
-// Record-only invoice financing: one row per financed invoice asset. The token
-// itself moves to the financier through the compliance-checked engine transfer;
-// this row records the commercial terms + status (no cash leg in this iteration).
-model Financing {
-  id            String   @id @default(cuid())
-  assetId       String   @unique
-  tokenId       String
-  financier     String // wallet
-  ratePct       String // annualised discount rate, decimal string
-  tenorDays     Int
-  faceValueInr  String
-  discountedInr String // face × (1 − rate×tenor/365), floor
-  maturityDate  String // ISO date (yyyy-mm-dd)
-  status        String   @default("financed") // financed | repaid
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-}
-
 model Account {
   id      String @id @default(cuid())
   address String @unique

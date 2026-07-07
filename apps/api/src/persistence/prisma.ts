@@ -19,8 +19,6 @@ import type {
   AuditRepository,
   CashBalanceRecord,
   CashRepository,
-  FinancingRecord,
-  FinancingRepository,
   KycDetails,
   KycStatus,
   ListingRecord,
@@ -440,47 +438,6 @@ export class PrismaListingRepository implements ListingRepository {
       if (count === 1) return { ...toListing(r), status: "open", updatedAt: new Date().toISOString() };
     }
     throw new ListingConflictError("LISTING_CONFLICT", `listing '${id}' kept changing while reopening — manual reconciliation may be required`);
-  }
-}
-
-const toFinancing = (r: {
-  id: string;
-  assetId: string;
-  tokenId: string;
-  financier: string;
-  ratePct: string;
-  tenorDays: number;
-  faceValueInr: string;
-  discountedInr: string;
-  maturityDate: string;
-  status: string;
-  createdAt: Date;
-  updatedAt: Date;
-}): FinancingRecord => ({
-  id: r.id,
-  assetId: r.assetId,
-  tokenId: r.tokenId,
-  financier: r.financier,
-  ratePct: r.ratePct,
-  tenorDays: r.tenorDays,
-  faceValueInr: r.faceValueInr,
-  discountedInr: r.discountedInr,
-  maturityDate: r.maturityDate,
-  status: r.status,
-  createdAt: r.createdAt.toISOString(),
-  updatedAt: r.updatedAt.toISOString(),
-});
-
-export class PrismaFinancingRepository implements FinancingRepository {
-  async create(input: Pick<FinancingRecord, "assetId" | "tokenId" | "financier" | "ratePct" | "tenorDays" | "faceValueInr" | "discountedInr" | "maturityDate">): Promise<FinancingRecord> {
-    return toFinancing(await prisma.financing.create({ data: { ...input, status: "financed" } }));
-  }
-  async getByAsset(assetId: string): Promise<FinancingRecord | null> {
-    const r = await prisma.financing.findUnique({ where: { assetId } });
-    return r ? toFinancing(r) : null;
-  }
-  async setStatus(assetId: string, status: string): Promise<FinancingRecord> {
-    return toFinancing(await prisma.financing.update({ where: { assetId }, data: { status } }));
   }
 }
 

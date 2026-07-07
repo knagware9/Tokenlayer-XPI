@@ -8,7 +8,6 @@ import type {
   AssetRepository,
   AuditRepository,
   CashRepository,
-  FinancingRepository,
   ListingRepository,
   UseCaseRepository,
   UserRepository,
@@ -25,7 +24,6 @@ export interface AppDeps {
   chains: ChainRegistry;
   cash: CashRepository;
   listings: ListingRepository;
-  financing: FinancingRepository;
   currencies: Currency[];
   jwtSecret: string;
   /** CORS origin allowlist; defaults to the local dashboard when omitted (tests/demo). */
@@ -45,11 +43,6 @@ export interface AppDeps {
    * MARKET_DISABLED.
    */
   marketEscrowAccount?: string;
-  /**
-   * Deep-tier financing cap as a percentage of the parent invoice's face value
-   * (a child invoice may not exceed this share of its parent). Default 80.
-   */
-  deepTierCapPct: number;
 }
 
 /**
