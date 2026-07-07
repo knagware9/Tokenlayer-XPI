@@ -244,6 +244,7 @@ interface UseCaseRow {
   compliance: string;
   fees: string;
   saleTermsDefault: string;
+  valuation: string;
   roles: string;
 }
 
@@ -261,6 +262,7 @@ function parseJsonObject(raw: string | null | undefined): Record<string, unknown
 function rowToUseCase(r: UseCaseRow): UseCaseDefinition {
   const fees = parseJsonObject(r.fees);
   const saleTermsDefault = parseJsonObject(r.saleTermsDefault);
+  const valuation = parseJsonObject(r.valuation);
   return normalizeUseCaseDefinition({
     key: r.key,
     name: r.name,
@@ -276,6 +278,7 @@ function rowToUseCase(r: UseCaseRow): UseCaseDefinition {
     // Omit empty objects so normalization leaves the optional fields unset.
     ...(Object.keys(fees).length > 0 ? { fees } : {}),
     ...(Object.keys(saleTermsDefault).length > 0 ? { saleTermsDefault } : {}),
+    ...(Object.keys(valuation).length > 0 ? { valuation } : {}),
     roles: JSON.parse(r.roles),
   });
 }
@@ -295,6 +298,7 @@ function useCaseToData(def: UseCaseDefinition) {
     compliance: JSON.stringify(def.compliance),
     fees: JSON.stringify(def.fees ?? {}),
     saleTermsDefault: JSON.stringify(def.saleTermsDefault ?? {}),
+    valuation: JSON.stringify(def.valuation ?? {}),
     roles: JSON.stringify(def.roles),
   };
 }

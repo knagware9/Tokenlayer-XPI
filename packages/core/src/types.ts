@@ -24,6 +24,8 @@ export type LifecycleAction =
   | "buy"
   | "list"
   | "cancel-listing"
+  | "finance"
+  | "repay"
   | "read";
 
 /** Kind of token a use case issues. */
@@ -186,6 +188,16 @@ export interface UseCaseDefinition {
   saleTermsDefault?: {
     unitPrice?: string;
     currency?: string;
+  };
+  /**
+   * How to value this use case's tokens in analytics when they carry no on-sale
+   * unitPrice (e.g. invoices priced by face value in metadata). When set, a
+   * token's value = its `metadataField` amount (a non-negative number) in
+   * `currency`. unitPrice/currency sale terms, when present, take precedence.
+   */
+  valuation?: {
+    metadataField: string;
+    currency: string;
   };
   roles: Role[];
 }
