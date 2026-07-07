@@ -193,18 +193,19 @@ describe("computeAnalytics (pure)", () => {
     expect(r.byUseCase.find((u) => u.useCaseKey === "invoice-tokenization")?.holders).toBe(2);
   });
 
-  it("values invoices by a use-case valuation field (metadata amountInr in INR)", () => {
-    // Two invoices valued by face value (no unitPrice). inv1 (1,000,000) minted
-    // then transferred; inv2 (600,000) minted. Both stay live, so value =
-    // 1,000,000 + 600,000 = 1,600,000 INR.
+  it("values fractional invoices by FACE value once, not per token (metadata valuation)", () => {
+    // Invoices are fractional ERC-20: inv1's ₹1,000,000 face is split into 10,000
+    // tokens, inv2's ₹600,000 into 5,000. A partial transfer of inv1 does not
+    // change supply. Tokenized value = face value counted ONCE per live invoice
+    // (1,000,000 + 600,000 = 1,600,000 INR) — NOT supply × face.
     const invAssets: AssetRecord[] = [
       asset({ id: "inv1", chainId: "fabric", useCaseKey: "invoice-tokenization", tokenType: "fungible", tokenStandard: "ERC-20", symbol: "INVT", metadata: { amountInr: 1_000_000 } }),
       asset({ id: "inv2", chainId: "fabric", useCaseKey: "invoice-tokenization", tokenType: "fungible", tokenStandard: "ERC-20", symbol: "INVT", metadata: { amountInr: 600_000 } }),
     ];
     const invAudit: AuditEntryRecord[] = [
-      entry("inv1", "mint", { to: ALICE, tokenId: "h1" }, "2026-06-01T01:00:00.000Z"),
-      entry("inv1", "transfer", { from: ALICE, to: BOB, tokenId: "h1" }, "2026-06-02T00:00:00.000Z"),
-      entry("inv2", "mint", { to: ALICE, tokenId: "h2" }, "2026-06-01T02:00:00.000Z"),
+      entry("inv1", "mint", { to: ALICE, amount: "10000" }, "2026-06-01T01:00:00.000Z"),
+      entry("inv1", "transfer", { from: ALICE, to: BOB, amount: "4000" }, "2026-06-02T00:00:00.000Z"),
+      entry("inv2", "mint", { to: ALICE, amount: "5000" }, "2026-06-01T02:00:00.000Z"),
     ];
     const r = computeAnalytics({
       ...base,
@@ -212,7 +213,8 @@ describe("computeAnalytics (pure)", () => {
       audit: invAudit,
       useCases: [{ key: "invoice-tokenization", name: "Invoice Tokenization", symbol: "INVT", valuation: { metadataField: "amountInr", currency: "INR" } }],
     });
-    expect(r.totals.valueByCurrency).toEqual({ INR: "1600000" });
+    expect(r.totals.supply).toBe("15000"); // 10,000 + 5,000 tokens live
+    expect(r.totals.valueByCurrency).toEqual({ INR: "1600000" }); // face value once — not 10,000×
     expect(r.byUseCase.find((u) => u.useCaseKey === "invoice-tokenization")?.valueByCurrency).toEqual({ INR: "1600000" });
   });
 
