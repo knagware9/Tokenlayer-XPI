@@ -69,6 +69,11 @@ export interface Env {
    * address outside production so the market is usable out of the box.
    */
   marketEscrowAccount?: string;
+  /**
+   * Deep-tier financing cap: the maximum share (percent) of a parent invoice's
+   * face value that a linked child invoice may claim. Defaults to 80.
+   */
+  deepTierCapPct: number;
 }
 
 const platformFeeAccount =
@@ -89,4 +94,5 @@ export const env: Env = {
   evmOperatorKey: process.env.EVM_OPERATOR_KEY,
   platformFeeAccount,
   marketEscrowAccount,
+  deepTierCapPct: Number(process.env.DEEP_TIER_CAP_PCT ?? 80),
 };

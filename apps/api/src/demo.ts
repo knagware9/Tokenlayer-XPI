@@ -10,6 +10,7 @@ import {
   MemoryAuditRepository,
   MemoryCashRepository,
   MemoryListingRepository,
+  MemoryFinancingRepository,
   MemoryUseCaseRepository,
   MemoryUserRepository,
 } from "./persistence/memory.js";
@@ -41,7 +42,8 @@ async function main(): Promise<void> {
   });
   const cash = new MemoryCashRepository();
   const listings = new MemoryListingRepository();
-  const app = await buildApp({ useCases, rbac, engine, users, assets, audit, accounts, chains, cash, listings, currencies: loadCurrencies(), jwtSecret: "demo" });
+  const financing = new MemoryFinancingRepository();
+  const app = await buildApp({ useCases, rbac, engine, users, assets, audit, accounts, chains, cash, listings, financing, deepTierCapPct: 80, currencies: loadCurrencies(), jwtSecret: "demo" });
   const token = (await post(app, "/auth/login", null, { email: "admin@tokenlayer.dev", password: "admin123" })).body.token;
 
   // 1. ERC-20 across every available DLT — identical behaviour everywhere.
