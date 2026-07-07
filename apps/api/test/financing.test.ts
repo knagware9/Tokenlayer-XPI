@@ -173,6 +173,31 @@ describe("invoice financing (record-only) + deep-tier", () => {
     expect(over.json().error).toBe("DEEP_TIER_CAP_EXCEEDED");
   });
 
+  it("deep-tier: a mint rejection (non-KYC recipient) leaves no orphan child asset", async () => {
+    const app = await buildTestApp();
+    const admin = await invoiceAdmin(app);
+    await makeHolder(app, admin, "seller@x.dev", SELLER);
+    await makeHolder(app, admin, "fina@x.dev", FIN_A);
+
+    const parentId = await issueAndMint(app, admin, { invoiceHash: hash("a"), invoiceNumber: "INV-100", amountInr: 1_000_000, seller: SELLER });
+    await app.inject({ method: "POST", url: `${V1}/assets/${parentId}/finance`, headers: auth(admin), payload: { financier: FIN_A, ratePct: 10, tenorDays: 365 } });
+
+    // mintTo is a wallet with no KYC'd, IN-jurisdiction user → mintToken rejects
+    // fail-closed. The child asset row must NOT be persisted.
+    const bad = await app.inject({
+      method: "POST", url: `${V1}/assets/${parentId}/deep-tier`, headers: auth(admin),
+      payload: { invoiceNumber: "INV-ORPHAN", sellerGstin: SUB_GSTIN, amountInr: 500_000, dueDate: "2026-11-30", invoiceHash: hash("z"), mintTo: SUB_SELLER },
+    });
+    expect(bad.statusCode).toBeGreaterThanOrEqual(400);
+
+    // No orphan: tier-chain from the parent is just the parent (1 node), and the
+    // over-write-on-retry hazard is gone because nothing was persisted.
+    const chain = (await app.inject({ method: "GET", url: `${V1}/assets/${parentId}/tier-chain`, headers: auth(admin) })).json() as { tier: number }[];
+    expect(chain.map((n) => n.tier)).toEqual([1]);
+    const assets = (await app.inject({ method: "GET", url: `${V1}/assets?useCaseKey=${UC}&limit=200`, headers: auth(admin) })).json().data as { name: string }[];
+    expect(assets.some((a) => a.name === "INV-ORPHAN")).toBe(false);
+  });
+
   it("builds a 3-level chain and tier-chain returns all nodes with correct tiers", async () => {
     const app = await buildTestApp();
     const admin = await invoiceAdmin(app);

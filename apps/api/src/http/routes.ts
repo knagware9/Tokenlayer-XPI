@@ -831,8 +831,11 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   // --- invoice financing + deep-tier --------------------------------------
 
   // finance/repay/deep-tier are operator-desk actions: require the `issue`
-  // capability (Issuer / UseCaseAdmin / PlatformAdmin). Returns true after
-  // sending a 403 when the actor lacks it.
+  // capability. Note the engine independently gates the underlying ledger op —
+  // finance needs `transfer`, repay needs `burn` — which an Issuer does NOT
+  // hold, so in practice these resolve to UseCaseAdmin / PlatformAdmin;
+  // deep-tier (issue + mint) is the one an Issuer can run. Returns true after
+  // sending a 403 when the actor lacks `issue`.
   function requireIssue(actor: Actor, reply: FastifyReply): boolean {
     if (deps.rbac.can(actor.role, "issue")) return false;
     reply.code(403).send({ error: "FORBIDDEN", message: `role '${actor.role}' may not perform this financing action` });
@@ -885,16 +888,28 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const face = BigInt(Math.round(Number(asset.metadata.amountInr)));
     const bp = Math.min(10000, Math.max(0, Math.round((ratePct * tenorDays / 365) * 100)));
     const discounted = (face * BigInt(10000 - bp)) / 10000n;
-    const financing = await deps.financing.create({
-      assetId: asset.id,
-      tokenId: invoiceHash,
-      financier,
-      ratePct: String(ratePct),
-      tenorDays,
-      faceValueInr: face.toString(),
-      discountedInr: discounted.toString(),
-      maturityDate: isoDatePlusDays(tenorDays),
-    });
+    let financing;
+    try {
+      financing = await deps.financing.create({
+        assetId: asset.id,
+        tokenId: invoiceHash,
+        financier,
+        ratePct: String(ratePct),
+        tenorDays,
+        faceValueInr: face.toString(),
+        discountedInr: discounted.toString(),
+        maturityDate: isoDatePlusDays(tenorDays),
+      });
+    } catch (err) {
+      // Concurrent double-finance: the getByAsset pre-check and this create race,
+      // and the assetId unique constraint (Prisma P2002) rejects the loser. The
+      // token has already moved to the financier at this point; surface the same
+      // 409 as the sequential path rather than a generic 500.
+      if ((err as { code?: string }).code === "P2002") {
+        return reply.code(409).send({ error: "ALREADY_FINANCED", message: "this invoice is already financed" });
+      }
+      throw err;
+    }
     return reply.code(201).send({ financing });
   });
 
@@ -977,6 +992,24 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const useCase = await deps.useCases.get(parent.useCaseKey);
     const childId = randomUUID();
     const result = await deps.engine.issue(actor, { useCaseKey: parent.useCaseKey, chainId: parent.chainId, id: childId, metadata: childMetadata });
+
+    // Allowlist + mint BEFORE persisting the asset row. mintToken can still
+    // reject fail-closed here (recipient KYC/jurisdiction, holder limit, or a
+    // duplicate-hash race). Persisting only after a successful mint means a
+    // rejected deep-tier leaves no orphan asset row — which would otherwise
+    // surface in tier-chain and collide by invoiceHash on retry.
+    const childCtx = contextOf({ id: childId, chainId: parent.chainId, contractRef: result.ref.contractRef, useCaseKey: parent.useCaseKey } as AssetRecord);
+    await ensureAllowed(actor, childCtx, useCase, parent.chainId, recipient);
+    try {
+      await deps.engine.mintToken(actor, childCtx, recipient, b.invoiceHash, b.invoiceDocUrl);
+    } catch (err) {
+      // A duplicate fingerprint is blocked by the ledger at mint time — surface it
+      // precisely (the pre-check above catches the common case; this is a backstop).
+      if ((err as Error).message?.includes("already exists")) {
+        return reply.code(409).send({ error: "DUPLICATE_INVOICE", message: "an invoice with this fingerprint already exists" });
+      }
+      throw err;
+    }
     await deps.assets.create({
       id: childId,
       useCaseKey: parent.useCaseKey,
@@ -993,19 +1026,6 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       currency: null,
       treasuryAccount: null,
     });
-    const childAsset = (await deps.assets.get(childId))!;
-    const childCtx = contextOf(childAsset);
-    await ensureAllowed(actor, childCtx, useCase, parent.chainId, recipient);
-    try {
-      await deps.engine.mintToken(actor, childCtx, recipient, b.invoiceHash, b.invoiceDocUrl);
-    } catch (err) {
-      // A duplicate fingerprint is blocked by the ledger at mint time — surface it
-      // precisely (the pre-check above catches the common case; this is a backstop).
-      if ((err as Error).message?.includes("already exists")) {
-        return reply.code(409).send({ error: "DUPLICATE_INVOICE", message: "an invoice with this fingerprint already exists" });
-      }
-      throw err;
-    }
     return reply.code(201).send({ asset: await deps.assets.get(childId) });
   });
 
