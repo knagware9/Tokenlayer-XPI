@@ -1,4 +1,4 @@
-import type { AccountState, AnalyticsSummary, Asset, AuditEntry, ChainInfo, Listing, Role, SessionUser, TokenInfo, Trade, UseCase } from "./types.js";
+import type { AccountState, AnalyticsSummary, Asset, AuditEntry, ChainInfo, Financing, Listing, Role, SessionUser, TierChainNode, TokenInfo, Trade, UseCase } from "./types.js";
 
 export interface Currency { code: string; label: string; }
 export interface CashBalance { currency: string; address: string; amount: string; }
@@ -74,6 +74,23 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  // ── Invoice financing + deep-tier ─────────────────────────────────────────
+  financing: (token: string, assetId: string) =>
+    request<{ financing: Financing | null }>(`/assets/${assetId}/financing`, token),
+  finance: (token: string, assetId: string, body: { financier: string; ratePct: string; tenorDays: number }) =>
+    request<{ financing: Financing }>(`/assets/${assetId}/finance`, token, { method: "POST", body: JSON.stringify(body) }),
+  repay: (token: string, assetId: string) =>
+    request<{ financing: Financing }>(`/assets/${assetId}/repay`, token, { method: "POST", body: JSON.stringify({}) }),
+  deepTier: (
+    token: string,
+    assetId: string,
+    body: {
+      invoiceNumber: string; sellerGstin: string; buyerGstin?: string; amountInr: number; dueDate: string;
+      invoiceHash: string; discountRatePct?: number; invoiceDocUrl?: string; mintTo?: string;
+    },
+  ) => request<{ asset: Asset }>(`/assets/${assetId}/deep-tier`, token, { method: "POST", body: JSON.stringify(body) }),
+  tierChain: (token: string, assetId: string) =>
+    request<TierChainNode[]>(`/assets/${assetId}/tier-chain`, token),
   currencies: (token: string) => request<Currency[]>("/currencies", token),
   cashBalances: (token: string, address: string) =>
     request<CashBalance[]>(`/cash/balances?address=${encodeURIComponent(address)}`, token),

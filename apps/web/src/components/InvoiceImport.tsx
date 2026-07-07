@@ -41,7 +41,7 @@ interface ImportRow {
 }
 
 /** Canonical fingerprint — MUST match computeFingerprint in scripts/erp-import.mjs. */
-async function computeFingerprint(inv: {
+export async function computeFingerprint(inv: {
   invoiceNumber: string; sellerGstin: string; buyerGstin: string; amountInr: string; dueDate: string;
 }): Promise<string> {
   const canonical = [

@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AssetRecord, KycDetails, KycStatus, ListingRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { canCreateUser, canManageUsers, normalizeUseCaseDefinition, PolicyError, type Role, type UseCaseDefinition } from "@tokenlayer/core";
+import { canCreateUser, canManageUsers, normalizeUseCaseDefinition, PolicyError, type Actor, type AssetContext, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { isSupportedCurrency } from "../currencies.js";
 import { deployUseCaseContracts } from "../use-cases.js";
@@ -12,6 +12,13 @@ import { S } from "./schemas.js";
 import { actorOf, contextOf, isPositiveIntString, notFound, requireUser, scopedToCaller, type TokenClaims } from "./support.js";
 
 const NO_USE_CASE = "__none__"; // sentinel: a use-case key that matches no real use case (denies scoped users with no assigned use case)
+
+/** ISO yyyy-mm-dd `days` from today (UTC). Used for a financing maturity date. */
+function isoDatePlusDays(days: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
 const BCRYPT_ROUNDS = 12;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 
@@ -819,6 +826,268 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
           secondary: p.secondary === true,
         };
       });
+  });
+
+  // --- invoice financing + deep-tier --------------------------------------
+
+  // finance/repay/deep-tier are operator-desk actions: require the `issue`
+  // capability. Note the engine independently gates the underlying ledger op —
+  // finance needs `transfer`, repay needs `burn` — which an Issuer does NOT
+  // hold, so in practice these resolve to UseCaseAdmin / PlatformAdmin;
+  // deep-tier (issue + mint) is the one an Issuer can run. Returns true after
+  // sending a 403 when the actor lacks `issue`.
+  function requireIssue(actor: Actor, reply: FastifyReply): boolean {
+    if (deps.rbac.can(actor.role, "issue")) return false;
+    reply.code(403).send({ error: "FORBIDDEN", message: `role '${actor.role}' may not perform this financing action` });
+    return true;
+  }
+
+  // Auto-allowlist a party on the asset (operator), mirroring the issue/listings
+  // routes. No-op when the use case does not gate on an allowlist, or the party
+  // is already allowed. Acts as the platform operator when the caller lacks the
+  // "allow" right (all issue-capable roles do hold it, but stay robust).
+  async function ensureAllowed(actor: Actor, ctx: AssetContext, useCase: UseCaseDefinition, chainId: string, account: string): Promise<void> {
+    if (!useCase.compliance.allowlist) return;
+    const adapter = deps.chains.resolveAdapter(chainId);
+    if (await adapter.isAllowed(ctx.ref, account).catch(() => false)) return;
+    const allowActor: Actor = deps.rbac.can(actor.role, "allow") ? actor : { id: "platform-operator", role: "PlatformAdmin" };
+    await deps.engine.setAllowed(allowActor, ctx, account, true);
+  }
+
+  app.post("/assets/:id/finance", { schema: S.financeAsset, ...auth }, async (request, reply) => {
+    const asset = await scopedAsset(request, reply, "act");
+    if (!asset) return reply;
+    const actor = actorOf(request);
+    if (requireIssue(actor, reply)) return reply;
+
+    const invoiceHash = asset.metadata.invoiceHash;
+    if (typeof invoiceHash !== "string" || invoiceHash === "") {
+      return reply.code(400).send({ error: "NOT_AN_INVOICE", message: "this asset is not an invoice (no invoiceHash metadata)" });
+    }
+    if (await deps.financing.getByAsset(asset.id)) {
+      return reply.code(409).send({ error: "ALREADY_FINANCED", message: "this invoice is already financed" });
+    }
+    const { financier, ratePct, tenorDays } = request.body as { financier: string; ratePct: number; tenorDays: number };
+    const ctx = contextOf(asset);
+    const currentHolder = await deps.engine.ownerOf(actor, ctx, invoiceHash);
+    if (!currentHolder) {
+      return reply.code(400).send({ error: "NOT_MINTED", message: "the invoice token has not been minted yet" });
+    }
+
+    // Auto-allowlist the financier (if gated), then move the token holder→financier.
+    // transferToken enforces allowlist + IN jurisdiction + freeze and audits a
+    // `transfer`. If it throws, no Financing row is created (create runs after).
+    const useCase = await deps.useCases.get(asset.useCaseKey);
+    await ensureAllowed(actor, ctx, useCase, asset.chainId, financier);
+    await deps.engine.transferToken(actor, ctx, currentHolder, financier, invoiceHash);
+
+    // Record-only discount, integer/BigInt-safe:
+    //   discountFraction = ratePct/100 × tenorDays/365
+    //   basisPoints      = round(ratePct × tenorDays / 365 × 100), clamped 0..10000
+    //   discounted       = face × (10000 − bp) / 10000  (BigInt floor)
+    const face = BigInt(Math.round(Number(asset.metadata.amountInr)));
+    const bp = Math.min(10000, Math.max(0, Math.round((ratePct * tenorDays / 365) * 100)));
+    const discounted = (face * BigInt(10000 - bp)) / 10000n;
+    let financing;
+    try {
+      financing = await deps.financing.create({
+        assetId: asset.id,
+        tokenId: invoiceHash,
+        financier,
+        ratePct: String(ratePct),
+        tenorDays,
+        faceValueInr: face.toString(),
+        discountedInr: discounted.toString(),
+        maturityDate: isoDatePlusDays(tenorDays),
+      });
+    } catch (err) {
+      // Concurrent double-finance: the getByAsset pre-check and this create race,
+      // and the assetId unique constraint (Prisma P2002) rejects the loser. The
+      // token has already moved to the financier at this point; surface the same
+      // 409 as the sequential path rather than a generic 500.
+      if ((err as { code?: string }).code === "P2002") {
+        return reply.code(409).send({ error: "ALREADY_FINANCED", message: "this invoice is already financed" });
+      }
+      throw err;
+    }
+    return reply.code(201).send({ financing });
+  });
+
+  app.post("/assets/:id/repay", { schema: S.repayAsset, ...auth }, async (request, reply) => {
+    const asset = await scopedAsset(request, reply, "act");
+    if (!asset) return reply;
+    const actor = actorOf(request);
+    if (requireIssue(actor, reply)) return reply;
+
+    const rec = await deps.financing.getByAsset(asset.id);
+    if (!rec || rec.status !== "financed") {
+      return reply.code(400).send({ error: "NOT_FINANCED", message: "this invoice has no active financing to repay" });
+    }
+    // Burn the token (repayment closes the lifecycle), then mark the record repaid.
+    await deps.engine.burnToken(actor, contextOf(asset), rec.tokenId);
+    const financing = await deps.financing.setStatus(asset.id, "repaid");
+    return reply.code(200).send({ financing });
+  });
+
+  app.get("/assets/:id/financing", { schema: S.getFinancing, ...auth }, async (request, reply) => {
+    const asset = await scopedAsset(request, reply, "read");
+    if (!asset) return reply;
+    return { financing: await deps.financing.getByAsset(asset.id) };
+  });
+
+  app.post("/assets/:id/deep-tier", { schema: S.deepTier, ...auth }, async (request, reply) => {
+    const parent = await scopedAsset(request, reply, "act");
+    if (!parent) return reply;
+    const actor = actorOf(request);
+    if (requireIssue(actor, reply)) return reply;
+
+    const parentFin = await deps.financing.getByAsset(parent.id);
+    if (!parentFin || parentFin.status !== "financed") {
+      return reply.code(400).send({ error: "PARENT_NOT_FINANCED", message: "the parent invoice must be financed before extending deep-tier credit" });
+    }
+    const b = request.body as {
+      invoiceNumber: string; sellerGstin: string; buyerGstin?: string; amountInr: number;
+      dueDate: string; invoiceHash: string; discountRatePct?: number; invoiceDocUrl?: string; mintTo?: string;
+    };
+
+    // Cap the child at deepTierCapPct% of the parent's face value (BigInt-safe).
+    const parentFace = BigInt(Math.round(Number(parent.metadata.amountInr)));
+    const cap = (parentFace * BigInt(deps.deepTierCapPct)) / 100n;
+    const childFace = BigInt(Math.round(Number(b.amountInr)));
+    if (childFace > cap) {
+      return reply.code(400).send({ error: "DEEP_TIER_CAP_EXCEEDED", message: `deep-tier amount ${childFace} exceeds the ${deps.deepTierCapPct}% cap of ${cap} on the parent's face value` });
+    }
+
+    const parentCtx = contextOf(parent);
+    // Duplicate fingerprint → the token already exists in the shared collection.
+    if (await deps.engine.ownerOf(actor, parentCtx, b.invoiceHash)) {
+      return reply.code(409).send({ error: "DUPLICATE_INVOICE", message: "an invoice with this fingerprint already exists" });
+    }
+
+    // Resolve the child's mint recipient (the sub-supplier's receivable):
+    // explicit mintTo → the caller's linked wallet → the parent's current holder.
+    const parentHolder = await deps.engine.ownerOf(actor, parentCtx, parent.metadata.invoiceHash as string);
+    const recipient = b.mintTo ?? (await walletOf(request.user as TokenClaims)) ?? parentHolder;
+    if (!recipient) {
+      return reply.code(400).send({ error: "NO_WALLET", message: "no mint recipient could be resolved (supply mintTo or link a wallet)" });
+    }
+
+    const parentTier = Number(parent.metadata.tier ?? 1);
+    const childMetadata: Record<string, unknown> = {
+      invoiceHash: b.invoiceHash,
+      invoiceNumber: b.invoiceNumber,
+      sellerGstin: b.sellerGstin,
+      buyerGstin: b.buyerGstin ?? parent.metadata.sellerGstin,
+      amountInr: Number(b.amountInr),
+      dueDate: b.dueDate,
+      tier: parentTier + 1,
+      parentInvoiceHash: parent.metadata.invoiceHash,
+      anchorBuyerGstin: parent.metadata.anchorBuyerGstin ?? parent.metadata.buyerGstin,
+      ...(b.discountRatePct !== undefined ? { discountRatePct: Number(b.discountRatePct) } : {}),
+      ...(b.invoiceDocUrl ? { invoiceDocUrl: b.invoiceDocUrl } : {}),
+    };
+
+    // Issue the child on the parent's chain (mirrors POST /assets), then mint it
+    // to the recipient. Metadata is validated by engine.issue against the schema.
+    const useCase = await deps.useCases.get(parent.useCaseKey);
+    const childId = randomUUID();
+    const result = await deps.engine.issue(actor, { useCaseKey: parent.useCaseKey, chainId: parent.chainId, id: childId, metadata: childMetadata });
+
+    // Allowlist + mint BEFORE persisting the asset row. mintToken can still
+    // reject fail-closed here (recipient KYC/jurisdiction, holder limit, or a
+    // duplicate-hash race). Persisting only after a successful mint means a
+    // rejected deep-tier leaves no orphan asset row — which would otherwise
+    // surface in tier-chain and collide by invoiceHash on retry.
+    const childCtx = contextOf({ id: childId, chainId: parent.chainId, contractRef: result.ref.contractRef, useCaseKey: parent.useCaseKey } as AssetRecord);
+    await ensureAllowed(actor, childCtx, useCase, parent.chainId, recipient);
+    try {
+      await deps.engine.mintToken(actor, childCtx, recipient, b.invoiceHash, b.invoiceDocUrl);
+    } catch (err) {
+      // A duplicate fingerprint is blocked by the ledger at mint time — surface it
+      // precisely (the pre-check above catches the common case; this is a backstop).
+      if ((err as Error).message?.includes("already exists")) {
+        return reply.code(409).send({ error: "DUPLICATE_INVOICE", message: "an invoice with this fingerprint already exists" });
+      }
+      throw err;
+    }
+    await deps.assets.create({
+      id: childId,
+      useCaseKey: parent.useCaseKey,
+      name: b.invoiceNumber,
+      symbol: useCase.symbol,
+      chainId: parent.chainId,
+      contractRef: result.ref.contractRef,
+      tokenType: result.tokenType,
+      tokenStandard: useCase.tokenStandard,
+      metadata: childMetadata,
+      status: "active",
+      createdBy: actor.id,
+      unitPrice: null,
+      currency: null,
+      treasuryAccount: null,
+    });
+    return reply.code(201).send({ asset: await deps.assets.get(childId) });
+  });
+
+  app.get("/assets/:id/tier-chain", { schema: S.tierChain, ...auth }, async (request, reply) => {
+    const asset = await scopedAsset(request, reply, "read");
+    if (!asset) return reply;
+
+    // All assets in the caller's use case, indexed by their invoiceHash.
+    const { items } = await deps.assets.list({ useCaseKey: asset.useCaseKey }, { limit: 1000 });
+    const byHash = new Map<string, AssetRecord>();
+    for (const a of items) {
+      const h = a.metadata.invoiceHash;
+      if (typeof h === "string") byHash.set(h, a);
+    }
+
+    // Climb parentInvoiceHash links to the chain's root.
+    let root = asset;
+    const climbed = new Set<string>([root.id]);
+    for (;;) {
+      const ph = root.metadata.parentInvoiceHash;
+      if (typeof ph !== "string") break;
+      const parentAsset = byHash.get(ph);
+      if (!parentAsset || climbed.has(parentAsset.id)) break;
+      climbed.add(parentAsset.id);
+      root = parentAsset;
+    }
+
+    // Collect the root + every descendant (a node whose parent is already in the tree).
+    const inTree = new Set<string>([root.id]);
+    for (let changed = true; changed; ) {
+      changed = false;
+      for (const a of items) {
+        if (inTree.has(a.id)) continue;
+        const ph = a.metadata.parentInvoiceHash;
+        if (typeof ph !== "string") continue;
+        const parentAsset = byHash.get(ph);
+        if (parentAsset && inTree.has(parentAsset.id)) {
+          inTree.add(a.id);
+          changed = true;
+        }
+      }
+    }
+
+    const nodes = await Promise.all(
+      items
+        .filter((a) => inTree.has(a.id))
+        .map(async (a) => {
+          const fin = await deps.financing.getByAsset(a.id);
+          return {
+            assetId: a.id,
+            invoiceNumber: typeof a.metadata.invoiceNumber === "string" ? a.metadata.invoiceNumber : null,
+            tier: Number(a.metadata.tier ?? 1),
+            sellerGstin: typeof a.metadata.sellerGstin === "string" ? a.metadata.sellerGstin : null,
+            buyerGstin: typeof a.metadata.buyerGstin === "string" ? a.metadata.buyerGstin : null,
+            amountInr: a.metadata.amountInr !== undefined ? Number(a.metadata.amountInr) : null,
+            parentInvoiceHash: typeof a.metadata.parentInvoiceHash === "string" ? a.metadata.parentInvoiceHash : null,
+            financing: fin ? { financier: fin.financier, status: fin.status } : null,
+          };
+        }),
+    );
+    nodes.sort((x, y) => x.tier - y.tier || String(x.invoiceNumber ?? "").localeCompare(String(y.invoiceNumber ?? ""), undefined, { numeric: true }));
+    return nodes;
   });
 
   // --- cash (CBDC) --------------------------------------------------------
