@@ -394,7 +394,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const days = Math.min(90, Math.max(1, Math.trunc(q.days ?? 30)));
     const { items: assets } = await deps.assets.list({ useCaseKey: useCaseKey ?? undefined }, { limit: 1000 });
     const { items: audit } = await deps.audit.listByAssetIds(assets.map((a) => a.id), { limit: 10000 });
-    const useCases = (await deps.useCases.list()).map((u) => ({ key: u.key, name: u.name, symbol: u.symbol }));
+    const useCases = (await deps.useCases.list()).map((u) => ({ key: u.key, name: u.name, symbol: u.symbol, valuation: u.valuation }));
     const chains = deps.chains.list().map((c) => ({ id: c.id, mode: c.mode }));
 
     return computeAnalytics({
@@ -910,6 +910,27 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       }
       throw err;
     }
+
+    // Record a business-level `finance` audit event (distinct from the engine's
+    // `transfer`) valued at the discounted disbursement, so analytics counts it
+    // as economic volume and the recent feed shows the financing. Currency is the
+    // use case's valuation currency (invoices: INR), else a neutral "INR".
+    await deps.audit.append({
+      assetId: asset.id,
+      actorId: actor.id,
+      action: "finance",
+      payload: {
+        financier,
+        from: currentHolder,
+        tokenId: invoiceHash,
+        discountedInr: discounted.toString(),
+        faceValueInr: face.toString(),
+        currency: useCase.valuation?.currency ?? "INR",
+        ratePct: String(ratePct),
+        tenorDays,
+      },
+      chainId: asset.chainId,
+    });
     return reply.code(201).send({ financing });
   });
 
@@ -926,6 +947,13 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     // Burn the token (repayment closes the lifecycle), then mark the record repaid.
     await deps.engine.burnToken(actor, contextOf(asset), rec.tokenId);
     const financing = await deps.financing.setStatus(asset.id, "repaid");
+    await deps.audit.append({
+      assetId: asset.id,
+      actorId: actor.id,
+      action: "repay",
+      payload: { tokenId: rec.tokenId, financier: rec.financier, faceValueInr: rec.faceValueInr },
+      chainId: asset.chainId,
+    });
     return reply.code(200).send({ financing });
   });
 

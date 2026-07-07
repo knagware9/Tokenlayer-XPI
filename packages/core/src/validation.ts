@@ -74,6 +74,7 @@ export function validateUseCaseDefinition(def: unknown): asserts def is UseCaseD
 
   if (d.fees !== undefined) validateFees(d.fees, String(d.key), fail);
   if (d.saleTermsDefault !== undefined) validateSaleTermsDefault(d.saleTermsDefault, String(d.key), fail);
+  if (d.valuation !== undefined) validateValuation(d.valuation, String(d.key), fail);
 
   if (!Array.isArray(d.roles) || d.roles.length === 0) fail(`use case '${String(d.key)}' needs a non-empty 'roles' array`);
   for (const r of d.roles as unknown[]) {
@@ -199,6 +200,18 @@ function validateSaleTermsDefault(terms: unknown, key: string, fail: (msg: strin
   }
   if (t.currency !== undefined && typeof t.currency !== "string") {
     fail(`use case '${key}' saleTermsDefault.currency must be a string`);
+  }
+}
+
+/** Validate the optional analytics valuation shape (both fields required together). */
+function validateValuation(valuation: unknown, key: string, fail: (msg: string) => never): void {
+  if (typeof valuation !== "object" || valuation === null) fail(`use case '${key}' 'valuation' must be an object`);
+  const v = valuation as Record<string, unknown>;
+  if (typeof v.metadataField !== "string" || v.metadataField === "") {
+    fail(`use case '${key}' valuation.metadataField must be a non-empty string`);
+  }
+  if (typeof v.currency !== "string" || v.currency === "") {
+    fail(`use case '${key}' valuation.currency must be a non-empty string`);
   }
 }
 

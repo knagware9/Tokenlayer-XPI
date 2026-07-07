@@ -54,6 +54,7 @@ model UseCase {
   compliance      String // JSON object
   fees             String   @default("{}") // JSON object: { marketplaceBps?, issuanceFlat? }
   saleTermsDefault String   @default("{}") // JSON object: { unitPrice?, currency? }
+  valuation        String   @default("{}") // JSON object: { metadataField, currency } (analytics valuation)
   roles           String // JSON array
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

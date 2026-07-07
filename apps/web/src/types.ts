@@ -63,6 +63,8 @@ export interface UseCase {
   };
   fees?: { marketplaceBps?: number; issuanceFlat?: string };
   saleTermsDefault?: { unitPrice?: string; currency?: string };
+  /** How analytics values tokens with no unitPrice (e.g. invoice face value). */
+  valuation?: { metadataField: string; currency: string };
   roles: Role[];
 }
 

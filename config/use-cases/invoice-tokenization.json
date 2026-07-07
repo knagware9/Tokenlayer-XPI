@@ -80,5 +80,9 @@
     "transferRestrictions": true,
     "allowedJurisdictions": ["IN"]
   },
+  "valuation": {
+    "metadataField": "amountInr",
+    "currency": "INR"
+  },
   "roles": ["UseCaseAdmin", "Issuer", "Buyer", "Auditor"]
 }
