@@ -931,7 +931,10 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   // A small document store so the dashboard can upload a file (e.g. an invoice
   // PDF) and reference it from asset metadata by URL + sha256.
   const MAX_DOC_BYTES = 5 * 1024 * 1024;
-  app.post("/documents", { schema: S.uploadDocument, ...auth }, async (request, reply) => {
+  // Override the app-global 256KB bodyLimit for uploads: a 5MB document is ~6.8MB
+  // as base64 JSON, so allow 8MB here (the route still enforces MAX_DOC_BYTES on
+  // the decoded bytes).
+  app.post("/documents", { schema: S.uploadDocument, bodyLimit: 8 * 1024 * 1024, ...auth }, async (request, reply) => {
     const actor = actorOf(request);
     if (!deps.rbac.can(actor.role, "issue")) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to upload documents" });
     const { contentType, dataBase64 } = request.body as { contentType: string; dataBase64: string };
