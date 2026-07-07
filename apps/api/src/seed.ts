@@ -25,11 +25,26 @@ function rosterFor(useCaseKey: string, prefix: string, buyerWalletLabel: string,
   ];
 }
 
+/**
+ * Invoice-tokenization (M1xchange TReDS POC) roster. Explicit rather than via
+ * rosterFor so the desk-admin credential matches the demo login exactly. The
+ * admin operates the desk (issue / allowlist / finance / deep-tier); token
+ * holders (suppliers/financiers) are onboarded through the desk with real IN
+ * KYC, since the invoice use case gates receipt on IN jurisdiction.
+ */
+const INVOICE_ROSTER: SeedUser[] = [
+  { email: "m1.admin@tokenlayer.dev", password: "m1admin123", role: "UseCaseAdmin", useCaseKey: "invoice-tokenization" },
+  { email: "m1.issuer@tokenlayer.dev", password: "m1issuer123", role: "Issuer", useCaseKey: "invoice-tokenization" },
+  { email: "m1.buyer@tokenlayer.dev", password: "m1buyer123", role: "Buyer", useCaseKey: "invoice-tokenization" },
+  { email: "m1.auditor@tokenlayer.dev", password: "m1auditor123", role: "Auditor", useCaseKey: "invoice-tokenization" },
+];
+
 export const DEFAULT_USERS: SeedUser[] = [
   PLATFORM_ADMIN,
   ...rosterFor("carbon-credit", "carbon", "EcoFund Capital", "Treasury"),
   ...rosterFor("gold-loan", "gold", "Alice", "Treasury"),
   ...rosterFor("corporate-bond", "bond", "Bob", "Treasury"),
+  ...INVOICE_ROSTER,
 ];
 
 /**
