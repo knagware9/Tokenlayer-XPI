@@ -24,9 +24,18 @@ export interface AssetState {
  * Fold an asset's audit entries into net supply + per-address balances.
  * Order-sensitive for correctness of running balances — callers pass entries in
  * chronological (oldest→newest) order.
+ *
+ * Handles BOTH token types (an asset's stream is entirely one kind):
+ *  - fungible: mint/transfer/burn/buy carry an integer `amount`; supply = minted
+ *    − burned, balances = net amount per address.
+ *  - non-fungible (ERC-721): mint/transfer/burn carry a `tokenId` and no amount;
+ *    each live token counts as 1, so supply = live token count and balances =
+ *    number of tokens per owner. Ownership is tracked by tokenId so a transfer
+ *    debits the actual current owner (authoritative over the payload `from`).
  */
 export function foldAsset(entries: AuditEntryRecord[]): AssetState {
   const balances = new Map<string, bigint>();
+  const owners = new Map<string, string>(); // tokenId → current owner (NFT only)
   const bump = (addr: unknown, delta: bigint): void => {
     if (typeof addr !== "string" || addr === "") return;
     balances.set(addr, (balances.get(addr) ?? 0n) + delta);
@@ -34,37 +43,54 @@ export function foldAsset(entries: AuditEntryRecord[]): AssetState {
   let supply = 0n;
   for (const e of entries) {
     const p = e.payload ?? {};
+    const tokenId = typeof p.tokenId === "string" ? p.tokenId : null;
     switch (e.action) {
       case "mint": {
-        const amt = amountOf(p, "amount");
-        supply += amt;
-        bump(p.to, amt);
+        if (tokenId) {
+          if (!owners.has(tokenId)) { owners.set(tokenId, String(p.to)); supply += 1n; bump(p.to, 1n); }
+        } else {
+          const amt = amountOf(p, "amount");
+          supply += amt;
+          bump(p.to, amt);
+        }
         break;
       }
       case "transfer": {
-        const amt = amountOf(p, "amount");
-        bump(p.from, -amt);
-        bump(p.to, amt);
+        if (tokenId) {
+          const cur = owners.get(tokenId) ?? (typeof p.from === "string" ? p.from : undefined);
+          bump(cur, -1n);
+          owners.set(tokenId, String(p.to));
+          bump(p.to, 1n);
+        } else {
+          const amt = amountOf(p, "amount");
+          bump(p.from, -amt);
+          bump(p.to, amt);
+        }
         break;
       }
       case "buy": {
+        // Secondary market is fungible-only. Buys record `from = escrow` (the
+        // pooled market escrow account) but carry the economic sender in `seller`.
+        // Debit the seller so the escrow never enters balances: the seller keeps
+        // the balance while escrowed (unsold inventory — `list`/`cancel-listing`
+        // stay no-ops below) and loses it exactly when a take fills. Folding the
+        // escrow instead leaves a fully-exited seller with a phantom credit,
+        // over-counting holders (false HOLDER_LIMIT_EXCEEDED).
         const amt = amountOf(p, "amount");
-        // Secondary-market buys record `from = escrow` (the pooled market
-        // escrow account) but carry the economic sender in `seller`. Debit the
-        // seller so the escrow never enters balances: the seller keeps the
-        // balance while escrowed (unsold inventory — `list`/`cancel-listing`
-        // stay no-ops below) and loses it exactly when a take fills. Folding
-        // the escrow instead leaves a fully-exited seller with a phantom
-        // credit, over-counting holders (false HOLDER_LIMIT_EXCEEDED).
         const debit = p.secondary === true && typeof p.seller === "string" ? p.seller : p.from;
         bump(debit, -amt);
         bump(p.to, amt);
         break;
       }
       case "burn": {
-        const amt = amountOf(p, "amount");
-        supply -= amt;
-        bump(p.from, -amt);
+        if (tokenId) {
+          const cur = owners.get(tokenId);
+          if (cur !== undefined) { supply -= 1n; bump(cur, -1n); owners.delete(tokenId); }
+        } else {
+          const amt = amountOf(p, "amount");
+          supply -= amt;
+          bump(p.from, -amt);
+        }
         break;
       }
       default:
@@ -103,13 +129,13 @@ export function firstAcquisitionOf(entries: AuditEntryRecord[], account: string)
   for (const e of entries) {
     const p = e.payload ?? {};
     let credited = false;
+    // A credit is a positive fungible amount OR an NFT token-id received.
+    const isCredit = amountOf(p, "amount") > 0n || typeof p.tokenId === "string";
     switch (e.action) {
       case "mint":
-        credited = p.to === account && amountOf(p, "amount") > 0n;
-        break;
       case "transfer":
       case "buy":
-        credited = p.to === account && amountOf(p, "amount") > 0n;
+        credited = p.to === account && isCredit;
         break;
       default:
         break;

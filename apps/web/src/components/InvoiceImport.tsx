@@ -17,6 +17,13 @@ const INVOICE_FIELDS = ["invoiceNumber", "sellerGstin", "buyerGstin", "amountInr
 const OPTIONAL_FIELDS = ["discountRatePct", "invoiceDocUrl"] as const;
 const CSV_HEADERS = [...INVOICE_FIELDS, ...OPTIONAL_FIELDS].join(",");
 
+/** A representative ERP export (same canonical scheme as samples/erp/invoices.csv) for one-click demos. */
+const ERP_SAMPLE_CSV = `${CSV_HEADERS}
+INV-ERP-2026-401,27AAPFU0939F1ZV,29AABCT1332L1ZU,1650000,2026-11-15,8.4,https://vault.m1x.example/docs/INV-ERP-2026-401.pdf
+INV-ERP-2026-402,24AAACS1429B1ZL,27AABCR1718E1ZP,780000,2026-10-30,9.05,https://vault.m1x.example/docs/INV-ERP-2026-402.pdf
+INV-ERP-2026-403,29AACCF4587R1ZK,27AAACB2894G1ZJ,2950000,2026-12-05,7.75,https://vault.m1x.example/docs/INV-ERP-2026-403.pdf
+INV-ERP-2026-402,24AAACS1429B1ZL,27AABCR1718E1ZP,780000,2026-10-30,9.05,https://vault.m1x.example/docs/INV-ERP-2026-402-resubmit.pdf`;
+
 type RowStatus = "invalid" | "pending" | "working" | "tokenized" | "duplicate" | "error";
 
 interface ImportRow {
@@ -114,28 +121,14 @@ export function InvoiceImport({ useCase, chains, onTokenized }: Props): JSX.Elem
     void api.accounts(token).then(setAccounts).catch(() => {});
   }, [token]);
 
-  async function handleFile(e: React.ChangeEvent<HTMLInputElement>): Promise<void> {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setFileName(file.name);
+  /** Turn raw {header: value} rows into previewed ImportRows (validate + fingerprint). Shared by file upload + ERP sample. */
+  async function ingest(raws: Record<string, string>[], sourceName: string): Promise<void> {
+    setFileName(sourceName);
     setParseError(null);
     setRows([]);
     setDone(false);
     try {
-      const text = await file.text();
-      let raws: Record<string, string>[];
-      if (/\.json$/i.test(file.name)) {
-        const parsed: unknown = JSON.parse(text);
-        if (!Array.isArray(parsed)) throw new Error("JSON must be an array of invoice objects");
-        raws = parsed.map((o) => {
-          const rec: Record<string, string> = {};
-          for (const [k, v] of Object.entries(o as Record<string, unknown>)) rec[k] = v == null ? "" : String(v).trim();
-          return rec;
-        });
-      } else {
-        raws = parseCsv(text);
-      }
-      if (raws.length === 0) throw new Error("No invoice rows found in file");
+      if (raws.length === 0) throw new Error("No invoice rows found");
       const parsedRows = await Promise.all(
         raws.map(async (raw): Promise<ImportRow> => {
           const problems = validate(raw, useCase);
@@ -154,6 +147,29 @@ export function InvoiceImport({ useCase, chains, onTokenized }: Props): JSX.Elem
         }),
       );
       setRows(parsedRows);
+    } catch (err) {
+      setParseError(err instanceof Error ? err.message : "Could not parse the invoices");
+    }
+  }
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>): Promise<void> {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      let raws: Record<string, string>[];
+      if (/\.json$/i.test(file.name)) {
+        const parsed: unknown = JSON.parse(text);
+        if (!Array.isArray(parsed)) throw new Error("JSON must be an array of invoice objects");
+        raws = parsed.map((o) => {
+          const rec: Record<string, string> = {};
+          for (const [k, v] of Object.entries(o as Record<string, unknown>)) rec[k] = v == null ? "" : String(v).trim();
+          return rec;
+        });
+      } else {
+        raws = parseCsv(text);
+      }
+      await ingest(raws, file.name);
     } catch (err) {
       setParseError(err instanceof Error ? err.message : "Could not parse file");
     } finally {
@@ -234,16 +250,26 @@ export function InvoiceImport({ useCase, chains, onTokenized }: Props): JSX.Elem
     <div className="space-y-4 max-w-4xl">
       <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-4">
         <div>
-          <h2 className="font-semibold text-slate-900">Import invoices</h2>
+          <h2 className="font-semibold text-slate-900">Import invoices — ERP export or file upload</h2>
           <p className="text-xs text-slate-500 mt-1">
-            Upload an ERP export (.csv or .json). Each invoice gets a canonical fingerprint used as its token ID, so an
-            already-financed invoice is rejected by the ledger — even if it arrived through another channel.
+            Ingest invoices two ways: load an <span className="font-medium text-slate-700">ERP export</span> (or the built-in
+            sample), or <span className="font-medium text-slate-700">upload</span> a CSV/JSON file. Each invoice gets a
+            canonical fingerprint used as its token ID, so an already-financed invoice is rejected by the ledger — even if it
+            arrived through the other channel.
           </p>
+          <button
+            type="button"
+            onClick={() => void ingest(parseCsv(ERP_SAMPLE_CSV), "ERP export (sample)")}
+            disabled={busy}
+            className="mt-2 rounded-lg border border-brand-600 text-brand-700 px-3 py-1.5 text-xs font-medium hover:bg-brand-50 disabled:opacity-50"
+          >
+            Load ERP sample export
+          </button>
         </div>
 
         <div className="grid grid-cols-3 gap-4">
           <label className="block">
-            <span className="block text-xs font-medium text-slate-600 mb-1">Invoice file</span>
+            <span className="block text-xs font-medium text-slate-600 mb-1">Or upload invoice file</span>
             <input
               type="file"
               accept=".csv,.json"
