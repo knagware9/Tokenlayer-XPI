@@ -5,12 +5,12 @@ import type { ChainInfo, UseCase } from "../types.js";
 
 // ============================================================================
 // Invoice Import — browser-side counterpart of scripts/erp-import.mjs.
-// Parses a CSV/JSON invoice export, computes each invoice's CANONICAL
-// fingerprint (identical byte-for-byte to the Node connector), previews the
-// batch with local validation, then tokenizes each valid row through the
-// public API: issue → allowlist financier → mint (tokenId = fingerprint).
-// The ledger's duplicate-tokenId rejection blocks double financing across
-// channels (ERP connector, this tab, any other integration).
+// Parses a CSV/JSON invoice export, previews the batch with local validation,
+// then tokenizes each valid row through the public API as a single fungible
+// issue: the invoice's face value is split into `supply = round(face / par)`
+// ERC-20 units minted to a holder. The server derives the canonical invoice
+// fingerprint and rejects an already-tokenized invoice with a 409
+// (DUPLICATE_INVOICE) — the cross-channel double-tokenization guard.
 // ============================================================================
 
 const INVOICE_FIELDS = ["invoiceNumber", "sellerGstin", "buyerGstin", "amountInr", "dueDate"] as const;
@@ -34,7 +34,6 @@ interface ImportRow {
   dueDate: string;
   discountRatePct: string;
   invoiceDocUrl: string;
-  fingerprint: string;
   problems: string[];
   status: RowStatus;
   message?: string;
@@ -53,6 +52,11 @@ export async function computeFingerprint(inv: {
   ].join("|");
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical));
   return "0x" + Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Token supply for an invoice = round(face value / par value), at least 1. */
+function supplyFor(amountInr: string | number, parValue: string | number): number {
+  return Math.max(1, Math.round(Number(amountInr) / Math.max(1, Number(parValue) || 1)));
 }
 
 /** Simple CSV: first line headers, comma-split, trimmed cells (matches the connector). */
@@ -100,7 +104,8 @@ export function InvoiceImport({ useCase, chains, onTokenized }: Props): JSX.Elem
   const [rows, setRows] = useState<ImportRow[]>([]);
   const [fileName, setFileName] = useState("");
   const [parseError, setParseError] = useState<string | null>(null);
-  const [financier, setFinancier] = useState("");
+  const [holder, setHolder] = useState("");
+  const [parValue, setParValue] = useState("1");
   const [accounts, setAccounts] = useState<{ address: string; label: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
@@ -121,7 +126,7 @@ export function InvoiceImport({ useCase, chains, onTokenized }: Props): JSX.Elem
     void api.accounts(token).then(setAccounts).catch(() => {});
   }, [token]);
 
-  /** Turn raw {header: value} rows into previewed ImportRows (validate + fingerprint). Shared by file upload + ERP sample. */
+  /** Turn raw {header: value} rows into previewed, locally-validated ImportRows. Shared by file upload + ERP sample. */
   async function ingest(raws: Record<string, string>[], sourceName: string): Promise<void> {
     setFileName(sourceName);
     setParseError(null);
@@ -129,23 +134,20 @@ export function InvoiceImport({ useCase, chains, onTokenized }: Props): JSX.Elem
     setDone(false);
     try {
       if (raws.length === 0) throw new Error("No invoice rows found");
-      const parsedRows = await Promise.all(
-        raws.map(async (raw): Promise<ImportRow> => {
-          const problems = validate(raw, useCase);
-          return {
-            invoiceNumber: (raw.invoiceNumber ?? "").trim(),
-            sellerGstin: (raw.sellerGstin ?? "").trim(),
-            buyerGstin: (raw.buyerGstin ?? "").trim(),
-            amountInr: (raw.amountInr ?? "").trim(),
-            dueDate: (raw.dueDate ?? "").trim(),
-            discountRatePct: (raw.discountRatePct ?? "").trim(),
-            invoiceDocUrl: (raw.invoiceDocUrl ?? "").trim(),
-            fingerprint: problems.length === 0 ? await computeFingerprint(raw as Parameters<typeof computeFingerprint>[0]) : "",
-            problems,
-            status: problems.length === 0 ? "pending" : "invalid",
-          };
-        }),
-      );
+      const parsedRows = raws.map((raw): ImportRow => {
+        const problems = validate(raw, useCase);
+        return {
+          invoiceNumber: (raw.invoiceNumber ?? "").trim(),
+          sellerGstin: (raw.sellerGstin ?? "").trim(),
+          buyerGstin: (raw.buyerGstin ?? "").trim(),
+          amountInr: (raw.amountInr ?? "").trim(),
+          dueDate: (raw.dueDate ?? "").trim(),
+          discountRatePct: (raw.discountRatePct ?? "").trim(),
+          invoiceDocUrl: (raw.invoiceDocUrl ?? "").trim(),
+          problems,
+          status: problems.length === 0 ? "pending" : "invalid",
+        };
+      });
       setRows(parsedRows);
     } catch (err) {
       setParseError(err instanceof Error ? err.message : "Could not parse the invoices");
@@ -185,7 +187,7 @@ export function InvoiceImport({ useCase, chains, onTokenized }: Props): JSX.Elem
   }
 
   async function tokenize(): Promise<void> {
-    if (!token || !financier || !chainId) return;
+    if (!token || !holder || !chainId) return;
     setBusy(true);
     setDone(false);
     let anyMinted = false;
@@ -193,40 +195,35 @@ export function InvoiceImport({ useCase, chains, onTokenized }: Props): JSX.Elem
       const row = rows[i];
       if (!row || row.status === "invalid" || row.status === "tokenized" || row.status === "duplicate") continue;
       patchRow(i, { status: "working", message: undefined });
+      // Fractionalize the face value into ERC-20 units minted to the holder.
+      const supply = supplyFor(row.amountInr, parValue);
+      const metadata: Record<string, unknown> = {
+        invoiceNumber: row.invoiceNumber,
+        sellerGstin: row.sellerGstin,
+        buyerGstin: row.buyerGstin,
+        amountInr: Number(row.amountInr),
+        dueDate: row.dueDate,
+        ...(row.discountRatePct ? { discountRatePct: Number(row.discountRatePct) } : {}),
+        ...(row.invoiceDocUrl ? { invoiceDocUrl: row.invoiceDocUrl } : {}),
+        // invoiceHash intentionally omitted — the server derives it.
+      };
       try {
-        // 1. issue the invoice asset (metadata validated by the platform)
-        const metadata: Record<string, unknown> = {
-          invoiceHash: row.fingerprint,
-          invoiceNumber: row.invoiceNumber,
-          sellerGstin: row.sellerGstin,
-          buyerGstin: row.buyerGstin,
-          amountInr: Number(row.amountInr),
-          dueDate: row.dueDate,
-          ...(row.discountRatePct ? { discountRatePct: Number(row.discountRatePct) } : {}),
-          ...(row.invoiceDocUrl ? { invoiceDocUrl: row.invoiceDocUrl } : {}),
-        };
-        const issued = await api.issue(token, {
+        await api.issue(token, {
           useCaseKey: useCase.key,
           name: `${row.invoiceNumber} · ${row.sellerGstin.slice(0, 4)}→${row.buyerGstin.slice(0, 4)}`,
           chainId,
+          initialSupply: String(supply),
+          treasuryAccount: holder,
           metadata,
         });
-        const assetId = issued.asset.id;
-        // 2. allowlist the financier (idempotent; KYC-gated by the platform)
-        await api.action(token, assetId, "allow", { account: financier });
-        // 3. mint — tokenId IS the fingerprint; the ledger blocks duplicates
-        try {
-          const mintBody: Record<string, string> = { to: financier, tokenId: row.fingerprint };
-          if (row.invoiceDocUrl) mintBody.uri = row.invoiceDocUrl;
-          await api.action(token, assetId, "mint", mintBody);
-          patchRow(i, { status: "tokenized", message: undefined });
-          anyMinted = true;
-        } catch (mintErr) {
-          // Mint rejected after a successful issue = duplicate financing blocked by the ledger.
-          patchRow(i, { status: "duplicate", message: mintErr instanceof ApiError ? mintErr.message : "token already exists" });
-        }
+        patchRow(i, { status: "tokenized", message: undefined });
+        anyMinted = true;
       } catch (err) {
-        patchRow(i, { status: "error", message: err instanceof ApiError ? err.message : "request failed" });
+        if (err instanceof ApiError && err.code === "DUPLICATE_INVOICE") {
+          patchRow(i, { status: "duplicate", message: "already tokenized" });
+        } else {
+          patchRow(i, { status: "error", message: err instanceof ApiError ? err.message : "request failed" });
+        }
       }
     }
     setBusy(false);
@@ -253,9 +250,10 @@ export function InvoiceImport({ useCase, chains, onTokenized }: Props): JSX.Elem
           <h2 className="font-semibold text-slate-900">Import invoices — ERP export or file upload</h2>
           <p className="text-xs text-slate-500 mt-1">
             Ingest invoices two ways: load an <span className="font-medium text-slate-700">ERP export</span> (or the built-in
-            sample), or <span className="font-medium text-slate-700">upload</span> a CSV/JSON file. Each invoice gets a
-            canonical fingerprint used as its token ID, so an already-financed invoice is rejected by the ledger — even if it
-            arrived through the other channel.
+            sample), or <span className="font-medium text-slate-700">upload</span> a CSV/JSON file. Each valid invoice is
+            tokenized into <span className="font-medium text-slate-700">round(face ÷ par)</span> fungible units minted to the
+            holder. The server derives each invoice's canonical fingerprint and rejects an already-tokenized invoice — even
+            if it arrived through another channel.
           </p>
           <button
             type="button"
@@ -267,7 +265,7 @@ export function InvoiceImport({ useCase, chains, onTokenized }: Props): JSX.Elem
           </button>
         </div>
 
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <label className="block">
             <span className="block text-xs font-medium text-slate-600 mb-1">Or upload invoice file</span>
             <input
@@ -279,13 +277,26 @@ export function InvoiceImport({ useCase, chains, onTokenized }: Props): JSX.Elem
             />
           </label>
           <label className="block">
-            <span className="block text-xs font-medium text-slate-600 mb-1">Financier (mint recipient)</span>
-            <select className="select" value={financier} onChange={(e) => setFinancier(e.target.value)} disabled={busy}>
+            <span className="block text-xs font-medium text-slate-600 mb-1">Holder (issue to)</span>
+            <select className="select" value={holder} onChange={(e) => setHolder(e.target.value)} disabled={busy}>
               <option value="">Select account…</option>
               {accounts.map((a) => (
                 <option key={a.address} value={a.address}>{a.label}</option>
               ))}
             </select>
+          </label>
+          <label className="block">
+            <span className="block text-xs font-medium text-slate-600 mb-1">Par value per token (₹)</span>
+            <input
+              className="input"
+              type="number"
+              min="1"
+              step="1"
+              value={parValue}
+              onChange={(e) => setParValue(e.target.value)}
+              disabled={busy}
+            />
+            <span className="block text-[11px] text-slate-400 mt-1">supply per invoice = round(face ÷ par)</span>
           </label>
           <label className="block">
             <span className="block text-xs font-medium text-slate-600 mb-1">Chain / DLT</span>
@@ -319,7 +330,7 @@ export function InvoiceImport({ useCase, chains, onTokenized }: Props): JSX.Elem
             </p>
             <button
               onClick={() => void tokenize()}
-              disabled={busy || pending === 0 || !financier || !chainId}
+              disabled={busy || pending === 0 || !holder || !chainId}
               className="rounded-lg bg-brand-600 text-white px-4 py-1.5 text-sm font-medium hover:bg-brand-700 disabled:opacity-50"
             >
               {busy ? "Tokenizing…" : `Tokenize ${pending} invoice${pending === 1 ? "" : "s"}`}
@@ -331,8 +342,8 @@ export function InvoiceImport({ useCase, chains, onTokenized }: Props): JSX.Elem
                 <th className="text-left font-medium px-4 py-2.5">Invoice</th>
                 <th className="text-left font-medium px-4 py-2.5">Seller → Buyer</th>
                 <th className="text-right font-medium px-4 py-2.5">Amount (INR)</th>
+                <th className="text-right font-medium px-4 py-2.5">Tokens</th>
                 <th className="text-left font-medium px-4 py-2.5">Due date</th>
-                <th className="text-left font-medium px-4 py-2.5">Fingerprint</th>
                 <th className="text-left font-medium px-4 py-2.5">Status</th>
               </tr>
             </thead>
@@ -342,10 +353,10 @@ export function InvoiceImport({ useCase, chains, onTokenized }: Props): JSX.Elem
                   <td className="px-4 py-2.5 font-medium text-slate-800">{r.invoiceNumber || <span className="text-slate-300">—</span>}</td>
                   <td className="px-4 py-2.5 text-xs font-mono text-slate-600">{r.sellerGstin || "?"} → {r.buyerGstin || "?"}</td>
                   <td className="px-4 py-2.5 text-right font-mono text-slate-700">{r.amountInr || "—"}</td>
-                  <td className="px-4 py-2.5 text-xs text-slate-600">{r.dueDate || "—"}</td>
-                  <td className="px-4 py-2.5 text-xs font-mono text-slate-500" title={r.fingerprint}>
-                    {r.fingerprint ? `${r.fingerprint.slice(0, 12)}…` : "—"}
+                  <td className="px-4 py-2.5 text-right font-mono text-slate-700">
+                    {r.status === "invalid" || !r.amountInr ? "—" : supplyFor(r.amountInr, parValue).toLocaleString()}
                   </td>
+                  <td className="px-4 py-2.5 text-xs text-slate-600">{r.dueDate || "—"}</td>
                   <td className="px-4 py-2.5">
                     <StatusPill status={r.status} />
                     {(r.message ?? (r.problems.length > 0 ? r.problems.join("; ") : "")) && (
