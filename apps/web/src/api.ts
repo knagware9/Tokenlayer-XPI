@@ -74,6 +74,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  uploadDocument: (token: string, contentType: string, dataBase64: string) =>
+    request<{ id: string; url: string; sha256: string; size: number }>("/documents", token, { method: "POST", body: JSON.stringify({ contentType, dataBase64 }) }),
   currencies: (token: string) => request<Currency[]>("/currencies", token),
   cashBalances: (token: string, address: string) =>
     request<CashBalance[]>(`/cash/balances?address=${encodeURIComponent(address)}`, token),

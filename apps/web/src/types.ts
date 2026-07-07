@@ -65,6 +65,10 @@ export interface UseCase {
   saleTermsDefault?: { unitPrice?: string; currency?: string };
   /** How analytics values tokens with no unitPrice (e.g. invoice face value). */
   valuation?: { metadataField: string; currency: string };
+  /** Metadata fields the platform derives on issue (client value ignored). */
+  derivedFields?: Record<string, string>;
+  /** A metadata field whose value must be unique across the use case's assets. */
+  uniqueBy?: string;
   roles: Role[];
 }
 
