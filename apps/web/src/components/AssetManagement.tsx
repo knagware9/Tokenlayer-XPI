@@ -10,10 +10,10 @@ import { MyHoldings } from "./MyHoldings.js";
 
 type Sub = "issuance" | "marketplace" | "import" | "holdings";
 
-/** The Import tab targets any non-fungible use case whose schema carries the canonical invoice fields. */
+/** The Import tab targets any use case whose schema carries the canonical invoice fields. */
 const INVOICE_FIELDS = ["invoiceHash", "invoiceNumber", "sellerGstin", "buyerGstin", "amountInr", "dueDate"];
-function isInvoiceUseCase(u: UseCase | undefined): u is UseCase {
-  return !!u && u.tokenType === "nonfungible" && INVOICE_FIELDS.every((f) => f in (u.metadataSchema?.properties ?? {}));
+export function isInvoiceUseCase(u: UseCase | undefined): u is UseCase {
+  return !!u && INVOICE_FIELDS.every((f) => f in (u.metadataSchema?.properties ?? {}));
 }
 
 export function AssetManagement({ useCaseKey, useCases, chains }: { useCaseKey: string; useCases: UseCase[]; chains: ChainInfo[] }): JSX.Element {

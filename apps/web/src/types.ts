@@ -138,38 +138,6 @@ export interface AuditEntry {
   createdAt: string;
 }
 
-/** A financing record — one per financed invoice asset. Amounts are integer-INR decimal strings. */
-export interface Financing {
-  id: string;
-  assetId: string;
-  tokenId: string;
-  financier: string;
-  /** Annualised discount rate, decimal string. */
-  ratePct: string;
-  tenorDays: number;
-  faceValueInr: string;
-  /** face × (1 − rate×tenor/365), floored — record-only. */
-  discountedInr: string;
-  /** ISO date. */
-  maturityDate: string;
-  /** "financed" | "repaid". */
-  status: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/** One node of a deep-tier invoice chain, sorted tier→invoiceNumber. */
-export interface TierChainNode {
-  assetId: string;
-  invoiceNumber: string;
-  tier: number;
-  sellerGstin: string;
-  buyerGstin: string;
-  amountInr: number;
-  parentInvoiceHash?: string | null;
-  financing: { financier: string; status: string } | null;
-}
-
 export interface AnalyticsSummary {
   scope: "platform" | "use-case";
   useCaseKey: string | null;
