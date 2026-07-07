@@ -224,6 +224,9 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         if (gen === "invoiceFingerprint") meta[field] = invoiceFingerprint(meta as unknown as Parameters<typeof invoiceFingerprint>[0]);
       }
     }
+    // The (useCaseKey, uniqueKey) DB constraint is the authoritative backstop; the
+    // pre-check here just avoids ledger side-effects on the common duplicate case.
+    const uniqueKey = useCase.uniqueBy ? String(meta[useCase.uniqueBy]) : null;
     if (useCase.uniqueBy) {
       const existing = await deps.assets.findByMetadata(useCase.key, useCase.uniqueBy, meta[useCase.uniqueBy]);
       if (existing) return reply.code(409).send({ error: "DUPLICATE_INVOICE", message: "an invoice with this fingerprint is already tokenized" });
@@ -273,6 +276,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         unitPrice: null,
         currency: null,
         treasuryAccount: null,
+        uniqueKey,
       });
       if (sale) {
         await deps.assets.setSaleTerms(id, sale);
@@ -292,6 +296,12 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       // for an asset that was never created (mirrors the buy path's compensation).
       if (issuanceFeeCharged && feePayer && feeAccount) {
         await deps.cash.transfer(issuanceFeeCharged.currency, feeAccount, feePayer, issuanceFeeCharged.amount).catch(() => {});
+      }
+      // A concurrent issue of the same invoice lost the (useCaseKey, uniqueKey)
+      // race: the DB constraint rejected it (Prisma P2002 / memory-repo mirror).
+      // Surface the same 409 as the pre-check rather than a generic 500.
+      if ((err as { code?: string }).code === "P2002") {
+        return reply.code(409).send({ error: "DUPLICATE_INVOICE", message: "an invoice with this fingerprint is already tokenized" });
       }
       throw err;
     }
@@ -931,6 +941,12 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   // A small document store so the dashboard can upload a file (e.g. an invoice
   // PDF) and reference it from asset metadata by URL + sha256.
   const MAX_DOC_BYTES = 5 * 1024 * 1024;
+  // Allowlisted document content types — stored bytes are served back later, so an
+  // arbitrary type (e.g. text/html) would enable stored XSS on the API origin.
+  const ALLOWED_DOC_TYPES = new Set(["application/pdf", "image/png", "image/jpeg", "image/webp", "text/plain"]);
+  // Only desk operators (issue-capable) and auditors may read stored documents —
+  // these hold sensitive off-ledger invoice evidence, not public assets.
+  const canReadDoc = (role: Role): boolean => deps.rbac.can(role, "issue") || role === "Auditor";
   // Override the app-global 256KB bodyLimit for uploads: a 5MB document is ~6.8MB
   // as base64 JSON, so allow 8MB here (the route still enforces MAX_DOC_BYTES on
   // the decoded bytes).
@@ -938,6 +954,9 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const actor = actorOf(request);
     if (!deps.rbac.can(actor.role, "issue")) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to upload documents" });
     const { contentType, dataBase64 } = request.body as { contentType: string; dataBase64: string };
+    if (!ALLOWED_DOC_TYPES.has(contentType)) {
+      return reply.code(415).send({ error: "UNSUPPORTED_DOCUMENT_TYPE", message: `contentType must be one of: ${[...ALLOWED_DOC_TYPES].join(", ")}` });
+    }
     const bytes = Buffer.from(dataBase64, "base64");
     if (bytes.length === 0) return reply.code(400).send({ error: "BAD_DOCUMENT", message: "empty document" });
     if (bytes.length > MAX_DOC_BYTES) return reply.code(413).send({ error: "DOCUMENT_TOO_LARGE", message: `max ${MAX_DOC_BYTES} bytes` });
@@ -945,9 +964,17 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return reply.code(201).send({ id: doc.id, url: `/api/v1/documents/${doc.id}`, sha256: doc.sha256, size: doc.size });
   });
   app.get("/documents/:id", { schema: S.getDocument, ...auth }, async (request, reply) => {
+    const actor = actorOf(request);
+    if (!canReadDoc(actor.role)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to read documents" });
     const { id } = request.params as { id: string };
     const doc = await deps.documents.get(id);
     if (!doc) return notFound(reply, "document not found");
-    return reply.header("content-type", doc.contentType).send(doc.bytes);
+    // Never let the browser sniff/execute stored bytes as the API origin: pin the
+    // stored (allowlisted) type, forbid sniffing, and force download.
+    return reply
+      .header("content-type", doc.contentType)
+      .header("x-content-type-options", "nosniff")
+      .header("content-disposition", `attachment; filename="document-${id}"`)
+      .send(doc.bytes);
   });
 }

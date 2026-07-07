@@ -36,6 +36,13 @@ model Asset {
   unitPrice       String?
   currency        String?
   treasuryAccount String?
+  // Value of the use case's `uniqueBy` metadata field (e.g. an invoice fingerprint),
+  // if any. The (useCaseKey, uniqueKey) unique index is the atomic backstop that
+  // makes "tokenize an invoice at most once" hold even under concurrent issue.
+  // NULL for use cases without a uniqueBy rule (SQLite treats NULLs as distinct).
+  uniqueKey       String?
+
+  @@unique([useCaseKey, uniqueKey])
 }
 
 // Low-code use-case definitions, editable via the dashboard builder. JSON

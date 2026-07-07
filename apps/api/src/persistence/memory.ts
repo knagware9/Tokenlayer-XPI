@@ -59,11 +59,22 @@ export class MemoryUserRepository implements UserRepository {
 export class MemoryAssetRepository implements AssetRepository {
   private readonly byId = new Map<string, AssetRecord>();
   async create(input: Omit<AssetRecord, "createdAt">): Promise<AssetRecord> {
+    // Mirror the DB's (useCaseKey, uniqueKey) unique constraint: reject a second
+    // asset with the same non-null uniqueKey in the same use case (throws a
+    // P2002-shaped error the issue route maps to 409, same as Prisma).
+    if (input.uniqueKey != null) {
+      for (const a of this.byId.values()) {
+        if (a.useCaseKey === input.useCaseKey && a.uniqueKey === input.uniqueKey) {
+          throw Object.assign(new Error("Unique constraint failed on (useCaseKey, uniqueKey)"), { code: "P2002" });
+        }
+      }
+    }
     const rec: AssetRecord = {
       ...input,
       unitPrice: input.unitPrice ?? null,
       currency: input.currency ?? null,
       treasuryAccount: input.treasuryAccount ?? null,
+      uniqueKey: input.uniqueKey ?? null,
       createdAt: now(),
     };
     this.byId.set(rec.id, rec);
@@ -89,6 +100,7 @@ export class MemoryAssetRepository implements AssetRepository {
     if (a) { a.unitPrice = terms.unitPrice; a.currency = terms.currency; a.treasuryAccount = terms.treasuryAccount; }
   }
   async findByMetadata(useCaseKey: string, field: string, value: unknown): Promise<AssetRecord | null> {
+    if (value === undefined) return null; // never match on a missing field (undefined === undefined footgun)
     for (const a of this.byId.values()) {
       if (a.useCaseKey === useCaseKey && a.metadata?.[field] === value) return a;
     }

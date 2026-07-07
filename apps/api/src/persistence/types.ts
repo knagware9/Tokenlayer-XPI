@@ -38,6 +38,8 @@ export interface AssetRecord {
   unitPrice: string | null;
   currency: string | null;
   treasuryAccount: string | null;
+  /** Value of the use case's `uniqueBy` field, enforced unique per use case. */
+  uniqueKey?: string | null;
 }
 
 export interface SaleTerms {

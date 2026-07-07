@@ -197,17 +197,20 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
                       <input className="input" type="url" placeholder="https://… or upload →" value={value} onChange={(e) => onChange(e.target.value)} />
                       <input
                         type="file"
+                        accept="application/pdf,image/png,image/jpeg,image/webp,text/plain"
                         disabled={busy}
                         onChange={async (e) => {
                           const file = e.target.files?.[0];
                           if (!file || !token) return;
-                          const b64 = btoa(String.fromCharCode(...new Uint8Array(await file.arrayBuffer())));
                           try {
-                            const r = await api.uploadDocument(token, file.type || "application/octet-stream", b64);
+                            // FileReader → data URL avoids the call-stack overflow of
+                            // spreading a large byte array into String.fromCharCode.
+                            const b64 = await fileToBase64(file);
+                            const r = await api.uploadDocument(token, file.type || "application/pdf", b64);
                             onChange(r.url);
                             setMeta((m) => ({ ...m, invoiceDocHash: r.sha256 }));
-                          } catch {
-                            setError("Document upload failed");
+                          } catch (err) {
+                            setError(err instanceof ApiError ? `${err.code ?? "Error"}: ${err.message}` : "Document upload failed");
                           } finally {
                             e.target.value = "";
                           }
@@ -304,6 +307,20 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
       </button>
     </form>
   );
+}
+
+/** Read a File as base64 (no data-URL prefix) via FileReader — safe for MB-sized files. */
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("could not read file"));
+    reader.onload = () => {
+      const result = String(reader.result);
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }): JSX.Element {

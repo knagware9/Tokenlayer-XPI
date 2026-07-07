@@ -101,6 +101,7 @@ function toAsset(r: Asset, parsedMetadata?: Record<string, unknown>): AssetRecor
     unitPrice: r.unitPrice,
     currency: r.currency,
     treasuryAccount: r.treasuryAccount,
+    uniqueKey: r.uniqueKey,
   };
 }
 
@@ -109,6 +110,7 @@ export class PrismaAssetRepository implements AssetRepository {
     const r = await prisma.asset.create({
       data: {
         ...input,
+        uniqueKey: input.uniqueKey ?? null,
         metadata: JSON.stringify(input.metadata),
       },
     });
@@ -143,6 +145,7 @@ export class PrismaAssetRepository implements AssetRepository {
   // Metadata is stored as a JSON string column, so filter in-process over the
   // (small) per-use-case set rather than with a JSON query.
   async findByMetadata(useCaseKey: string, field: string, value: unknown): Promise<AssetRecord | null> {
+    if (value === undefined) return null; // never match on a missing field (undefined === undefined footgun)
     const rows = await prisma.asset.findMany({ where: { useCaseKey } });
     const hit = rows.find((r) => (JSON.parse(r.metadata) as Record<string, unknown>)?.[field] === value);
     return hit ? toAsset(hit) : null;
