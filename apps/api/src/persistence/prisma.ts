@@ -267,6 +267,8 @@ interface UseCaseRow {
   fees: string;
   saleTermsDefault: string;
   valuation: string;
+  derivedFields: string;
+  uniqueBy: string | null;
   roles: string;
 }
 
@@ -285,6 +287,7 @@ function rowToUseCase(r: UseCaseRow): UseCaseDefinition {
   const fees = parseJsonObject(r.fees);
   const saleTermsDefault = parseJsonObject(r.saleTermsDefault);
   const valuation = parseJsonObject(r.valuation);
+  const derivedFields = parseJsonObject(r.derivedFields);
   return normalizeUseCaseDefinition({
     key: r.key,
     name: r.name,
@@ -301,6 +304,8 @@ function rowToUseCase(r: UseCaseRow): UseCaseDefinition {
     ...(Object.keys(fees).length > 0 ? { fees } : {}),
     ...(Object.keys(saleTermsDefault).length > 0 ? { saleTermsDefault } : {}),
     ...(Object.keys(valuation).length > 0 ? { valuation } : {}),
+    ...(Object.keys(derivedFields).length > 0 ? { derivedFields: derivedFields as Record<string, "invoiceFingerprint"> } : {}),
+    ...(r.uniqueBy ? { uniqueBy: r.uniqueBy } : {}),
     roles: JSON.parse(r.roles),
   });
 }
@@ -321,6 +326,8 @@ function useCaseToData(def: UseCaseDefinition) {
     fees: JSON.stringify(def.fees ?? {}),
     saleTermsDefault: JSON.stringify(def.saleTermsDefault ?? {}),
     valuation: JSON.stringify(def.valuation ?? {}),
+    derivedFields: JSON.stringify(def.derivedFields ?? {}),
+    uniqueBy: def.uniqueBy ?? null,
     roles: JSON.stringify(def.roles),
   };
 }

@@ -55,6 +55,8 @@ model UseCase {
   fees             String   @default("{}") // JSON object: { marketplaceBps?, issuanceFlat? }
   saleTermsDefault String   @default("{}") // JSON object: { unitPrice?, currency? }
   valuation        String   @default("{}") // JSON object: { metadataField, currency } (analytics valuation)
+  derivedFields    String   @default("{}") // JSON object: metadataField -> generator (server-derived on issue)
+  uniqueBy         String? // metadata field that must be unique across the use case's assets
   roles           String // JSON array
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

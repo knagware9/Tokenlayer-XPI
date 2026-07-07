@@ -19,6 +19,10 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
       # Simulated-only stack: boot without the required besu chain (absent, never mocked).
       CHAIN_STRICT: "0"
+      # Secondary market (escrowed listings) + marketplace/issuance fee sink. System
+      # addresses exempt from holder rules; enable the DvP marketplace for the demo.
+      MARKET_ESCROW_ACCOUNT: ${MARKET_ESCROW_ACCOUNT:-0x000000000000000000000000000000000000E5C0}
+      PLATFORM_FEE_ACCOUNT: ${PLATFORM_FEE_ACCOUNT:-0x000000000000000000000000000000000000FEE5}
     volumes:
       - api-data:/data
     ports:
