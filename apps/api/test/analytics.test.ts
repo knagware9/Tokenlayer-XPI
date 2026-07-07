@@ -165,6 +165,34 @@ describe("computeAnalytics (pure)", () => {
     expect(mint?.summary).toContain("→");
   });
 
+  it("counts non-fungible (ERC-721) tokens: supply = live token count, holders = distinct owners", () => {
+    // An NFT collection asset: mint 3 token-ids, transfer one, burn one.
+    // Live tokens: t1→BOB (transferred from ALICE), t2→ALICE, t3 burned.
+    // supply = 2, holders = {ALICE, BOB}.
+    const nftAssets: AssetRecord[] = [
+      asset({ id: "inv", chainId: "fabric", useCaseKey: "invoice-tokenization", tokenType: "nonfungible", tokenStandard: "ERC-721", symbol: "INVT" }),
+    ];
+    const nftAudit: AuditEntryRecord[] = [
+      entry("inv", "issue", {}, "2026-06-01T00:00:00.000Z"),
+      entry("inv", "mint", { to: ALICE, tokenId: "t1" }, "2026-06-01T01:00:00.000Z"),
+      entry("inv", "mint", { to: ALICE, tokenId: "t2" }, "2026-06-01T02:00:00.000Z"),
+      entry("inv", "mint", { to: ALICE, tokenId: "t3" }, "2026-06-01T03:00:00.000Z"),
+      entry("inv", "transfer", { from: ALICE, to: BOB, tokenId: "t1" }, "2026-06-02T00:00:00.000Z"),
+      entry("inv", "burn", { tokenId: "t3" }, "2026-06-03T00:00:00.000Z"),
+    ];
+    const r = computeAnalytics({
+      ...base,
+      assets: nftAssets,
+      audit: nftAudit,
+      useCases: [{ key: "invoice-tokenization", name: "Invoice Tokenization", symbol: "INVT" }],
+    });
+    expect(r.totals.supply).toBe("2"); // 3 minted − 1 burned
+    expect(r.totals.holders).toBe(2); // ALICE (t2) + BOB (t1)
+    expect(r.totals.assets).toBe(1);
+    expect(r.byLedger.find((l) => l.chainId === "fabric")?.supply).toBe("2");
+    expect(r.byUseCase.find((u) => u.useCaseKey === "invoice-tokenization")?.holders).toBe(2);
+  });
+
   it("empty inputs → zeros and days empty buckets", () => {
     const r = computeAnalytics({ ...base, assets: [], audit: [], days: 7 });
     expect(r.totals.supply).toBe("0");
