@@ -926,4 +926,25 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const updated = await deps.users.update(id, patch);
     return { id: updated.id, email: updated.email, role: updated.role, useCaseKey: updated.useCaseKey, accountId: updated.accountId, active: updated.active, kycStatus: updated.kycStatus };
   });
+
+  // --- documents ----------------------------------------------------------
+  // A small document store so the dashboard can upload a file (e.g. an invoice
+  // PDF) and reference it from asset metadata by URL + sha256.
+  const MAX_DOC_BYTES = 5 * 1024 * 1024;
+  app.post("/documents", { schema: S.uploadDocument, ...auth }, async (request, reply) => {
+    const actor = actorOf(request);
+    if (!deps.rbac.can(actor.role, "issue")) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to upload documents" });
+    const { contentType, dataBase64 } = request.body as { contentType: string; dataBase64: string };
+    const bytes = Buffer.from(dataBase64, "base64");
+    if (bytes.length === 0) return reply.code(400).send({ error: "BAD_DOCUMENT", message: "empty document" });
+    if (bytes.length > MAX_DOC_BYTES) return reply.code(413).send({ error: "DOCUMENT_TOO_LARGE", message: `max ${MAX_DOC_BYTES} bytes` });
+    const doc = await deps.documents.create({ contentType, bytes });
+    return reply.code(201).send({ id: doc.id, url: `/api/v1/documents/${doc.id}`, sha256: doc.sha256, size: doc.size });
+  });
+  app.get("/documents/:id", { schema: S.getDocument, ...auth }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const doc = await deps.documents.get(id);
+    if (!doc) return notFound(reply, "document not found");
+    return reply.header("content-type", doc.contentType).send(doc.bytes);
+  });
 }

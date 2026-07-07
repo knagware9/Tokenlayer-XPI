@@ -8,6 +8,7 @@ import type {
   AssetRepository,
   AuditRepository,
   CashRepository,
+  DocumentRepository,
   ListingRepository,
   UseCaseRepository,
   UserRepository,
@@ -24,6 +25,7 @@ export interface AppDeps {
   chains: ChainRegistry;
   cash: CashRepository;
   listings: ListingRepository;
+  documents: DocumentRepository;
   currencies: Currency[];
   jwtSecret: string;
   /** CORS origin allowlist; defaults to the local dashboard when omitted (tests/demo). */

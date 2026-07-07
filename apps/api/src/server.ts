@@ -9,6 +9,7 @@ import {
   PrismaAssetRepository,
   PrismaAuditRepository,
   PrismaCashRepository,
+  PrismaDocumentRepository,
   PrismaListingRepository,
   PrismaUseCaseRepository,
   PrismaUserRepository,
@@ -28,6 +29,7 @@ async function main(): Promise<void> {
   const useCases = new PrismaUseCaseRepository();
   const cash = new PrismaCashRepository();
   const listings = new PrismaListingRepository();
+  const documents = new PrismaDocumentRepository();
   // Demo users/accounts (with predictable passwords) are seeded only outside production.
   if (env.nodeEnv !== "production") await seedDefaults(users, accounts);
 
@@ -49,6 +51,7 @@ async function main(): Promise<void> {
     chains,
     cash,
     listings,
+    documents,
     currencies: loadCurrencies(),
     jwtSecret: env.jwtSecret,
     corsOrigins: env.corsOrigins,

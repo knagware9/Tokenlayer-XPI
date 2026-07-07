@@ -105,3 +105,14 @@ model CashBalance {
 
   @@unique([currency, address])
 }
+
+// Uploaded documents (e.g. invoice PDFs). Bytes are stored inline; the asset
+// metadata references the document by its GET URL + sha256 hash.
+model Document {
+  id          String   @id @default(cuid())
+  contentType String
+  sha256      String
+  size        Int
+  bytes       Bytes
+  createdAt   DateTime @default(now())
+}

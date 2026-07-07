@@ -9,6 +9,7 @@ import {
   MemoryAssetRepository,
   MemoryAuditRepository,
   MemoryCashRepository,
+  MemoryDocumentRepository,
   MemoryListingRepository,
   MemoryUseCaseRepository,
   MemoryUserRepository,
@@ -29,6 +30,7 @@ export async function buildTestApp(opts: { loginRateLimitMax?: number; platformF
   const useCases = new MemoryUseCaseRepository();
   const cash = new MemoryCashRepository();
   const listings = new MemoryListingRepository();
+  const documents = new MemoryDocumentRepository();
   await seedDefaults(users, accounts);
   const engine = createEngine(useCases, rbac, chains, audit, { users, accounts });
   await seedUseCases(useCases, {
@@ -37,7 +39,7 @@ export async function buildTestApp(opts: { loginRateLimitMax?: number; platformF
   });
   // The suite makes many logins from one IP; raise the throttle unless a test opts into it.
   return buildApp({
-    useCases, rbac, engine, users, assets, audit, accounts, chains, cash, listings,
+    useCases, rbac, engine, users, assets, audit, accounts, chains, cash, listings, documents,
     currencies: loadCurrencies(), jwtSecret: "test-secret",
     loginRateLimitMax: opts.loginRateLimitMax ?? 100000,
     platformFeeAccount: opts.platformFeeAccount,

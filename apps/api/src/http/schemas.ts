@@ -681,6 +681,27 @@ export const S: Record<string, FastifySchema> = {
     },
     response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403) },
   },
+  uploadDocument: {
+    tags: ["Documents"], summary: "Upload a document (base64); returns its URL + sha256", security: bearer,
+    body: {
+      type: "object",
+      required: ["contentType", "dataBase64"],
+      properties: { contentType: { type: "string" }, dataBase64: { type: "string" } },
+    },
+    response: {
+      201: {
+        type: "object",
+        properties: { id: { type: "string" }, url: { type: "string" }, sha256: { type: "string" }, size: { type: "integer" } },
+        required: ["id", "url", "sha256", "size"],
+      },
+      ...errs(400, 401, 403, 413),
+    },
+  },
+  getDocument: {
+    tags: ["Documents"], summary: "Fetch a document's bytes by id", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    response: { ...errs(401, 404) },
+  },
   deleteUser: { tags: ["Users"], summary: "Remove a user (scoped)", security: bearer, params: { type: "object", required: ["id"], properties: { id: { type: "string" } } }, response: { 204: { type: "null" }, ...errs(401, 403, 404) } },
   updateUser: {
     tags: ["Users"], summary: "Edit a user (reset password / suspend) — scoped", security: bearer,

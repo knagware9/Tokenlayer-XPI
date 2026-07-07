@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from "node:crypto";
 import { normalizeUseCaseDefinition, PolicyError, type UseCaseDefinition } from "@tokenlayer/core";
 import type {
   AccountRecord,
@@ -9,6 +10,8 @@ import type {
   AuditRepository,
   CashBalanceRecord,
   CashRepository,
+  DocumentRecord,
+  DocumentRepository,
   ListingRecord,
   ListingRepository,
   Page,
@@ -238,6 +241,19 @@ export class MemoryCashRepository implements CashRepository {
     this.balances.set(fromKey, have - amt);
     const toKey = this.key(currency, to);
     this.balances.set(toKey, (this.balances.get(toKey) ?? 0n) + amt);
+  }
+}
+
+export class MemoryDocumentRepository implements DocumentRepository {
+  private readonly docs = new Map<string, DocumentRecord>();
+  async create({ contentType, bytes }: { contentType: string; bytes: Buffer }) {
+    const docId = randomUUID();
+    const sha256 = "0x" + createHash("sha256").update(bytes).digest("hex");
+    this.docs.set(docId, { id: docId, contentType, sha256, size: bytes.length, bytes, createdAt: now() });
+    return { id: docId, sha256, size: bytes.length };
+  }
+  async get(docId: string): Promise<DocumentRecord | null> {
+    return this.docs.get(docId) ?? null;
   }
 }
 

@@ -186,6 +186,21 @@ export interface CashBalanceRecord {
   amount: string;
 }
 
+/** An uploaded document (bytes + content-type), referenced from asset metadata. */
+export interface DocumentRecord {
+  id: string;
+  contentType: string;
+  sha256: string;
+  size: number;
+  bytes: Buffer;
+  createdAt: string;
+}
+
+export interface DocumentRepository {
+  create(input: { contentType: string; bytes: Buffer }): Promise<{ id: string; sha256: string; size: number }>;
+  get(id: string): Promise<DocumentRecord | null>;
+}
+
 export interface CashRepository {
   balanceOf(currency: string, address: string): Promise<string>;
   balancesOf(address: string): Promise<CashBalanceRecord[]>;
