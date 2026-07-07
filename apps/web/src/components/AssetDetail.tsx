@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../api.js";
 import { useAuth } from "../auth.js";
 import { can } from "../rbac.js";
+import { FinancingPanel, isInvoiceUseCase } from "./FinancingPanel.js";
 import type { AccountState, Asset, AuditEntry, ChainInfo, Listing, Role, TokenInfo, Trade, UseCase } from "../types.js";
 
 interface Props {
@@ -183,6 +184,10 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
       </div>
 
       {error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2">{error}</div>}
+
+      {isInvoiceUseCase(useCase) && (
+        <FinancingPanel asset={asset} role={role} onChanged={async () => { await reload(); onChanged(); }} />
+      )}
 
       {asset.unitPrice && asset.currency && can(role, "buy") && (
         <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
