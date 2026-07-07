@@ -199,6 +199,18 @@ export interface UseCaseDefinition {
     metadataField: string;
     currency: string;
   };
+  /**
+   * Metadata fields the platform computes on issue instead of accepting from the
+   * client. Maps a metadata field to a named generator. Currently the only
+   * generator is "invoiceFingerprint" (see invoiceFingerprint()).
+   */
+  derivedFields?: Record<string, "invoiceFingerprint">;
+  /**
+   * A metadata field whose value must be unique across the use case's assets.
+   * Issue rejects a duplicate with DUPLICATE_INVOICE. Must name a declared
+   * metadata property.
+   */
+  uniqueBy?: string;
   roles: Role[];
 }
 
