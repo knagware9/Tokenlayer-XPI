@@ -95,6 +95,8 @@ export interface AssetRepository {
   list(filter?: AssetFilter, page?: Page): Promise<Paged<AssetRecord>>;
   setStatus(id: string, status: string): Promise<void>;
   setSaleTerms(id: string, terms: SaleTerms): Promise<void>;
+  /** First asset in the use case whose metadata[field] === value, else null. */
+  findByMetadata(useCaseKey: string, field: string, value: unknown): Promise<AssetRecord | null>;
 }
 
 export interface AuditRepository {

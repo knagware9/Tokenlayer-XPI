@@ -87,6 +87,12 @@ export class MemoryAssetRepository implements AssetRepository {
     const a = this.byId.get(id);
     if (a) { a.unitPrice = terms.unitPrice; a.currency = terms.currency; a.treasuryAccount = terms.treasuryAccount; }
   }
+  async findByMetadata(useCaseKey: string, field: string, value: unknown): Promise<AssetRecord | null> {
+    for (const a of this.byId.values()) {
+      if (a.useCaseKey === useCaseKey && a.metadata?.[field] === value) return a;
+    }
+    return null;
+  }
 }
 
 export class MemoryAuditRepository implements AuditRepository {

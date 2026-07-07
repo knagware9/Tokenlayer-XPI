@@ -139,6 +139,13 @@ export class PrismaAssetRepository implements AssetRepository {
   async setSaleTerms(id: string, terms: SaleTerms): Promise<void> {
     await prisma.asset.update({ where: { id }, data: { unitPrice: terms.unitPrice, currency: terms.currency, treasuryAccount: terms.treasuryAccount } });
   }
+  // Metadata is stored as a JSON string column, so filter in-process over the
+  // (small) per-use-case set rather than with a JSON query.
+  async findByMetadata(useCaseKey: string, field: string, value: unknown): Promise<AssetRecord | null> {
+    const rows = await prisma.asset.findMany({ where: { useCaseKey } });
+    const hit = rows.find((r) => (JSON.parse(r.metadata) as Record<string, unknown>)?.[field] === value);
+    return hit ? toAsset(hit) : null;
+  }
 }
 
 export class PrismaAuditRepository implements AuditRepository {
