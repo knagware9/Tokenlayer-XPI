@@ -4,10 +4,17 @@ import { can } from "../rbac.js";
 import type { ChainInfo, UseCase } from "../types.js";
 import { AssetDetail } from "./AssetDetail.js";
 import { AssetList } from "./AssetList.js";
+import { InvoiceImport } from "./InvoiceImport.js";
 import { IssuePanel } from "./IssuePanel.js";
 import { MyHoldings } from "./MyHoldings.js";
 
-type Sub = "issuance" | "marketplace" | "holdings";
+type Sub = "issuance" | "marketplace" | "import" | "holdings";
+
+/** The Import tab targets any non-fungible use case whose schema carries the canonical invoice fields. */
+const INVOICE_FIELDS = ["invoiceHash", "invoiceNumber", "sellerGstin", "buyerGstin", "amountInr", "dueDate"];
+function isInvoiceUseCase(u: UseCase | undefined): u is UseCase {
+  return !!u && u.tokenType === "nonfungible" && INVOICE_FIELDS.every((f) => f in (u.metadataSchema?.properties ?? {}));
+}
 
 export function AssetManagement({ useCaseKey, useCases, chains }: { useCaseKey: string; useCases: UseCase[]; chains: ChainInfo[] }): JSX.Element {
   const { user } = useAuth();
@@ -15,12 +22,18 @@ export function AssetManagement({ useCaseKey, useCases, chains }: { useCaseKey: 
   const canIssue = user ? can(user.role, "issue") : false;
   const hasWallet = !!user?.walletAddress;
 
+  const activeUseCase = useCases.find((u) => u.key === useCaseKey);
+  const canImport = canIssue && isInvoiceUseCase(activeUseCase);
+
   const subs: { id: Sub; label: string }[] = [
     ...(canIssue ? [{ id: "issuance" as Sub, label: "Token Issuance" }] : []),
     { id: "marketplace" as Sub, label: "Marketplace" },
+    ...(canImport ? [{ id: "import" as Sub, label: "Import" }] : []),
     ...(hasWallet ? [{ id: "holdings" as Sub, label: "My Holdings" }] : []),
   ];
-  const [sub, setSub] = useState<Sub>(subs[0]?.id ?? "marketplace");
+  const [selectedSub, setSub] = useState<Sub>(subs[0]?.id ?? "marketplace");
+  // Fall back if the selected tab disappears (e.g. active use case changes away from invoices).
+  const sub: Sub = subs.some((s) => s.id === selectedSub) ? selectedSub : subs[0]?.id ?? "marketplace";
   const [selected, setSelected] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -47,6 +60,9 @@ export function AssetManagement({ useCaseKey, useCases, chains }: { useCaseKey: 
       </div>
       {sub === "issuance" && <IssuePanel useCases={issueUseCases} chains={chains} onIssued={(id) => { setRefreshKey((k) => k + 1); setSelected(id); }} />}
       {sub === "marketplace" && <AssetList chains={chains} useCaseKey={listKey} refreshKey={refreshKey} onSelect={setSelected} />}
+      {sub === "import" && isInvoiceUseCase(activeUseCase) && (
+        <InvoiceImport useCase={activeUseCase} chains={chains} onTokenized={() => setRefreshKey((k) => k + 1)} />
+      )}
       {sub === "holdings" && <MyHoldings onSelect={setSelected} />}
     </div>
   );
