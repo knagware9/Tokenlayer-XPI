@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AssetRecord, KycDetails, KycStatus, ListingRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { canCreateUser, canManageUsers, normalizeUseCaseDefinition, PolicyError, type Actor, type AssetContext, type Role, type UseCaseDefinition } from "@tokenlayer/core";
+import { canCreateUser, canManageUsers, invoiceFingerprint, normalizeUseCaseDefinition, PolicyError, type Actor, type AssetContext, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { isSupportedCurrency } from "../currencies.js";
 import { deployUseCaseContracts } from "../use-cases.js";
@@ -220,6 +220,21 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       return reply.code(400).send({ error: "SUPPLY_UNSUPPORTED", message: "initial supply is only supported for fungible assets" });
     }
 
+    // Resolve issuance metadata: compute any server-derived fields (e.g. the
+    // invoice fingerprint) from their source fields, overwriting any client value,
+    // then enforce the use case's uniqueness guard. Runs BEFORE the issuance fee so
+    // a duplicate is rejected without charging anything.
+    const meta: Record<string, unknown> = { ...(metadata ?? {}) };
+    if (useCase.derivedFields) {
+      for (const [field, gen] of Object.entries(useCase.derivedFields)) {
+        if (gen === "invoiceFingerprint") meta[field] = invoiceFingerprint(meta as unknown as Parameters<typeof invoiceFingerprint>[0]);
+      }
+    }
+    if (useCase.uniqueBy) {
+      const existing = await deps.assets.findByMetadata(useCase.key, useCase.uniqueBy, meta[useCase.uniqueBy]);
+      if (existing) return reply.code(409).send({ error: "DUPLICATE_INVOICE", message: "an invoice with this fingerprint is already tokenized" });
+    }
+
     // Issuance fee: a flat CBDC amount charged from the issuer's linked cash
     // account to the platform fee account. Applies only when: a fee account is
     // configured, fees.issuanceFlat > 0, and a fee currency is determinable (sale
@@ -248,7 +263,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const id = randomUUID();
     let result: Awaited<ReturnType<typeof deps.engine.issue>>;
     try {
-      result = await deps.engine.issue(actor, { useCaseKey: bUseCaseKey, chainId, id, metadata: metadata ?? {} });
+      result = await deps.engine.issue(actor, { useCaseKey: bUseCaseKey, chainId, id, metadata: meta });
       await deps.assets.create({
         id,
         useCaseKey: bUseCaseKey,
@@ -258,7 +273,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         contractRef: result.ref.contractRef,
         tokenType: result.tokenType,
         tokenStandard: useCase.tokenStandard,
-        metadata: metadata ?? {},
+        metadata: meta,
         status: "active",
         createdBy: actor.id,
         unitPrice: null,
