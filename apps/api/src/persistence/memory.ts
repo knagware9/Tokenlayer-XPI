@@ -9,6 +9,8 @@ import type {
   AuditEntryRecord,
   AuditRepository,
   CashBalanceRecord,
+  CashflowRecord,
+  CashflowRepository,
   CashRepository,
   DocumentRecord,
   DocumentRepository,
@@ -253,6 +255,29 @@ export class MemoryCashRepository implements CashRepository {
     this.balances.set(fromKey, have - amt);
     const toKey = this.key(currency, to);
     this.balances.set(toKey, (this.balances.get(toKey) ?? 0n) + amt);
+  }
+}
+
+export class MemoryCashflowRepository implements CashflowRepository {
+  private rows = new Map<string, CashflowRecord>();
+  async createMany(assetId: string, currency: string, rows: { seq: number; kind: "coupon" | "redemption"; dueDate: string; amount: string }[]): Promise<void> {
+    for (const r of rows) {
+      const cfId = randomUUID();
+      this.rows.set(cfId, { id: cfId, assetId, currency, status: "scheduled", executedAt: null, ...r });
+    }
+  }
+  async listByAsset(assetId: string): Promise<CashflowRecord[]> {
+    return [...this.rows.values()].filter((r) => r.assetId === assetId).sort((a, b) => a.seq - b.seq);
+  }
+  async get(cfId: string): Promise<CashflowRecord | null> {
+    return this.rows.get(cfId) ?? null;
+  }
+  async markExecuted(cfId: string, executedAt: string): Promise<CashflowRecord> {
+    const r = this.rows.get(cfId);
+    if (!r) throw new Error(`unknown cashflow '${cfId}'`);
+    r.status = "executed";
+    r.executedAt = executedAt;
+    return r;
   }
 }
 

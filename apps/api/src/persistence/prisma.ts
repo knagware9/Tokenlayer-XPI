@@ -19,6 +19,8 @@ import type {
   AuditEntryRecord,
   AuditRepository,
   CashBalanceRecord,
+  CashflowRecord,
+  CashflowRepository,
   CashRepository,
   DocumentRecord,
   DocumentRepository,
@@ -469,6 +471,28 @@ export class PrismaListingRepository implements ListingRepository {
       if (count === 1) return { ...toListing(r), status: "open", updatedAt: new Date().toISOString() };
     }
     throw new ListingConflictError("LISTING_CONFLICT", `listing '${id}' kept changing while reopening — manual reconciliation may be required`);
+  }
+}
+
+const toCashflow = (r: { id: string; assetId: string; seq: number; kind: string; dueDate: string; amount: string; currency: string; status: string; executedAt: Date | null }): CashflowRecord => ({
+  id: r.id, assetId: r.assetId, seq: r.seq, kind: r.kind as CashflowRecord["kind"], dueDate: r.dueDate,
+  amount: r.amount, currency: r.currency, status: r.status as CashflowRecord["status"], executedAt: r.executedAt?.toISOString() ?? null,
+});
+
+export class PrismaCashflowRepository implements CashflowRepository {
+  async createMany(assetId: string, currency: string, rows: { seq: number; kind: "coupon" | "redemption"; dueDate: string; amount: string }[]): Promise<void> {
+    if (rows.length === 0) return;
+    await prisma.cashflow.createMany({ data: rows.map((r) => ({ assetId, currency, ...r })) });
+  }
+  async listByAsset(assetId: string): Promise<CashflowRecord[]> {
+    return (await prisma.cashflow.findMany({ where: { assetId }, orderBy: { seq: "asc" } })).map(toCashflow);
+  }
+  async get(id: string): Promise<CashflowRecord | null> {
+    const r = await prisma.cashflow.findUnique({ where: { id } });
+    return r ? toCashflow(r) : null;
+  }
+  async markExecuted(id: string, executedAt: string): Promise<CashflowRecord> {
+    return toCashflow(await prisma.cashflow.update({ where: { id }, data: { status: "executed", executedAt: new Date(executedAt) } }));
   }
 }
 

@@ -203,6 +203,30 @@ export interface DocumentRepository {
   get(id: string): Promise<DocumentRecord | null>;
 }
 
+/**
+ * A materialized financial-terms cashflow (coupon or redemption) for one asset.
+ * Only "scheduled"/"executed" are persisted — "due"/"overdue" are derived from
+ * the due date at read time (no background scheduler).
+ */
+export interface CashflowRecord {
+  id: string;
+  assetId: string;
+  seq: number;
+  kind: "coupon" | "redemption";
+  dueDate: string;
+  amount: string;
+  currency: string;
+  status: "scheduled" | "executed";
+  executedAt: string | null;
+}
+
+export interface CashflowRepository {
+  createMany(assetId: string, currency: string, rows: { seq: number; kind: "coupon" | "redemption"; dueDate: string; amount: string }[]): Promise<void>;
+  listByAsset(assetId: string): Promise<CashflowRecord[]>; // ordered by seq asc
+  get(id: string): Promise<CashflowRecord | null>;
+  markExecuted(id: string, executedAt: string): Promise<CashflowRecord>;
+}
+
 export interface CashRepository {
   balanceOf(currency: string, address: string): Promise<string>;
   balancesOf(address: string): Promise<CashBalanceRecord[]>;

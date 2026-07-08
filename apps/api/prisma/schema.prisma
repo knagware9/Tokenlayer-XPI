@@ -116,6 +116,24 @@ model CashBalance {
   @@unique([currency, address])
 }
 
+// A materialized financial-terms cashflow (coupon or redemption) for one asset,
+// created at issue from the use case's `terms`. Only "scheduled"/"executed" are
+// stored — "due"/"overdue" are derived from the date at read time.
+model Cashflow {
+  id         String    @id @default(cuid())
+  assetId    String
+  seq        Int
+  kind       String // "coupon" | "redemption"
+  dueDate    String // YYYY-MM-DD
+  amount     String // integer decimal string
+  currency   String
+  status     String    @default("scheduled") // "scheduled" | "executed"
+  executedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@unique([assetId, seq])
+}
+
 // Uploaded documents (e.g. invoice PDFs). Bytes are stored inline; the asset
 // metadata references the document by its GET URL + sha256 hash.
 model Document {
