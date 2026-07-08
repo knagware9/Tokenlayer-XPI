@@ -268,8 +268,8 @@ export interface ProposalRepository {
   list(useCaseKey?: string, status?: string): Promise<ProposalRecord[]>;
   /** Append an approval; throws { code: "ALREADY_APPROVED" } if this userId already approved. */
   addApproval(id: string, approval: ProposalApproval): Promise<ProposalRecord>;
-  /** Atomic CAS "pending"→"approved". True iff this caller won — the winner executes. */
-  claimApproved(id: string): Promise<boolean>;
+  /** Atomic CAS "pending"→`target` (approved | rejected). True iff this caller won the transition. */
+  claimDecided(id: string, target: ProposalRecord["status"]): Promise<boolean>;
   /** Set a terminal status (+error, +decidedAt for terminal states). */
   setStatus(id: string, status: ProposalRecord["status"], error?: string | null): Promise<ProposalRecord>;
 }

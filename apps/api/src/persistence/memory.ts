@@ -331,10 +331,10 @@ export class MemoryProposalRepository implements ProposalRepository {
     r.approvals.push(approval);
     return this.clone(r);
   }
-  async claimApproved(proposalId: string): Promise<boolean> {
+  async claimDecided(proposalId: string, target: ProposalRecord["status"]): Promise<boolean> {
     const r = this.rows.get(proposalId);
     if (!r || r.status !== "pending") return false;
-    r.status = "approved";
+    r.status = target;
     return true;
   }
   async setStatus(proposalId: string, status: ProposalRecord["status"], error?: string | null): Promise<ProposalRecord> {

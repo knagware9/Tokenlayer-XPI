@@ -1127,14 +1127,22 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const asset = p.assetId ? await deps.assets.get(p.assetId) : null;
     if (p.kind === "issue") {
       if (!asset) throw coded(404, "NOT_FOUND", "pending asset missing");
+      // Re-assert the asset is still awaiting approval (not rejected/decided elsewhere).
+      if (asset.status !== "pending_approval") throw coded(409, "ASSET_NOT_ACTIVE", `asset is ${asset.status}`);
       await executeIssueActivation(deps, proposer, asset, p.payload as Parameters<typeof executeIssueActivation>[3]);
     } else if (p.kind === "cashflow-execute") {
       if (!asset) throw coded(404, "NOT_FOUND", "asset missing");
+      // Re-check the asset is live at approval time — it may have matured/frozen since propose.
+      if (asset.status !== "active") throw coded(409, "ASSET_NOT_ACTIVE", `asset is ${asset.status}`);
       const cf = await deps.cashflows.get(String(p.payload.cfId));
       if (!cf || cf.assetId !== asset.id) throw coded(404, "NOT_FOUND", "cashflow missing");
       await executeCashflowCore(deps, proposer, asset, cf, String(p.payload.from), request.log);
     } else {
       if (!asset) throw coded(404, "NOT_FOUND", "asset missing");
+      // The direct action route rejects non-active assets before gating; the
+      // approval path must re-assert it (the asset may have matured/frozen since
+      // propose), or a gated mint/transfer could mutate a redeemed instrument.
+      if (asset.status !== "active") throw coded(409, "ASSET_NOT_ACTIVE", `asset is ${asset.status}`);
       await runGatedAction(deps, proposer, asset, p.kind, (p.payload.body ?? {}) as Record<string, string>);
     }
   }
@@ -1150,17 +1158,25 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       return reply.code(403).send({ error: "NOT_ELIGIBLE", message: `role '${claims.role}' may not decide '${p.kind}' proposals` });
     }
 
+    // Refund an issuance fee captured at propose time (best-effort). Shared by
+    // rejection and failed activation so a gated issue never keeps a fee for an
+    // asset that never activated.
+    const refundIssuanceFee = async (): Promise<void> => {
+      const fee = p.payload.issuanceFee as { amount: string; currency: string; payer?: string } | undefined;
+      if (fee?.payer && deps.platformFeeAccount) {
+        await deps.cash.transfer(fee.currency, deps.platformFeeAccount, fee.payer, fee.amount).catch((refundErr) =>
+          request.log.error({ refundErr, proposalId: p.id }, "issuance fee refund failed — manual reconciliation required"));
+      }
+    };
+
     if (verdict === "reject") {
-      if (!(await deps.proposals.claimApproved(p.id))) return reply.code(409).send({ error: "PROPOSAL_NOT_PENDING", message: "already decided" });
+      // CAS pending → rejected FIRST, so a lost race yields 409 and a won race
+      // never strands the proposal in a non-terminal state if a later step throws.
+      if (!(await deps.proposals.claimDecided(p.id, "rejected"))) return reply.code(409).send({ error: "PROPOSAL_NOT_PENDING", message: "already decided" });
       const rejected = await deps.proposals.setStatus(p.id, "rejected");
       if (p.kind === "issue" && p.assetId) {
         await deps.assets.setStatus(p.assetId, "rejected");
-        // Refund any issuance fee charged at propose time (best-effort).
-        const fee = p.payload.issuanceFee as { amount: string; currency: string; payer?: string } | undefined;
-        if (fee?.payer && deps.platformFeeAccount) {
-          await deps.cash.transfer(fee.currency, deps.platformFeeAccount, fee.payer, fee.amount).catch((refundErr) =>
-            request.log.error({ refundErr, proposalId: p.id }, "issuance fee refund on rejection failed — manual reconciliation required"));
-        }
+        await refundIssuanceFee();
       }
       return { proposal: rejected };
     }
@@ -1177,11 +1193,13 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (withApproval.approvals.length < withApproval.required) return { proposal: withApproval };
 
     // Threshold reached — CAS pending → approved so exactly one approval executes.
-    if (!(await deps.proposals.claimApproved(p.id))) {
+    if (!(await deps.proposals.claimDecided(p.id, "approved"))) {
       return reply.code(409).send({ error: "PROPOSAL_NOT_PENDING", message: "another approval already finalized this proposal" });
     }
     const proposerUser = await deps.users.findById(p.proposerId);
     if (!proposerUser || !proposerUser.active) {
+      // The captured issuance never activates — refund its fee (parity with reject).
+      if (p.kind === "issue") await refundIssuanceFee();
       return { proposal: await deps.proposals.setStatus(p.id, "failed", "PROPOSER_INACTIVE") };
     }
     try {
@@ -1189,6 +1207,8 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       return { proposal: await deps.proposals.setStatus(p.id, "executed") };
     } catch (err) {
       const code = err instanceof CodedError ? err.code : err instanceof PolicyError ? err.code : "EXECUTION_FAILED";
+      // A gated issuance that fails to activate keeps no fee (parity with reject).
+      if (p.kind === "issue") await refundIssuanceFee();
       return { proposal: await deps.proposals.setStatus(p.id, "failed", `${code}: ${(err as Error).message}`) };
     }
   }

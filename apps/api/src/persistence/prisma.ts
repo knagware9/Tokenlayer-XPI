@@ -543,20 +543,29 @@ export class PrismaProposalRepository implements ProposalRepository {
     return (await prisma.proposal.findMany({ where, orderBy: { createdAt: "desc" } })).map(toProposal);
   }
   async addApproval(id: string, approval: ProposalApproval): Promise<ProposalRecord> {
-    const r = await prisma.proposal.findUnique({ where: { id } });
-    if (!r) throw new Error(`unknown proposal '${id}'`);
-    const approvals = JSON.parse(r.approvals) as ProposalApproval[];
-    if (approvals.some((a) => a.userId === approval.userId)) {
-      throw Object.assign(new Error("already approved"), { code: "ALREADY_APPROVED" });
+    // Optimistic-concurrency append: read-modify-write is not atomic in SQL, so
+    // two distinct approvers racing could clobber each other's approval. Guard the
+    // write with a CAS on the exact prior JSON (the listings-repo pattern) and
+    // retry on a lost race, so no approval is silently dropped from the audit trail.
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const r = await prisma.proposal.findUnique({ where: { id } });
+      if (!r) throw new Error(`unknown proposal '${id}'`);
+      const approvals = JSON.parse(r.approvals) as ProposalApproval[];
+      if (approvals.some((a) => a.userId === approval.userId)) {
+        throw Object.assign(new Error("already approved"), { code: "ALREADY_APPROVED" });
+      }
+      const next = JSON.stringify([...approvals, approval]);
+      const { count } = await prisma.proposal.updateMany({ where: { id, approvals: r.approvals }, data: { approvals: next } });
+      if (count === 1) return toProposal({ ...r, approvals: next });
+      // Lost the race to a concurrent approver — re-read and retry.
     }
-    approvals.push(approval);
-    const updated = await prisma.proposal.update({ where: { id }, data: { approvals: JSON.stringify(approvals) } });
-    return toProposal(updated);
+    throw new Error(`addApproval for '${id}' kept losing to concurrent writers`);
   }
-  async claimApproved(id: string): Promise<boolean> {
-    // Atomic CAS: only one concurrent Nth approval flips pending → approved and
-    // therefore executes the operation.
-    const { count } = await prisma.proposal.updateMany({ where: { id, status: "pending" }, data: { status: "approved" } });
+  async claimDecided(id: string, target: ProposalRecord["status"]): Promise<boolean> {
+    // Atomic CAS: only one concurrent decision flips pending → target, so the
+    // Nth approval (approved) executes once and an approve-vs-reject race resolves
+    // to exactly one outcome.
+    const { count } = await prisma.proposal.updateMany({ where: { id, status: "pending" }, data: { status: target } });
     return count === 1;
   }
   async setStatus(id: string, status: ProposalRecord["status"], error?: string | null): Promise<ProposalRecord> {
