@@ -6,6 +6,7 @@ import { createEngine } from "./context.js";
 import { loadCurrencies } from "./currencies.js";
 import { MemoryAccountRepository, MemoryAssetRepository, MemoryAuditRepository, MemoryCashRepository,
   MemoryCashflowRepository,
+  MemoryProposalRepository,
   MemoryDocumentRepository,
   MemoryListingRepository,
   MemoryUseCaseRepository, MemoryUserRepository } from "./persistence/memory.js";
@@ -31,7 +32,7 @@ async function main(): Promise<void> {
   });
   const cash = new MemoryCashRepository();
   const listings = new MemoryListingRepository();
-  const app = await buildApp({ useCases, rbac, engine, users, assets, audit, accounts, chains, cash, listings, documents: new MemoryDocumentRepository(), cashflows: new MemoryCashflowRepository(), currencies: loadCurrencies(), jwtSecret: "e2e" });
+  const app = await buildApp({ useCases, rbac, engine, users, assets, audit, accounts, chains, cash, listings, documents: new MemoryDocumentRepository(), cashflows: new MemoryCashflowRepository(), proposals: new MemoryProposalRepository(), currencies: loadCurrencies(), jwtSecret: "e2e" });
 
   const platform = await login(app, "admin@tokenlayer.dev", "admin123");
   const carbonAdmin = await login(app, "carbon.admin@tokenlayer.dev", "carbon123");

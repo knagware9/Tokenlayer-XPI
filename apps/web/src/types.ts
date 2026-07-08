@@ -71,6 +71,8 @@ export interface UseCase {
   uniqueBy?: string;
   /** Financial terms template driving the cashflow schedule. */
   terms?: { principalField: string; maturityField: string; rateField?: string; frequency?: string; currency: string };
+  /** Maker-checker policy: gated op → required approvals. */
+  workflow?: { approvals?: Record<string, number> };
   roles: Role[];
 }
 
@@ -148,6 +150,29 @@ export interface Trade {
   from: string | null;
   to: string | null;
   secondary: boolean;
+}
+
+export interface ProposalApproval {
+  userId: string;
+  email: string;
+  at: string;
+}
+
+/** A maker-checker proposal: a gated operation captured pending approval. */
+export interface Proposal {
+  id: string;
+  useCaseKey: string;
+  assetId: string | null;
+  kind: string;
+  payload: Record<string, unknown>;
+  proposerId: string;
+  proposerLabel: string;
+  required: number;
+  approvals: ProposalApproval[];
+  status: "pending" | "approved" | "rejected" | "executed" | "failed";
+  error: string | null;
+  createdAt: string;
+  decidedAt: string | null;
 }
 
 export interface AuditEntry {

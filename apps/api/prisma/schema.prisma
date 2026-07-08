@@ -65,6 +65,7 @@ model UseCase {
   derivedFields    String   @default("{}") // JSON object: metadataField -> generator (server-derived on issue)
   uniqueBy         String? // metadata field that must be unique across the use case's assets
   terms            String   @default("{}") // JSON object: { principalField, maturityField, rateField?, frequency?, currency }
+  workflow         String   @default("{}") // JSON object: { approvals?: { [gatedOp]: requiredApprovals } }
   roles           String // JSON array
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -143,4 +144,25 @@ model Document {
   size        Int
   bytes       Bytes
   createdAt   DateTime @default(now())
+}
+
+// A maker-checker proposal: a gated operation captured pending approval. The
+// pending -> approved transition is a CAS (updateMany where-status) so
+// concurrent Nth approvals execute the operation exactly once.
+model Proposal {
+  id            String    @id @default(cuid())
+  useCaseKey    String
+  assetId       String?
+  kind          String // gated op: issue | mint | transfer | burn | freeze | unfreeze | cashflow-execute
+  payload       String // JSON — everything the executor needs
+  proposerId    String
+  proposerLabel String // email, for display
+  required      Int
+  approvals     String    @default("[]") // JSON: [{ userId, email, at }]
+  status        String    @default("pending") // pending | approved | rejected | executed | failed
+  error         String?
+  createdAt     DateTime  @default(now())
+  decidedAt     DateTime?
+
+  @@index([useCaseKey, status])
 }

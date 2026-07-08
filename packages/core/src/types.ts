@@ -28,6 +28,11 @@ export type LifecycleAction =
   | "redeem"
   | "read";
 
+/** Operations that may be gated behind maker-checker approvals. */
+export type GatedOp = "issue" | "mint" | "transfer" | "burn" | "freeze" | "unfreeze" | "cashflow-execute";
+
+export const GATED_OPS: readonly GatedOp[] = ["issue", "mint", "transfer", "burn", "freeze", "unfreeze", "cashflow-execute"];
+
 /** Kind of token a use case issues. */
 export type TokenType = "fungible" | "nonfungible";
 
@@ -223,6 +228,14 @@ export interface UseCaseDefinition {
     rateField?: string;
     frequency?: "atMaturity" | "monthly" | "quarterly" | "semiannual" | "annual";
     currency: string;
+  };
+  /**
+   * Maker-checker policy: gated operations require N approvals from capability
+   * holders other than the proposer before they execute. Unlisted ops run
+   * instantly. No role bypasses a gated op — including admins.
+   */
+  workflow?: {
+    approvals?: Partial<Record<GatedOp, number>>;
   };
   roles: Role[];
 }

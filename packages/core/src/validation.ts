@@ -1,5 +1,5 @@
 import { PolicyError } from "./errors.js";
-import { ROLES, tokenTypeForStandard, type MetadataSchema, type TokenStandard, type UseCaseDefinition, type Role } from "./types.js";
+import { GATED_OPS, ROLES, tokenTypeForStandard, type MetadataSchema, type TokenStandard, type UseCaseDefinition, type Role } from "./types.js";
 
 const VALID_ROLES: ReadonlySet<Role> = new Set<Role>(ROLES);
 const VALID_TOKEN_STANDARDS = new Set<string>(["ERC-20", "ERC-721", "ERC-3643"]);
@@ -78,6 +78,7 @@ export function validateUseCaseDefinition(def: unknown): asserts def is UseCaseD
   if (d.derivedFields !== undefined) validateDerivedFields(d.derivedFields, d.metadataSchema, String(d.key), fail);
   if (d.uniqueBy !== undefined) validateUniqueBy(d.uniqueBy, d.metadataSchema, String(d.key), fail);
   if (d.terms !== undefined) validateTerms(d.terms, d.metadataSchema, String(d.key), fail);
+  if (d.workflow !== undefined) validateWorkflow(d.workflow, String(d.key), fail);
 
   if (!Array.isArray(d.roles) || d.roles.length === 0) fail(`use case '${String(d.key)}' needs a non-empty 'roles' array`);
   for (const r of d.roles as unknown[]) {
@@ -238,6 +239,20 @@ function validateTerms(terms: unknown, schema: unknown, key: string, fail: (msg:
     fail(`use case '${key}' terms.rateField is required for periodic frequency`);
   }
   if (typeof t.currency !== "string" || t.currency === "") fail(`use case '${key}' terms.currency must be a non-empty string`);
+}
+
+const GATED_OP_SET = new Set<string>(GATED_OPS);
+
+/** Validate the optional maker-checker workflow block (gated op → required approvals). */
+function validateWorkflow(workflow: unknown, key: string, fail: (msg: string) => never): void {
+  if (typeof workflow !== "object" || workflow === null) fail(`use case '${key}' 'workflow' must be an object`);
+  const approvals = (workflow as Record<string, unknown>).approvals;
+  if (approvals === undefined) return;
+  if (typeof approvals !== "object" || approvals === null) fail(`use case '${key}' workflow.approvals must be an object`);
+  for (const [op, n] of Object.entries(approvals as Record<string, unknown>)) {
+    if (!GATED_OP_SET.has(op)) fail(`use case '${key}' workflow.approvals has unknown operation '${op}'`);
+    if (typeof n !== "number" || !Number.isInteger(n) || n < 1) fail(`use case '${key}' workflow.approvals.${op} must be an integer >= 1`);
+  }
 }
 
 const DERIVED_GENERATORS = new Set(["invoiceFingerprint"]);

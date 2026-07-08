@@ -165,6 +165,16 @@ describe("validateUseCaseDefinition", () => {
     expect(() => validateUseCaseDefinition(withInvoiceFields({ terms: { principalField: "amountInr", maturityField: "dueDate", frequency: "quarterly", currency: "CBDC-INR" } }))).toThrow(/rateField/);
     expect(() => validateUseCaseDefinition(withInvoiceFields({ terms: { principalField: "amountInr", maturityField: "dueDate", frequency: "weekly", currency: "CBDC-INR" } }))).toThrow(/frequency/);
   });
+
+  it("accepts a valid workflow block", () => {
+    const def = { ...FUNGIBLE_USE_CASE, workflow: { approvals: { issue: 1, "cashflow-execute": 2 } } };
+    expect(() => validateUseCaseDefinition(def)).not.toThrow();
+  });
+  it("rejects unknown gated ops and non-positive counts", () => {
+    expect(() => validateUseCaseDefinition({ ...FUNGIBLE_USE_CASE, workflow: { approvals: { list: 1 } } })).toThrow(/workflow/);
+    expect(() => validateUseCaseDefinition({ ...FUNGIBLE_USE_CASE, workflow: { approvals: { issue: 0 } } })).toThrow(/workflow/);
+    expect(() => validateUseCaseDefinition({ ...FUNGIBLE_USE_CASE, workflow: { approvals: { issue: 1.5 } } })).toThrow(/workflow/);
+  });
 });
 
 describe("validateMetadata", () => {

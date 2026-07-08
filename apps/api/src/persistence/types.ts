@@ -233,6 +233,47 @@ export interface CashflowRepository {
   markExecuted(id: string, executedAt: string): Promise<CashflowRecord>;
 }
 
+/** One approval on a proposal (segregation-of-duties: never the proposer). */
+export interface ProposalApproval {
+  userId: string;
+  email: string;
+  at: string;
+}
+
+/**
+ * A maker-checker proposal: a gated operation captured for approval. When the
+ * approval count reaches `required`, the operation executes (as the proposer's
+ * identity) and the proposal becomes "executed" or "failed".
+ */
+export interface ProposalRecord {
+  id: string;
+  useCaseKey: string;
+  assetId: string | null;
+  kind: string;
+  payload: Record<string, unknown>;
+  proposerId: string;
+  proposerLabel: string;
+  required: number;
+  approvals: ProposalApproval[];
+  status: "pending" | "approved" | "rejected" | "executed" | "failed";
+  error: string | null;
+  createdAt: string;
+  decidedAt: string | null;
+}
+
+export interface ProposalRepository {
+  create(input: Omit<ProposalRecord, "id" | "approvals" | "status" | "error" | "createdAt" | "decidedAt">): Promise<ProposalRecord>;
+  get(id: string): Promise<ProposalRecord | null>;
+  /** Newest first, optionally scoped by use case and/or status. */
+  list(useCaseKey?: string, status?: string): Promise<ProposalRecord[]>;
+  /** Append an approval; throws { code: "ALREADY_APPROVED" } if this userId already approved. */
+  addApproval(id: string, approval: ProposalApproval): Promise<ProposalRecord>;
+  /** Atomic CAS "pending"→`target` (approved | rejected). True iff this caller won the transition. */
+  claimDecided(id: string, target: ProposalRecord["status"]): Promise<boolean>;
+  /** Set a terminal status (+error, +decidedAt for terminal states). */
+  setStatus(id: string, status: ProposalRecord["status"], error?: string | null): Promise<ProposalRecord>;
+}
+
 export interface CashRepository {
   balanceOf(currency: string, address: string): Promise<string>;
   balancesOf(address: string): Promise<CashBalanceRecord[]>;

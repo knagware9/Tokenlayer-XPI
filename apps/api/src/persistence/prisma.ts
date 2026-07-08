@@ -30,6 +30,9 @@ import type {
   ListingRepository,
   Page,
   Paged,
+  ProposalApproval,
+  ProposalRecord,
+  ProposalRepository,
   SaleTerms,
   UseCaseRepository,
   UserRecord,
@@ -275,6 +278,7 @@ interface UseCaseRow {
   derivedFields: string;
   uniqueBy: string | null;
   terms: string;
+  workflow: string;
   roles: string;
 }
 
@@ -295,6 +299,7 @@ function rowToUseCase(r: UseCaseRow): UseCaseDefinition {
   const valuation = parseJsonObject(r.valuation);
   const derivedFields = parseJsonObject(r.derivedFields);
   const terms = parseJsonObject(r.terms);
+  const workflow = parseJsonObject(r.workflow);
   return normalizeUseCaseDefinition({
     key: r.key,
     name: r.name,
@@ -314,6 +319,7 @@ function rowToUseCase(r: UseCaseRow): UseCaseDefinition {
     ...(Object.keys(derivedFields).length > 0 ? { derivedFields: derivedFields as Record<string, "invoiceFingerprint"> } : {}),
     ...(r.uniqueBy ? { uniqueBy: r.uniqueBy } : {}),
     ...(Object.keys(terms).length > 0 ? { terms: terms as UseCaseDefinition["terms"] } : {}),
+    ...(Object.keys(workflow).length > 0 ? { workflow: workflow as UseCaseDefinition["workflow"] } : {}),
     roles: JSON.parse(r.roles),
   });
 }
@@ -337,6 +343,7 @@ function useCaseToData(def: UseCaseDefinition) {
     derivedFields: JSON.stringify(def.derivedFields ?? {}),
     uniqueBy: def.uniqueBy ?? null,
     terms: JSON.stringify(def.terms ?? {}),
+    workflow: JSON.stringify(def.workflow ?? {}),
     roles: JSON.stringify(def.roles),
   };
 }
@@ -504,6 +511,70 @@ export class PrismaCashflowRepository implements CashflowRepository {
     if (count !== 1) throw new Error(`cashflow '${id}' is not 'executing' — claim it before marking executed`);
     const r = await prisma.cashflow.findUnique({ where: { id } });
     return toCashflow(r!);
+  }
+}
+
+const toProposal = (r: { id: string; useCaseKey: string; assetId: string | null; kind: string; payload: string; proposerId: string; proposerLabel: string; required: number; approvals: string; status: string; error: string | null; createdAt: Date; decidedAt: Date | null }): ProposalRecord => ({
+  id: r.id, useCaseKey: r.useCaseKey, assetId: r.assetId, kind: r.kind,
+  payload: JSON.parse(r.payload) as Record<string, unknown>,
+  proposerId: r.proposerId, proposerLabel: r.proposerLabel, required: r.required,
+  approvals: JSON.parse(r.approvals) as ProposalApproval[],
+  status: r.status as ProposalRecord["status"], error: r.error,
+  createdAt: r.createdAt.toISOString(), decidedAt: r.decidedAt?.toISOString() ?? null,
+});
+
+export class PrismaProposalRepository implements ProposalRepository {
+  async create(input: Omit<ProposalRecord, "id" | "approvals" | "status" | "error" | "createdAt" | "decidedAt">): Promise<ProposalRecord> {
+    const r = await prisma.proposal.create({
+      data: {
+        useCaseKey: input.useCaseKey, assetId: input.assetId, kind: input.kind,
+        payload: JSON.stringify(input.payload), proposerId: input.proposerId,
+        proposerLabel: input.proposerLabel, required: input.required,
+      },
+    });
+    return toProposal(r);
+  }
+  async get(id: string): Promise<ProposalRecord | null> {
+    const r = await prisma.proposal.findUnique({ where: { id } });
+    return r ? toProposal(r) : null;
+  }
+  async list(useCaseKey?: string, status?: string): Promise<ProposalRecord[]> {
+    const where = { ...(useCaseKey ? { useCaseKey } : {}), ...(status ? { status } : {}) };
+    return (await prisma.proposal.findMany({ where, orderBy: { createdAt: "desc" } })).map(toProposal);
+  }
+  async addApproval(id: string, approval: ProposalApproval): Promise<ProposalRecord> {
+    // Optimistic-concurrency append: read-modify-write is not atomic in SQL, so
+    // two distinct approvers racing could clobber each other's approval. Guard the
+    // write with a CAS on the exact prior JSON (the listings-repo pattern) and
+    // retry on a lost race, so no approval is silently dropped from the audit trail.
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const r = await prisma.proposal.findUnique({ where: { id } });
+      if (!r) throw new Error(`unknown proposal '${id}'`);
+      const approvals = JSON.parse(r.approvals) as ProposalApproval[];
+      if (approvals.some((a) => a.userId === approval.userId)) {
+        throw Object.assign(new Error("already approved"), { code: "ALREADY_APPROVED" });
+      }
+      const next = JSON.stringify([...approvals, approval]);
+      const { count } = await prisma.proposal.updateMany({ where: { id, approvals: r.approvals }, data: { approvals: next } });
+      if (count === 1) return toProposal({ ...r, approvals: next });
+      // Lost the race to a concurrent approver — re-read and retry.
+    }
+    throw new Error(`addApproval for '${id}' kept losing to concurrent writers`);
+  }
+  async claimDecided(id: string, target: ProposalRecord["status"]): Promise<boolean> {
+    // Atomic CAS: only one concurrent decision flips pending → target, so the
+    // Nth approval (approved) executes once and an approve-vs-reject race resolves
+    // to exactly one outcome.
+    const { count } = await prisma.proposal.updateMany({ where: { id, status: "pending" }, data: { status: target } });
+    return count === 1;
+  }
+  async setStatus(id: string, status: ProposalRecord["status"], error?: string | null): Promise<ProposalRecord> {
+    const terminal = status === "rejected" || status === "executed" || status === "failed";
+    const updated = await prisma.proposal.update({
+      where: { id },
+      data: { status, error: error ?? null, ...(terminal ? { decidedAt: new Date() } : {}) },
+    });
+    return toProposal(updated);
   }
 }
 

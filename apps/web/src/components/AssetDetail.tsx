@@ -185,6 +185,17 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
 
       {error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2">{error}</div>}
 
+      {asset.status === "pending_approval" && (
+        <div className="rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-2">
+          ⏳ Pending approval — supply mints and the asset activates once approved in the Approvals tab.
+        </div>
+      )}
+      {asset.status === "rejected" && (
+        <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2">
+          ✕ Issuance rejected — this asset was never activated.
+        </div>
+      )}
+
       {useCase.terms && <CashflowPanel asset={asset} useCase={useCase} role={role} onChanged={() => { void reload(); onChanged(); }} />}
 
       {asset.unitPrice && asset.currency && can(role, "buy") && (

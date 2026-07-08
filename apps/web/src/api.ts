@@ -1,4 +1,4 @@
-import type { AccountState, AnalyticsSummary, Asset, AuditEntry, Cashflow, CashflowPreview, ChainInfo, Listing, Role, SessionUser, TokenInfo, Trade, UseCase } from "./types.js";
+import type { AccountState, AnalyticsSummary, Asset, AuditEntry, Cashflow, CashflowPreview, ChainInfo, Listing, Proposal, Role, SessionUser, TokenInfo, Trade, UseCase } from "./types.js";
 
 export interface Currency { code: string; label: string; }
 export interface CashBalance { currency: string; address: string; amount: string; }
@@ -68,9 +68,11 @@ export const api = {
   issue: (
     token: string,
     input: { useCaseKey: string; name: string; chainId: string; metadata: Record<string, unknown>; treasuryAccount?: string; initialSupply?: string; sale?: { unitPrice: string; currency: string; treasuryAccount: string } },
-  ) => request<{ asset: Asset; txHash: string }>("/assets", token, { method: "POST", body: JSON.stringify(input) }),
+    // 201 → { asset }; 202 (maker-checker gated) → { proposal, asset }.
+  ) => request<{ asset: Asset; txHash?: string; proposal?: Proposal }>("/assets", token, { method: "POST", body: JSON.stringify(input) }),
   action: (token: string, id: string, action: string, body: Record<string, string>) =>
-    request<{ receipt: { txHash: string } }>(`/assets/${id}/actions/${action}`, token, {
+    // 200 → { receipt }; 202 (gated) → { proposal }.
+    request<{ receipt?: { txHash: string }; proposal?: Proposal }>(`/assets/${id}/actions/${action}`, token, {
       method: "POST",
       body: JSON.stringify(body),
     }),
@@ -96,7 +98,14 @@ export const api = {
   cashflows: (token: string, assetId: string) =>
     request<{ cashflows: Cashflow[]; preview: CashflowPreview | null }>(`/assets/${assetId}/cashflows`, token),
   executeCashflow: (token: string, assetId: string, cfId: string, from?: string) =>
-    request<{ cashflow: Cashflow }>(`/assets/${assetId}/cashflows/${cfId}/execute`, token, { method: "POST", body: JSON.stringify(from ? { from } : {}) }),
+    // 200 → { cashflow }; 202 (gated settlement) → { proposal }.
+    request<{ cashflow?: Cashflow; proposal?: Proposal }>(`/assets/${assetId}/cashflows/${cfId}/execute`, token, { method: "POST", body: JSON.stringify(from ? { from } : {}) }),
+  proposals: (token: string, status?: string) =>
+    request<Proposal[]>(`/proposals${status ? `?status=${encodeURIComponent(status)}` : ""}`, token),
+  approveProposal: (token: string, id: string) =>
+    request<{ proposal: Proposal }>(`/proposals/${id}/approve`, token, { method: "POST", body: JSON.stringify({}) }),
+  rejectProposal: (token: string, id: string) =>
+    request<{ proposal: Proposal }>(`/proposals/${id}/reject`, token, { method: "POST", body: JSON.stringify({}) }),
   creditCash: (token: string, account: string, currency: string, amount: string) =>
     request<{ ok: boolean; balance: string }>("/cash/credit", token, { method: "POST", body: JSON.stringify({ account, currency, amount }) }),
   users: (token: string) => request<{ id: string; email: string; role: Role; useCaseKey: string | null; accountId: string | null; active: boolean; kycStatus: "pending" | "approved" | "rejected"; kyc: { legalName?: string; country?: string; idType?: string; idNumber?: string; documentRef?: string } | null }[]>("/users", token),

@@ -18,6 +18,9 @@ import type {
   ListingRepository,
   Page,
   Paged,
+  ProposalApproval,
+  ProposalRecord,
+  ProposalRepository,
   SaleTerms,
   UseCaseRepository,
   UserRecord,
@@ -292,6 +295,55 @@ export class MemoryCashflowRepository implements CashflowRepository {
     r.status = "executed";
     r.executedAt = executedAt;
     return r;
+  }
+}
+
+export class MemoryProposalRepository implements ProposalRepository {
+  private rows = new Map<string, ProposalRecord>();
+  // Return a deep-enough copy so callers can't alias the stored record's arrays.
+  private clone(r: ProposalRecord): ProposalRecord {
+    return { ...r, payload: { ...r.payload }, approvals: r.approvals.map((a) => ({ ...a })) };
+  }
+  async create(input: Omit<ProposalRecord, "id" | "approvals" | "status" | "error" | "createdAt" | "decidedAt">): Promise<ProposalRecord> {
+    const rec: ProposalRecord = { ...input, id: id("proposal"), approvals: [], status: "pending", error: null, createdAt: now(), decidedAt: null };
+    this.rows.set(rec.id, rec);
+    return this.clone(rec);
+  }
+  async get(proposalId: string): Promise<ProposalRecord | null> {
+    const r = this.rows.get(proposalId);
+    return r ? this.clone(r) : null;
+  }
+  async list(useCaseKey?: string, status?: string): Promise<ProposalRecord[]> {
+    return [...this.rows.values()]
+      .filter((r) => (!useCaseKey || r.useCaseKey === useCaseKey) && (!status || r.status === status))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map((r) => this.clone(r));
+  }
+  // addApproval/claimApproved/setStatus are each a single synchronous mutation
+  // (no await between check and write) → atomic w.r.t. concurrent requests, as
+  // the CashflowRepository CAS methods rely on.
+  async addApproval(proposalId: string, approval: ProposalApproval): Promise<ProposalRecord> {
+    const r = this.rows.get(proposalId);
+    if (!r) throw new Error(`unknown proposal '${proposalId}'`);
+    if (r.approvals.some((a) => a.userId === approval.userId)) {
+      throw Object.assign(new Error("already approved"), { code: "ALREADY_APPROVED" });
+    }
+    r.approvals.push(approval);
+    return this.clone(r);
+  }
+  async claimDecided(proposalId: string, target: ProposalRecord["status"]): Promise<boolean> {
+    const r = this.rows.get(proposalId);
+    if (!r || r.status !== "pending") return false;
+    r.status = target;
+    return true;
+  }
+  async setStatus(proposalId: string, status: ProposalRecord["status"], error?: string | null): Promise<ProposalRecord> {
+    const r = this.rows.get(proposalId);
+    if (!r) throw new Error(`unknown proposal '${proposalId}'`);
+    r.status = status;
+    r.error = error ?? null;
+    if (status === "rejected" || status === "executed" || status === "failed") r.decidedAt = now();
+    return this.clone(r);
   }
 }
 

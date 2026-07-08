@@ -61,6 +61,7 @@
     "transferRestrictions": true
   },
   "terms": { "principalField": "faceValue", "maturityField": "maturityDate", "rateField": "couponRate", "frequency": "quarterly", "currency": "CBDC-INR" },
+  "workflow": { "approvals": { "issue": 1, "cashflow-execute": 1 } },
   "roles": [
     "UseCaseAdmin",
     "Issuer",
