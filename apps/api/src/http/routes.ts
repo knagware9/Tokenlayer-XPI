@@ -1043,6 +1043,13 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       if (siblings.some((s) => s.seq < cf.seq && s.status !== "executed")) {
         return reply.code(409).send({ error: "COUPONS_OUTSTANDING", message: "execute all coupons before settling the redemption" });
       }
+      // Early open-listings check for good error ordering (before the funds
+      // check tells the desk to record a repayment). The authoritative re-check
+      // still runs post-claim to close the create-listing race window.
+      const openEarly = await deps.listings.listByAsset(asset.id, "open");
+      if (openEarly.length > 0) {
+        return reply.code(409).send({ error: "OPEN_LISTINGS_BLOCK_SETTLEMENT", message: "cancel open listings before settling — escrowed tokens cannot be redeemed" });
+      }
     }
 
     const payer = (request.body as { from?: string } | null)?.from ?? asset.treasuryAccount ?? null;
