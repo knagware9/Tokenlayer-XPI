@@ -322,6 +322,24 @@ export const components: Record<string, unknown>[] = [
     required: ["id", "assetId", "seller", "quantity", "unitPrice", "currency", "status", "createdAt"],
   },
   {
+    $id: "Cashflow",
+    type: "object",
+    additionalProperties: true,
+    description: "A materialized financial-terms cashflow. `status` is derived at read time: due/overdue flow from the due date; only scheduled/executed are stored.",
+    properties: {
+      id: { type: "string" },
+      assetId: { type: "string" },
+      seq: { type: "integer" },
+      kind: { type: "string", enum: ["coupon", "redemption"] },
+      dueDate: { type: "string" },
+      amount: { type: "string" },
+      currency: { type: "string" },
+      status: { type: "string", enum: ["scheduled", "due", "overdue", "executed"] },
+      executedAt: { type: "string", nullable: true },
+    },
+    required: ["id", "assetId", "seq", "kind", "dueDate", "amount", "currency", "status"],
+  },
+  {
     $id: "Receipt",
     type: "object",
     additionalProperties: true,
@@ -628,6 +646,38 @@ export const S: Record<string, FastifySchema> = {
         },
       },
       ...errs(401, 404, 503),
+    },
+  },
+
+  listCashflows: {
+    tags: ["Cashflows"], summary: "An asset's cashflow schedule with derived status + next-payout preview", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    response: {
+      200: {
+        type: "object",
+        properties: {
+          cashflows: { type: "array", items: { $ref: "Cashflow#" } },
+          preview: {
+            type: "object",
+            nullable: true,
+            additionalProperties: true,
+            properties: {
+              cashflowId: { type: "string" },
+              split: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: { address: { type: "string" }, amount: { type: "string" } },
+                  required: ["address", "amount"],
+                },
+              },
+            },
+            required: ["cashflowId", "split"],
+          },
+        },
+        required: ["cashflows"],
+      },
+      ...errs(401, 404),
     },
   },
 

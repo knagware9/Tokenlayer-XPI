@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { AssetRecord, KycDetails, KycStatus, ListingRecord } from "../persistence/types.js";
+import type { AssetRecord, CashflowRecord, KycDetails, KycStatus, ListingRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { canCreateUser, canManageUsers, invoiceFingerprint, normalizeUseCaseDefinition, PolicyError, type Role, type UseCaseDefinition } from "@tokenlayer/core";
+import { canCreateUser, canManageUsers, computeCashflowSchedule, invoiceFingerprint, normalizeUseCaseDefinition, PolicyError, splitProRata, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { isSupportedCurrency } from "../currencies.js";
 import { deployUseCaseContracts } from "../use-cases.js";
 import { computeAnalytics } from "../analytics.js";
+import { foldAsset } from "../holders.js";
 import { S } from "./schemas.js";
 import { actorOf, contextOf, isPositiveIntString, notFound, requireUser, scopedToCaller, type TokenClaims } from "./support.js";
 
@@ -278,6 +279,13 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         treasuryAccount: null,
         uniqueKey,
       });
+      // Materialize the financial-terms schedule (coupons + redemption) so the
+      // asset carries its cashflow ledger from birth. Empty when terms are
+      // inapplicable for this asset's metadata; invalid values → INVALID_TERMS.
+      if (useCase.terms) {
+        const schedule = computeCashflowSchedule(useCase.terms, meta, new Date().toISOString());
+        await deps.cashflows.createMany(id, useCase.terms.currency, schedule);
+      }
       if (sale) {
         await deps.assets.setSaleTerms(id, sale);
       }
@@ -935,6 +943,39 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (b.kycStatus === "approved" || b.kycStatus === "rejected") patch.kycStatus = b.kycStatus;
     const updated = await deps.users.update(id, patch);
     return { id: updated.id, email: updated.email, role: updated.role, useCaseKey: updated.useCaseKey, accountId: updated.accountId, active: updated.active, kycStatus: updated.kycStatus };
+  });
+
+  // --- cashflows (financial terms servicing) --------------------------------
+
+  // Derived read-time status — never stored; "due"/"overdue" flow from the date.
+  function cashflowStatus(cf: CashflowRecord, today: string): "scheduled" | "due" | "overdue" | "executed" {
+    if (cf.status === "executed") return "executed";
+    if (cf.dueDate < today) return "overdue";
+    if (cf.dueDate === today) return "due";
+    return "scheduled";
+  }
+
+  // Current positive balances from the audit fold (source of truth shared with
+  // analytics/compliance). listByAsset returns DESC — sort ASC before folding.
+  async function assetBalances(assetId: string): Promise<Map<string, bigint>> {
+    const { items } = await deps.audit.listByAsset(assetId, { limit: 10000 });
+    const asc = [...items].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return foldAsset(asc).balances;
+  }
+
+  app.get("/assets/:id/cashflows", { schema: S.listCashflows, ...auth }, async (request, reply) => {
+    const asset = await scopedAsset(request, reply, "read");
+    if (!asset) return reply;
+    const today = new Date().toISOString().slice(0, 10);
+    const rows = (await deps.cashflows.listByAsset(asset.id)).map((cf) => ({ ...cf, status: cashflowStatus(cf, today) }));
+    // Preview the next payable row (redemption is payable any time; coupons once due).
+    const next = rows.find((cf) => cf.status !== "executed" && (cf.kind === "redemption" || cf.status !== "scheduled"));
+    let preview: { cashflowId: string; split: { address: string; amount: string }[] } | null = null;
+    if (next) {
+      const split = splitProRata(BigInt(next.amount), await assetBalances(asset.id));
+      preview = { cashflowId: next.id, split: [...split].map(([address, amount]) => ({ address, amount: amount.toString() })) };
+    }
+    return { cashflows: rows, preview };
   });
 
   // --- documents ----------------------------------------------------------
