@@ -131,7 +131,7 @@ export interface Cashflow {
   dueDate: string;
   amount: string;
   currency: string;
-  status: "scheduled" | "due" | "overdue" | "executed";
+  status: "scheduled" | "due" | "overdue" | "executing" | "executed";
   executedAt: string | null;
 }
 

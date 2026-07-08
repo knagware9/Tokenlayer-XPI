@@ -325,7 +325,7 @@ export const components: Record<string, unknown>[] = [
     $id: "Cashflow",
     type: "object",
     additionalProperties: true,
-    description: "A materialized financial-terms cashflow. `status` is derived at read time: due/overdue flow from the due date; only scheduled/executed are stored.",
+    description: "A materialized financial-terms cashflow. `status` is derived at read time: due/overdue flow from the due date; only scheduled/executing/executed are stored.",
     properties: {
       id: { type: "string" },
       assetId: { type: "string" },
@@ -334,7 +334,7 @@ export const components: Record<string, unknown>[] = [
       dueDate: { type: "string" },
       amount: { type: "string" },
       currency: { type: "string" },
-      status: { type: "string", enum: ["scheduled", "due", "overdue", "executed"] },
+      status: { type: "string", enum: ["scheduled", "due", "overdue", "executing", "executed"] },
       executedAt: { type: "string", nullable: true },
     },
     required: ["id", "assetId", "seq", "kind", "dueDate", "amount", "currency", "status"],

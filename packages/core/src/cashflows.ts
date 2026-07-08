@@ -35,9 +35,9 @@ function daysBetween(a: string, b: string): number {
   return Math.round((Date.parse(b) - Date.parse(a)) / 86_400_000);
 }
 
-/** Coupon for `days` of accrual: principal × rate% p.a. × days/365, bp-clamped, floored. */
+/** Coupon for `days` of accrual: principal × rate% p.a. × days/365 in basis points (non-negative, uncapped — a long/high-rate period may exceed the principal), floored. */
 function couponAmount(principal: bigint, ratePct: number, days: number): bigint {
-  const bp = Math.min(10000, Math.max(0, Math.round((ratePct * days) / 365 * 100)));
+  const bp = Math.max(0, Math.round((ratePct * days) / 365 * 100));
   return (principal * BigInt(bp)) / 10000n;
 }
 

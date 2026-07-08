@@ -272,9 +272,23 @@ export class MemoryCashflowRepository implements CashflowRepository {
   async get(cfId: string): Promise<CashflowRecord | null> {
     return this.rows.get(cfId) ?? null;
   }
+  // claim/release/markExecuted mirror the Prisma repo's CAS semantics: each is a
+  // single synchronous mutation (no await between check and write), so the JS
+  // event loop makes it atomic with respect to concurrent requests.
+  async claim(cfId: string): Promise<boolean> {
+    const r = this.rows.get(cfId);
+    if (!r || r.status !== "scheduled") return false;
+    r.status = "executing";
+    return true;
+  }
+  async release(cfId: string): Promise<void> {
+    const r = this.rows.get(cfId);
+    if (r && r.status === "executing") r.status = "scheduled";
+  }
   async markExecuted(cfId: string, executedAt: string): Promise<CashflowRecord> {
     const r = this.rows.get(cfId);
     if (!r) throw new Error(`unknown cashflow '${cfId}'`);
+    if (r.status !== "executing") throw new Error(`cashflow '${cfId}' is '${r.status}', not 'executing' — claim it before marking executed`);
     r.status = "executed";
     r.executedAt = executedAt;
     return r;

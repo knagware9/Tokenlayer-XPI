@@ -8,6 +8,7 @@ const TONE: Record<Cashflow["status"], string> = {
   scheduled: "bg-slate-100 text-slate-500",
   due: "bg-amber-100 text-amber-700",
   overdue: "bg-red-100 text-red-700",
+  executing: "bg-brand-50 text-brand-700",
   executed: "bg-emerald-100 text-emerald-700",
 };
 
@@ -95,7 +96,13 @@ export function CashflowPanel({ asset, useCase, role, onChanged }: { asset: Asse
               onClick={() => {
                 const cf = rows.find((c) => c.kind === "redemption" && c.status !== "executed")!;
                 void run(async () => {
-                  await api.creditCash(token!, payer, cf.currency, repayAmount || cf.amount);
+                  // Credit only the SHORTFALL: a retry after a failed execute (or a
+                  // pre-funded payer) must not double-credit the repayment.
+                  const needed = BigInt(repayAmount || cf.amount);
+                  const balances = await api.cashBalances(token!, payer);
+                  const current = BigInt(balances.find((b) => b.currency === cf.currency)?.amount ?? "0");
+                  const shortfall = needed > current ? needed - current : 0n;
+                  if (shortfall > 0n) await api.creditCash(token!, payer, cf.currency, shortfall.toString());
                   await api.executeCashflow(token!, asset.id, cf.id, payer);
                 });
               }}

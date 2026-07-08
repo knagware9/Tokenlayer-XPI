@@ -19,6 +19,19 @@ describe("computeCashflowSchedule", () => {
     expect(() => computeCashflowSchedule({ ...TERMS }, { amountInr: 100, dueDate: "not-a-date" }, "2026-07-08T00:00:00.000Z")).toThrow(/INVALID_TERMS|date/);
   });
 
+  it("does not clamp the coupon rate: 150% p.a. for a full year may exceed the principal", () => {
+    // Issued 2026-01-01, matures 2027-01-01 (365 days); annual frequency → one stub coupon.
+    const rows = computeCashflowSchedule(
+      { ...TERMS, principalField: "faceValue", maturityField: "maturityDate", rateField: "couponRate", frequency: "annual" },
+      { faceValue: 100_000, maturityDate: "2027-01-01", couponRate: 150 },
+      "2026-01-01T00:00:00.000Z",
+    );
+    // bp = round(150 × 365 / 365 × 100) = 15000 → 100,000 × 15000 / 10000 = 150,000 (> principal).
+    expect(rows.map((r) => r.kind)).toEqual(["coupon", "redemption"]);
+    expect(rows[0]!.amount).toBe("150000");
+    expect(rows[1]!.amount).toBe("100000");
+  });
+
   it("quarterly → coupons stepping from issue, a final stub coupon, then redemption at maturity", () => {
     // Issued 2026-01-15, matures 2026-12-31, 10% p.a. on 1,000,000.
     const rows = computeCashflowSchedule(

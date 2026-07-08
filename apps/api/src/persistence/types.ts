@@ -205,8 +205,9 @@ export interface DocumentRepository {
 
 /**
  * A materialized financial-terms cashflow (coupon or redemption) for one asset.
- * Only "scheduled"/"executed" are persisted — "due"/"overdue" are derived from
- * the due date at read time (no background scheduler).
+ * Only "scheduled"/"executing"/"executed" are persisted — "due"/"overdue" are
+ * derived from the due date at read time (no background scheduler). "executing"
+ * is the execute route's atomic claim: it excludes concurrent double-payment.
  */
 export interface CashflowRecord {
   id: string;
@@ -216,7 +217,7 @@ export interface CashflowRecord {
   dueDate: string;
   amount: string;
   currency: string;
-  status: "scheduled" | "executed";
+  status: "scheduled" | "executing" | "executed";
   executedAt: string | null;
 }
 
@@ -224,6 +225,11 @@ export interface CashflowRepository {
   createMany(assetId: string, currency: string, rows: { seq: number; kind: "coupon" | "redemption"; dueDate: string; amount: string }[]): Promise<void>;
   listByAsset(assetId: string): Promise<CashflowRecord[]>; // ordered by seq asc
   get(id: string): Promise<CashflowRecord | null>;
+  /** Atomic CAS "scheduled"→"executing". True iff this caller won the claim. */
+  claim(id: string): Promise<boolean>;
+  /** Compensation: flip "executing"→"scheduled" so a failed execute is retryable. */
+  release(id: string): Promise<void>;
+  /** Finalize: "executing"→"executed" (+executedAt). Throws when the row is not "executing". */
   markExecuted(id: string, executedAt: string): Promise<CashflowRecord>;
 }
 

@@ -233,6 +233,20 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       if (existing) return reply.code(409).send({ error: "DUPLICATE_INVOICE", message: "an invoice with this fingerprint is already tokenized" });
     }
 
+    // Compute the financial-terms schedule (coupons + redemption) BEFORE the fee
+    // charge and the ledger issue: invalid terms metadata must reject the request
+    // outright — no fee moves and no ghost asset row is created. Empty when terms
+    // are inapplicable for this asset's metadata.
+    let schedule: ReturnType<typeof computeCashflowSchedule> = [];
+    if (useCase.terms) {
+      try {
+        schedule = computeCashflowSchedule(useCase.terms, meta, new Date().toISOString());
+      } catch (err) {
+        if (err instanceof PolicyError) return reply.code(400).send({ error: err.code, message: err.message });
+        throw err;
+      }
+    }
+
     // Issuance fee: a flat CBDC amount charged from the issuer's linked cash
     // account to the platform fee account. Applies only when: a fee account is
     // configured, fees.issuanceFlat > 0, and a fee currency is determinable (sale
@@ -279,13 +293,9 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         treasuryAccount: null,
         uniqueKey,
       });
-      // Materialize the financial-terms schedule (coupons + redemption) so the
-      // asset carries its cashflow ledger from birth. Empty when terms are
-      // inapplicable for this asset's metadata; invalid values → INVALID_TERMS.
-      if (useCase.terms) {
-        const schedule = computeCashflowSchedule(useCase.terms, meta, new Date().toISOString());
-        await deps.cashflows.createMany(id, useCase.terms.currency, schedule);
-      }
+      // Materialize the pre-computed financial-terms schedule so the asset
+      // carries its cashflow ledger from birth.
+      if (schedule.length) await deps.cashflows.createMany(id, useCase.terms!.currency, schedule);
       if (sale) {
         await deps.assets.setSaleTerms(id, sale);
       }
@@ -441,6 +451,10 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const { action } = request.params as { action: string };
     const asset = await scopedAsset(request, reply, "act");
     if (!asset) return reply;
+    // Every action on this route mutates state — none may touch a matured/retired asset.
+    if (asset.status !== "active") {
+      return reply.code(409).send({ error: "ASSET_NOT_ACTIVE", message: `asset is ${asset.status}` });
+    }
     const actor = actorOf(request);
     const ctx = contextOf(asset);
     const b = (request.body ?? {}) as Record<string, string>;
@@ -496,6 +510,9 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const asset = await deps.assets.get((request.params as { id: string }).id);
     if (!asset) return notFound(reply, "asset not found");
     if (!scopedToCaller(request.user as TokenClaims, asset.useCaseKey)) return notFound(reply, "asset not found");
+    if (asset.status !== "active") {
+      return reply.code(409).send({ error: "ASSET_NOT_ACTIVE", message: `asset is ${asset.status}` });
+    }
     if (!asset.unitPrice || !asset.currency || !asset.treasuryAccount) {
       return reply.code(400).send({ error: "NO_SALE_TERMS", message: "this asset is not listed for sale" });
     }
@@ -947,9 +964,11 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
 
   // --- cashflows (financial terms servicing) --------------------------------
 
-  // Derived read-time status — never stored; "due"/"overdue" flow from the date.
-  function cashflowStatus(cf: CashflowRecord, today: string): "scheduled" | "due" | "overdue" | "executed" {
+  // Derived read-time status — "due"/"overdue" flow from the date; the stored
+  // "executing" (an in-flight execute claim) surfaces as-is.
+  function cashflowStatus(cf: CashflowRecord, today: string): "scheduled" | "due" | "overdue" | "executing" | "executed" {
     if (cf.status === "executed") return "executed";
+    if (cf.status === "executing") return "executing";
     if (cf.dueDate < today) return "overdue";
     if (cf.dueDate === today) return "due";
     return "scheduled";
@@ -958,9 +977,18 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   // Current positive balances from the audit fold (source of truth shared with
   // analytics/compliance). listByAsset returns DESC — sort ASC before folding.
   async function assetBalances(assetId: string): Promise<Map<string, bigint>> {
-    const { items } = await deps.audit.listByAsset(assetId, { limit: 10000 });
+    const { items } = await deps.audit.listByAsset(assetId, { limit: 100000 });
     const asc = [...items].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     return foldAsset(asc).balances;
+  }
+
+  // The payer keeps its own pro-rata share — drop it from the split. Address
+  // casing is not canonical across sources, so compare case-insensitively.
+  function dropPayerShare(split: Map<string, bigint>, payer: string): void {
+    const lower = payer.toLowerCase();
+    for (const key of [...split.keys()]) {
+      if (key.toLowerCase() === lower) split.delete(key);
+    }
   }
 
   app.get("/assets/:id/cashflows", { schema: S.listCashflows, ...auth }, async (request, reply) => {
@@ -973,6 +1001,8 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     let preview: { cashflowId: string; split: { address: string; amount: string }[] } | null = null;
     if (next) {
       const split = splitProRata(BigInt(next.amount), await assetBalances(asset.id));
+      // Mirror the execute route: the default payer (the treasury) keeps its own share.
+      if (asset.treasuryAccount) dropPayerShare(split, asset.treasuryAccount);
       preview = { cashflowId: next.id, split: [...split].map(([address, amount]) => ({ address, amount: amount.toString() })) };
     }
     return { cashflows: rows, preview };
@@ -980,9 +1010,9 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
 
   // Execute a cashflow: pay every holder its pro-rata share of the amount from
   // the payer's cash account; a redemption additionally burns all remaining
-  // balances and matures the asset. Note the engine independently gates `burn`,
-  // so redemption effectively requires UseCaseAdmin/PlatformAdmin while coupons
-  // work for an Issuer.
+  // balances and matures the asset. Redemption is gated on the `burn`
+  // capability up front, so an Issuer (no burn) is rejected before any money
+  // moves; coupons work for an Issuer.
   app.post("/assets/:id/cashflows/:cfId/execute", { schema: S.executeCashflow, ...auth }, async (request, reply) => {
     const asset = await scopedAsset(request, reply, "act");
     if (!asset) return reply;
@@ -993,6 +1023,12 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const { cfId } = request.params as { id: string; cfId: string };
     const cf = await deps.cashflows.get(cfId);
     if (!cf || cf.assetId !== asset.id) return notFound(reply, "cashflow not found");
+    // A redemption burns balances at the end — require the capability BEFORE any
+    // money moves, or an Issuer would pay holders and then fail mid-burn.
+    if (cf.kind === "redemption" && !deps.rbac.can(actor.role, "burn")) {
+      return reply.code(403).send({ error: "FORBIDDEN", message: `role '${actor.role}' lacks the 'burn' capability required to settle a redemption` });
+    }
+    // Friendly pre-check; the atomic claim below is the authoritative guard.
     if (cf.status === "executed") return reply.code(409).send({ error: "ALREADY_EXECUTED", message: "this cashflow was already executed" });
 
     const today = new Date().toISOString().slice(0, 10);
@@ -1000,54 +1036,99 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (cf.kind === "coupon" && cf.dueDate > today) {
       return reply.code(400).send({ error: "NOT_DUE", message: `coupon is due ${cf.dueDate}` });
     }
+    // Settling the redemption marks the asset matured and burns balances, which
+    // would silently forfeit any earlier coupon that was never paid out.
     if (cf.kind === "redemption") {
-      const open = await deps.listings.listByAsset(asset.id, "open");
-      if (open.length > 0) {
-        return reply.code(409).send({ error: "OPEN_LISTINGS_BLOCK_SETTLEMENT", message: "cancel open listings before settling — escrowed tokens cannot be redeemed" });
+      const siblings = await deps.cashflows.listByAsset(asset.id);
+      if (siblings.some((s) => s.seq < cf.seq && s.status !== "executed")) {
+        return reply.code(409).send({ error: "COUPONS_OUTSTANDING", message: "execute all coupons before settling the redemption" });
       }
     }
 
     const payer = (request.body as { from?: string } | null)?.from ?? asset.treasuryAccount ?? null;
     if (!payer) return reply.code(400).send({ error: "NO_PAYER", message: "supply 'from' (the funded payer account) — this asset has no treasury account" });
+    // Payer authorization: the asset's own treasury is always a valid payer;
+    // any other account must be within the caller's use-case scope (mirrors
+    // /cash/credit). PlatformAdmin is unrestricted via scopedAccounts.
+    const claims = request.user as TokenClaims;
+    const isTreasuryPayer = asset.treasuryAccount !== null && asset.treasuryAccount.toLowerCase() === payer.toLowerCase();
+    if (!isTreasuryPayer && claims.role !== "PlatformAdmin") {
+      const scoped = await scopedAccounts(claims);
+      if (!scoped.some((a) => a.address === payer)) {
+        return reply.code(403).send({ error: "OUT_OF_SCOPE", message: "that payer account is not in your use case" });
+      }
+    }
 
     const balances = await assetBalances(asset.id);
     const split = splitProRata(BigInt(cf.amount), balances);
-    split.delete(payer); // the payer's own share stays with the payer
+    dropPayerShare(split, payer); // the payer's own share stays with the payer
+    if (split.size === 0) {
+      return reply.code(400).send({ error: "NO_HOLDERS", message: "no positive balances to pay" });
+    }
     let payable = 0n;
     for (const v of split.values()) payable += v;
     if (BigInt(await deps.cash.balanceOf(cf.currency, payer)) < payable) {
       return reply.code(400).send({ error: "INSUFFICIENT_TREASURY_FUNDS", message: `payer needs ${payable} ${cf.currency} (record the repayment via /cash/credit first)` });
     }
 
-    // Pay sequentially with compensation on failure (mirrors the buy path).
+    // ATOMIC CLAIM — flip scheduled → executing so no concurrent execute of the
+    // same cashflow can double-pay. Everything after this either completes to
+    // "executed" or compensates (refunds) and releases back to "scheduled".
+    if (!(await deps.cashflows.claim(cf.id))) {
+      return reply.code(409).send({ error: "ALREADY_EXECUTED", message: "this cashflow was already executed" });
+    }
+
+    const releaseClaim = () =>
+      deps.cashflows.release(cf.id).catch((releaseErr) => {
+        request.log.error({ releaseErr, cashflowId: cf.id }, "cashflow claim release failed — row stuck 'executing', manual reconciliation required");
+      });
+
     const paid: [string, bigint][] = [];
+    let executed: CashflowRecord;
     try {
+      // Re-check open listings AFTER the claim (shrinks the race window with a
+      // concurrent listing creation): escrowed tokens cannot be redeemed.
+      if (cf.kind === "redemption") {
+        const open = await deps.listings.listByAsset(asset.id, "open");
+        if (open.length > 0) {
+          await releaseClaim();
+          return reply.code(409).send({ error: "OPEN_LISTINGS_BLOCK_SETTLEMENT", message: "cancel open listings before settling — escrowed tokens cannot be redeemed" });
+        }
+      }
+
+      // Pay sequentially; compensation on any later failure (mirrors the buy path).
       for (const [addr, amount] of split) {
         await deps.cash.transfer(cf.currency, payer, addr, amount.toString());
         paid.push([addr, amount]);
       }
-    } catch (err) {
-      for (const [addr, amount] of paid) {
-        await deps.cash.transfer(cf.currency, addr, payer, amount.toString()).catch(() => {});
+
+      // Redemption closes the lifecycle: burn every remaining balance, mature the asset.
+      if (cf.kind === "redemption") {
+        const ctx = contextOf(asset);
+        for (const [addr, bal] of balances) {
+          if (bal > 0n) await deps.engine.burn(actor, ctx, addr, bal.toString());
+        }
+        await deps.assets.setStatus(asset.id, "matured");
       }
+
+      executed = await deps.cashflows.markExecuted(cf.id, new Date().toISOString());
+    } catch (err) {
+      // Best-effort refunds of whatever was paid, then release the claim so the
+      // cashflow is retryable, then surface the real cause.
+      for (const [addr, amount] of paid) {
+        await deps.cash.transfer(cf.currency, addr, payer, amount.toString()).catch((refundErr) => {
+          request.log.error({ refundErr, addr, amount: amount.toString(), cashflowId: cf.id }, "cashflow refund compensation failed — manual reconciliation required");
+        });
+      }
+      await releaseClaim();
       throw err;
     }
 
-    // Redemption closes the lifecycle: burn every remaining balance, mature the asset.
-    if (cf.kind === "redemption") {
-      const ctx = contextOf(asset);
-      for (const [addr, bal] of balances) {
-        if (bal > 0n) await deps.engine.burn(actor, ctx, addr, bal.toString());
-      }
-      await deps.assets.setStatus(asset.id, "matured");
-    }
-
-    const executed = await deps.cashflows.markExecuted(cf.id, new Date().toISOString());
     await deps.audit.append({
       assetId: asset.id,
       actorId: actor.id,
       action: cf.kind === "redemption" ? "redeem" : "distribute",
-      payload: { currency: cf.currency, amount: cf.amount, holders: split.size, from: payer, seq: cf.seq },
+      payload: { currency: cf.currency, amount: cf.amount, paid: payable.toString(), holders: split.size, from: payer, seq: cf.seq },
       chainId: asset.chainId,
     });
     return { cashflow: { ...executed, status: "executed" } };

@@ -117,8 +117,8 @@ model CashBalance {
 }
 
 // A materialized financial-terms cashflow (coupon or redemption) for one asset,
-// created at issue from the use case's `terms`. Only "scheduled"/"executed" are
-// stored — "due"/"overdue" are derived from the date at read time.
+// created at issue from the use case's `terms`. Only "scheduled"/"executing"/
+// "executed" are stored — "due"/"overdue" are derived from the date at read time.
 model Cashflow {
   id         String    @id @default(cuid())
   assetId    String
@@ -127,7 +127,7 @@ model Cashflow {
   dueDate    String // YYYY-MM-DD
   amount     String // integer decimal string
   currency   String
-  status     String    @default("scheduled") // "scheduled" | "executed"
+  status     String    @default("scheduled") // "scheduled" | "executing" | "executed"
   executedAt DateTime?
   createdAt  DateTime  @default(now())
 

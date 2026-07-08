@@ -491,8 +491,19 @@ export class PrismaCashflowRepository implements CashflowRepository {
     const r = await prisma.cashflow.findUnique({ where: { id } });
     return r ? toCashflow(r) : null;
   }
+  async claim(id: string): Promise<boolean> {
+    // Atomic CAS: only one concurrent execute can flip scheduled → executing.
+    const { count } = await prisma.cashflow.updateMany({ where: { id, status: "scheduled" }, data: { status: "executing" } });
+    return count === 1;
+  }
+  async release(id: string): Promise<void> {
+    await prisma.cashflow.updateMany({ where: { id, status: "executing" }, data: { status: "scheduled" } });
+  }
   async markExecuted(id: string, executedAt: string): Promise<CashflowRecord> {
-    return toCashflow(await prisma.cashflow.update({ where: { id }, data: { status: "executed", executedAt: new Date(executedAt) } }));
+    const { count } = await prisma.cashflow.updateMany({ where: { id, status: "executing" }, data: { status: "executed", executedAt: new Date(executedAt) } });
+    if (count !== 1) throw new Error(`cashflow '${id}' is not 'executing' — claim it before marking executed`);
+    const r = await prisma.cashflow.findUnique({ where: { id } });
+    return toCashflow(r!);
   }
 }
 
