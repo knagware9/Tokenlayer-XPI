@@ -152,6 +152,29 @@ export interface Trade {
   secondary: boolean;
 }
 
+export interface ProposalApproval {
+  userId: string;
+  email: string;
+  at: string;
+}
+
+/** A maker-checker proposal: a gated operation captured pending approval. */
+export interface Proposal {
+  id: string;
+  useCaseKey: string;
+  assetId: string | null;
+  kind: string;
+  payload: Record<string, unknown>;
+  proposerId: string;
+  proposerLabel: string;
+  required: number;
+  approvals: ProposalApproval[];
+  status: "pending" | "approved" | "rejected" | "executed" | "failed";
+  error: string | null;
+  createdAt: string;
+  decidedAt: string | null;
+}
+
 export interface AuditEntry {
   id: string;
   assetId?: string;

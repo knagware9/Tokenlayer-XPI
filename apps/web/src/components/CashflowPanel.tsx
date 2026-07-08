@@ -28,6 +28,7 @@ export function CashflowPanel({ asset, useCase, role, onChanged }: { asset: Asse
   const [repayAmount, setRepayAmount] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     if (!token) return;
@@ -45,8 +46,13 @@ export function CashflowPanel({ asset, useCase, role, onChanged }: { asset: Asse
   async function run(fn: () => Promise<unknown>): Promise<void> {
     setBusy(true);
     setError(null);
+    setInfo(null);
     try {
-      await fn();
+      const res = await fn();
+      // Maker-checker: a gated settlement returns a pending proposal (202), not a payout.
+      if (res && typeof res === "object" && "proposal" in res && (res as { proposal?: unknown }).proposal) {
+        setInfo("Submitted for approval — pending in the Approvals tab.");
+      }
       await reload();
       onChanged();
     } catch (err) {
@@ -60,6 +66,7 @@ export function CashflowPanel({ asset, useCase, role, onChanged }: { asset: Asse
     <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-4">
       <h3 className="text-sm font-semibold text-slate-800">Cashflows & settlement</h3>
       {error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2">{error}</div>}
+      {info && <div className="rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-2">{info}</div>}
       <table className="w-full text-sm">
         <thead className="text-xs text-slate-500 uppercase tracking-wide">
           <tr><th className="text-left py-1.5">#</th><th className="text-left">Type</th><th className="text-left">Due</th><th className="text-right">Amount</th><th className="text-left pl-4">Status</th><th /></tr>
@@ -103,7 +110,7 @@ export function CashflowPanel({ asset, useCase, role, onChanged }: { asset: Asse
                   const current = BigInt(balances.find((b) => b.currency === cf.currency)?.amount ?? "0");
                   const shortfall = needed > current ? needed - current : 0n;
                   if (shortfall > 0n) await api.creditCash(token!, payer, cf.currency, shortfall.toString());
-                  await api.executeCashflow(token!, asset.id, cf.id, payer);
+                  return api.executeCashflow(token!, asset.id, cf.id, payer);
                 });
               }}
               className="rounded-lg bg-brand-600 text-white px-4 py-1.5 text-sm font-medium hover:bg-brand-700 disabled:opacity-50"
