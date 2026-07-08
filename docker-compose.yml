@@ -23,6 +23,9 @@ services:
       # addresses exempt from holder rules; enable the DvP marketplace for the demo.
       MARKET_ESCROW_ACCOUNT: ${MARKET_ESCROW_ACCOUNT:-0x000000000000000000000000000000000000E5C0}
       PLATFORM_FEE_ACCOUNT: ${PLATFORM_FEE_ACCOUNT:-0x000000000000000000000000000000000000FEE5}
+      # Shared demo: many users authenticate from one egress IP — raise the
+      # per-IP login throttle above the secure default (10).
+      LOGIN_RATE_LIMIT_MAX: ${LOGIN_RATE_LIMIT_MAX:-200}
     volumes:
       - api-data:/data
     ports:

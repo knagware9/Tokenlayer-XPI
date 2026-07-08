@@ -11,7 +11,10 @@ function isNonNegativeIntegerString(v: unknown): boolean {
   return typeof v === "string" && /^\d+$/.test(v);
 }
 
-function isHttpUrl(v: string): boolean {
+function isDocumentRef(v: string): boolean {
+  // Accept an absolute http(s) URL (an external document vault) OR a same-origin
+  // relative path (the platform's own document store returns "/api/v1/documents/:id").
+  if (v.startsWith("/")) return true;
   try {
     const u = new URL(v);
     return u.protocol === "http:" || u.protocol === "https:";
@@ -299,8 +302,8 @@ export function validateMetadata(metadata: Record<string, unknown>, schema: Meta
     }
 
     if (prop.type === "document") {
-      if (!isHttpUrl(value as string)) {
-        problems.push(`field '${name}' must be an http(s) URL`);
+      if (!isDocumentRef(value as string)) {
+        problems.push(`field '${name}' must be an http(s) URL or an uploaded-document path`);
       }
     }
     if (prop.enum !== undefined && !prop.enum.includes(value as string)) {
