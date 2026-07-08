@@ -71,6 +71,8 @@ export interface UseCase {
   uniqueBy?: string;
   /** Financial terms template driving the cashflow schedule. */
   terms?: { principalField: string; maturityField: string; rateField?: string; frequency?: string; currency: string };
+  /** Maker-checker policy: gated op → required approvals. */
+  workflow?: { approvals?: Record<string, number> };
   roles: Role[];
 }
 

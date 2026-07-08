@@ -75,6 +75,7 @@
     "currency": "INR"
   },
   "terms": { "principalField": "amountInr", "maturityField": "dueDate", "frequency": "atMaturity", "currency": "CBDC-INR" },
+  "workflow": { "approvals": { "cashflow-execute": 1 } },
   "derivedFields": { "invoiceHash": "invoiceFingerprint" },
   "uniqueBy": "invoiceHash",
   "roles": ["UseCaseAdmin", "Issuer", "Buyer", "Auditor"]
