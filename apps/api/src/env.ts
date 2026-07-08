@@ -69,6 +69,12 @@ export interface Env {
    * address outside production so the market is usable out of the box.
    */
   marketEscrowAccount?: string;
+  /**
+   * Max login attempts per IP per 15-min window. Unset → the route default (10),
+   * which is the right security posture for production; raise it for shared
+   * demo/load environments where many users authenticate from one egress IP.
+   */
+  loginRateLimitMax?: number;
 }
 
 const platformFeeAccount =
@@ -89,4 +95,5 @@ export const env: Env = {
   evmOperatorKey: process.env.EVM_OPERATOR_KEY,
   platformFeeAccount,
   marketEscrowAccount,
+  loginRateLimitMax: process.env.LOGIN_RATE_LIMIT_MAX ? Number(process.env.LOGIN_RATE_LIMIT_MAX) : undefined,
 };

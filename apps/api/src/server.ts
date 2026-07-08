@@ -64,6 +64,7 @@ async function main(): Promise<void> {
     isProduction: env.nodeEnv === "production",
     platformFeeAccount: env.platformFeeAccount,
     marketEscrowAccount: env.marketEscrowAccount,
+    loginRateLimitMax: env.loginRateLimitMax,
   });
 
   await app.listen({ port: env.port, host: "0.0.0.0" });
