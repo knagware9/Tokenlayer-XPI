@@ -24,6 +24,8 @@ export type LifecycleAction =
   | "buy"
   | "list"
   | "cancel-listing"
+  | "distribute"
+  | "redeem"
   | "read";
 
 /** Kind of token a use case issues. */

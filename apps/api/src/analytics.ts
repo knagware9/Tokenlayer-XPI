@@ -137,6 +137,10 @@ function summarize(action: string, p: Record<string, unknown>): string {
       return `${String(p.amount ?? "")} ${short(p.from)}→${short(p.to)} @ ${String(p.unitPrice ?? "")} ${String(p.currency ?? "")}`;
     case "issue":
       return "issued";
+    case "distribute":
+      return `coupon ${String(p.amount ?? "")} ${String(p.currency ?? "")} → ${String(p.holders ?? "?")} holder(s)`;
+    case "redeem":
+      return `redeemed ${String(p.amount ?? "")} ${String(p.currency ?? "")} → ${String(p.holders ?? "?")} holder(s)`;
     case "freeze":
     case "unfreeze":
     case "allow":

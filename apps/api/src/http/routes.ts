@@ -978,6 +978,81 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return { cashflows: rows, preview };
   });
 
+  // Execute a cashflow: pay every holder its pro-rata share of the amount from
+  // the payer's cash account; a redemption additionally burns all remaining
+  // balances and matures the asset. Note the engine independently gates `burn`,
+  // so redemption effectively requires UseCaseAdmin/PlatformAdmin while coupons
+  // work for an Issuer.
+  app.post("/assets/:id/cashflows/:cfId/execute", { schema: S.executeCashflow, ...auth }, async (request, reply) => {
+    const asset = await scopedAsset(request, reply, "act");
+    if (!asset) return reply;
+    const actor = actorOf(request);
+    if (!deps.rbac.can(actor.role, "issue")) {
+      return reply.code(403).send({ error: "FORBIDDEN", message: `role '${actor.role}' may not execute cashflows` });
+    }
+    const { cfId } = request.params as { id: string; cfId: string };
+    const cf = await deps.cashflows.get(cfId);
+    if (!cf || cf.assetId !== asset.id) return notFound(reply, "cashflow not found");
+    if (cf.status === "executed") return reply.code(409).send({ error: "ALREADY_EXECUTED", message: "this cashflow was already executed" });
+
+    const today = new Date().toISOString().slice(0, 10);
+    // Coupons pay only once due; redemption may settle early (early repayment).
+    if (cf.kind === "coupon" && cf.dueDate > today) {
+      return reply.code(400).send({ error: "NOT_DUE", message: `coupon is due ${cf.dueDate}` });
+    }
+    if (cf.kind === "redemption") {
+      const open = await deps.listings.listByAsset(asset.id, "open");
+      if (open.length > 0) {
+        return reply.code(409).send({ error: "OPEN_LISTINGS_BLOCK_SETTLEMENT", message: "cancel open listings before settling — escrowed tokens cannot be redeemed" });
+      }
+    }
+
+    const payer = (request.body as { from?: string } | null)?.from ?? asset.treasuryAccount ?? null;
+    if (!payer) return reply.code(400).send({ error: "NO_PAYER", message: "supply 'from' (the funded payer account) — this asset has no treasury account" });
+
+    const balances = await assetBalances(asset.id);
+    const split = splitProRata(BigInt(cf.amount), balances);
+    split.delete(payer); // the payer's own share stays with the payer
+    let payable = 0n;
+    for (const v of split.values()) payable += v;
+    if (BigInt(await deps.cash.balanceOf(cf.currency, payer)) < payable) {
+      return reply.code(400).send({ error: "INSUFFICIENT_TREASURY_FUNDS", message: `payer needs ${payable} ${cf.currency} (record the repayment via /cash/credit first)` });
+    }
+
+    // Pay sequentially with compensation on failure (mirrors the buy path).
+    const paid: [string, bigint][] = [];
+    try {
+      for (const [addr, amount] of split) {
+        await deps.cash.transfer(cf.currency, payer, addr, amount.toString());
+        paid.push([addr, amount]);
+      }
+    } catch (err) {
+      for (const [addr, amount] of paid) {
+        await deps.cash.transfer(cf.currency, addr, payer, amount.toString()).catch(() => {});
+      }
+      throw err;
+    }
+
+    // Redemption closes the lifecycle: burn every remaining balance, mature the asset.
+    if (cf.kind === "redemption") {
+      const ctx = contextOf(asset);
+      for (const [addr, bal] of balances) {
+        if (bal > 0n) await deps.engine.burn(actor, ctx, addr, bal.toString());
+      }
+      await deps.assets.setStatus(asset.id, "matured");
+    }
+
+    const executed = await deps.cashflows.markExecuted(cf.id, new Date().toISOString());
+    await deps.audit.append({
+      assetId: asset.id,
+      actorId: actor.id,
+      action: cf.kind === "redemption" ? "redeem" : "distribute",
+      payload: { currency: cf.currency, amount: cf.amount, holders: split.size, from: payer, seq: cf.seq },
+      chainId: asset.chainId,
+    });
+    return { cashflow: { ...executed, status: "executed" } };
+  });
+
   // --- documents ----------------------------------------------------------
   // A small document store so the dashboard can upload a file (e.g. an invoice
   // PDF) and reference it from asset metadata by URL + sha256.

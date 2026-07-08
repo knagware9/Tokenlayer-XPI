@@ -681,6 +681,25 @@ export const S: Record<string, FastifySchema> = {
     },
   },
 
+  executeCashflow: {
+    tags: ["Cashflows"], summary: "Execute a cashflow — pro-rata cash payout; redemption burns balances + matures the asset", security: bearer,
+    params: { type: "object", required: ["id", "cfId"], properties: { id: { type: "string" }, cfId: { type: "string" } } },
+    body: {
+      type: "object",
+      additionalProperties: false,
+      properties: { from: { type: "string" } },
+    },
+    response: {
+      200: {
+        type: "object",
+        additionalProperties: true,
+        properties: { cashflow: { $ref: "Cashflow#" } },
+        required: ["cashflow"],
+      },
+      ...errs(400, 401, 403, 404, 409),
+    },
+  },
+
   creditCash: {
     tags: ["Cash"], summary: "Fund an account with CBDC / cash (Issuer / admin only)", security: bearer,
     body: {
