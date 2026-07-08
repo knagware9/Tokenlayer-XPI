@@ -69,6 +69,8 @@ export interface UseCase {
   derivedFields?: Record<string, string>;
   /** A metadata field whose value must be unique across the use case's assets. */
   uniqueBy?: string;
+  /** Financial terms template driving the cashflow schedule. */
+  terms?: { principalField: string; maturityField: string; rateField?: string; frequency?: string; currency: string };
   roles: Role[];
 }
 
