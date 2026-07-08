@@ -1,14 +1,14 @@
 import { randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { AssetRecord, CashflowRecord, KycDetails, KycStatus, ListingRecord } from "../persistence/types.js";
+import type { AssetRecord, CashflowRecord, KycDetails, KycStatus, ListingRecord, ProposalRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { canCreateUser, canManageUsers, computeCashflowSchedule, invoiceFingerprint, normalizeUseCaseDefinition, PolicyError, splitProRata, type Role, type UseCaseDefinition } from "@tokenlayer/core";
+import { canCreateUser, canManageUsers, computeCashflowSchedule, invoiceFingerprint, normalizeUseCaseDefinition, PolicyError, splitProRata, type Actor, type LifecycleAction, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { isSupportedCurrency } from "../currencies.js";
 import { deployUseCaseContracts } from "../use-cases.js";
 import { computeAnalytics } from "../analytics.js";
-import { assetBalancesOf, CodedError, dropPayerShare, executeCashflowCore, executeIssueActivation, runGatedAction } from "../executors.js";
+import { assetBalancesOf, coded, CodedError, dropPayerShare, executeCashflowCore, executeIssueActivation, runGatedAction } from "../executors.js";
 import { S } from "./schemas.js";
 import { actorOf, contextOf, isPositiveIntString, notFound, requireUser, scopedToCaller, type TokenClaims } from "./support.js";
 
@@ -60,6 +60,29 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const users = await deps.users.list(claims.useCaseKey ?? NO_USE_CASE);
     const allowed = new Set(users.map((u) => u.accountId).filter((id): id is string => !!id));
     return all.filter((a) => allowed.has(a.id));
+  }
+
+  // Maker-checker capability an approver must hold for each gated op. Every op
+  // maps to itself except cashflow-execute, which mirrors its route gate (issue).
+  const CAPABILITY_FOR: Record<string, LifecycleAction> = {
+    issue: "issue", mint: "mint", transfer: "transfer", burn: "burn",
+    freeze: "freeze", unfreeze: "unfreeze", "cashflow-execute": "issue",
+  };
+
+  // When the use case gates `op`, capture the operation as a pending Proposal
+  // instead of executing it. Returns the proposal (→ 202) or null when ungated.
+  // The caller must have already run every request-time validation for the op.
+  async function proposeIfGated(
+    request: FastifyRequest,
+    useCase: UseCaseDefinition,
+    op: string,
+    assetId: string | null,
+    payload: Record<string, unknown>,
+  ): Promise<ProposalRecord | null> {
+    const required = useCase.workflow?.approvals?.[op as keyof NonNullable<NonNullable<UseCaseDefinition["workflow"]>["approvals"]>];
+    if (!required || required < 1) return null;
+    const claims = request.user as TokenClaims;
+    return deps.proposals.create({ useCaseKey: useCase.key, assetId, kind: op, payload, proposerId: claims.id, proposerLabel: claims.email, required });
   }
 
   // --- auth ---------------------------------------------------------------
@@ -214,6 +237,9 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (wantsSupply && useCase.tokenType !== "fungible") {
       return reply.code(400).send({ error: "SUPPLY_UNSUPPORTED", message: "initial supply is only supported for fungible assets" });
     }
+    // Gated issuance: the asset is created `pending_approval` (frozen to actions/
+    // buy/listings) and its supply mint + sale terms are deferred to approval.
+    const gatedIssue = !!useCase.workflow?.approvals?.issue;
 
     // Resolve issuance metadata: compute any server-derived fields (e.g. the
     // invoice fingerprint) from their source fields, overwriting any client value,
@@ -286,7 +312,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         tokenType: result.tokenType,
         tokenStandard: useCase.tokenStandard,
         metadata: meta,
-        status: "active",
+        status: gatedIssue ? "pending_approval" : "active",
         createdBy: actor.id,
         unitPrice: null,
         currency: null,
@@ -296,9 +322,17 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       // Materialize the pre-computed financial-terms schedule so the asset
       // carries its cashflow ledger from birth.
       if (schedule.length) await deps.cashflows.createMany(id, useCase.terms!.currency, schedule);
-      // Activate: set sale terms + allowlist the treasury + mint the initial
-      // supply. Shared with the maker-checker approval path (deferred until
-      // approval when issuance is gated).
+
+      if (gatedIssue) {
+        // Defer supply mint + sale terms to approval; capture them in the proposal.
+        const proposal = await proposeIfGated(request, useCase, "issue", id, {
+          ...(wantsSupply ? { initialSupply, treasury } : {}),
+          ...(sale ? { sale } : {}),
+          ...(issuanceFeeCharged ? { issuanceFee: { ...issuanceFeeCharged, payer: feePayer } } : {}),
+        });
+        return reply.code(202).send({ proposal, asset: await deps.assets.get(id) });
+      }
+      // Ungated: activate immediately — sale terms + allowlist treasury + mint supply.
       const created = await deps.assets.get(id);
       await executeIssueActivation(deps, actor, created!, {
         initialSupply: wantsSupply ? initialSupply : undefined,
@@ -454,6 +488,21 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const actor = actorOf(request);
     const ctx = contextOf(asset);
     const b = (request.body ?? {}) as Record<string, string>;
+
+    // Maker-checker: gate mint/transfer/burn/freeze/unfreeze when configured. The
+    // proposer must hold the capability up front (so they can't propose what they
+    // couldn't do), then the operation is captured as a pending proposal.
+    if (["mint", "transfer", "burn", "freeze", "unfreeze"].includes(action)) {
+      try {
+        deps.rbac.authorize(actor, action as LifecycleAction);
+      } catch (err) {
+        if (err instanceof PolicyError) return reply.code(403).send({ error: err.code, message: err.message });
+        throw err;
+      }
+      const useCase = await deps.useCases.get(asset.useCaseKey);
+      const proposal = await proposeIfGated(request, useCase, action, asset.id, { action, body: b });
+      if (proposal) return reply.code(202).send({ proposal });
+    }
 
     let receipt;
     switch (action) {
@@ -1037,6 +1086,12 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       }
     }
 
+    // Maker-checker: when settlement is gated, capture it (all validations above
+    // have already passed) as a pending proposal instead of paying out now.
+    const useCase = await deps.useCases.get(asset.useCaseKey);
+    const proposal = await proposeIfGated(request, useCase, "cashflow-execute", asset.id, { cfId: cf.id, from: payer });
+    if (proposal) return reply.code(202).send({ proposal });
+
     // Pro-rata payout + (redemption) burn/mature + markExecuted + audit — shared
     // with the maker-checker approval path (executed as the proposer there).
     try {
@@ -1047,6 +1102,99 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       throw err;
     }
   });
+
+  // --- maker-checker proposals --------------------------------------------
+  async function scopedProposal(request: FastifyRequest, reply: FastifyReply): Promise<ProposalRecord | null> {
+    const { id } = request.params as { id: string };
+    const p = await deps.proposals.get(id);
+    if (!p || !scopedToCaller(request.user as TokenClaims, p.useCaseKey)) {
+      notFound(reply, "proposal not found");
+      return null;
+    }
+    return p;
+  }
+
+  app.get("/proposals", { schema: S.listProposals, ...auth }, async (request) => {
+    const claims = request.user as TokenClaims;
+    const q = request.query as { status?: string; useCaseKey?: string };
+    const useCaseKey = claims.role === "PlatformAdmin" ? q.useCaseKey : claims.useCaseKey ?? NO_USE_CASE;
+    return deps.proposals.list(useCaseKey, q.status);
+  });
+
+  // Run the finalized proposal's operation as the PROPOSER's identity (RBAC +
+  // engine compliance re-apply to the proposer at execution time).
+  async function executeProposal(request: FastifyRequest, p: ProposalRecord, proposer: Actor): Promise<void> {
+    const asset = p.assetId ? await deps.assets.get(p.assetId) : null;
+    if (p.kind === "issue") {
+      if (!asset) throw coded(404, "NOT_FOUND", "pending asset missing");
+      await executeIssueActivation(deps, proposer, asset, p.payload as Parameters<typeof executeIssueActivation>[3]);
+    } else if (p.kind === "cashflow-execute") {
+      if (!asset) throw coded(404, "NOT_FOUND", "asset missing");
+      const cf = await deps.cashflows.get(String(p.payload.cfId));
+      if (!cf || cf.assetId !== asset.id) throw coded(404, "NOT_FOUND", "cashflow missing");
+      await executeCashflowCore(deps, proposer, asset, cf, String(p.payload.from), request.log);
+    } else {
+      if (!asset) throw coded(404, "NOT_FOUND", "asset missing");
+      await runGatedAction(deps, proposer, asset, p.kind, (p.payload.body ?? {}) as Record<string, string>);
+    }
+  }
+
+  async function decide(request: FastifyRequest, reply: FastifyReply, verdict: "approve" | "reject") {
+    const p = await scopedProposal(request, reply);
+    if (!p) return reply;
+    const claims = request.user as TokenClaims;
+    if (p.status !== "pending") return reply.code(409).send({ error: "PROPOSAL_NOT_PENDING", message: `proposal is ${p.status}` });
+    if (claims.id === p.proposerId) return reply.code(403).send({ error: "SELF_APPROVAL", message: "the proposer may not decide their own proposal" });
+    const capability = CAPABILITY_FOR[p.kind];
+    if (!capability || !deps.rbac.can(claims.role, capability)) {
+      return reply.code(403).send({ error: "NOT_ELIGIBLE", message: `role '${claims.role}' may not decide '${p.kind}' proposals` });
+    }
+
+    if (verdict === "reject") {
+      if (!(await deps.proposals.claimApproved(p.id))) return reply.code(409).send({ error: "PROPOSAL_NOT_PENDING", message: "already decided" });
+      const rejected = await deps.proposals.setStatus(p.id, "rejected");
+      if (p.kind === "issue" && p.assetId) {
+        await deps.assets.setStatus(p.assetId, "rejected");
+        // Refund any issuance fee charged at propose time (best-effort).
+        const fee = p.payload.issuanceFee as { amount: string; currency: string; payer?: string } | undefined;
+        if (fee?.payer && deps.platformFeeAccount) {
+          await deps.cash.transfer(fee.currency, deps.platformFeeAccount, fee.payer, fee.amount).catch((refundErr) =>
+            request.log.error({ refundErr, proposalId: p.id }, "issuance fee refund on rejection failed — manual reconciliation required"));
+        }
+      }
+      return { proposal: rejected };
+    }
+
+    let withApproval: ProposalRecord;
+    try {
+      withApproval = await deps.proposals.addApproval(p.id, { userId: claims.id, email: claims.email, at: new Date().toISOString() });
+    } catch (err) {
+      if ((err as { code?: string }).code === "ALREADY_APPROVED") {
+        return reply.code(409).send({ error: "ALREADY_APPROVED_BY_YOU", message: "you already approved this proposal" });
+      }
+      throw err;
+    }
+    if (withApproval.approvals.length < withApproval.required) return { proposal: withApproval };
+
+    // Threshold reached — CAS pending → approved so exactly one approval executes.
+    if (!(await deps.proposals.claimApproved(p.id))) {
+      return reply.code(409).send({ error: "PROPOSAL_NOT_PENDING", message: "another approval already finalized this proposal" });
+    }
+    const proposerUser = await deps.users.findById(p.proposerId);
+    if (!proposerUser || !proposerUser.active) {
+      return { proposal: await deps.proposals.setStatus(p.id, "failed", "PROPOSER_INACTIVE") };
+    }
+    try {
+      await executeProposal(request, p, { id: proposerUser.id, role: proposerUser.role });
+      return { proposal: await deps.proposals.setStatus(p.id, "executed") };
+    } catch (err) {
+      const code = err instanceof CodedError ? err.code : err instanceof PolicyError ? err.code : "EXECUTION_FAILED";
+      return { proposal: await deps.proposals.setStatus(p.id, "failed", `${code}: ${(err as Error).message}`) };
+    }
+  }
+
+  app.post("/proposals/:id/approve", { schema: S.decideProposal, ...auth }, (req, rep) => decide(req, rep, "approve"));
+  app.post("/proposals/:id/reject", { schema: S.decideProposal, ...auth }, (req, rep) => decide(req, rep, "reject"));
 
   // --- documents ----------------------------------------------------------
   // A small document store so the dashboard can upload a file (e.g. an invoice

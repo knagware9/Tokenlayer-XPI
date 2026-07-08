@@ -351,6 +351,36 @@ export const components: Record<string, unknown>[] = [
     },
     required: ["txHash", "chainId", "timestamp"],
   },
+  {
+    $id: "Proposal",
+    type: "object",
+    additionalProperties: true,
+    description: "A maker-checker proposal: a gated operation captured pending approval.",
+    properties: {
+      id: { type: "string" },
+      useCaseKey: { type: "string" },
+      assetId: { type: "string", nullable: true },
+      kind: { type: "string" },
+      payload: { type: "object", additionalProperties: true },
+      proposerId: { type: "string" },
+      proposerLabel: { type: "string" },
+      required: { type: "integer" },
+      approvals: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: true,
+          properties: { userId: { type: "string" }, email: { type: "string" }, at: { type: "string" } },
+          required: ["userId", "email", "at"],
+        },
+      },
+      status: { type: "string", enum: ["pending", "approved", "rejected", "executed", "failed"] },
+      error: { type: "string", nullable: true },
+      createdAt: { type: "string" },
+      decidedAt: { type: "string", nullable: true },
+    },
+    required: ["id", "useCaseKey", "kind", "payload", "proposerId", "proposerLabel", "required", "approvals", "status", "createdAt"],
+  },
 ];
 
 /** Standard error responses attached to authenticated routes. */
@@ -697,6 +727,25 @@ export const S: Record<string, FastifySchema> = {
         required: ["cashflow"],
       },
       ...errs(400, 401, 403, 404, 409),
+    },
+  },
+
+  listProposals: {
+    tags: ["Proposals"], summary: "List maker-checker proposals (use-case scoped)", security: bearer,
+    querystring: {
+      type: "object",
+      additionalProperties: false,
+      properties: { status: { type: "string" }, useCaseKey: { type: "string" } },
+    },
+    response: { 200: { type: "array", items: { $ref: "Proposal#" } }, ...errs(401) },
+  },
+  decideProposal: {
+    tags: ["Proposals"], summary: "Approve or reject a proposal (segregation of duties: never the proposer)", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    body: { type: "object", additionalProperties: false, properties: {} },
+    response: {
+      200: { type: "object", additionalProperties: true, properties: { proposal: { $ref: "Proposal#" } }, required: ["proposal"] },
+      ...errs(401, 403, 404, 409),
     },
   },
 

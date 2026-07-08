@@ -29,6 +29,20 @@ async function issueInvoice(app: FastifyInstance, admin: string, n: string, due:
   return res.json().asset.id as string;
 }
 
+/**
+ * The invoice use case gates cashflow-execute (maker-checker), so an execute is a
+ * PROPOSAL: m1.admin proposes (202), then a distinct capability holder (m1.issuer)
+ * approves — which runs the settlement as the proposer. Request-time guards
+ * (NO_PAYER, OUT_OF_SCOPE, burn-gate, open-listings, ALREADY_EXECUTED) reject
+ * before a proposal is ever created, so those responses pass straight through.
+ */
+async function settle(app: FastifyInstance, admin: string, assetId: string, cfId: string, payer: string) {
+  const proposed = await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/cashflows/${cfId}/execute`, headers: auth(admin), payload: { from: payer } });
+  if (proposed.statusCode !== 202) return proposed; // ungated result or a request-time guard error
+  const approver = await loginAs(app, "m1.issuer@tokenlayer.dev", "m1issuer123");
+  return app.inject({ method: "POST", url: `${V1}/proposals/${proposed.json().proposal.id}/approve`, headers: auth(approver), payload: {} });
+}
+
 describe("cashflows: materialization + listing", () => {
   it("issuing an invoice materializes one redemption cashflow at the due date", async () => {
     const app = await buildTestApp();
@@ -74,8 +88,9 @@ describe("cashflows: execution", () => {
     const { cashflows } = (await app.inject({ method: "GET", url: `${V1}/assets/${assetId}/cashflows`, headers: auth(admin) })).json();
     const cfId = cashflows[0].id;
 
-    const exec = await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/cashflows/${cfId}/execute`, headers: auth(admin), payload: { from: PAYER } });
+    const exec = await settle(app, admin, assetId, cfId, PAYER);
     expect(exec.statusCode).toBe(200);
+    expect(exec.json().proposal.status).toBe("executed"); // maker-checker settlement executed on approval
     // Holder received face value.
     const bal = (await app.inject({ method: "GET", url: `${V1}/cash/balances?address=${HOLDER}`, headers: auth(platform) })).json();
     expect(bal.find((b: { currency: string }) => b.currency === "CBDC-INR")?.amount).toBe("1000000");
@@ -106,11 +121,14 @@ describe("cashflows: execution", () => {
     await linkPayer(app, admin); // in scope but unfunded
     const { cashflows } = (await app.inject({ method: "GET", url: `${V1}/assets/${assetId}/cashflows`, headers: auth(admin) })).json();
     const noPayer = await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/cashflows/${cashflows[0].id}/execute`, headers: auth(admin), payload: {} });
-    expect(noPayer.statusCode).toBe(400);
+    expect(noPayer.statusCode).toBe(400); // NO_PAYER is a request-time guard (before any proposal)
     expect(noPayer.json().error).toBe("NO_PAYER");
-    const broke = await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/cashflows/${cashflows[0].id}/execute`, headers: auth(admin), payload: { from: PAYER } });
-    expect(broke.statusCode).toBe(400);
-    expect(broke.json().error).toBe("INSUFFICIENT_TREASURY_FUNDS");
+    // Funds are checked at execution — for a gated settlement that is APPROVAL
+    // time, so the proposal is created then fails on approval with the funds error.
+    const broke = await settle(app, admin, assetId, cashflows[0].id, PAYER);
+    expect(broke.statusCode).toBe(200);
+    expect(broke.json().proposal.status).toBe("failed");
+    expect(broke.json().proposal.error).toContain("INSUFFICIENT_TREASURY_FUNDS");
   });
 
   it("redemption is blocked while an open listing escrows tokens", async () => {
