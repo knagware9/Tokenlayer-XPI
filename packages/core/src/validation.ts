@@ -77,6 +77,7 @@ export function validateUseCaseDefinition(def: unknown): asserts def is UseCaseD
   if (d.valuation !== undefined) validateValuation(d.valuation, String(d.key), fail);
   if (d.derivedFields !== undefined) validateDerivedFields(d.derivedFields, d.metadataSchema, String(d.key), fail);
   if (d.uniqueBy !== undefined) validateUniqueBy(d.uniqueBy, d.metadataSchema, String(d.key), fail);
+  if (d.terms !== undefined) validateTerms(d.terms, d.metadataSchema, String(d.key), fail);
 
   if (!Array.isArray(d.roles) || d.roles.length === 0) fail(`use case '${String(d.key)}' needs a non-empty 'roles' array`);
   for (const r of d.roles as unknown[]) {
@@ -215,6 +216,28 @@ function validateValuation(valuation: unknown, key: string, fail: (msg: string) 
   if (typeof v.currency !== "string" || v.currency === "") {
     fail(`use case '${key}' valuation.currency must be a non-empty string`);
   }
+}
+
+const TERM_FREQUENCIES = new Set(["atMaturity", "monthly", "quarterly", "semiannual", "annual"]);
+
+/** Validate the optional financial terms template (fields must be declared metadata properties). */
+function validateTerms(terms: unknown, schema: unknown, key: string, fail: (msg: string) => never): void {
+  if (typeof terms !== "object" || terms === null) fail(`use case '${key}' 'terms' must be an object`);
+  const t = terms as Record<string, unknown>;
+  const props = (schema as { properties?: Record<string, unknown> } | undefined)?.properties ?? {};
+  for (const f of ["principalField", "maturityField"] as const) {
+    if (typeof t[f] !== "string" || !((t[f] as string) in props)) fail(`use case '${key}' terms.${f} must name a declared metadata field`);
+  }
+  if (t.rateField !== undefined && (typeof t.rateField !== "string" || !(t.rateField in props))) {
+    fail(`use case '${key}' terms.rateField must name a declared metadata field`);
+  }
+  if (t.frequency !== undefined && (typeof t.frequency !== "string" || !TERM_FREQUENCIES.has(t.frequency))) {
+    fail(`use case '${key}' terms.frequency must be one of ${[...TERM_FREQUENCIES].join("|")}`);
+  }
+  if (t.frequency !== undefined && t.frequency !== "atMaturity" && t.rateField === undefined) {
+    fail(`use case '${key}' terms.rateField is required for periodic frequency`);
+  }
+  if (typeof t.currency !== "string" || t.currency === "") fail(`use case '${key}' terms.currency must be a non-empty string`);
 }
 
 const DERIVED_GENERATORS = new Set(["invoiceFingerprint"]);

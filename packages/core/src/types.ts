@@ -209,6 +209,19 @@ export interface UseCaseDefinition {
    * metadata property.
    */
   uniqueBy?: string;
+  /**
+   * Financial terms template: which metadata fields carry the principal,
+   * maturity date, and (for periodic coupons) the % p.a. rate — plus the
+   * payment frequency and cash-ledger currency. Drives the cashflow schedule
+   * materialized at issue (see computeCashflowSchedule()).
+   */
+  terms?: {
+    principalField: string;
+    maturityField: string;
+    rateField?: string;
+    frequency?: "atMaturity" | "monthly" | "quarterly" | "semiannual" | "annual";
+    currency: string;
+  };
   roles: Role[];
 }
 
