@@ -23,6 +23,7 @@ import {
   MemoryAuditRepository,
   MemoryCashRepository,
   MemoryCashflowRepository,
+  MemoryProposalRepository,
   MemoryDocumentRepository,
   MemoryListingRepository,
   MemoryUseCaseRepository,
@@ -59,7 +60,7 @@ async function main(): Promise<void> {
   });
   const cash = new MemoryCashRepository();
   const listings = new MemoryListingRepository();
-  const app = await buildApp({ useCases, rbac, engine, users, assets, audit, accounts, chains, cash, listings, documents: new MemoryDocumentRepository(), cashflows: new MemoryCashflowRepository(), currencies: loadCurrencies(), jwtSecret: "e2e" });
+  const app = await buildApp({ useCases, rbac, engine, users, assets, audit, accounts, chains, cash, listings, documents: new MemoryDocumentRepository(), cashflows: new MemoryCashflowRepository(), proposals: new MemoryProposalRepository(), currencies: loadCurrencies(), jwtSecret: "e2e" });
 
   // Per-use-case roster seeded by seedDefaults — password is "carbon123" for all.
   const adminToken = await login(app, "carbon.admin@tokenlayer.dev", "carbon123");

@@ -30,6 +30,9 @@ import type {
   ListingRepository,
   Page,
   Paged,
+  ProposalApproval,
+  ProposalRecord,
+  ProposalRepository,
   SaleTerms,
   UseCaseRepository,
   UserRecord,
@@ -508,6 +511,61 @@ export class PrismaCashflowRepository implements CashflowRepository {
     if (count !== 1) throw new Error(`cashflow '${id}' is not 'executing' — claim it before marking executed`);
     const r = await prisma.cashflow.findUnique({ where: { id } });
     return toCashflow(r!);
+  }
+}
+
+const toProposal = (r: { id: string; useCaseKey: string; assetId: string | null; kind: string; payload: string; proposerId: string; proposerLabel: string; required: number; approvals: string; status: string; error: string | null; createdAt: Date; decidedAt: Date | null }): ProposalRecord => ({
+  id: r.id, useCaseKey: r.useCaseKey, assetId: r.assetId, kind: r.kind,
+  payload: JSON.parse(r.payload) as Record<string, unknown>,
+  proposerId: r.proposerId, proposerLabel: r.proposerLabel, required: r.required,
+  approvals: JSON.parse(r.approvals) as ProposalApproval[],
+  status: r.status as ProposalRecord["status"], error: r.error,
+  createdAt: r.createdAt.toISOString(), decidedAt: r.decidedAt?.toISOString() ?? null,
+});
+
+export class PrismaProposalRepository implements ProposalRepository {
+  async create(input: Omit<ProposalRecord, "id" | "approvals" | "status" | "error" | "createdAt" | "decidedAt">): Promise<ProposalRecord> {
+    const r = await prisma.proposal.create({
+      data: {
+        useCaseKey: input.useCaseKey, assetId: input.assetId, kind: input.kind,
+        payload: JSON.stringify(input.payload), proposerId: input.proposerId,
+        proposerLabel: input.proposerLabel, required: input.required,
+      },
+    });
+    return toProposal(r);
+  }
+  async get(id: string): Promise<ProposalRecord | null> {
+    const r = await prisma.proposal.findUnique({ where: { id } });
+    return r ? toProposal(r) : null;
+  }
+  async list(useCaseKey?: string, status?: string): Promise<ProposalRecord[]> {
+    const where = { ...(useCaseKey ? { useCaseKey } : {}), ...(status ? { status } : {}) };
+    return (await prisma.proposal.findMany({ where, orderBy: { createdAt: "desc" } })).map(toProposal);
+  }
+  async addApproval(id: string, approval: ProposalApproval): Promise<ProposalRecord> {
+    const r = await prisma.proposal.findUnique({ where: { id } });
+    if (!r) throw new Error(`unknown proposal '${id}'`);
+    const approvals = JSON.parse(r.approvals) as ProposalApproval[];
+    if (approvals.some((a) => a.userId === approval.userId)) {
+      throw Object.assign(new Error("already approved"), { code: "ALREADY_APPROVED" });
+    }
+    approvals.push(approval);
+    const updated = await prisma.proposal.update({ where: { id }, data: { approvals: JSON.stringify(approvals) } });
+    return toProposal(updated);
+  }
+  async claimApproved(id: string): Promise<boolean> {
+    // Atomic CAS: only one concurrent Nth approval flips pending → approved and
+    // therefore executes the operation.
+    const { count } = await prisma.proposal.updateMany({ where: { id, status: "pending" }, data: { status: "approved" } });
+    return count === 1;
+  }
+  async setStatus(id: string, status: ProposalRecord["status"], error?: string | null): Promise<ProposalRecord> {
+    const terminal = status === "rejected" || status === "executed" || status === "failed";
+    const updated = await prisma.proposal.update({
+      where: { id },
+      data: { status, error: error ?? null, ...(terminal ? { decidedAt: new Date() } : {}) },
+    });
+    return toProposal(updated);
   }
 }
 

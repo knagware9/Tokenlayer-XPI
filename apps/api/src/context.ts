@@ -11,6 +11,7 @@ import type {
   CashRepository,
   DocumentRepository,
   ListingRepository,
+  ProposalRepository,
   UseCaseRepository,
   UserRepository,
 } from "./persistence/types.js";
@@ -28,6 +29,7 @@ export interface AppDeps {
   listings: ListingRepository;
   documents: DocumentRepository;
   cashflows: CashflowRepository;
+  proposals: ProposalRepository;
   currencies: Currency[];
   jwtSecret: string;
   /** CORS origin allowlist; defaults to the local dashboard when omitted (tests/demo). */

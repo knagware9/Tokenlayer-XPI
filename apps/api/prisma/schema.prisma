@@ -145,3 +145,24 @@ model Document {
   bytes       Bytes
   createdAt   DateTime @default(now())
 }
+
+// A maker-checker proposal: a gated operation captured pending approval. The
+// pending -> approved transition is a CAS (updateMany where-status) so
+// concurrent Nth approvals execute the operation exactly once.
+model Proposal {
+  id            String    @id @default(cuid())
+  useCaseKey    String
+  assetId       String?
+  kind          String // gated op: issue | mint | transfer | burn | freeze | unfreeze | cashflow-execute
+  payload       String // JSON — everything the executor needs
+  proposerId    String
+  proposerLabel String // email, for display
+  required      Int
+  approvals     String    @default("[]") // JSON: [{ userId, email, at }]
+  status        String    @default("pending") // pending | approved | rejected | executed | failed
+  error         String?
+  createdAt     DateTime  @default(now())
+  decidedAt     DateTime?
+
+  @@index([useCaseKey, status])
+}
