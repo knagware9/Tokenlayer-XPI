@@ -8,7 +8,7 @@ import type { AppDeps } from "../context.js";
 import { isSupportedCurrency } from "../currencies.js";
 import { deployUseCaseContracts } from "../use-cases.js";
 import { computeAnalytics } from "../analytics.js";
-import { foldAsset } from "../holders.js";
+import { assetBalancesOf, CodedError, dropPayerShare, executeCashflowCore, executeIssueActivation, runGatedAction } from "../executors.js";
 import { S } from "./schemas.js";
 import { actorOf, contextOf, isPositiveIntString, notFound, requireUser, scopedToCaller, type TokenClaims } from "./support.js";
 
@@ -296,19 +296,15 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       // Materialize the pre-computed financial-terms schedule so the asset
       // carries its cashflow ledger from birth.
       if (schedule.length) await deps.cashflows.createMany(id, useCase.terms!.currency, schedule);
-      if (sale) {
-        await deps.assets.setSaleTerms(id, sale);
-      }
-      // Auto-allowlist the treasury and mint the requested initial supply into it,
-      // so the asset is immediately funded and (if priced) available to buy.
-      if (wantsSupply) {
-        const created = await deps.assets.get(id);
-        const ctx = contextOf(created!);
-        if (useCase.compliance.allowlist) {
-          await deps.engine.setAllowed(actor, ctx, treasury!, true);
-        }
-        await deps.engine.mint(actor, ctx, treasury!, initialSupply!);
-      }
+      // Activate: set sale terms + allowlist the treasury + mint the initial
+      // supply. Shared with the maker-checker approval path (deferred until
+      // approval when issuance is gated).
+      const created = await deps.assets.get(id);
+      await executeIssueActivation(deps, actor, created!, {
+        initialSupply: wantsSupply ? initialSupply : undefined,
+        treasury,
+        sale,
+      });
     } catch (err) {
       // Issuance failed after the fee moved — refund it so the issuer isn't charged
       // for an asset that was never created (mirrors the buy path's compensation).
@@ -458,24 +454,16 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const actor = actorOf(request);
     const ctx = contextOf(asset);
     const b = (request.body ?? {}) as Record<string, string>;
-    const isNft = asset.tokenType === "nonfungible";
 
     let receipt;
     switch (action) {
       case "mint":
-        receipt = isNft ? await deps.engine.mintToken(actor, ctx, b.to!, b.tokenId!, b.uri) : await deps.engine.mint(actor, ctx, b.to!, b.amount!);
-        break;
       case "transfer":
-        receipt = isNft ? await deps.engine.transferToken(actor, ctx, b.from!, b.to!, b.tokenId!) : await deps.engine.transfer(actor, ctx, b.from!, b.to!, b.amount!);
-        break;
       case "burn":
-        receipt = isNft ? await deps.engine.burnToken(actor, ctx, b.tokenId!) : await deps.engine.burn(actor, ctx, b.from!, b.amount!);
-        break;
       case "freeze":
-        receipt = await deps.engine.setFrozen(actor, ctx, b.account!, true);
-        break;
       case "unfreeze":
-        receipt = await deps.engine.setFrozen(actor, ctx, b.account!, false);
+        // Shared with the maker-checker approval path (executed as the proposer there).
+        receipt = await runGatedAction(deps, actor, asset, action, b);
         break;
       case "allow": {
         const acct = (await deps.accounts.list()).find((a) => a.address === b.account);
@@ -974,23 +962,6 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return "scheduled";
   }
 
-  // Current positive balances from the audit fold (source of truth shared with
-  // analytics/compliance). listByAsset returns DESC — sort ASC before folding.
-  async function assetBalances(assetId: string): Promise<Map<string, bigint>> {
-    const { items } = await deps.audit.listByAsset(assetId, { limit: 100000 });
-    const asc = [...items].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    return foldAsset(asc).balances;
-  }
-
-  // The payer keeps its own pro-rata share — drop it from the split. Address
-  // casing is not canonical across sources, so compare case-insensitively.
-  function dropPayerShare(split: Map<string, bigint>, payer: string): void {
-    const lower = payer.toLowerCase();
-    for (const key of [...split.keys()]) {
-      if (key.toLowerCase() === lower) split.delete(key);
-    }
-  }
-
   app.get("/assets/:id/cashflows", { schema: S.listCashflows, ...auth }, async (request, reply) => {
     const asset = await scopedAsset(request, reply, "read");
     if (!asset) return reply;
@@ -1000,7 +971,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const next = rows.find((cf) => cf.status !== "executed" && (cf.kind === "redemption" || cf.status !== "scheduled"));
     let preview: { cashflowId: string; split: { address: string; amount: string }[] } | null = null;
     if (next) {
-      const split = splitProRata(BigInt(next.amount), await assetBalances(asset.id));
+      const split = splitProRata(BigInt(next.amount), await assetBalancesOf(deps, asset.id));
       // Mirror the execute route: the default payer (the treasury) keeps its own share.
       if (asset.treasuryAccount) dropPayerShare(split, asset.treasuryAccount);
       preview = { cashflowId: next.id, split: [...split].map(([address, amount]) => ({ address, amount: amount.toString() })) };
@@ -1066,79 +1037,15 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       }
     }
 
-    const balances = await assetBalances(asset.id);
-    const split = splitProRata(BigInt(cf.amount), balances);
-    dropPayerShare(split, payer); // the payer's own share stays with the payer
-    if (split.size === 0) {
-      return reply.code(400).send({ error: "NO_HOLDERS", message: "no positive balances to pay" });
-    }
-    let payable = 0n;
-    for (const v of split.values()) payable += v;
-    if (BigInt(await deps.cash.balanceOf(cf.currency, payer)) < payable) {
-      return reply.code(400).send({ error: "INSUFFICIENT_TREASURY_FUNDS", message: `payer needs ${payable} ${cf.currency} (record the repayment via /cash/credit first)` });
-    }
-
-    // ATOMIC CLAIM — flip scheduled → executing so no concurrent execute of the
-    // same cashflow can double-pay. Everything after this either completes to
-    // "executed" or compensates (refunds) and releases back to "scheduled".
-    if (!(await deps.cashflows.claim(cf.id))) {
-      return reply.code(409).send({ error: "ALREADY_EXECUTED", message: "this cashflow was already executed" });
-    }
-
-    const releaseClaim = () =>
-      deps.cashflows.release(cf.id).catch((releaseErr) => {
-        request.log.error({ releaseErr, cashflowId: cf.id }, "cashflow claim release failed — row stuck 'executing', manual reconciliation required");
-      });
-
-    const paid: [string, bigint][] = [];
-    let executed: CashflowRecord;
+    // Pro-rata payout + (redemption) burn/mature + markExecuted + audit — shared
+    // with the maker-checker approval path (executed as the proposer there).
     try {
-      // Re-check open listings AFTER the claim (shrinks the race window with a
-      // concurrent listing creation): escrowed tokens cannot be redeemed.
-      if (cf.kind === "redemption") {
-        const open = await deps.listings.listByAsset(asset.id, "open");
-        if (open.length > 0) {
-          await releaseClaim();
-          return reply.code(409).send({ error: "OPEN_LISTINGS_BLOCK_SETTLEMENT", message: "cancel open listings before settling — escrowed tokens cannot be redeemed" });
-        }
-      }
-
-      // Pay sequentially; compensation on any later failure (mirrors the buy path).
-      for (const [addr, amount] of split) {
-        await deps.cash.transfer(cf.currency, payer, addr, amount.toString());
-        paid.push([addr, amount]);
-      }
-
-      // Redemption closes the lifecycle: burn every remaining balance, mature the asset.
-      if (cf.kind === "redemption") {
-        const ctx = contextOf(asset);
-        for (const [addr, bal] of balances) {
-          if (bal > 0n) await deps.engine.burn(actor, ctx, addr, bal.toString());
-        }
-        await deps.assets.setStatus(asset.id, "matured");
-      }
-
-      executed = await deps.cashflows.markExecuted(cf.id, new Date().toISOString());
+      const executed = await executeCashflowCore(deps, actor, asset, cf, payer, request.log);
+      return { cashflow: { ...executed, status: "executed" } };
     } catch (err) {
-      // Best-effort refunds of whatever was paid, then release the claim so the
-      // cashflow is retryable, then surface the real cause.
-      for (const [addr, amount] of paid) {
-        await deps.cash.transfer(cf.currency, addr, payer, amount.toString()).catch((refundErr) => {
-          request.log.error({ refundErr, addr, amount: amount.toString(), cashflowId: cf.id }, "cashflow refund compensation failed — manual reconciliation required");
-        });
-      }
-      await releaseClaim();
+      if (err instanceof CodedError) return reply.code(err.statusCode).send({ error: err.code, message: err.message });
       throw err;
     }
-
-    await deps.audit.append({
-      assetId: asset.id,
-      actorId: actor.id,
-      action: cf.kind === "redemption" ? "redeem" : "distribute",
-      payload: { currency: cf.currency, amount: cf.amount, paid: payable.toString(), holders: split.size, from: payer, seq: cf.seq },
-      chainId: asset.chainId,
-    });
-    return { cashflow: { ...executed, status: "executed" } };
   });
 
   // --- documents ----------------------------------------------------------
