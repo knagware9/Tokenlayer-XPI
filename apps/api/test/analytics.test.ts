@@ -236,6 +236,19 @@ describe("computeAnalytics (pure)", () => {
     expect(r.totals.valueByCurrency).toEqual({}); // supply 0 × unit → nothing added
   });
 
+  it("distribute/redeem events do not count as traded volume", () => {
+    const a = [asset({ id: "n1", chainId: "fabric", useCaseKey: "carbon-credit" })];
+    const audit = [
+      entry("n1", "mint", { to: ALICE, amount: "100" }, "2026-06-01T00:00:00.000Z"),
+      entry("n1", "distribute", { currency: "CBDC-INR", amount: "5000", holders: 2 }, "2026-06-02T00:00:00.000Z"),
+      entry("n1", "redeem", { currency: "CBDC-INR", amount: "100000", holders: 2 }, "2026-06-03T00:00:00.000Z"),
+    ];
+    const r = computeAnalytics({ ...base, assets: a, audit });
+    expect(r.totals.trades).toBe(0);
+    expect(r.totals.tradedByCurrency).toEqual({});
+    expect(r.recent.find((e) => e.action === "distribute")?.summary).toContain("coupon 5000");
+  });
+
   it("empty inputs → zeros and days empty buckets", () => {
     const r = computeAnalytics({ ...base, assets: [], audit: [], days: 7 });
     expect(r.totals.supply).toBe("0");

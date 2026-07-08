@@ -74,6 +74,7 @@
     "metadataField": "amountInr",
     "currency": "INR"
   },
+  "terms": { "principalField": "amountInr", "maturityField": "dueDate", "frequency": "atMaturity", "currency": "CBDC-INR" },
   "derivedFields": { "invoiceHash": "invoiceFingerprint" },
   "uniqueBy": "invoiceHash",
   "roles": ["UseCaseAdmin", "Issuer", "Buyer", "Auditor"]

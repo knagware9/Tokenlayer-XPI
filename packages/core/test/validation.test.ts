@@ -137,6 +137,34 @@ describe("validateUseCaseDefinition", () => {
     const def = { ...withInvoiceHash, uniqueBy: "notAField" };
     expect(() => validateUseCaseDefinition(def)).toThrow(/uniqueBy/);
   });
+
+  // A base definition with invoice-style `amountInr` + `dueDate` metadata
+  // fields, so the `terms` cases below can point at real declared properties.
+  const withInvoiceFields = (extra: Record<string, unknown>) => ({
+    ...FUNGIBLE_USE_CASE,
+    metadataSchema: {
+      ...FUNGIBLE_USE_CASE.metadataSchema,
+      properties: {
+        ...FUNGIBLE_USE_CASE.metadataSchema.properties,
+        amountInr: { type: "number" as const },
+        dueDate: { type: "string" as const },
+      },
+    },
+    ...extra,
+  });
+
+  it("accepts a valid terms block", () => {
+    const def = withInvoiceFields({ terms: { principalField: "amountInr", maturityField: "dueDate", currency: "CBDC-INR" } });
+    expect(() => validateUseCaseDefinition(def)).not.toThrow();
+  });
+  it("rejects terms pointing at undeclared metadata fields", () => {
+    const def = withInvoiceFields({ terms: { principalField: "nope", maturityField: "dueDate", currency: "CBDC-INR" } });
+    expect(() => validateUseCaseDefinition(def)).toThrow(/terms/);
+  });
+  it("rejects a periodic frequency without a rateField, and an unknown frequency", () => {
+    expect(() => validateUseCaseDefinition(withInvoiceFields({ terms: { principalField: "amountInr", maturityField: "dueDate", frequency: "quarterly", currency: "CBDC-INR" } }))).toThrow(/rateField/);
+    expect(() => validateUseCaseDefinition(withInvoiceFields({ terms: { principalField: "amountInr", maturityField: "dueDate", frequency: "weekly", currency: "CBDC-INR" } }))).toThrow(/frequency/);
+  });
 });
 
 describe("validateMetadata", () => {

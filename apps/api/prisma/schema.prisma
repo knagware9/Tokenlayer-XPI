@@ -64,6 +64,7 @@ model UseCase {
   valuation        String   @default("{}") // JSON object: { metadataField, currency } (analytics valuation)
   derivedFields    String   @default("{}") // JSON object: metadataField -> generator (server-derived on issue)
   uniqueBy         String? // metadata field that must be unique across the use case's assets
+  terms            String   @default("{}") // JSON object: { principalField, maturityField, rateField?, frequency?, currency }
   roles           String // JSON array
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -113,6 +114,24 @@ model CashBalance {
   amount   String @default("0")
 
   @@unique([currency, address])
+}
+
+// A materialized financial-terms cashflow (coupon or redemption) for one asset,
+// created at issue from the use case's `terms`. Only "scheduled"/"executing"/
+// "executed" are stored — "due"/"overdue" are derived from the date at read time.
+model Cashflow {
+  id         String    @id @default(cuid())
+  assetId    String
+  seq        Int
+  kind       String // "coupon" | "redemption"
+  dueDate    String // YYYY-MM-DD
+  amount     String // integer decimal string
+  currency   String
+  status     String    @default("scheduled") // "scheduled" | "executing" | "executed"
+  executedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@unique([assetId, seq])
 }
 
 // Uploaded documents (e.g. invoice PDFs). Bytes are stored inline; the asset

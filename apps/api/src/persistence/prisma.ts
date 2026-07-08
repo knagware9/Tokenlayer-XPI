@@ -19,6 +19,8 @@ import type {
   AuditEntryRecord,
   AuditRepository,
   CashBalanceRecord,
+  CashflowRecord,
+  CashflowRepository,
   CashRepository,
   DocumentRecord,
   DocumentRepository,
@@ -272,6 +274,7 @@ interface UseCaseRow {
   valuation: string;
   derivedFields: string;
   uniqueBy: string | null;
+  terms: string;
   roles: string;
 }
 
@@ -291,6 +294,7 @@ function rowToUseCase(r: UseCaseRow): UseCaseDefinition {
   const saleTermsDefault = parseJsonObject(r.saleTermsDefault);
   const valuation = parseJsonObject(r.valuation);
   const derivedFields = parseJsonObject(r.derivedFields);
+  const terms = parseJsonObject(r.terms);
   return normalizeUseCaseDefinition({
     key: r.key,
     name: r.name,
@@ -309,6 +313,7 @@ function rowToUseCase(r: UseCaseRow): UseCaseDefinition {
     ...(Object.keys(valuation).length > 0 ? { valuation } : {}),
     ...(Object.keys(derivedFields).length > 0 ? { derivedFields: derivedFields as Record<string, "invoiceFingerprint"> } : {}),
     ...(r.uniqueBy ? { uniqueBy: r.uniqueBy } : {}),
+    ...(Object.keys(terms).length > 0 ? { terms: terms as UseCaseDefinition["terms"] } : {}),
     roles: JSON.parse(r.roles),
   });
 }
@@ -331,6 +336,7 @@ function useCaseToData(def: UseCaseDefinition) {
     valuation: JSON.stringify(def.valuation ?? {}),
     derivedFields: JSON.stringify(def.derivedFields ?? {}),
     uniqueBy: def.uniqueBy ?? null,
+    terms: JSON.stringify(def.terms ?? {}),
     roles: JSON.stringify(def.roles),
   };
 }
@@ -465,6 +471,39 @@ export class PrismaListingRepository implements ListingRepository {
       if (count === 1) return { ...toListing(r), status: "open", updatedAt: new Date().toISOString() };
     }
     throw new ListingConflictError("LISTING_CONFLICT", `listing '${id}' kept changing while reopening — manual reconciliation may be required`);
+  }
+}
+
+const toCashflow = (r: { id: string; assetId: string; seq: number; kind: string; dueDate: string; amount: string; currency: string; status: string; executedAt: Date | null }): CashflowRecord => ({
+  id: r.id, assetId: r.assetId, seq: r.seq, kind: r.kind as CashflowRecord["kind"], dueDate: r.dueDate,
+  amount: r.amount, currency: r.currency, status: r.status as CashflowRecord["status"], executedAt: r.executedAt?.toISOString() ?? null,
+});
+
+export class PrismaCashflowRepository implements CashflowRepository {
+  async createMany(assetId: string, currency: string, rows: { seq: number; kind: "coupon" | "redemption"; dueDate: string; amount: string }[]): Promise<void> {
+    if (rows.length === 0) return;
+    await prisma.cashflow.createMany({ data: rows.map((r) => ({ assetId, currency, ...r })) });
+  }
+  async listByAsset(assetId: string): Promise<CashflowRecord[]> {
+    return (await prisma.cashflow.findMany({ where: { assetId }, orderBy: { seq: "asc" } })).map(toCashflow);
+  }
+  async get(id: string): Promise<CashflowRecord | null> {
+    const r = await prisma.cashflow.findUnique({ where: { id } });
+    return r ? toCashflow(r) : null;
+  }
+  async claim(id: string): Promise<boolean> {
+    // Atomic CAS: only one concurrent execute can flip scheduled → executing.
+    const { count } = await prisma.cashflow.updateMany({ where: { id, status: "scheduled" }, data: { status: "executing" } });
+    return count === 1;
+  }
+  async release(id: string): Promise<void> {
+    await prisma.cashflow.updateMany({ where: { id, status: "executing" }, data: { status: "scheduled" } });
+  }
+  async markExecuted(id: string, executedAt: string): Promise<CashflowRecord> {
+    const { count } = await prisma.cashflow.updateMany({ where: { id, status: "executing" }, data: { status: "executed", executedAt: new Date(executedAt) } });
+    if (count !== 1) throw new Error(`cashflow '${id}' is not 'executing' — claim it before marking executed`);
+    const r = await prisma.cashflow.findUnique({ where: { id } });
+    return toCashflow(r!);
   }
 }
 

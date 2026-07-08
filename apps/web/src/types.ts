@@ -69,6 +69,8 @@ export interface UseCase {
   derivedFields?: Record<string, string>;
   /** A metadata field whose value must be unique across the use case's assets. */
   uniqueBy?: string;
+  /** Financial terms template driving the cashflow schedule. */
+  terms?: { principalField: string; maturityField: string; rateField?: string; frequency?: string; currency: string };
   roles: Role[];
 }
 
@@ -119,6 +121,23 @@ export interface Listing {
   status?: "open" | "filled" | "cancelled";
   createdAt: string;
   updatedAt?: string;
+}
+
+export interface Cashflow {
+  id: string;
+  assetId: string;
+  seq: number;
+  kind: "coupon" | "redemption";
+  dueDate: string;
+  amount: string;
+  currency: string;
+  status: "scheduled" | "due" | "overdue" | "executing" | "executed";
+  executedAt: string | null;
+}
+
+export interface CashflowPreview {
+  cashflowId: string;
+  split: { address: string; amount: string }[];
 }
 
 export interface Trade {
