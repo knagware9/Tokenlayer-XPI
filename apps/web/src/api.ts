@@ -1,4 +1,4 @@
-import type { AccountState, AnalyticsSummary, Asset, AuditEntry, ChainInfo, Listing, Role, SessionUser, TokenInfo, Trade, UseCase } from "./types.js";
+import type { AccountState, AnalyticsSummary, Asset, AuditEntry, Cashflow, CashflowPreview, ChainInfo, Listing, Role, SessionUser, TokenInfo, Trade, UseCase } from "./types.js";
 
 export interface Currency { code: string; label: string; }
 export interface CashBalance { currency: string; address: string; amount: string; }
@@ -93,6 +93,10 @@ export const api = {
   cancelListing: (token: string, listingId: string) =>
     request<void>(`/listings/${listingId}`, token, { method: "DELETE" }),
   trades: (token: string, assetId: string) => request<Trade[]>(`/assets/${assetId}/trades`, token),
+  cashflows: (token: string, assetId: string) =>
+    request<{ cashflows: Cashflow[]; preview: CashflowPreview | null }>(`/assets/${assetId}/cashflows`, token),
+  executeCashflow: (token: string, assetId: string, cfId: string, from?: string) =>
+    request<{ cashflow: Cashflow }>(`/assets/${assetId}/cashflows/${cfId}/execute`, token, { method: "POST", body: JSON.stringify(from ? { from } : {}) }),
   creditCash: (token: string, account: string, currency: string, amount: string) =>
     request<{ ok: boolean; balance: string }>("/cash/credit", token, { method: "POST", body: JSON.stringify({ account, currency, amount }) }),
   users: (token: string) => request<{ id: string; email: string; role: Role; useCaseKey: string | null; accountId: string | null; active: boolean; kycStatus: "pending" | "approved" | "rejected"; kyc: { legalName?: string; country?: string; idType?: string; idNumber?: string; documentRef?: string } | null }[]>("/users", token),

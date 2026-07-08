@@ -123,6 +123,23 @@ export interface Listing {
   updatedAt?: string;
 }
 
+export interface Cashflow {
+  id: string;
+  assetId: string;
+  seq: number;
+  kind: "coupon" | "redemption";
+  dueDate: string;
+  amount: string;
+  currency: string;
+  status: "scheduled" | "due" | "overdue" | "executed";
+  executedAt: string | null;
+}
+
+export interface CashflowPreview {
+  cashflowId: string;
+  split: { address: string; amount: string }[];
+}
+
 export interface Trade {
   at: string;
   amount: string | null;
