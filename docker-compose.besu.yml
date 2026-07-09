@@ -23,6 +23,11 @@ services:
       # Pre-funded account in the network's genesis (0xfe3b…bd73, ~200 ETH).
       # DEV/demo key — do not reuse on a production network.
       BESU_OPERATOR_KEY: "0x8f2a55949038a9610f50fb23b5883af3b4ecb3c3bb792cbcefbd1542c692be63"
+      # MST Testnet (public EVM, chainId 91562037) — real when RPC + operator key
+      # are set. Values come from .env (gitignored). The operator key must hold
+      # tMSTC (faucet: https://faucet.mstblockchain.com/) to deploy contracts on MST.
+      MST_RPC_URL: ${MST_RPC_URL:-}
+      MST_OPERATOR_KEY: ${MST_OPERATOR_KEY:-}
       # Real-chain deploy: refuse to start unless besu is configured AND reachable.
       CHAIN_STRICT: "1"
 

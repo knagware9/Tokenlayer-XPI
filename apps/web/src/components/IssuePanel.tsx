@@ -30,9 +30,11 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
   const [currencies, setCurrencies] = useState<Currency[]>([]);
   const [allAccounts, setAllAccounts] = useState<{ address: string; label: string }[]>([]);
 
-  // Sync useCaseKey when useCases loads after mount (avoids empty chain dropdown on first render)
+  // Keep the selected use case valid: pick the first when unset OR when the current
+  // key is no longer in the list (a PlatformAdmin switched use cases while this panel
+  // stayed mounted — otherwise `useCase` goes stale and the chain dropdown empties).
   useEffect(() => {
-    if (!useCaseKey && useCases[0]?.key) setUseCaseKey(useCases[0].key);
+    if ((!useCaseKey || !useCases.some((u) => u.key === useCaseKey)) && useCases[0]?.key) setUseCaseKey(useCases[0].key);
   }, [useCases, useCaseKey]);
 
   const useCase = useMemo(() => useCases.find((u) => u.key === useCaseKey), [useCases, useCaseKey]);

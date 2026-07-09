@@ -44,7 +44,12 @@ export function PlatformHome({ useCases, chains, onReloadUseCases }: { useCases:
               </div>
             )}
             <button
-              onClick={() => selected && navigate(`/${selected}`)}
+              onClick={() => {
+                if (!selected) return;
+                // Land directly on the Asset Management tab of the chosen use case.
+                sessionStorage.setItem("tl:section", "assets");
+                navigate(`/${selected}`);
+              }}
               disabled={!selected}
               className="rounded-lg bg-brand-600 text-white px-4 py-2 text-sm font-semibold hover:bg-brand-700 disabled:opacity-50 whitespace-nowrap"
             >
