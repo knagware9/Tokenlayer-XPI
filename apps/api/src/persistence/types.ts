@@ -57,6 +57,9 @@ export interface AuditEntryRecord {
   txHash?: string;
   chainId?: string;
   createdAt: string;
+  seq?: number;
+  prevHash?: string;
+  hash?: string;
 }
 
 export interface AccountRecord {
@@ -112,6 +115,23 @@ export interface AccountRepository {
   list(): Promise<AccountRecord[]>;
   findById(id: string): Promise<AccountRecord | null>;
   upsert(address: string, label: string): Promise<AccountRecord>;
+}
+
+/** An on-ledger anchor of one asset's audit chain head. */
+export interface AuditAnchorRecord {
+  id: string;
+  assetId: string;
+  seq: number;
+  hash: string;
+  txHash: string;
+  chainId: string;
+  createdAt: string;
+}
+
+export interface AuditAnchorRepository {
+  create(input: Omit<AuditAnchorRecord, "id" | "createdAt">): Promise<AuditAnchorRecord>;
+  /** The most recent anchor for the asset (highest seq), or null if never anchored. */
+  latest(assetId: string): Promise<AuditAnchorRecord | null>;
 }
 
 /** A writable use-case store. Also satisfies the engine's UseCaseSource. */

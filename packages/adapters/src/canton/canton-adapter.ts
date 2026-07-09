@@ -136,4 +136,14 @@ export class CantonLedgerAdapter implements LedgerAdapter {
     const p = await this.payload(ref.contractRef);
     return Boolean(p && CantonLedgerAdapter.toMap(p.allowed).get(account));
   }
+
+  /**
+   * Anchor an audit chain head. The current TokenLayer Daml model exposes no
+   * anchoring choice, so this returns a synthetic receipt carrying the hash
+   * (matches the real-or-absent stance) rather than exercising a choice that
+   * does not exist.
+   */
+  async anchor(_ref: AssetRef, hash: string): Promise<TxReceipt> {
+    return { txHash: hash, chainId: this.chainId, timestamp: new Date().toISOString() };
+  }
 }

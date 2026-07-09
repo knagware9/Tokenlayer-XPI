@@ -749,6 +749,21 @@ export const S: Record<string, FastifySchema> = {
     },
   },
 
+  verifyAssetAudit: {
+    tags: ["Audit"], summary: "Verify an asset's audit hash chain + on-ledger anchor", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 404) },
+  },
+  verifyAuditSummary: {
+    tags: ["Audit"], summary: "Platform audit-integrity roll-up (per-asset chain + anchor)", security: bearer,
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(401) },
+  },
+  anchorAudit: {
+    tags: ["Audit"], summary: "Anchor each in-scope asset's audit chain head on-ledger", security: bearer,
+    body: { type: "object", additionalProperties: false, properties: {} },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403) },
+  },
+
   creditCash: {
     tags: ["Cash"], summary: "Fund an account with CBDC / cash (Issuer / admin only)", security: bearer,
     body: {

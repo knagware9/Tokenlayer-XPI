@@ -7,6 +7,7 @@ import { loadCurrencies } from "../src/currencies.js";
 import {
   MemoryAccountRepository,
   MemoryAssetRepository,
+  MemoryAuditAnchorRepository,
   MemoryAuditRepository,
   MemoryCashflowRepository,
   MemoryProposalRepository,
@@ -28,6 +29,7 @@ export async function buildTestApp(opts: { loginRateLimitMax?: number; platformF
   const users = new MemoryUserRepository();
   const assets = new MemoryAssetRepository();
   const audit = new MemoryAuditRepository();
+  const auditAnchors = new MemoryAuditAnchorRepository();
   const accounts = new MemoryAccountRepository();
   const useCases = new MemoryUseCaseRepository();
   const cash = new MemoryCashRepository();
@@ -43,7 +45,7 @@ export async function buildTestApp(opts: { loginRateLimitMax?: number; platformF
   });
   // The suite makes many logins from one IP; raise the throttle unless a test opts into it.
   return buildApp({
-    useCases, rbac, engine, users, assets, audit, accounts, chains, cash, listings, documents, cashflows, proposals,
+    useCases, rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents, cashflows, proposals,
     currencies: loadCurrencies(), jwtSecret: "test-secret",
     loginRateLimitMax: opts.loginRateLimitMax ?? 100000,
     platformFeeAccount: opts.platformFeeAccount,

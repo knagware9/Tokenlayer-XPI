@@ -116,6 +116,9 @@ export interface LedgerAdapter {
   setAllowed(ref: AssetRef, account: string, allowed: boolean): Promise<TxReceipt>;
   isFrozen(ref: AssetRef, account: string): Promise<boolean>;
   isAllowed(ref: AssetRef, account: string): Promise<boolean>;
+
+  /** Anchor an off-ledger hash (e.g. an audit chain head) on-ledger for tamper-evidence. */
+  anchor(ref: AssetRef, hash: string): Promise<TxReceipt>;
 }
 
 /** Minimal JSON-Schema subset used to describe issuance metadata. */

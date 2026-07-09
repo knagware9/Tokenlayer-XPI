@@ -1,11 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
-import { normalizeUseCaseDefinition, PolicyError, type UseCaseDefinition } from "@tokenlayer/core";
+import { auditGenesis, auditEntryHash, normalizeUseCaseDefinition, PolicyError, type UseCaseDefinition } from "@tokenlayer/core";
 import type {
   AccountRecord,
   AccountRepository,
   AssetFilter,
   AssetRecord,
   AssetRepository,
+  AuditAnchorRecord,
+  AuditAnchorRepository,
   AuditEntryRecord,
   AuditRepository,
   CashBalanceRecord,
@@ -115,12 +117,24 @@ export class MemoryAssetRepository implements AssetRepository {
 
 export class MemoryAuditRepository implements AuditRepository {
   private readonly entries: AuditEntryRecord[] = [];
+  private appendLock: Promise<unknown> = Promise.resolve();
   async append(
     entry: Omit<AuditEntryRecord, "id" | "createdAt"> & { createdAt?: string },
   ): Promise<AuditEntryRecord> {
-    const rec: AuditEntryRecord = { ...entry, id: id("audit"), createdAt: entry.createdAt ?? now() };
-    this.entries.push(rec);
-    return rec;
+    // Serialize appends so each entry reads a consistent per-asset head.
+    const run = this.appendLock.then(async () => {
+      const chainKey = entry.assetId ?? "__none__";
+      const chain = this.entries.filter((e) => (e.assetId ?? "__none__") === chainKey).sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
+      const seq = chain.length;
+      const prevHash = chain.length ? chain[chain.length - 1]!.hash! : auditGenesis(chainKey);
+      const createdAt = entry.createdAt ?? now();
+      const hash = auditEntryHash(prevHash, { assetId: chainKey, seq, actorId: entry.actorId, action: entry.action, payload: entry.payload, txHash: entry.txHash, chainId: entry.chainId, createdAt });
+      const rec: AuditEntryRecord = { ...entry, id: id("audit"), createdAt, seq, prevHash, hash };
+      this.entries.push(rec);
+      return rec;
+    });
+    this.appendLock = run.catch(() => {});
+    return run;
   }
   async listByAsset(assetId: string, page: Page = {}): Promise<Paged<AuditEntryRecord>> {
     const matched = this.entries.filter((e) => e.assetId === assetId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -357,6 +371,19 @@ export class MemoryDocumentRepository implements DocumentRepository {
   }
   async get(docId: string): Promise<DocumentRecord | null> {
     return this.docs.get(docId) ?? null;
+  }
+}
+
+export class MemoryAuditAnchorRepository implements AuditAnchorRepository {
+  private readonly rows: AuditAnchorRecord[] = [];
+  async create(input: Omit<AuditAnchorRecord, "id" | "createdAt">): Promise<AuditAnchorRecord> {
+    const rec: AuditAnchorRecord = { ...input, id: id("anchor"), createdAt: now() };
+    this.rows.push(rec);
+    return { ...rec };
+  }
+  async latest(assetId: string): Promise<AuditAnchorRecord | null> {
+    const matches = this.rows.filter((r) => r.assetId === assetId).sort((a, b) => b.seq - a.seq);
+    return matches.length ? { ...matches[0]! } : null;
   }
 }
 

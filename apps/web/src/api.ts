@@ -1,4 +1,4 @@
-import type { AccountState, AnalyticsSummary, Asset, AuditEntry, Cashflow, CashflowPreview, ChainInfo, Listing, Proposal, Role, SessionUser, TokenInfo, Trade, UseCase } from "./types.js";
+import type { AccountState, AnalyticsSummary, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, ChainInfo, Listing, Proposal, Role, SessionUser, TokenInfo, Trade, UseCase } from "./types.js";
 
 export interface Currency { code: string; label: string; }
 export interface CashBalance { currency: string; address: string; amount: string; }
@@ -100,6 +100,10 @@ export const api = {
   executeCashflow: (token: string, assetId: string, cfId: string, from?: string) =>
     // 200 → { cashflow }; 202 (gated settlement) → { proposal }.
     request<{ cashflow?: Cashflow; proposal?: Proposal }>(`/assets/${assetId}/cashflows/${cfId}/execute`, token, { method: "POST", body: JSON.stringify(from ? { from } : {}) }),
+  verifyAudit: (token: string, assetId: string) => request<AuditVerify>(`/assets/${assetId}/audit/verify`, token),
+  auditSummary: (token: string) => request<AuditSummary>("/audit/verify", token),
+  anchorAudit: (token: string) =>
+    request<{ anchored: { assetId: string; seq: number; txHash: string }[] }>("/audit/anchor", token, { method: "POST", body: JSON.stringify({}) }),
   proposals: (token: string, status?: string) =>
     request<Proposal[]>(`/proposals${status ? `?status=${encodeURIComponent(status)}` : ""}`, token),
   approveProposal: (token: string, id: string) =>

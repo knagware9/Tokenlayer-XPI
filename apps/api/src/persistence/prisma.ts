@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import type { Asset } from "@prisma/client";
 import {
+  auditGenesis,
+  auditEntryHash,
   normalizeUseCaseDefinition,
   PolicyError,
   type LifecycleAction,
@@ -16,6 +18,8 @@ import type {
   AssetFilter,
   AssetRecord,
   AssetRepository,
+  AuditAnchorRecord,
+  AuditAnchorRepository,
   AuditEntryRecord,
   AuditRepository,
   CashBalanceRecord,
@@ -158,30 +162,27 @@ export class PrismaAssetRepository implements AssetRepository {
 }
 
 export class PrismaAuditRepository implements AuditRepository {
+  private appendLock: Promise<unknown> = Promise.resolve();
   async append(
     entry: Omit<AuditEntryRecord, "id" | "createdAt"> & { createdAt?: string },
   ): Promise<AuditEntryRecord> {
-    const r = await prisma.auditLog.create({
-      data: {
-        assetId: entry.assetId,
-        actorId: entry.actorId,
-        action: entry.action,
-        payload: JSON.stringify(entry.payload),
-        txHash: entry.txHash,
-        chainId: entry.chainId,
-        ...(entry.createdAt ? { createdAt: new Date(entry.createdAt) } : {}),
-      },
+    const run = this.appendLock.then(async () => {
+      const chainKey = entry.assetId ?? "__none__";
+      const head = await prisma.auditLog.findFirst({ where: { assetId: entry.assetId ?? null }, orderBy: { seq: "desc" } });
+      const seq = head ? head.seq + 1 : 0;
+      const prevHash = head ? head.hash : auditGenesis(chainKey);
+      const createdAt = entry.createdAt ? new Date(entry.createdAt) : new Date();
+      // Hash over createdAt.toISOString() + the payload OBJECT so verifyChain,
+      // which reads toAuditRecord's createdAt.toISOString() and payload, matches
+      // byte-for-byte (no re-stringify/re-parse drift).
+      const hash = auditEntryHash(prevHash, { assetId: chainKey, seq, actorId: entry.actorId, action: entry.action, payload: entry.payload, txHash: entry.txHash, chainId: entry.chainId, createdAt: createdAt.toISOString() });
+      const r = await prisma.auditLog.create({
+        data: { assetId: entry.assetId, actorId: entry.actorId, action: entry.action, payload: JSON.stringify(entry.payload), txHash: entry.txHash, chainId: entry.chainId, createdAt, seq, prevHash, hash },
+      });
+      return toAuditRecord({ ...r, payload: entry.payload });
     });
-    return {
-      id: r.id,
-      assetId: r.assetId ?? undefined,
-      actorId: r.actorId,
-      action: r.action as LifecycleAction,
-      payload: entry.payload,
-      txHash: r.txHash ?? undefined,
-      chainId: r.chainId ?? undefined,
-      createdAt: r.createdAt.toISOString(),
-    };
+    this.appendLock = run.catch(() => {});
+    return run;
   }
   async listByAsset(assetId: string, page: Page = {}): Promise<Paged<AuditEntryRecord>> {
     const [rows, total] = await Promise.all([
@@ -212,20 +213,28 @@ function toAuditRecord(r: {
   assetId: string | null;
   actorId: string;
   action: string;
-  payload: string;
+  // string on DB reads (JSON column); object when append passes it through so the
+  // hashed payload round-trips unchanged.
+  payload: string | Record<string, unknown>;
   txHash: string | null;
   chainId: string | null;
   createdAt: Date;
+  seq: number;
+  prevHash: string;
+  hash: string;
 }): AuditEntryRecord {
   return {
     id: r.id,
     assetId: r.assetId ?? undefined,
     actorId: r.actorId,
     action: r.action as LifecycleAction,
-    payload: JSON.parse(r.payload) as Record<string, unknown>,
+    payload: typeof r.payload === "string" ? (JSON.parse(r.payload) as Record<string, unknown>) : r.payload,
     txHash: r.txHash ?? undefined,
     chainId: r.chainId ?? undefined,
     createdAt: r.createdAt.toISOString(),
+    seq: r.seq,
+    prevHash: r.prevHash,
+    hash: r.hash,
   };
 }
 
@@ -240,6 +249,35 @@ export class PrismaDocumentRepository implements DocumentRepository {
     return r
       ? { id: r.id, contentType: r.contentType, sha256: r.sha256, size: r.size, bytes: Buffer.from(r.bytes), createdAt: r.createdAt.toISOString() }
       : null;
+  }
+}
+
+const toAuditAnchor = (r: {
+  id: string;
+  assetId: string;
+  seq: number;
+  hash: string;
+  txHash: string;
+  chainId: string;
+  createdAt: Date;
+}): AuditAnchorRecord => ({
+  id: r.id,
+  assetId: r.assetId,
+  seq: r.seq,
+  hash: r.hash,
+  txHash: r.txHash,
+  chainId: r.chainId,
+  createdAt: r.createdAt.toISOString(),
+});
+
+export class PrismaAuditAnchorRepository implements AuditAnchorRepository {
+  async create(input: Omit<AuditAnchorRecord, "id" | "createdAt">): Promise<AuditAnchorRecord> {
+    const r = await prisma.auditAnchor.create({ data: { assetId: input.assetId, seq: input.seq, hash: input.hash, txHash: input.txHash, chainId: input.chainId } });
+    return toAuditAnchor(r);
+  }
+  async latest(assetId: string): Promise<AuditAnchorRecord | null> {
+    const r = await prisma.auditAnchor.findFirst({ where: { assetId }, orderBy: { seq: "desc" } });
+    return r ? toAuditAnchor(r) : null;
   }
 }
 

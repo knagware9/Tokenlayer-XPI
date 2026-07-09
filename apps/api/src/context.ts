@@ -6,6 +6,7 @@ import type { Currency } from "./currencies.js";
 import type {
   AccountRepository,
   AssetRepository,
+  AuditAnchorRepository,
   AuditRepository,
   CashflowRepository,
   CashRepository,
@@ -23,6 +24,7 @@ export interface AppDeps {
   users: UserRepository;
   assets: AssetRepository;
   audit: AuditRepository;
+  auditAnchors: AuditAnchorRepository;
   accounts: AccountRepository;
   chains: ChainRegistry;
   cash: CashRepository;

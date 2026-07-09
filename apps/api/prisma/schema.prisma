@@ -82,6 +82,25 @@ model AuditLog {
   txHash    String?
   chainId   String?
   createdAt DateTime @default(now())
+  seq       Int      @default(0)
+  prevHash  String   @default("")
+  hash      String   @default("")
+
+  @@index([assetId])
+  @@unique([assetId, seq])
+}
+
+// On-ledger anchor of an audit chain head: the operator broadcasts the head
+// hash to the ledger so even a consistent full DB rewrite is caught (the stored
+// hash for the anchored seq no longer matches the on-ledger txHash's payload).
+model AuditAnchor {
+  id        String   @id @default(cuid())
+  assetId   String
+  seq       Int
+  hash      String
+  txHash    String
+  chainId   String
+  createdAt DateTime @default(now())
 
   @@index([assetId])
 }
