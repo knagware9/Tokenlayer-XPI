@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AssetRecord, CashflowRecord, KycDetails, KycStatus, ListingRecord, ProposalRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { canCreateUser, canManageUsers, computeCashflowSchedule, invoiceFingerprint, normalizeUseCaseDefinition, PolicyError, splitProRata, type Actor, type LifecycleAction, type Role, type UseCaseDefinition } from "@tokenlayer/core";
+import { auditEntryHash, canCreateUser, canManageUsers, computeCashflowSchedule, invoiceFingerprint, normalizeUseCaseDefinition, PolicyError, splitProRata, verifyChain, type Actor, type ChainEntry, type LifecycleAction, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { isSupportedCurrency } from "../currencies.js";
 import { deployUseCaseContracts } from "../use-cases.js";
@@ -434,6 +434,68 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const q = request.query as { limit: number; offset: number };
     const { items, total } = await deps.audit.listByAsset(asset.id, { limit: q.limit, offset: q.offset });
     return { data: items, pagination: { limit: q.limit, offset: q.offset, total } };
+  });
+
+  // --- audit integrity (hash chain + on-ledger anchoring) -----------------
+  // Rebuild an asset's seq-ascending ChainEntry list from its (chained) audit rows.
+  async function assetChain(assetId: string): Promise<ChainEntry[]> {
+    const { items } = await deps.audit.listByAsset(assetId, { limit: 100000 });
+    return items
+      .filter((e) => e.hash !== undefined)
+      .sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))
+      .map((e) => ({ seq: e.seq!, prevHash: e.prevHash!, hash: e.hash!, fields: { assetId: e.assetId ?? "__none__", seq: e.seq!, actorId: e.actorId, action: e.action, payload: e.payload, txHash: e.txHash, chainId: e.chainId, createdAt: e.createdAt } }));
+  }
+  // Verify one asset's chain and compare the entry at the anchored seq to the
+  // on-ledger anchor (catches a consistent full-chain rewrite up to that point).
+  async function verifyAsset(assetId: string) {
+    const chain = await assetChain(assetId);
+    const base = verifyChain(assetId, chain);
+    const anchor = await deps.auditAnchors.latest(assetId);
+    let anchorConsistent = true;
+    if (anchor) {
+      const at = chain.find((e) => e.seq === anchor.seq);
+      anchorConsistent = !!at && auditEntryHash(at.prevHash, at.fields) === anchor.hash;
+    }
+    return { assetId, valid: base.valid, count: base.count, head: base.head, brokenAt: base.brokenAt, reason: base.reason ?? null, lastAnchor: anchor ? { seq: anchor.seq, hash: anchor.hash, txHash: anchor.txHash, chainId: anchor.chainId, at: anchor.createdAt } : null, anchorConsistent };
+  }
+
+  app.get("/assets/:id/audit/verify", { schema: S.verifyAssetAudit, ...auth }, async (request, reply) => {
+    const asset = await scopedAsset(request, reply, "read");
+    if (!asset) return reply;
+    return verifyAsset(asset.id);
+  });
+
+  app.get("/audit/verify", { schema: S.verifyAuditSummary, ...auth }, async (request) => {
+    const claims = request.user as TokenClaims;
+    const useCaseKey = claims.role === "PlatformAdmin" ? undefined : claims.useCaseKey ?? NO_USE_CASE;
+    const { items } = await deps.assets.list({ useCaseKey }, { limit: 1000 });
+    const results = await Promise.all(items.map((a) => verifyAsset(a.id)));
+    const tampered = results.filter((r) => !r.valid || !r.anchorConsistent).map((r) => ({ assetId: r.assetId, brokenAt: r.brokenAt, reason: r.anchorConsistent ? r.reason : "anchor-mismatch" }));
+    return { assets: results.length, verified: results.filter((r) => r.valid && r.anchorConsistent).length, tampered, anchoredAssets: results.filter((r) => r.lastAnchor).length };
+  });
+
+  app.post("/audit/anchor", { schema: S.anchorAudit, ...auth }, async (request, reply) => {
+    const actor = actorOf(request);
+    if (!(deps.rbac.can(actor.role, "issue") || actor.role === "Auditor")) {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to anchor the audit trail" });
+    }
+    const claims = request.user as TokenClaims;
+    const useCaseKey = claims.role === "PlatformAdmin" ? undefined : claims.useCaseKey ?? NO_USE_CASE;
+    const { items } = await deps.assets.list({ useCaseKey }, { limit: 1000 });
+    const anchored: { assetId: string; seq: number; txHash: string }[] = [];
+    for (const a of items) {
+      const chain = await assetChain(a.id);
+      if (chain.length === 0) continue;
+      const head = chain[chain.length - 1]!;
+      try {
+        const receipt = await deps.chains.resolveAdapter(a.chainId).anchor({ id: a.id, chainId: a.chainId, contractRef: a.contractRef }, head.hash);
+        const rec = await deps.auditAnchors.create({ assetId: a.id, seq: head.seq, hash: head.hash, txHash: receipt.txHash, chainId: a.chainId });
+        anchored.push({ assetId: a.id, seq: rec.seq, txHash: rec.txHash });
+      } catch (err) {
+        request.log.error({ err, assetId: a.id }, "audit anchor failed for asset — skipped (best-effort)");
+      }
+    }
+    return { anchored };
   });
 
   // --- analytics ----------------------------------------------------------
