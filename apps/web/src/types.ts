@@ -175,6 +175,25 @@ export interface Proposal {
   decidedAt: string | null;
 }
 
+/** Result of verifying one asset's audit hash chain + on-ledger anchor. */
+export interface AuditVerify {
+  assetId: string;
+  valid: boolean;
+  count: number;
+  head: string | null;
+  brokenAt: number | null;
+  reason: string | null;
+  lastAnchor: { seq: number; hash: string; txHash: string; chainId: string; at: string } | null;
+  anchorConsistent: boolean;
+}
+
+export interface AuditSummary {
+  assets: number;
+  verified: number;
+  anchoredAssets: number;
+  tampered: { assetId: string; brokenAt: number | null; reason: string | null }[];
+}
+
 export interface AuditEntry {
   id: string;
   assetId?: string;

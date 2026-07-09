@@ -5,13 +5,14 @@ import { useRoute } from "./router.js";
 import { AssetManagement } from "./components/AssetManagement.js";
 import { Dashboard } from "./components/Dashboard.js";
 import { Header } from "./components/Header.js";
+import { IntegrityPanel } from "./components/IntegrityPanel.js";
 import { Login } from "./components/Login.js";
 import { PlatformHome } from "./components/PlatformHome.js";
 import { UserManagement } from "./components/UserManagement.js";
 import { canManageUsers } from "./rbac.js";
 import type { ChainInfo, UseCase } from "./types.js";
 
-type Section = "overview" | "assets" | "users";
+type Section = "overview" | "assets" | "users" | "integrity";
 
 export function App(): JSX.Element {
   const { token, user } = useAuth();
@@ -54,6 +55,7 @@ export function App(): JSX.Element {
   const sections: { id: Section; label: string }[] = [
     { id: "overview", label: "Overview" },
     { id: "assets", label: "Asset Management" },
+    { id: "integrity", label: "Integrity" },
     ...(canManageUsers(user.role) ? [{ id: "users" as Section, label: "User Management" }] : []),
   ];
 
@@ -74,6 +76,7 @@ export function App(): JSX.Element {
         </div>
         {section === "overview" && <Dashboard useCaseKey={activeUseCase} />}
         {section === "assets" && <AssetManagement useCaseKey={activeUseCase} useCases={useCases} chains={chains} />}
+        {section === "integrity" && <IntegrityPanel useCaseKey={user.role === "PlatformAdmin" ? undefined : activeUseCase} />}
         {section === "users" && <UserManagement useCaseKey={activeUseCase} useCases={useCases} />}
       </main>
     </div>
