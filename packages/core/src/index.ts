@@ -8,3 +8,4 @@ export * from "./lifecycle-engine.js";
 export * from "./user-policy.js";
 export { invoiceFingerprint, type InvoiceFingerprintInput } from "./invoice-fingerprint.js";
 export { computeCashflowSchedule, splitProRata, type TermsConfig, type ScheduledCashflow } from "./cashflows.js";
+export { auditGenesis, auditEntryHash, verifyChain, type AuditChainFields, type ChainEntry, type VerifyResult } from "./audit-chain.js";
