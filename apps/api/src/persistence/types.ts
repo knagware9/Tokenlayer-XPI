@@ -57,6 +57,9 @@ export interface AuditEntryRecord {
   txHash?: string;
   chainId?: string;
   createdAt: string;
+  seq?: number;
+  prevHash?: string;
+  hash?: string;
 }
 
 export interface AccountRecord {

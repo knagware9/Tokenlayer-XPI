@@ -82,8 +82,12 @@ model AuditLog {
   txHash    String?
   chainId   String?
   createdAt DateTime @default(now())
+  seq       Int      @default(0)
+  prevHash  String   @default("")
+  hash      String   @default("")
 
   @@index([assetId])
+  @@unique([assetId, seq])
 }
 
 // Secondary-market sell listing. `quantity` is the REMAINING quantity — it
