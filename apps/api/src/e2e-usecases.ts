@@ -18,6 +18,7 @@ import { loadCurrencies } from "./currencies.js";
 import {
   MemoryAccountRepository,
   MemoryAssetRepository,
+  MemoryAuditAnchorRepository,
   MemoryAuditRepository,
   MemoryCashRepository,
   MemoryCashflowRepository,
@@ -54,6 +55,7 @@ async function main(): Promise<void> {
   const users = new MemoryUserRepository();
   const assets = new MemoryAssetRepository();
   const audit = new MemoryAuditRepository();
+  const auditAnchors = new MemoryAuditAnchorRepository();
   const accounts = new MemoryAccountRepository();
   const useCases = new MemoryUseCaseRepository();
   await seedDefaults(users, accounts);
@@ -64,7 +66,7 @@ async function main(): Promise<void> {
   });
   const cash = new MemoryCashRepository();
   const listings = new MemoryListingRepository();
-  const app = await buildApp({ useCases, rbac, engine, users, assets, audit, accounts, chains, cash, listings, documents: new MemoryDocumentRepository(), cashflows: new MemoryCashflowRepository(), proposals: new MemoryProposalRepository(), currencies: loadCurrencies(), jwtSecret: "e2e" });
+  const app = await buildApp({ useCases, rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents: new MemoryDocumentRepository(), cashflows: new MemoryCashflowRepository(), proposals: new MemoryProposalRepository(), currencies: loadCurrencies(), jwtSecret: "e2e" });
 
   const admin = await login(app, "admin");
   const evmAvailable = chains.list().some((c) => c.id === "local-evm");

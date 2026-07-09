@@ -6,6 +6,8 @@ import type {
   AssetFilter,
   AssetRecord,
   AssetRepository,
+  AuditAnchorRecord,
+  AuditAnchorRepository,
   AuditEntryRecord,
   AuditRepository,
   CashBalanceRecord,
@@ -369,6 +371,19 @@ export class MemoryDocumentRepository implements DocumentRepository {
   }
   async get(docId: string): Promise<DocumentRecord | null> {
     return this.docs.get(docId) ?? null;
+  }
+}
+
+export class MemoryAuditAnchorRepository implements AuditAnchorRepository {
+  private readonly rows: AuditAnchorRecord[] = [];
+  async create(input: Omit<AuditAnchorRecord, "id" | "createdAt">): Promise<AuditAnchorRecord> {
+    const rec: AuditAnchorRecord = { ...input, id: id("anchor"), createdAt: now() };
+    this.rows.push(rec);
+    return { ...rec };
+  }
+  async latest(assetId: string): Promise<AuditAnchorRecord | null> {
+    const matches = this.rows.filter((r) => r.assetId === assetId).sort((a, b) => b.seq - a.seq);
+    return matches.length ? { ...matches[0]! } : null;
   }
 }
 

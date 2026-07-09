@@ -4,7 +4,7 @@ import { buildApp } from "./app.js";
 import { buildChainRegistry } from "./chains.js";
 import { createEngine } from "./context.js";
 import { loadCurrencies } from "./currencies.js";
-import { MemoryAccountRepository, MemoryAssetRepository, MemoryAuditRepository, MemoryCashRepository,
+import { MemoryAccountRepository, MemoryAssetRepository, MemoryAuditAnchorRepository, MemoryAuditRepository, MemoryCashRepository,
   MemoryCashflowRepository,
   MemoryProposalRepository,
   MemoryDocumentRepository,
@@ -22,6 +22,7 @@ async function main(): Promise<void> {
   const users = new MemoryUserRepository();
   const assets = new MemoryAssetRepository();
   const audit = new MemoryAuditRepository();
+  const auditAnchors = new MemoryAuditAnchorRepository();
   const accounts = new MemoryAccountRepository();
   const useCases = new MemoryUseCaseRepository();
   await seedDefaults(users, accounts); // Platform Admin + per-use-case rosters
@@ -32,7 +33,7 @@ async function main(): Promise<void> {
   });
   const cash = new MemoryCashRepository();
   const listings = new MemoryListingRepository();
-  const app = await buildApp({ useCases, rbac, engine, users, assets, audit, accounts, chains, cash, listings, documents: new MemoryDocumentRepository(), cashflows: new MemoryCashflowRepository(), proposals: new MemoryProposalRepository(), currencies: loadCurrencies(), jwtSecret: "e2e" });
+  const app = await buildApp({ useCases, rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents: new MemoryDocumentRepository(), cashflows: new MemoryCashflowRepository(), proposals: new MemoryProposalRepository(), currencies: loadCurrencies(), jwtSecret: "e2e" });
 
   const platform = await login(app, "admin@tokenlayer.dev", "admin123");
   const carbonAdmin = await login(app, "carbon.admin@tokenlayer.dev", "carbon123");

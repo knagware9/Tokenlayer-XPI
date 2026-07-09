@@ -7,6 +7,7 @@ import { env } from "./env.js";
 import {
   PrismaAccountRepository,
   PrismaAssetRepository,
+  PrismaAuditAnchorRepository,
   PrismaAuditRepository,
   PrismaCashflowRepository,
   PrismaProposalRepository,
@@ -27,6 +28,7 @@ async function main(): Promise<void> {
   const users = new PrismaUserRepository();
   const assets = new PrismaAssetRepository();
   const audit = new PrismaAuditRepository();
+  const auditAnchors = new PrismaAuditAnchorRepository();
   const accounts = new PrismaAccountRepository();
   const useCases = new PrismaUseCaseRepository();
   const cash = new PrismaCashRepository();
@@ -51,6 +53,7 @@ async function main(): Promise<void> {
     users,
     assets,
     audit,
+    auditAnchors,
     accounts,
     chains,
     cash,

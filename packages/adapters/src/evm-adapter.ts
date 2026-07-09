@@ -282,4 +282,14 @@ export class EvmLedgerAdapter implements LedgerAdapter {
     if (refs) return this.trexManager().isVerified(refs, account);
     return (await this.fungible(ref).getFunction("isAllowed")(account)) as boolean;
   }
+
+  /**
+   * Anchor an off-ledger hash (an audit chain head) on-ledger by broadcasting a
+   * 0-value self-transaction that carries the hash as calldata — permanent,
+   * tamper-evident proof the operator observed that head. Routed through the same
+   * serialised send/nonce machinery as every other write so it never races.
+   */
+  async anchor(_ref: AssetRef, hash: string): Promise<TxReceipt> {
+    return this.send((ov) => this.signer.sendTransaction({ to: this.wallet.address, value: 0n, data: hash, ...ov }));
+  }
 }

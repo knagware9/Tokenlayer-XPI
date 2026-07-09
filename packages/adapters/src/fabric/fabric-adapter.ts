@@ -129,4 +129,13 @@ export class FabricLedgerAdapter implements LedgerAdapter {
   async isAllowed(ref: AssetRef, account: string): Promise<boolean> {
     return (await this.evaluate("IsAllowed", ref.contractRef, account)) === "true";
   }
+
+  /**
+   * Anchor an audit chain head. The `tokenlayer` chaincode exposes no anchoring
+   * function, so this returns a synthetic receipt carrying the hash (matches the
+   * real-or-absent stance) rather than submitting a transaction that would fail.
+   */
+  async anchor(_ref: AssetRef, hash: string): Promise<TxReceipt> {
+    return { txHash: hash, chainId: this.chainId, timestamp: new Date().toISOString() };
+  }
 }

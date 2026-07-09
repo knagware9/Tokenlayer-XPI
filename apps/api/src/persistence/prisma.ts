@@ -18,6 +18,8 @@ import type {
   AssetFilter,
   AssetRecord,
   AssetRepository,
+  AuditAnchorRecord,
+  AuditAnchorRepository,
   AuditEntryRecord,
   AuditRepository,
   CashBalanceRecord,
@@ -247,6 +249,35 @@ export class PrismaDocumentRepository implements DocumentRepository {
     return r
       ? { id: r.id, contentType: r.contentType, sha256: r.sha256, size: r.size, bytes: Buffer.from(r.bytes), createdAt: r.createdAt.toISOString() }
       : null;
+  }
+}
+
+const toAuditAnchor = (r: {
+  id: string;
+  assetId: string;
+  seq: number;
+  hash: string;
+  txHash: string;
+  chainId: string;
+  createdAt: Date;
+}): AuditAnchorRecord => ({
+  id: r.id,
+  assetId: r.assetId,
+  seq: r.seq,
+  hash: r.hash,
+  txHash: r.txHash,
+  chainId: r.chainId,
+  createdAt: r.createdAt.toISOString(),
+});
+
+export class PrismaAuditAnchorRepository implements AuditAnchorRepository {
+  async create(input: Omit<AuditAnchorRecord, "id" | "createdAt">): Promise<AuditAnchorRecord> {
+    const r = await prisma.auditAnchor.create({ data: { assetId: input.assetId, seq: input.seq, hash: input.hash, txHash: input.txHash, chainId: input.chainId } });
+    return toAuditAnchor(r);
+  }
+  async latest(assetId: string): Promise<AuditAnchorRecord | null> {
+    const r = await prisma.auditAnchor.findFirst({ where: { assetId }, orderBy: { seq: "desc" } });
+    return r ? toAuditAnchor(r) : null;
   }
 }
 

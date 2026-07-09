@@ -88,6 +88,15 @@ export abstract class SimulatedAdapter implements LedgerAdapter {
   async isAllowed(ref: AssetRef, account: string): Promise<boolean> {
     return this.ledger.isAllowed(ref.contractRef, account);
   }
+
+  /** Record an off-ledger hash as a synthesised on-ledger anchor transaction. */
+  async anchor(ref: AssetRef, hash: string): Promise<TxReceipt> {
+    const list = this.anchors.get(ref.contractRef) ?? [];
+    list.push(hash);
+    this.anchors.set(ref.contractRef, list);
+    return this.receipt();
+  }
+  private readonly anchors = new Map<string, string[]>();
 }
 
 /** Generic in-memory chain. */
