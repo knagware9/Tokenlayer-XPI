@@ -33,7 +33,13 @@ export function App(): JSX.Element {
   }, [user, routeKey, navigate]);
 
   // Reset to the Overview section whenever the active use case changes.
-  useEffect(() => { setSection("overview"); }, [user?.role === "PlatformAdmin" ? routeKey : user?.useCaseKey]);
+  // Reset the section when the active use case changes — honouring a one-shot
+  // intent (e.g. "Start tokenizing" lands on Asset Management) set before navigating.
+  useEffect(() => {
+    const want = sessionStorage.getItem("tl:section");
+    if (want) sessionStorage.removeItem("tl:section");
+    setSection(want === "assets" ? "assets" : "overview");
+  }, [user?.role === "PlatformAdmin" ? routeKey : user?.useCaseKey]);
 
   if (!token || !user) return <Login />;
 
