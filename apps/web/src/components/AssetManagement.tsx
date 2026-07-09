@@ -2,14 +2,13 @@ import { useState } from "react";
 import { useAuth } from "../auth.js";
 import { can } from "../rbac.js";
 import type { ChainInfo, UseCase } from "../types.js";
-import { ApprovalsPanel } from "./ApprovalsPanel.js";
 import { AssetDetail } from "./AssetDetail.js";
 import { AssetList } from "./AssetList.js";
 import { InvoiceImport } from "./InvoiceImport.js";
 import { IssuePanel } from "./IssuePanel.js";
 import { MyHoldings } from "./MyHoldings.js";
 
-type Sub = "issuance" | "marketplace" | "import" | "holdings" | "approvals";
+type Sub = "issuance" | "marketplace" | "import" | "holdings";
 
 /** The Import tab targets any use case whose schema carries the canonical invoice fields. */
 const INVOICE_FIELDS = ["invoiceHash", "invoiceNumber", "sellerGstin", "buyerGstin", "amountInr", "dueDate"];
@@ -25,13 +24,11 @@ export function AssetManagement({ useCaseKey, useCases, chains }: { useCaseKey: 
 
   const activeUseCase = useCases.find((u) => u.key === useCaseKey);
   const canImport = canIssue && isInvoiceUseCase(activeUseCase);
-  const hasWorkflow = !!activeUseCase?.workflow?.approvals && Object.keys(activeUseCase.workflow.approvals).length > 0;
 
   const subs: { id: Sub; label: string }[] = [
     ...(canIssue ? [{ id: "issuance" as Sub, label: "Token Issuance" }] : []),
     { id: "marketplace" as Sub, label: "Marketplace" },
     ...(canImport ? [{ id: "import" as Sub, label: "Import" }] : []),
-    ...(hasWorkflow ? [{ id: "approvals" as Sub, label: "Approvals" }] : []),
     ...(hasWallet ? [{ id: "holdings" as Sub, label: "My Holdings" }] : []),
   ];
   const [selectedSub, setSub] = useState<Sub>(subs[0]?.id ?? "marketplace");
@@ -65,9 +62,6 @@ export function AssetManagement({ useCaseKey, useCases, chains }: { useCaseKey: 
       {sub === "marketplace" && <AssetList chains={chains} useCaseKey={listKey} refreshKey={refreshKey} onSelect={setSelected} />}
       {sub === "import" && isInvoiceUseCase(activeUseCase) && (
         <InvoiceImport useCase={activeUseCase} chains={chains} onTokenized={() => setRefreshKey((k) => k + 1)} />
-      )}
-      {sub === "approvals" && activeUseCase && hasWorkflow && (
-        <ApprovalsPanel useCase={activeUseCase} onChanged={() => setRefreshKey((k) => k + 1)} />
       )}
       {sub === "holdings" && <MyHoldings onSelect={setSelected} />}
     </div>

@@ -41,6 +41,11 @@ export interface ChainInfo {
   kind: "simulated" | "evm";
   /** "real" = live backend (EVM RPC / Fabric gateway / Canton JSON API); "simulated" = in-memory ledger. */
   mode: "real" | "simulated";
+  /** false = a supported chain from the catalog that is not currently connected (no
+   * adapter). It can still be selected as an allowed DLT when configuring a use case
+   * (contracts deploy once the chain is brought online), but assets cannot be issued
+   * on it yet. Live chains are `true`. */
+  available: boolean;
   /** Public block-explorer base URL (no trailing slash), when the chain has one — lets the UI link contract addresses and tx hashes. */
   explorerUrl?: string;
   /** Native gas-token symbol (e.g. tMSTC), when known. */
@@ -86,7 +91,7 @@ export function buildChainRegistry(env: Env = process.env): ChainRegistry {
     if (d.kind === "simulated") {
       const { adapter, real } = makeSimulatedOrReal(d.id, d.family, env);
       adapters.set(d.id, adapter);
-      infos.push({ id: d.id, label: d.label, family: d.family, kind: "simulated", mode: real ? "real" : "simulated" });
+      infos.push({ id: d.id, label: d.label, family: d.family, kind: "simulated", mode: real ? "real" : "simulated", available: true });
       if (real && typeof (adapter as { healthCheck?: unknown }).healthCheck === "function") {
         realProbes.push({ id: d.id, adapter: adapter as unknown as (typeof realProbes)[number]["adapter"] });
       }
@@ -99,7 +104,7 @@ export function buildChainRegistry(env: Env = process.env): ChainRegistry {
       artifacts ??= evmArtifacts();
       const adapter = new EvmLedgerAdapter({ chainId: d.id, rpcUrl, privateKey, artifacts, gas: d.gas, confirmations: d.confirmations });
       adapters.set(d.id, adapter);
-      infos.push({ id: d.id, label: d.label, family: d.family, kind: "evm", mode: "real", explorerUrl: d.explorerUrl, currencySymbol: d.currencySymbol });
+      infos.push({ id: d.id, label: d.label, family: d.family, kind: "evm", mode: "real", available: true, explorerUrl: d.explorerUrl, currencySymbol: d.currencySymbol });
       evmChains.push({ descriptor: d, adapter });
     } else if (d.required && strict) {
       throw new Error(
@@ -107,10 +112,15 @@ export function buildChainRegistry(env: Env = process.env): ChainRegistry {
           `Run \`make deploy\` to start the Besu network, or set CHAIN_STRICT=0 to boot without it ` +
           `(the chain will be absent — never simulated).`,
       );
-    } else if (d.required) {
-      console.warn(`[chains] CHAIN_STRICT=0 — required chain '${d.id}' is NOT configured; it will be absent (not simulated).`);
+    } else {
+      // EVM chain not connected (CHAIN_STRICT=0 required chain like besu, or an
+      // optional one like mst/local-evm without env). It has NO adapter — assets
+      // cannot be issued on it — but it is a supported DLT from the catalog, so we
+      // surface it as a selectable option (available:false) when configuring a use
+      // case. Selecting it leaves that chain's contract pending until it comes online.
+      if (d.required) console.warn(`[chains] CHAIN_STRICT=0 — required chain '${d.id}' is NOT configured; it will be absent (not simulated).`);
+      infos.push({ id: d.id, label: d.label, family: d.family, kind: "evm", mode: "real", available: false, explorerUrl: d.explorerUrl, currencySymbol: d.currencySymbol });
     }
-    // optional EVM chain without env (e.g. local-evm): omitted from the registry.
   }
 
   return {
