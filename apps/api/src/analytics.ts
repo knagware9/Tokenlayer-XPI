@@ -54,6 +54,7 @@ export interface RecentEvent {
   action: string;
   assetId: string;
   assetName: string;
+  useCaseKey: string | null;
   chainId: string;
   summary: string;
 }
@@ -293,6 +294,7 @@ export function computeAnalytics(input: AnalyticsInput): AnalyticsSummary {
         action: e.action,
         assetId: e.assetId ?? "",
         assetName: asset?.name ?? "",
+        useCaseKey: asset?.useCaseKey ?? null,
         chainId: e.chainId ?? asset?.chainId ?? "",
         summary: summarize(e.action, e.payload ?? {}),
       };

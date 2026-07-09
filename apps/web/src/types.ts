@@ -17,6 +17,10 @@ export interface ChainInfo {
   family: ChainFamily;
   kind: "simulated" | "evm";
   mode: "real" | "simulated";
+  /** false = a supported DLT from the catalog that is not currently connected. It can
+   * be selected as an allowed chain when configuring a use case, but no assets can be
+   * issued on it until it is brought online. Absent/undefined is treated as available. */
+  available?: boolean;
   explorerUrl?: string;
   currencySymbol?: string;
 }
@@ -220,5 +224,5 @@ export interface AnalyticsSummary {
   byLedger: { chainId: string; mode: "real" | "simulated"; assets: number; supply: string; holders: number }[];
   byUseCase: { useCaseKey: string; name: string; symbol: string; chainId: string; supply: string; holders: number; valueByCurrency: Record<string, string> }[];
   activity: { date: string; count: number; tradedByCurrency: Record<string, string> }[];
-  recent: { at: string; action: string; assetId: string; assetName: string; chainId: string; summary: string }[];
+  recent: { at: string; action: string; assetId: string; assetName: string; useCaseKey: string | null; chainId: string; summary: string }[];
 }

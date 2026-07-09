@@ -9,18 +9,23 @@ describe("chain registry", () => {
     expect(() => buildChainRegistry({})).toThrow(/besu.*required.*BESU_RPC_URL/s);
   });
 
-  it("omits (never simulates) a required chain when CHAIN_STRICT=0", () => {
+  it("surfaces a required chain as available:false (never simulated) when CHAIN_STRICT=0", () => {
     const reg = buildChainRegistry({ CHAIN_STRICT: "0" });
-    const ids = reg.list().map((c) => c.id);
-    expect(ids).not.toContain("besu");
+    const besu = reg.list().find((c) => c.id === "besu");
+    // Present in the catalog so it can be selected as an allowed DLT, but not
+    // connected (no adapter) and never simulated.
+    expect(besu?.available).toBe(false);
+    expect(besu?.mode).not.toBe("simulated");
     expect(() => reg.resolveAdapter("besu")).toThrow(/not configured/);
   });
 
-  it("omits optional EVM chains (mst, local-evm) when their env is unset", () => {
+  it("surfaces optional EVM chains (mst, local-evm) as available:false when their env is unset", () => {
     const reg = buildChainRegistry({ CHAIN_STRICT: "0" });
-    const ids = reg.list().map((c) => c.id);
-    expect(ids).not.toContain("mst");
-    expect(ids).not.toContain("local-evm");
+    const byId = new Map(reg.list().map((c) => [c.id, c] as const));
+    expect(byId.get("mst")?.available).toBe(false);
+    expect(byId.get("local-evm")?.available).toBe(false);
+    // Still no adapter — they cannot be resolved until brought online.
+    expect(() => reg.resolveAdapter("mst")).toThrow(/not configured/);
   });
 
   it("keeps simulated chains available and labels their mode", () => {

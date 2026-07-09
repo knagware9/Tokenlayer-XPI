@@ -63,9 +63,14 @@ describe("catalog", () => {
     const keys = useCases.json().map((u: { key: string }) => u.key);
     expect(keys).toEqual(expect.arrayContaining(["generic-asset", "generic-certificate", "gold-loan", "corporate-bond"]));
     const chains = await inj({ method: "GET", url: "/chains", headers: auth(token) });
-    const ids = chains.json().map((c: { id: string }) => c.id);
+    const list = chains.json() as { id: string; available?: boolean; mode: string }[];
+    const ids = list.map((c) => c.id);
     expect(ids).toEqual(expect.arrayContaining(["fabric", "canton"]));
-    expect(ids).not.toContain("besu"); // EVM chains are never simulated
+    // besu is surfaced in the catalog as a selectable DLT but not connected
+    // (available:false) and never simulated.
+    const besu = list.find((c) => c.id === "besu");
+    expect(besu?.available).toBe(false);
+    expect(besu?.mode).not.toBe("simulated");
   });
 
   it("a scoped user only sees their own use case in the catalog", async () => {

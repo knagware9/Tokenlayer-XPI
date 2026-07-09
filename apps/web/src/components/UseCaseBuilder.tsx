@@ -29,7 +29,8 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
   const [symbol, setSymbol] = useState("");
   const [description, setDescription] = useState("");
   const [standard, setStandard] = useState<TokenStandard>("ERC-20");
-  const firstChain = chains[0]?.id ?? "besu";
+  // Default to a live chain so the use case has at least one deployable target.
+  const firstChain = (chains.find((c) => c.available !== false) ?? chains[0])?.id ?? "besu";
   const [allowedChainIds, setAllowedChainIds] = useState<string[]>([firstChain]);
   const [defaultChainId, setDefaultChainId] = useState(firstChain);
   const [fields, setFields] = useState<FieldRow[]>([{ name: "issuer", kind: "string", required: true }]);
@@ -200,20 +201,32 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
 
         <L label="Allowed DLTs / chains">
           <div className="flex flex-wrap gap-2">
-            {chains.map((c) => (
-              <Chip
-                key={c.id}
-                active={allowedChainIds.includes(c.id)}
-                onClick={() => {
-                  const next = toggle(allowedChainIds, c.id);
-                  setAllowedChainIds(next.length ? next : [c.id]);
-                  if (!next.includes(defaultChainId)) setDefaultChainId(next[0] ?? c.id);
-                }}
-              >
-                {c.label}
-              </Chip>
-            ))}
+            {chains.map((c) => {
+              const offline = c.available === false;
+              return (
+                <Chip
+                  key={c.id}
+                  active={allowedChainIds.includes(c.id)}
+                  onClick={() => {
+                    const next = toggle(allowedChainIds, c.id);
+                    setAllowedChainIds(next.length ? next : [c.id]);
+                    // Keep the default on a live chain so there's a deployable target.
+                    if (!next.includes(defaultChainId)) {
+                      const live = chains.find((x) => next.includes(x.id) && x.available !== false);
+                      setDefaultChainId(live?.id ?? next[0] ?? c.id);
+                    }
+                  }}
+                >
+                  {c.label}
+                  {offline && <span className="ml-1 text-[10px] opacity-70">· not connected</span>}
+                </Chip>
+              );
+            })}
           </div>
+          <p className="text-[11px] text-slate-400 mt-1.5">
+            Chains marked <span className="italic">not connected</span> (e.g. Besu, MST Blockchain) are supported DLTs you can select now — their
+            contract stays pending and deploys once the network is brought online. At least one connected chain must be selected to tokenize.
+          </p>
         </L>
 
         <div>
