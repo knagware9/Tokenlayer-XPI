@@ -1,0 +1,87 @@
+{
+  "key": "gold-egr",
+  "name": "Tokenized Gold (EGR)",
+  "description": "A SEBI-style Electronic Gold Receipt tokenized as fungible units (ERC-20) where 1 token = 1 gram of fine gold held in an accredited vault. A vault manager issues receipts against a physical deposit (mint), KYC-verified India-jurisdiction participants trade grams on the DvP marketplace at the digital-rupee gold price (a small exchange fee routes to the platform), and a physical withdrawal surrenders the tokens for delivery (burn) — gated behind maker-checker approval so releasing bullion from the vault needs a second pair of eyes. The vault receipt id is enforced unique so one physical deposit is tokenized only once; the assay certificate stays off-ledger with only its hash on-chain. Freeze places a compliance/lien hold on an account.",
+  "tokenStandard": "ERC-20",
+  "symbol": "EGR",
+  "allowedChainIds": [
+    "fabric",
+    "besu",
+    "canton"
+  ],
+  "defaultChainId": "fabric",
+  "metadataSchema": {
+    "type": "object",
+    "properties": {
+      "receiptId": {
+        "type": "string",
+        "description": "SEBI Electronic Gold Receipt number the vault manager issues against a physical deposit — enforced unique so one deposit is tokenized only once"
+      },
+      "custodian": {
+        "type": "string",
+        "description": "SEBI-accredited vault manager holding the physical gold (e.g. Sequel, Brink's India)"
+      },
+      "vaultLocation": {
+        "type": "string",
+        "description": "Physical vault location (city)"
+      },
+      "refiner": {
+        "type": "string",
+        "description": "LBMA / BIS-accredited refiner of the underlying bars"
+      },
+      "purity": {
+        "type": "string",
+        "description": "Fineness of the gold",
+        "enum": ["995", "999", "999.9"]
+      },
+      "fineWeightGrams": {
+        "type": "number",
+        "description": "Total fine-gold grams backing this issuance (1 token = 1 gram)",
+        "min": 1
+      },
+      "barSerial": {
+        "type": "string",
+        "description": "Serial number(s) of the physical bar(s) in the vault"
+      },
+      "depositDate": {
+        "type": "string",
+        "description": "Date the gold was deposited (YYYY-MM-DD)",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+      },
+      "assayCertificateUrl": {
+        "type": "document",
+        "description": "Off-ledger link to the refiner assay / quality certificate (only its hash lives on-ledger)"
+      },
+      "assayCertificateHash": {
+        "type": "string",
+        "description": "SHA-256 of the assay certificate (pins the off-ledger document)",
+        "pattern": "^0x[0-9a-fA-F]{64}$"
+      }
+    },
+    "required": ["receiptId", "custodian", "vaultLocation", "purity", "fineWeightGrams"]
+  },
+  "lifecycle": {
+    "mint": true,
+    "transfer": true,
+    "burn": true,
+    "freeze": true
+  },
+  "compliance": {
+    "allowlist": true,
+    "transferRestrictions": true,
+    "allowedJurisdictions": ["IN"]
+  },
+  "fees": {
+    "marketplaceBps": 25
+  },
+  "saleTermsDefault": {
+    "currency": "CBDC-INR"
+  },
+  "workflow": {
+    "approvals": {
+      "burn": 1
+    }
+  },
+  "uniqueBy": "receiptId",
+  "roles": ["UseCaseAdmin", "Issuer", "Buyer", "Auditor"]
+}
