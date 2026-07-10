@@ -26,6 +26,10 @@ services:
       # Shared demo: many users authenticate from one egress IP — raise the
       # per-IP login throttle above the secure default (10).
       LOGIN_RATE_LIMIT_MAX: ${LOGIN_RATE_LIMIT_MAX:-200}
+      # DID/VC KYC: trusted issuer DID allowlist (empty ⇒ verification closed) + a
+      # dev-only issuer seed enabling POST /identity/mint for the demo. From .env.
+      TRUSTED_KYC_ISSUERS: ${TRUSTED_KYC_ISSUERS:-}
+      DEV_KYC_ISSUER_SEED: ${DEV_KYC_ISSUER_SEED:-}
     volumes:
       - api-data:/data
     ports:
