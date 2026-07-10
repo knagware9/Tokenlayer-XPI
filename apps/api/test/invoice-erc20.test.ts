@@ -30,13 +30,13 @@ describe("invoice ERC-20 issue", () => {
     expect(res.json().asset.metadata.invoiceHash).toBe(invoiceFingerprint(inv));
   });
 
-  it("rejects a duplicate invoice (same fingerprint) with 409 DUPLICATE_INVOICE", async () => {
+  it("rejects a duplicate invoice (same fingerprint) with 409 DUPLICATE_ASSET", async () => {
     const app = await buildTestApp();
     const admin = await invoiceAdmin(app);
     const body = { useCaseKey: UC, name: inv.invoiceNumber, chainId: "fabric", initialSupply: "10000", treasuryAccount: HOLDER, metadata: { ...inv } };
     expect((await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(admin), payload: body })).statusCode).toBe(201);
     const dup = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(admin), payload: { ...body, name: "dup" } });
     expect(dup.statusCode).toBe(409);
-    expect(dup.json().error).toBe("DUPLICATE_INVOICE");
+    expect(dup.json().error).toBe("DUPLICATE_ASSET");
   });
 });

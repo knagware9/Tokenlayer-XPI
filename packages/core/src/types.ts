@@ -215,7 +215,7 @@ export interface UseCaseDefinition {
   derivedFields?: Record<string, "invoiceFingerprint">;
   /**
    * A metadata field whose value must be unique across the use case's assets.
-   * Issue rejects a duplicate with DUPLICATE_INVOICE. Must name a declared
+   * Issue rejects a duplicate with DUPLICATE_ASSET. Must name a declared
    * metadata property.
    */
   uniqueBy?: string;

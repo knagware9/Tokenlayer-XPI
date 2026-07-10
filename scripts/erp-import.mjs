@@ -90,7 +90,7 @@ for (const inv of rows) {
   const supply = Math.max(1, Math.round(Number(inv.amountInr) / PAR));
   const metadata = {
     // invoiceHash is intentionally omitted: the platform derives it server-side
-    // from the canonical fields and rejects duplicates (409 DUPLICATE_INVOICE).
+    // from the canonical fields and rejects duplicates (409 DUPLICATE_ASSET).
     invoiceNumber: inv.invoiceNumber,
     sellerGstin: inv.sellerGstin,
     buyerGstin: inv.buyerGstin,
@@ -102,7 +102,7 @@ for (const inv of rows) {
 
   // Tokenize the invoice into `supply` fungible tokens minted to the holder. The
   // issue path auto-allowlists + mints the treasury, and rejects a duplicate
-  // fingerprint with 409 DUPLICATE_INVOICE (cross-channel double-financing block).
+  // fingerprint with 409 DUPLICATE_ASSET (cross-channel double-financing block).
   const issued = await call("POST", "/assets", TOKEN, {
     useCaseKey: USE_CASE,
     name: `${inv.invoiceNumber} · ${inv.sellerGstin.slice(0, 4)}→${inv.buyerGstin.slice(0, 4)}`,
@@ -114,7 +114,7 @@ for (const inv of rows) {
   if (issued.status === 201) {
     results.TOKENIZED += 1;
     console.log(`  ✓ TOKENIZED          ${label} → ${supply} tokens → holder (${fingerprint.slice(0, 14)}…)`);
-  } else if (issued.status === 409 && issued.json?.error === "DUPLICATE_INVOICE") {
+  } else if (issued.status === 409 && issued.json?.error === "DUPLICATE_ASSET") {
     results["DUPLICATE-BLOCKED"] += 1;
     console.log(`  ⛔ DUPLICATE-BLOCKED ${label} — invoice already tokenized (${fingerprint.slice(0, 14)}…)`);
   } else {

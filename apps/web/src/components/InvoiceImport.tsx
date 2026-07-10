@@ -10,7 +10,7 @@ import type { ChainInfo, UseCase } from "../types.js";
 // issue: the invoice's face value is split into `supply = round(face / par)`
 // ERC-20 units minted to a holder. The server derives the canonical invoice
 // fingerprint and rejects an already-tokenized invoice with a 409
-// (DUPLICATE_INVOICE) — the cross-channel double-tokenization guard.
+// (DUPLICATE_ASSET) — the cross-channel double-tokenization guard.
 // ============================================================================
 
 const INVOICE_FIELDS = ["invoiceNumber", "sellerGstin", "buyerGstin", "amountInr", "dueDate"] as const;
@@ -219,7 +219,7 @@ export function InvoiceImport({ useCase, chains, onTokenized }: Props): JSX.Elem
         patchRow(i, { status: "tokenized", message: undefined });
         anyMinted = true;
       } catch (err) {
-        if (err instanceof ApiError && err.code === "DUPLICATE_INVOICE") {
+        if (err instanceof ApiError && err.code === "DUPLICATE_ASSET") {
           patchRow(i, { status: "duplicate", message: "already tokenized" });
         } else {
           patchRow(i, { status: "error", message: err instanceof ApiError ? err.message : "request failed" });

@@ -256,7 +256,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const uniqueKey = useCase.uniqueBy ? String(meta[useCase.uniqueBy]) : null;
     if (useCase.uniqueBy) {
       const existing = await deps.assets.findByMetadata(useCase.key, useCase.uniqueBy, meta[useCase.uniqueBy]);
-      if (existing) return reply.code(409).send({ error: "DUPLICATE_INVOICE", message: "an invoice with this fingerprint is already tokenized" });
+      if (existing) return reply.code(409).send({ error: "DUPLICATE_ASSET", message: `an asset with this ${useCase.uniqueBy} is already tokenized` });
     }
 
     // Compute the financial-terms schedule (coupons + redemption) BEFORE the fee
@@ -349,7 +349,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       // race: the DB constraint rejected it (Prisma P2002 / memory-repo mirror).
       // Surface the same 409 as the pre-check rather than a generic 500.
       if ((err as { code?: string }).code === "P2002") {
-        return reply.code(409).send({ error: "DUPLICATE_INVOICE", message: "an invoice with this fingerprint is already tokenized" });
+        return reply.code(409).send({ error: "DUPLICATE_ASSET", message: `an asset with this ${useCase.uniqueBy} is already tokenized` });
       }
       throw err;
     }
