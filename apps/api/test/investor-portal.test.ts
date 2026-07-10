@@ -98,8 +98,18 @@ describe("investor portal endpoints", () => {
     const app = await buildTestApp();
     const { investor } = await investorSetup(app);
     const carbon = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
-    await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(carbon), payload: { useCaseKey: "carbon-credit", name: "VCU-X", chainId: "fabric", initialSupply: "10", treasuryAccount: INVESTOR_WALLET, metadata: { projectName: "P", registry: "Verra", vintage: 2024 } } });
+    // Assert the cross-tenant issuance actually lands, or every() below goes vacuous.
+    const issued = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(carbon), payload: { useCaseKey: "carbon-credit", name: "VCU-X", chainId: "fabric", initialSupply: "10", treasuryAccount: INVESTOR_WALLET, metadata: { projectName: "P", registry: "Verra", vintage: 2024 } } });
+    expect(issued.statusCode).toBe(201);
     const pf = (await app.inject({ method: "GET", url: `${V1}/me/portfolio`, headers: auth(investor) })).json();
     expect(pf.holdings.every((h: { useCaseKey: string }) => h.useCaseKey === "invoice-tokenization")).toBe(true);
+  });
+
+  it("400 NO_WALLET on /me/activity too", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "m1.admin@tokenlayer.dev", "m1admin123");
+    const r = await app.inject({ method: "GET", url: `${V1}/me/activity`, headers: auth(admin) });
+    expect(r.statusCode).toBe(400);
+    expect(r.json().error).toBe("NO_WALLET");
   });
 });
