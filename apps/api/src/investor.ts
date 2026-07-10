@@ -7,7 +7,6 @@
 import { splitProRata } from "@tokenlayer/core";
 import type { AppDeps } from "./context.js";
 import { createFold, amountOf } from "./holders.js";
-import { dropPayerShare } from "./executors.js";
 import type { AssetRecord, AuditEntryRecord } from "./persistence/types.js";
 
 export interface Holding {
@@ -28,10 +27,11 @@ export interface ActivityEvent {
 
 const eq = (a: unknown, b: string): boolean => typeof a === "string" && a.toLowerCase() === b.toLowerCase();
 
-/** Balance of `wallet` in a fold's balances map, case-insensitive. */
+/** Balance of `wallet` in a fold's balances map: sum of case-insensitive matches (address casing is not canonical). */
 function balanceOf(balances: Map<string, bigint>, wallet: string): bigint {
-  for (const [addr, bal] of balances) if (eq(addr, wallet)) return bal;
-  return 0n;
+  let total = 0n;
+  for (const [addr, bal] of balances) if (eq(addr, wallet)) total += bal;
+  return total;
 }
 
 /** The use case's assets + their chronological audit entries, grouped. */
@@ -55,8 +55,16 @@ function holdingValue(a: AssetRecord, units: bigint, supply: bigint, valuation?:
   if (a.unitPrice && a.currency && /^\d+$/.test(a.unitPrice)) return { currency: a.currency, amount: units * BigInt(a.unitPrice) };
   if (valuation && supply > 0n) {
     const raw = a.metadata?.[valuation.metadataField];
-    const n = typeof raw === "number" ? raw : typeof raw === "string" && /^\d+(\.\d+)?$/.test(raw) ? Number(raw) : NaN;
-    if (Number.isFinite(n) && n >= 0) return { currency: valuation.currency, amount: (units * BigInt(Math.round(n))) / supply };
+    // Integer strings go straight to BigInt (no Number round-trip precision loss).
+    const total =
+      typeof raw === "string" && /^\d+$/.test(raw)
+        ? BigInt(raw)
+        : typeof raw === "number" && Number.isFinite(raw) && raw >= 0
+          ? BigInt(Math.round(raw))
+          : typeof raw === "string" && /^\d+\.\d+$/.test(raw)
+            ? BigInt(Math.round(Number(raw)))
+            : null;
+    if (total !== null) return { currency: valuation.currency, amount: (units * total) / supply };
   }
   return null;
 }
@@ -93,22 +101,33 @@ export async function computeActivity(deps: AppDeps, wallet: string, useCaseKey?
       const p = e.payload ?? {};
       const base = { at: e.createdAt, assetId: a.id, assetName: nameOf.get(a.id)?.name ?? "", txHash: e.txHash ?? null };
       if (e.action === "buy" && eq(p.to, wallet)) {
-        events.push({ ...base, kind: "subscribed", units: String(p.amount ?? ""), amount: typeof p.cost === "string" ? p.cost : null, currency: typeof p.currency === "string" ? p.currency : null });
+        events.push({ ...base, kind: "subscribed", units: p.amount != null ? String(p.amount) : null, amount: typeof p.cost === "string" ? p.cost : null, currency: typeof p.currency === "string" ? p.currency : null });
       } else if ((e.action === "mint" || e.action === "transfer") && eq(p.to, wallet)) {
-        events.push({ ...base, kind: "received", units: String(p.amount ?? p.tokenId ?? ""), amount: null, currency: null });
+        const u = p.amount ?? p.tokenId;
+        events.push({ ...base, kind: "received", units: u != null ? String(u) : null, amount: null, currency: null });
       } else if (e.action === "transfer" && eq(p.from, wallet)) {
-        events.push({ ...base, kind: "sent", units: String(p.amount ?? p.tokenId ?? ""), amount: null, currency: null });
+        const u = p.amount ?? p.tokenId;
+        events.push({ ...base, kind: "sent", units: u != null ? String(u) : null, amount: null, currency: null });
       } else if (e.action === "distribute" || e.action === "redeem") {
-        // Recompute this wallet's share exactly as settlement paid it: balances at
-        // this point in the stream → drop the payer → splitProRata → my slice.
         const held = balanceOf(fold.state.balances, wallet);
-        const split = new Map(fold.state.balances);
-        if (typeof p.from === "string") dropPayerShare(split, p.from);
-        const mine = splitProRata(amountOf(p, "paid") || amountOf(p, "amount"), split);
         let share = 0n;
-        for (const [addr, amt] of mine) if (eq(addr, wallet)) share = amt;
+        if (typeof p.payments === "object" && p.payments !== null && !Array.isArray(p.payments)) {
+          // Exact per-holder payments recorded at settlement — authoritative.
+          // (A redemption's burns precede its audit entry, so pre-event fold
+          // balances are already zero; the recorded payments still carry the share.)
+          for (const [addr, amt] of Object.entries(p.payments as Record<string, unknown>)) {
+            if (eq(addr, wallet) && typeof amt === "string" && /^\d+$/.test(amt)) share += BigInt(amt);
+          }
+        } else if (!eq(p.from, wallet)) {
+          // Legacy entries without `payments`: replicate the executor exactly —
+          // split the FULL amount over pre-event balances INCLUDING the payer
+          // (whose own floor share was then withheld, hence the payer skip above).
+          for (const [addr, amt] of splitProRata(amountOf(p, "amount"), fold.state.balances)) {
+            if (eq(addr, wallet)) share += amt;
+          }
+        }
         if (share > 0n) {
-          events.push({ ...base, kind: e.action === "redeem" ? "redemption" : "coupon", units: e.action === "redeem" ? held.toString() : null, amount: share.toString(), currency: typeof p.currency === "string" ? p.currency : null });
+          events.push({ ...base, kind: e.action === "redeem" ? "redemption" : "coupon", units: e.action === "redeem" && held > 0n ? held.toString() : null, amount: share.toString(), currency: typeof p.currency === "string" ? p.currency : null });
         }
       }
       fold.step(e); // apply AFTER classification so distribute sees pre-event balances
