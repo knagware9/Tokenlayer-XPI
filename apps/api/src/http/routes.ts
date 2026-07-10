@@ -1,9 +1,9 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { AssetRecord, CashflowRecord, KycDetails, KycStatus, ListingRecord, ProposalRecord } from "../persistence/types.js";
+import type { AssetRecord, CashflowRecord, KycDetails, KycStatus, ListingRecord, ProposalRecord, UserRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { auditEntryHash, canCreateUser, canManageUsers, computeCashflowSchedule, invoiceFingerprint, normalizeUseCaseDefinition, PolicyError, splitProRata, verifyChain, type Actor, type ChainEntry, type LifecycleAction, type Role, type UseCaseDefinition } from "@tokenlayer/core";
+import { auditEntryHash, canCreateUser, canManageUsers, computeCashflowSchedule, didKeyFromSeed, generateDidKey, invoiceFingerprint, issueCredential, normalizeUseCaseDefinition, PolicyError, presentCredential, splitProRata, verifyChain, verifyPresentation, type Actor, type ChainEntry, type LifecycleAction, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { isSupportedCurrency } from "../currencies.js";
 import { deployUseCaseContracts } from "../use-cases.js";
@@ -17,6 +17,26 @@ const NO_USE_CASE = "__none__"; // sentinel: a use-case key that matches no real
 
 const BCRYPT_ROUNDS = 12;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+
+// Extract the inner VC's `jti` (credential id) from a VP-JWT, or null on any
+// malformed input. Used to record the verified credential's id on the user.
+function decodeVcJti(vpJwt: string): string | null {
+  try {
+    const vp = JSON.parse(Buffer.from(vpJwt.split(".")[1] ?? "", "base64url").toString("utf8")) as { vp?: { verifiableCredential?: string[] } };
+    const vc = vp.vp?.verifiableCredential?.[0];
+    if (!vc) return null;
+    return String((JSON.parse(Buffer.from(vc.split(".")[1] ?? "", "base64url").toString("utf8")) as { jti?: string }).jti ?? "");
+  } catch {
+    return null;
+  }
+}
+
+// Derive a deterministic did:key from an arbitrary string seed. The seed is
+// hashed with SHA-256 to a stable 32-byte Ed25519 seed so the same string
+// always yields the same DID (dev/demo issuer + holder reproducibility).
+function devKeyFromSeed(seed: string) {
+  return didKeyFromSeed(createHash("sha256").update(seed).digest());
+}
 
 /** Registers every /api/v1 route on the given (prefixed) instance. */
 export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
@@ -1085,6 +1105,74 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (b.kycStatus === "approved" || b.kycStatus === "rejected") patch.kycStatus = b.kycStatus;
     const updated = await deps.users.update(id, patch);
     return { id: updated.id, email: updated.email, role: updated.role, useCaseKey: updated.useCaseKey, accountId: updated.accountId, active: updated.active, kycStatus: updated.kycStatus };
+  });
+
+  // --- identity (DID / Verifiable Credentials) ------------------------------
+
+  // Loads the target user and enforces the SAME scope guard as PATCH /users/:id:
+  // PlatformAdmin, or a user-manager acting on a same-use-case non-admin target.
+  // 404 (via notFound) when missing; 403 when out of scope. Null ⇒ reply sent.
+  async function manageableTarget(request: FastifyRequest, reply: FastifyReply): Promise<UserRecord | null> {
+    const claims = request.user as TokenClaims;
+    const target = await deps.users.findById((request.params as { id: string }).id);
+    if (!target) {
+      notFound(reply, "user not found");
+      return null;
+    }
+    const ok = claims.role === "PlatformAdmin" || (canManageUsers(claims.role) && target.useCaseKey === claims.useCaseKey && target.role !== "UseCaseAdmin");
+    if (!ok) {
+      reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to manage that user" });
+      return null;
+    }
+    return target;
+  }
+
+  app.post("/users/:id/identity/challenge", { schema: S.identityChallenge, ...auth }, async (request, reply) => {
+    const target = await manageableTarget(request, reply);
+    if (!target) return reply;
+    return deps.challenges.issue(target.id);
+  });
+
+  app.post("/users/:id/identity/verify", { schema: S.identityVerify, ...auth }, async (request, reply) => {
+    const target = await manageableTarget(request, reply);
+    if (!target) return reply;
+    const { presentation } = request.body as { presentation: string };
+    // Recover the challenge (nonce) from the VP and consume it (single-use, unexpired).
+    let nonce = "";
+    try {
+      nonce = String((JSON.parse(Buffer.from(presentation.split(".")[1] ?? "", "base64url").toString("utf8")) as { nonce?: string }).nonce ?? "");
+    } catch { /* malformed → handled by the guard below */ }
+    if (!nonce || !deps.challenges.consume(target.id, nonce)) {
+      return reply.code(400).send({ error: "CHALLENGE_EXPIRED", message: "no matching unexpired challenge — request a new one" });
+    }
+    const result = verifyPresentation({ vpJwt: presentation, challenge: nonce, trustedIssuers: deps.trustedKycIssuers ?? [], now: Math.floor(Date.now() / 1000) });
+    if (!result.valid) return reply.code(400).send({ error: result.reason, message: `presentation rejected: ${result.reason}` });
+    const vcClaims = result.credential!.claims as { country?: string; legalName?: string };
+    await deps.users.update(target.id, {
+      kycStatus: "approved",
+      did: result.holderDid,
+      kyc: { ...(target.kyc ?? {}), country: vcClaims.country, legalName: vcClaims.legalName ?? target.kyc?.legalName, issuerDid: result.credential!.issuer, credentialId: String(decodeVcJti(presentation) ?? ""), verifiedAt: new Date().toISOString() },
+    });
+    // Asset-less audit entry: "kyc-verified" is not a LifecycleAction, so cast at
+    // the append boundary (analytics/holders folds only match specific actions and
+    // never see this row anyway — it carries no assetId).
+    await deps.audit.append({ actorId: actorOf(request).id, action: "kyc-verified" as LifecycleAction, payload: { userId: target.id, did: result.holderDid, issuer: result.credential!.issuer, country: vcClaims.country ?? null } });
+    return { status: "approved", did: result.holderDid, claims: result.credential!.claims, issuer: result.credential!.issuer };
+  });
+
+  // Dev-only: mint a demo issuer-signed VC wrapped in a holder-signed VP over a
+  // challenge. Gated: only when a dev issuer seed is configured AND not production.
+  app.post("/identity/mint", { schema: S.identityMint, ...auth }, async (request, reply) => {
+    if (deps.isProduction || !deps.devIssuerSeed) return reply.code(404).send({ error: "NOT_FOUND", message: "not available" });
+    if ((request.user as TokenClaims).role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "platform admin only" });
+    const { subjectDid, holderSeed, claims, challenge } = request.body as { subjectDid?: string; holderSeed?: string; claims: Record<string, unknown>; challenge: string };
+    const issuer = devKeyFromSeed(deps.devIssuerSeed);       // deterministic issuer (its did must be in TRUSTED_KYC_ISSUERS)
+    const holder = holderSeed ? devKeyFromSeed(holderSeed) : generateDidKey();
+    const subject = subjectDid ?? holder.did;
+    const now = Math.floor(Date.now() / 1000);
+    const vc = issueCredential({ issuerDid: issuer.did, issuerKey: issuer.privateKey, subjectDid: subject, claims, expiresAt: now + 86400, now });
+    const vp = presentCredential({ holderDid: holder.did, holderKey: holder.privateKey, vcJwt: vc, challenge, now });
+    return { presentation: vp, holderDid: holder.did, issuerDid: issuer.did };
   });
 
   // --- cashflows (financial terms servicing) --------------------------------
