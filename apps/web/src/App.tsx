@@ -5,6 +5,7 @@ import { useRoute } from "./router.js";
 import { AssetManagement } from "./components/AssetManagement.js";
 import { Dashboard } from "./components/Dashboard.js";
 import { Header } from "./components/Header.js";
+import { InvestorPortal } from "./components/InvestorPortal.js";
 import { Login } from "./components/Login.js";
 import { PlatformHome } from "./components/PlatformHome.js";
 import { UserManagement } from "./components/UserManagement.js";
@@ -45,6 +46,18 @@ export function App(): JSX.Element {
 
   const isPlatform = user.role === "PlatformAdmin";
   const activeUseCase = isPlatform ? routeKey : user.useCaseKey ?? "";
+
+  // Investors get the dedicated portal experience instead of the operator console.
+  if (user.role === "Buyer") {
+    return (
+      <div className="min-h-screen">
+        <Header />
+        <main className="max-w-6xl mx-auto px-6 py-6">
+          <InvestorPortal useCases={useCases} />
+        </main>
+      </div>
+    );
+  }
 
   if (isPlatform && !activeUseCase) {
     return (
