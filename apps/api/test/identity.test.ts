@@ -134,12 +134,15 @@ describe("identity verification", () => {
     expect(res.statusCode).toBe(404);
   });
 
-  // ADVERSARIAL: dev mint is PlatformAdmin-only — a use-case admin gets 403 even in dev.
-  it("dev mint → 403 for a non-platform admin", async () => {
+  // Dev mint is usable by any desk operator (user-manager) but not by a non-manager role.
+  it("dev mint → 200 for a use-case admin (desk operator), 403 for a non-manager", async () => {
     const app = await buildTestApp({ trustedKycIssuers: [devIssuerDid], devIssuerSeed: DEV_SEED });
-    const m1 = await loginAs(app, "m1.admin@tokenlayer.dev", "m1admin123");
-    const res = await app.inject({ method: "POST", url: `${V1}/identity/mint`, headers: auth(m1), payload: { claims: { country: "SG" }, challenge: "c" } });
-    expect(res.statusCode).toBe(403);
+    const deskAdmin = await loginAs(app, "m1.admin@tokenlayer.dev", "m1admin123"); // UseCaseAdmin
+    const okRes = await app.inject({ method: "POST", url: `${V1}/identity/mint`, headers: auth(deskAdmin), payload: { claims: { country: "SG" }, challenge: "c" } });
+    expect(okRes.statusCode).toBe(200);
+    const issuer = await loginAs(app, "m1.issuer@tokenlayer.dev", "m1issuer123"); // cannot manage users
+    const forbidden = await app.inject({ method: "POST", url: `${V1}/identity/mint`, headers: auth(issuer), payload: { claims: { country: "SG" }, challenge: "c" } });
+    expect(forbidden.statusCode).toBe(403);
   });
 
   // Positive path for the dev mint → verify round-trip (dev/demo enablement).

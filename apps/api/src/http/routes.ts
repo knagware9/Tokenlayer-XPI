@@ -1166,7 +1166,9 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   // pattern as chains/fees. A production operator must never set the dev seed.
   app.post("/identity/mint", { schema: S.identityMint, ...auth }, async (request, reply) => {
     if (!deps.devIssuerSeed) return reply.code(404).send({ error: "NOT_FOUND", message: "not available" });
-    if ((request.user as TokenClaims).role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "platform admin only" });
+    // Any desk operator (user-manager) may use the demo minter — it's the same role
+    // that runs verification, and the endpoint is dev-only (seed-gated, absent in prod).
+    if (!canManageUsers((request.user as TokenClaims).role)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to mint demo credentials" });
     const { subjectDid, holderSeed, claims, challenge } = request.body as { subjectDid?: string; holderSeed?: string; claims: Record<string, unknown>; challenge: string };
     const issuer = devKeyFromSeed(deps.devIssuerSeed);       // deterministic issuer (its did must be in TRUSTED_KYC_ISSUERS)
     const holder = holderSeed ? devKeyFromSeed(holderSeed) : generateDidKey();
