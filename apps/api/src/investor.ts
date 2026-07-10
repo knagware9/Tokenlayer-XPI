@@ -127,7 +127,21 @@ export async function computeActivity(deps: AppDeps, wallet: string, useCaseKey?
           }
         }
         if (share > 0n) {
-          events.push({ ...base, kind: e.action === "redeem" ? "redemption" : "coupon", units: e.action === "redeem" && held > 0n ? held.toString() : null, amount: share.toString(), currency: typeof p.currency === "string" ? p.currency : null });
+          let units: string | null = null;
+          if (e.action === "redeem") {
+            if (typeof p.units === "object" && p.units !== null && !Array.isArray(p.units)) {
+              // Pre-burn per-holder units recorded at settlement — authoritative
+              // (the fold's balances are already zero once the burns land).
+              let retired = 0n;
+              for (const [addr, u] of Object.entries(p.units as Record<string, unknown>)) {
+                if (eq(addr, wallet) && typeof u === "string" && /^\d+$/.test(u)) retired += BigInt(u);
+              }
+              units = retired.toString();
+            } else if (held > 0n) {
+              units = held.toString();
+            }
+          }
+          events.push({ ...base, kind: e.action === "redeem" ? "redemption" : "coupon", units, amount: share.toString(), currency: typeof p.currency === "string" ? p.currency : null });
         }
       }
       fold.step(e); // apply AFTER classification so distribute sees pre-event balances

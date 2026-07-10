@@ -162,6 +162,10 @@ export async function executeCashflowCore(
       // investor's share without re-deriving it (balances are already burned
       // by the time a redemption's audit entry lands).
       payments: Object.fromEntries([...split].map(([addr, amt]) => [addr, amt.toString()])),
+      // Pre-burn per-holder unit balances — for redemptions this is each
+      // investor's "units retired" (recorded here because the burns above
+      // erase the balances before this entry lands). Harmless for coupons.
+      units: Object.fromEntries([...balances].map(([addr, bal]) => [addr, bal.toString()])),
     },
     chainId: asset.chainId,
   });
