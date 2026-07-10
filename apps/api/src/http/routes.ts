@@ -8,6 +8,7 @@ import type { AppDeps } from "../context.js";
 import { isSupportedCurrency } from "../currencies.js";
 import { deployUseCaseContracts } from "../use-cases.js";
 import { computeAnalytics } from "../analytics.js";
+import { computeActivity, computePortfolio } from "../investor.js";
 import { assetBalancesOf, coded, CodedError, dropPayerShare, executeCashflowCore, executeIssueActivation, runGatedAction } from "../executors.js";
 import { S } from "./schemas.js";
 import { actorOf, contextOf, isPositiveIntString, notFound, requireUser, scopedToCaller, type TokenClaims } from "./support.js";
@@ -702,6 +703,31 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (!me?.accountId) return null;
     return (await deps.accounts.findById(me.accountId))?.address ?? null;
   }
+
+  // --- investor portal (read-only, describes the CALLER) ---------------------
+
+  // The caller's wallet + use-case scope, or a 400 when no wallet is linked.
+  async function investorScope(request: FastifyRequest, reply: FastifyReply): Promise<{ wallet: string; useCaseKey?: string } | null> {
+    const claims = request.user as TokenClaims;
+    const wallet = await walletOf(claims);
+    if (!wallet) {
+      reply.code(400).send({ error: "NO_WALLET", message: "your account has no linked wallet" });
+      return null;
+    }
+    return { wallet, useCaseKey: claims.role === "PlatformAdmin" ? undefined : claims.useCaseKey ?? NO_USE_CASE };
+  }
+
+  app.get("/me/portfolio", { schema: S.mePortfolio, ...auth }, async (request, reply) => {
+    const scope = await investorScope(request, reply);
+    if (!scope) return reply;
+    return computePortfolio(deps, scope.wallet, scope.useCaseKey);
+  });
+
+  app.get("/me/activity", { schema: S.meActivity, ...auth }, async (request, reply) => {
+    const scope = await investorScope(request, reply);
+    if (!scope) return reply;
+    return computeActivity(deps, scope.wallet, scope.useCaseKey);
+  });
 
   // Loads a listing and its asset, enforcing use-case scope through the asset.
   // Out-of-scope callers get the same 404 as a missing listing (hides existence).

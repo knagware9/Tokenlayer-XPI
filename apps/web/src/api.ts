@@ -1,4 +1,4 @@
-import type { AccountState, AnalyticsSummary, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, ChainInfo, Listing, Proposal, Role, SessionUser, TokenInfo, Trade, UseCase } from "./types.js";
+import type { AccountState, ActivityEvent, AnalyticsSummary, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, ChainInfo, Listing, Portfolio, Proposal, Role, SessionUser, TokenInfo, Trade, UseCase } from "./types.js";
 
 export interface Currency { code: string; label: string; }
 export interface CashBalance { currency: string; address: string; amount: string; }
@@ -118,4 +118,6 @@ export const api = {
   updateUser: (token: string, id: string, patch: { password?: string; active?: boolean; kycStatus?: "approved" | "rejected" }) =>
     request<{ id: string }>(`/users/${id}`, token, { method: "PATCH", body: JSON.stringify(patch) }),
   deleteUser: (token: string, id: string) => request<void>(`/users/${id}`, token, { method: "DELETE" }),
+  mePortfolio: (token: string) => request<Portfolio>("/me/portfolio", token),
+  meActivity: (token: string) => request<ActivityEvent[]>("/me/activity", token),
 };

@@ -226,3 +226,19 @@ export interface AnalyticsSummary {
   activity: { date: string; count: number; tradedByCurrency: Record<string, string> }[];
   recent: { at: string; action: string; assetId: string; assetName: string; useCaseKey: string | null; chainId: string; summary: string }[];
 }
+
+export interface Holding {
+  assetId: string; name: string; symbol: string; useCaseKey: string; chainId: string;
+  units: string; unitPrice: string | null; currency: string | null; value: string | null;
+}
+export interface Portfolio {
+  wallet: string;
+  cash: { currency: string; amount: string }[];
+  holdings: Holding[];
+  totalByCurrency: Record<string, string>;
+}
+export interface ActivityEvent {
+  at: string; kind: "subscribed" | "received" | "sent" | "coupon" | "redemption";
+  assetId: string; assetName: string; units: string | null; amount: string | null;
+  currency: string | null; txHash: string | null;
+}
