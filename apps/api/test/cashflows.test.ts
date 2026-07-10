@@ -5,7 +5,7 @@ import { buildTestApp, V1, loginAs, auth } from "./helpers.js";
 const UC = "invoice-tokenization";
 const HOLDER = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"; // Carol — seeded account, linkable
 const PAYER = "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65"; // seeded "Treasury" wallet — NOT in m1 scope until linked
-const inv = (n: string, due: string) => ({ invoiceNumber: n, sellerGstin: "27AAECS1234F1Z5", buyerGstin: "29AABCU9876R1Z3", amountInr: 1000000, dueDate: due });
+const inv = (n: string, due: string) => ({ invoiceNumber: n, invoiceDate: "2026-07-01", buyerName: "JSW Steel Limited", currency: "INR", amount: 1000000, dueDate: due });
 
 async function desk(app: FastifyInstance): Promise<string> {
   const admin = await loginAs(app, "m1.admin@tokenlayer.dev", "m1admin123");

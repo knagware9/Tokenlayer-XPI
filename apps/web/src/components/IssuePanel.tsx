@@ -73,11 +73,11 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
   useEffect(() => {
     const gen = useCase?.derivedFields?.invoiceHash;
     if (gen !== "invoiceFingerprint") { setDerived({}); return; }
-    const f = { invoiceNumber: meta.invoiceNumber, sellerGstin: meta.sellerGstin, buyerGstin: meta.buyerGstin, amountInr: meta.amountInr, dueDate: meta.dueDate };
+    const f = { invoiceNumber: meta.invoiceNumber, buyerName: meta.buyerName, currency: meta.currency, amount: meta.amount, dueDate: meta.dueDate };
     if (Object.values(f).every((v) => (v ?? "").trim() !== "")) {
       void computeFingerprint(f as Parameters<typeof computeFingerprint>[0]).then((h) => setDerived({ invoiceHash: h }));
     } else setDerived({});
-  }, [useCase, meta.invoiceNumber, meta.sellerGstin, meta.buyerGstin, meta.amountInr, meta.dueDate]);
+  }, [useCase, meta.invoiceNumber, meta.buyerName, meta.currency, meta.amount, meta.dueDate]);
 
   const allowed = user ? can(user.role, "issue") : false;
 
@@ -214,7 +214,12 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
                             const b64 = await fileToBase64(file);
                             const r = await api.uploadDocument(token, file.type || "application/pdf", b64);
                             onChange(r.url);
-                            setMeta((m) => ({ ...m, invoiceDocHash: r.sha256 }));
+                            // Pin the upload: if the schema declares a companion hash
+                            // field (e.g. invoiceDocUrl → invoiceDocHash), fill it.
+                            const hashField = field.replace(/Url$/, "") + "Hash";
+                            if (hashField in useCase.metadataSchema.properties) {
+                              setMeta((m) => ({ ...m, [hashField]: r.sha256 }));
+                            }
                           } catch (err) {
                             setError(err instanceof ApiError ? `${err.code ?? "Error"}: ${err.message}` : "Document upload failed");
                           } finally {

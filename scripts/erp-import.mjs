@@ -27,9 +27,9 @@ import { readFileSync } from "node:fs";
 export function computeFingerprint(inv) {
   const canonical = [
     String(inv.invoiceNumber).trim(),
-    String(inv.sellerGstin).trim().toUpperCase(),
-    String(inv.buyerGstin).trim().toUpperCase(),
-    String(parseInt(String(inv.amountInr), 10)),
+    String(inv.buyerName).trim().toUpperCase(),
+    String(inv.currency).trim().toUpperCase(),
+    String(parseInt(String(inv.amount), 10)),
     String(inv.dueDate).trim(),
   ].join("|");
   return "0x" + createHash("sha256").update(canonical, "utf8").digest("hex");
@@ -40,9 +40,13 @@ function arg(name, fallback) {
   return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
 }
 
+// Template header ("Invoice No") or camelCase → canonical field name.
+const HEADER_MAP = { invoiceno: "invoiceNumber", invoicenumber: "invoiceNumber", invoicedate: "invoiceDate", buyername: "buyerName", buyer: "buyerName", currency: "currency", amount: "amount", amountinr: "amount", duedate: "dueDate", status: "status", invoicedocurl: "invoiceDocUrl" };
+const mapHeader = (h) => HEADER_MAP[h.toLowerCase().replace(/[^a-z0-9]/g, "")] ?? h;
+
 function parseCsv(text) {
   const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-  const headers = lines[0].split(",").map((h) => h.trim());
+  const headers = lines[0].split(",").map((h) => mapHeader(h.trim()));
   return lines.slice(1).map((line) => {
     const cells = line.split(",").map((c) => c.trim());
     return Object.fromEntries(headers.map((h, i) => [h, cells[i] ?? ""]));
@@ -83,19 +87,27 @@ const TOKEN = login.json.token;
 const rows = parseCsv(readFileSync(FILE, "utf8"));
 console.log(`ERP import: ${rows.length} invoice(s) from ${FILE} → use case '${USE_CASE}' on '${CHAIN}', holder ${HOLDER}, par ₹${PAR}/token\n`);
 
-const results = { TOKENIZED: 0, "DUPLICATE-BLOCKED": 0, INVALID: 0 };
+const results = { TOKENIZED: 0, "DUPLICATE-BLOCKED": 0, SKIPPED: 0, INVALID: 0 };
 for (const inv of rows) {
-  const label = `${inv.invoiceNumber} ₹${inv.amountInr}`;
+  const label = `${inv.invoiceNumber} ${inv.currency ?? "INR"} ${inv.amount}`;
   const fingerprint = computeFingerprint(inv); // display only — the server derives + enforces this
-  const supply = Math.max(1, Math.round(Number(inv.amountInr) / PAR));
+  const supply = Math.max(1, Math.round(Number(inv.amount) / PAR));
+  // ERP eligibility gate: only 'Available' invoices tokenize — an expected skip.
+  if ((inv.status ?? "").trim() && inv.status.trim().toLowerCase() !== "available") {
+    results.SKIPPED += 1;
+    console.log(`  ○ SKIPPED            ${label} — status '${inv.status}' (only Available tokenize)`);
+    continue;
+  }
   const metadata = {
     // invoiceHash is intentionally omitted: the platform derives it server-side
     // from the canonical fields and rejects duplicates (409 DUPLICATE_ASSET).
     invoiceNumber: inv.invoiceNumber,
-    sellerGstin: inv.sellerGstin,
-    buyerGstin: inv.buyerGstin,
-    amountInr: Number(inv.amountInr),
+    invoiceDate: inv.invoiceDate,
+    buyerName: inv.buyerName,
+    currency: (inv.currency ?? "INR").toUpperCase(),
+    amount: Number(inv.amount),
     dueDate: inv.dueDate,
+    ...(inv.status ? { status: inv.status } : {}),
     ...(inv.discountRatePct ? { discountRatePct: Number(inv.discountRatePct) } : {}),
     ...(inv.invoiceDocUrl ? { invoiceDocUrl: inv.invoiceDocUrl } : {}),
   };
@@ -105,7 +117,7 @@ for (const inv of rows) {
   // fingerprint with 409 DUPLICATE_ASSET (cross-channel double-financing block).
   const issued = await call("POST", "/assets", TOKEN, {
     useCaseKey: USE_CASE,
-    name: `${inv.invoiceNumber} · ${inv.sellerGstin.slice(0, 4)}→${inv.buyerGstin.slice(0, 4)}`,
+    name: `${inv.invoiceNumber} · ${inv.buyerName}`,
     chainId: CHAIN,
     initialSupply: String(supply),
     treasuryAccount: HOLDER,
@@ -123,5 +135,5 @@ for (const inv of rows) {
   }
 }
 
-console.log(`\nSummary: ${results.TOKENIZED} tokenized · ${results["DUPLICATE-BLOCKED"]} duplicate-blocked · ${results.INVALID} invalid`);
+console.log(`\nSummary: ${results.TOKENIZED} tokenized · ${results["DUPLICATE-BLOCKED"]} duplicate-blocked · ${results.SKIPPED} skipped · ${results.INVALID} invalid`);
 process.exit(results.INVALID > 0 ? 1 : 0);

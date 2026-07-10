@@ -26,8 +26,7 @@ const inr = (n) => "₹" + Number(n).toLocaleString("en-IN");
 
 const SUP = addr("5099117e"), FIN1 = addr("f1a0117e"), FIN2 = addr("f2b0117e");
 const CUR = "CBDC-INR";
-const SELLERS = ["27AAPFU0939F1ZV", "24AAACS1429B1ZL", "29AACCF4587R1ZK"];
-const BUYERS = ["29AABCT1332L1ZU", "27AABCR1718E1ZP", "27AAACB2894G1ZJ", "07AAGCM1234P1Z5"];
+const BUYERS = ["JSW Steel Limited", "ITC Limited", "Bajaj Auto Limited", "Reliance Industries Ltd"];
 const runId = String(Date.now()).slice(-7);
 
 const platform = await login("admin@tokenlayer.dev", "admin123");
@@ -61,8 +60,8 @@ for (let i = 0; i < N; i++) {
   const unitPrice = Math.round(PAR * (100 - discountPct) / 100);
   const meta = {
     invoiceNumber: `INV-50E2E-${runId}-${String(i).padStart(3, "0")}`,
-    sellerGstin: SELLERS[i % SELLERS.length], buyerGstin: BUYERS[i % BUYERS.length],
-    amountInr: face, dueDate: `2026-${String(9 + (i % 3)).padStart(2, "0")}-${String(1 + (i % 27)).padStart(2, "0")}`,
+    invoiceDate: "2026-07-01", buyerName: BUYERS[i % BUYERS.length], currency: "INR",
+    amount: face, dueDate: `2026-${String(9 + (i % 3)).padStart(2, "0")}-${String(1 + (i % 27)).padStart(2, "0")}`, status: "Available",
     discountRatePct: discountPct, invoiceDocUrl: `https://vault.m1x.example/docs/${runId}-${i}.pdf`,
   };
   const r = await call("POST", "/assets", { useCaseKey: "invoice-tokenization", name: meta.invoiceNumber, chainId: "fabric", initialSupply: String(supply), treasuryAccount: SUP, metadata: meta, sale: { unitPrice: String(unitPrice), currency: CUR, treasuryAccount: SUP } }, issuer);

@@ -7,7 +7,7 @@ const UC = "invoice-tokenization";
 // "Carol" — a seeded demo account not linked to any seeded user, so we can link
 // it to an IN-KYC holder and use it as the treasury (mint gates on IN jurisdiction).
 const HOLDER = "0x90F79bf6EB2c4f870365E785982E1f101E93b906";
-const inv = { invoiceNumber: "INV-9001", sellerGstin: "27AAECS1234F1Z5", buyerGstin: "29AABCU9876R1Z3", amountInr: 1000000, dueDate: "2026-12-31" };
+const inv = { invoiceNumber: "INV-9001", invoiceDate: "2026-07-01", buyerName: "JSW Steel Limited", currency: "INR", amount: 1000000, dueDate: "2026-12-31" };
 
 // Log in as the seeded invoice desk admin (UseCaseAdmin) and onboard an IN-KYC
 // holder wallet — the invoice use case gates token receipt on IN jurisdiction,
