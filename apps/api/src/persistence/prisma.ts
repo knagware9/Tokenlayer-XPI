@@ -56,6 +56,7 @@ const toUser = (r: {
   active: boolean;
   kycStatus: string;
   kyc: string | null;
+  did: string | null;
   createdAt: Date;
 }): UserRecord => ({
   id: r.id,
@@ -67,6 +68,7 @@ const toUser = (r: {
   active: r.active,
   kycStatus: r.kycStatus as KycStatus,
   kyc: r.kyc ? (JSON.parse(r.kyc) as KycDetails) : null,
+  did: r.did ?? undefined,
   createdAt: r.createdAt.toISOString(),
 });
 
@@ -85,8 +87,9 @@ export class PrismaUserRepository implements UserRepository {
   async list(useCaseKey?: string): Promise<UserRecord[]> {
     return (await prisma.user.findMany({ where: useCaseKey ? { useCaseKey } : undefined, orderBy: { createdAt: "asc" } })).map(toUser);
   }
-  async update(id: string, patch: Partial<Pick<UserRecord, "passwordHash" | "accountId" | "active" | "kycStatus">>): Promise<UserRecord> {
-    return toUser(await prisma.user.update({ where: { id }, data: patch }));
+  async update(id: string, patch: Partial<Pick<UserRecord, "passwordHash" | "accountId" | "active" | "kycStatus" | "did" | "kyc">>): Promise<UserRecord> {
+    const { kyc, ...rest } = patch;
+    return toUser(await prisma.user.update({ where: { id }, data: { ...rest, ...(kyc !== undefined ? { kyc: kyc ? JSON.stringify(kyc) : null } : {}) } }));
   }
   async remove(id: string): Promise<void> {
     await prisma.user.delete({ where: { id } });

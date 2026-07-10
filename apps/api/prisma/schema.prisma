@@ -17,6 +17,7 @@ model User {
   active       Boolean  @default(true)
   kycStatus    String   @default("approved")
   kyc          String?
+  did          String?
   createdAt    DateTime @default(now())
 }
 
