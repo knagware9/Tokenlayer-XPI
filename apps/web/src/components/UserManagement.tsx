@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { ApiError, api } from "../api.js";
 import { useAuth } from "../auth.js";
-import type { Role, UseCase } from "../types.js";
+import type { IdentityResult, Role, UseCase } from "../types.js";
 
 type Summary = { id: string; email: string; role: Role; useCaseKey: string | null; accountId: string | null; active: boolean; kycStatus: "pending" | "approved" | "rejected"; kyc: { legalName?: string; country?: string; idType?: string; idNumber?: string; documentRef?: string } | null };
 type Sub = "add" | "manage";
@@ -106,6 +106,7 @@ function AddUser({ useCaseKey, useCases, onAdded }: { useCaseKey: string; useCas
 function ManageUsers({ rows, me, onChanged }: { rows: Summary[]; me?: string; onChanged: () => void }): JSX.Element {
   const { token } = useAuth();
   const [editing, setEditing] = useState<Summary | null>(null);
+  const [verifying, setVerifying] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const act = async (fn: () => Promise<unknown>): Promise<void> => {
@@ -122,30 +123,40 @@ function ManageUsers({ rows, me, onChanged }: { rows: Summary[]; me?: string; on
           <thead className="text-xs text-slate-500 bg-slate-50"><tr><th className="text-left px-4 py-2">Email</th><th className="text-left px-4 py-2">Role</th><th className="text-left px-4 py-2">Use case</th><th className="text-left px-4 py-2">Status</th><th className="text-left px-4 py-2">KYC</th><th className="px-4 py-2 text-right">Actions</th></tr></thead>
           <tbody>
             {rows.map((u) => (
-              <tr key={u.id} className="border-t border-slate-100">
-                <td className="px-4 py-2">{u.email}</td>
-                <td className="px-4 py-2">{u.role}</td>
-                <td className="px-4 py-2 text-slate-500">{u.useCaseKey ?? "—"}</td>
-                <td className="px-4 py-2">
-                  <span className={`text-[11px] px-2 py-0.5 rounded-full ${u.active ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{u.active ? "active" : "suspended"}</span>
-                </td>
-                <td className="px-4 py-2">
-                  <span className={`text-[11px] px-2 py-0.5 rounded-full ${u.kycStatus === "approved" ? "bg-emerald-100 text-emerald-700" : u.kycStatus === "rejected" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`} title={u.kyc?.legalName ? `${u.kyc.legalName}${u.kyc.country ? " · " + u.kyc.country : ""}` : ""}>{u.kycStatus}</span>
-                </td>
-                <td className="px-4 py-2 text-right space-x-3">
-                  {manageable(u) ? (
-                    <>
-                      {u.kycStatus !== "approved" && <button onClick={() => act(() => api.updateUser(token!, u.id, { kycStatus: "approved" }))} className="text-xs text-emerald-600 hover:text-emerald-700">Approve</button>}
-                      {u.kycStatus !== "rejected" && <button onClick={() => act(() => api.updateUser(token!, u.id, { kycStatus: "rejected" }))} className="text-xs text-red-500 hover:text-red-700">Reject</button>}
-                      <button onClick={() => setEditing(u)} className="text-xs text-brand-600 hover:text-brand-700">Edit</button>
-                      <button onClick={() => act(() => api.updateUser(token!, u.id, { active: !u.active }))} className="text-xs text-amber-600 hover:text-amber-700">{u.active ? "Revoke" : "Reactivate"}</button>
-                      <button onClick={() => act(() => api.deleteUser(token!, u.id))} className="text-xs text-red-500 hover:text-red-700">Delete</button>
-                    </>
-                  ) : (
-                    <span className="text-xs text-slate-300">—</span>
-                  )}
-                </td>
-              </tr>
+              <Fragment key={u.id}>
+                <tr className="border-t border-slate-100">
+                  <td className="px-4 py-2">{u.email}</td>
+                  <td className="px-4 py-2">{u.role}</td>
+                  <td className="px-4 py-2 text-slate-500">{u.useCaseKey ?? "—"}</td>
+                  <td className="px-4 py-2">
+                    <span className={`text-[11px] px-2 py-0.5 rounded-full ${u.active ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{u.active ? "active" : "suspended"}</span>
+                  </td>
+                  <td className="px-4 py-2">
+                    <span className={`text-[11px] px-2 py-0.5 rounded-full ${u.kycStatus === "approved" ? "bg-emerald-100 text-emerald-700" : u.kycStatus === "rejected" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`} title={u.kyc?.legalName ? `${u.kyc.legalName}${u.kyc.country ? " · " + u.kyc.country : ""}` : ""}>{u.kycStatus}</span>
+                  </td>
+                  <td className="px-4 py-2 text-right space-x-3">
+                    {manageable(u) ? (
+                      <>
+                        {u.kycStatus === "pending" && <button onClick={() => setVerifying((v) => (v === u.id ? null : u.id))} className="text-xs text-brand-600 hover:text-brand-700 font-medium">Verify identity (DID/VC)</button>}
+                        {u.kycStatus !== "approved" && <button onClick={() => act(() => api.updateUser(token!, u.id, { kycStatus: "approved" }))} className="text-xs text-emerald-600 hover:text-emerald-700">Approve</button>}
+                        {u.kycStatus !== "rejected" && <button onClick={() => act(() => api.updateUser(token!, u.id, { kycStatus: "rejected" }))} className="text-xs text-red-500 hover:text-red-700">Reject</button>}
+                        <button onClick={() => setEditing(u)} className="text-xs text-brand-600 hover:text-brand-700">Edit</button>
+                        <button onClick={() => act(() => api.updateUser(token!, u.id, { active: !u.active }))} className="text-xs text-amber-600 hover:text-amber-700">{u.active ? "Revoke" : "Reactivate"}</button>
+                        <button onClick={() => act(() => api.deleteUser(token!, u.id))} className="text-xs text-red-500 hover:text-red-700">Delete</button>
+                      </>
+                    ) : (
+                      <span className="text-xs text-slate-300">—</span>
+                    )}
+                  </td>
+                </tr>
+                {verifying === u.id && (
+                  <tr className="border-t border-slate-100 bg-slate-50/60">
+                    <td colSpan={6} className="px-4 py-3">
+                      <VerifyIdentityPanel user={u} onClose={() => setVerifying(null)} onVerified={() => { setVerifying(null); onChanged(); }} />
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             ))}
           </tbody>
         </table>
@@ -157,6 +168,98 @@ function ManageUsers({ rows, me, onChanged }: { rows: Summary[]; me?: string; on
           onSave={async (pw) => { await act(() => api.updateUser(token!, editing.id, { password: pw })); setEditing(null); }}
         />
       )}
+    </div>
+  );
+}
+
+function VerifyIdentityPanel({ user, onClose, onVerified }: { user: Summary; onClose: () => void; onVerified: () => void }): JSX.Element {
+  const { token } = useAuth();
+  const [challenge, setChallenge] = useState<{ challenge: string; expiresAt: string } | null>(null);
+  const [presentation, setPresentation] = useState("");
+  const [result, setResult] = useState<IdentityResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setError(null);
+    api.identityChallenge(token!, user.id).then(setChallenge).catch((err) => {
+      setError(err instanceof ApiError ? `${err.code ?? err.status}: ${err.message}` : "Failed to fetch challenge");
+    });
+  }, [token, user.id]);
+
+  async function mintDemo(): Promise<void> {
+    if (!challenge) return;
+    setError(null);
+    setBusy(true);
+    try {
+      const r = await api.identityMint(token!, { claims: { country: "IN", legalName: user.email }, challenge: challenge.challenge });
+      setPresentation(r.presentation);
+    } catch (err) {
+      setError(err instanceof ApiError && err.status === 404 ? "dev minting disabled" : err instanceof ApiError ? `${err.code ?? err.status}: ${err.message}` : "Mint failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function verify(): Promise<void> {
+    setError(null);
+    setResult(null);
+    setBusy(true);
+    try {
+      const r = await api.identityVerify(token!, user.id, presentation.trim());
+      setResult(r);
+      onVerified();
+    } catch (err) {
+      setError(err instanceof ApiError ? `${err.code ?? err.status}: ${err.message}` : "Verification failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-slate-900">Verify identity (DID/VC) · {user.email}</h3>
+        <button onClick={onClose} className="text-xs text-slate-400 hover:text-slate-600">Close</button>
+      </div>
+      <p className="text-xs text-slate-500">
+        {challenge ? (
+          <>Challenge <span className="font-mono text-slate-700">{challenge.challenge.slice(0, 12)}…</span> · expires {new Date(challenge.expiresAt).toLocaleTimeString()}</>
+        ) : (
+          "Requesting challenge…"
+        )}
+      </p>
+      <div>
+        <label className="text-xs font-semibold text-slate-500 mb-1 block">Verifiable Presentation (VP-JWT)</label>
+        <textarea
+          className="input font-mono text-xs h-24 w-full resize-y"
+          placeholder="Paste the investor's VP-JWT here"
+          value={presentation}
+          onChange={(e) => setPresentation(e.target.value)}
+        />
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => void mintDemo()}
+          disabled={!challenge || busy}
+          className="rounded-lg border border-slate-200 text-slate-600 px-3 py-1.5 text-xs font-medium hover:bg-slate-50 disabled:opacity-40"
+        >
+          Generate demo credential
+        </button>
+        <button
+          onClick={() => void verify()}
+          disabled={!presentation.trim() || busy}
+          className="rounded-lg bg-brand-600 text-white px-4 py-1.5 text-xs font-medium hover:bg-brand-700 disabled:opacity-40"
+        >
+          Verify
+        </button>
+      </div>
+      {result && (
+        <p className="text-xs text-emerald-600 font-medium">
+          Verified · country {String(result.claims.country ?? "—")} · issuer {result.issuer.slice(0, 16)}…
+        </p>
+      )}
+      {error && <p className="text-xs text-red-600">{error}</p>}
     </div>
   );
 }
