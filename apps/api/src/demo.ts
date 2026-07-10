@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { buildApp } from "./app.js";
 import { buildChainRegistry } from "./chains.js";
 import { createEngine } from "./context.js";
+import { createMemoryChallengeStore } from "./identity-challenges.js";
 import { loadCurrencies } from "./currencies.js";
 import {
   MemoryAccountRepository,
@@ -46,7 +47,7 @@ async function main(): Promise<void> {
   });
   const cash = new MemoryCashRepository();
   const listings = new MemoryListingRepository();
-  const app = await buildApp({ useCases, rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents: new MemoryDocumentRepository(), cashflows: new MemoryCashflowRepository(), proposals: new MemoryProposalRepository(), currencies: loadCurrencies(), jwtSecret: "demo" });
+  const app = await buildApp({ useCases, rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents: new MemoryDocumentRepository(), cashflows: new MemoryCashflowRepository(), proposals: new MemoryProposalRepository(), challenges: createMemoryChallengeStore(), currencies: loadCurrencies(), jwtSecret: "demo" });
   const token = (await post(app, "/auth/login", null, { email: "admin@tokenlayer.dev", password: "admin123" })).body.token;
 
   // 1. ERC-20 across every available DLT — identical behaviour everywhere.

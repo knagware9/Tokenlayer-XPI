@@ -13,6 +13,7 @@ import { RbacPolicy } from "@tokenlayer/core";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "./app.js";
 import { buildChainRegistry } from "./chains.js";
+import { createMemoryChallengeStore } from "./identity-challenges.js";
 import { createEngine } from "./context.js";
 import { loadCurrencies } from "./currencies.js";
 import {
@@ -66,7 +67,7 @@ async function main(): Promise<void> {
   });
   const cash = new MemoryCashRepository();
   const listings = new MemoryListingRepository();
-  const app = await buildApp({ useCases, rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents: new MemoryDocumentRepository(), cashflows: new MemoryCashflowRepository(), proposals: new MemoryProposalRepository(), currencies: loadCurrencies(), jwtSecret: "e2e" });
+  const app = await buildApp({ useCases, rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents: new MemoryDocumentRepository(), cashflows: new MemoryCashflowRepository(), proposals: new MemoryProposalRepository(), challenges: createMemoryChallengeStore(), currencies: loadCurrencies(), jwtSecret: "e2e" });
 
   const admin = await login(app, "admin");
   const evmAvailable = chains.list().some((c) => c.id === "local-evm");

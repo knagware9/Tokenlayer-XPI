@@ -4,6 +4,7 @@ import { buildApp } from "../src/app.js";
 import { buildChainRegistry } from "../src/chains.js";
 import { createEngine } from "../src/context.js";
 import { loadCurrencies } from "../src/currencies.js";
+import { createMemoryChallengeStore } from "../src/identity-challenges.js";
 import {
   MemoryAccountRepository,
   MemoryAssetRepository,
@@ -23,7 +24,7 @@ import { seedUseCases } from "../src/use-cases.js";
 /** Demo market escrow used by tests unless a test explicitly overrides it (pass `marketEscrowAccount: undefined` to disable the market). */
 export const TEST_MARKET_ESCROW = "0xcd3B766CCDd6AE721141F452C550Ca635964ce71";
 
-export async function buildTestApp(opts: { loginRateLimitMax?: number; platformFeeAccount?: string; marketEscrowAccount?: string } = {}): Promise<FastifyInstance> {
+export async function buildTestApp(opts: { loginRateLimitMax?: number; platformFeeAccount?: string; marketEscrowAccount?: string; trustedKycIssuers?: string[] } = {}): Promise<FastifyInstance> {
   const rbac = new RbacPolicy();
   const chains = buildChainRegistry({ CHAIN_STRICT: "0" }); // simulated chains only — besu absent, never mocked
   const users = new MemoryUserRepository();
@@ -46,6 +47,7 @@ export async function buildTestApp(opts: { loginRateLimitMax?: number; platformF
   // The suite makes many logins from one IP; raise the throttle unless a test opts into it.
   return buildApp({
     useCases, rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents, cashflows, proposals,
+    challenges: createMemoryChallengeStore(), trustedKycIssuers: opts.trustedKycIssuers,
     currencies: loadCurrencies(), jwtSecret: "test-secret",
     loginRateLimitMax: opts.loginRateLimitMax ?? 100000,
     platformFeeAccount: opts.platformFeeAccount,
