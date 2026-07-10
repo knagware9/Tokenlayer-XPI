@@ -34,23 +34,35 @@ export interface AssetState {
  *    debits the actual current owner (authoritative over the payload `from`).
  */
 export function foldAsset(entries: AuditEntryRecord[]): AssetState {
+  const f = createFold();
+  for (const e of entries) f.step(e);
+  return f.state;
+}
+
+/** Incremental fold: feed entries oldest→newest via step(); read state anytime. */
+export interface Fold {
+  state: AssetState;
+  step(e: AuditEntryRecord): void;
+}
+
+export function createFold(): Fold {
   const balances = new Map<string, bigint>();
   const owners = new Map<string, string>(); // tokenId → current owner (NFT only)
   const bump = (addr: unknown, delta: bigint): void => {
     if (typeof addr !== "string" || addr === "") return;
     balances.set(addr, (balances.get(addr) ?? 0n) + delta);
   };
-  let supply = 0n;
-  for (const e of entries) {
+  const state: AssetState = { supply: 0n, balances };
+  const step = (e: AuditEntryRecord): void => {
     const p = e.payload ?? {};
     const tokenId = typeof p.tokenId === "string" ? p.tokenId : null;
     switch (e.action) {
       case "mint": {
         if (tokenId) {
-          if (!owners.has(tokenId)) { owners.set(tokenId, String(p.to)); supply += 1n; bump(p.to, 1n); }
+          if (!owners.has(tokenId)) { owners.set(tokenId, String(p.to)); state.supply += 1n; bump(p.to, 1n); }
         } else {
           const amt = amountOf(p, "amount");
-          supply += amt;
+          state.supply += amt;
           bump(p.to, amt);
         }
         break;
@@ -85,10 +97,10 @@ export function foldAsset(entries: AuditEntryRecord[]): AssetState {
       case "burn": {
         if (tokenId) {
           const cur = owners.get(tokenId);
-          if (cur !== undefined) { supply -= 1n; bump(cur, -1n); owners.delete(tokenId); }
+          if (cur !== undefined) { state.supply -= 1n; bump(cur, -1n); owners.delete(tokenId); }
         } else {
           const amt = amountOf(p, "amount");
-          supply -= amt;
+          state.supply -= amt;
           bump(p.from, -amt);
         }
         break;
@@ -96,8 +108,8 @@ export function foldAsset(entries: AuditEntryRecord[]): AssetState {
       default:
         break; // issue/freeze/unfreeze/allow/disallow/read/list/cancel-listing: no supply/balance effect
     }
-  }
-  return { supply, balances };
+  };
+  return { state, step };
 }
 
 /** Distinct addresses with a strictly positive net balance across a set of assets. */
