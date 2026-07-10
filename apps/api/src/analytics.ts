@@ -87,7 +87,7 @@ function addCurrency(acc: Map<string, bigint>, currency: string, amount: bigint)
  * (0 → contributes nothing). Two semantics:
  *  - `unitPrice`: a PER-TOKEN sale price → total = supply × unitPrice.
  *  - a use-case `valuation` metadata field (e.g. an invoice's face-value
- *    `amountInr`): a WHOLE-ASSET value → the face value counts ONCE while any
+ *    `amount`): a WHOLE-ASSET value → the face value counts ONCE while any
  *    supply is live, independent of the token count (a ₹10L invoice split into
  *    10,000 fractional tokens is still ₹10L tokenized, not ₹10L × 10,000).
  * Returns null when neither applies.

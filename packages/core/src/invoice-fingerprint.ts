@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
 
+/** Canonical invoice identity fields (the ERP invoice template: Invoice No,
+ * Buyer Name, Currency, Amount, Due Date). */
 export interface InvoiceFingerprintInput {
   invoiceNumber: string | number;
-  sellerGstin: string;
-  buyerGstin: string;
-  amountInr: string | number;
+  buyerName: string;
+  currency: string;
+  amount: string | number;
   dueDate: string;
 }
 
@@ -16,9 +18,9 @@ export interface InvoiceFingerprintInput {
 export function invoiceFingerprint(inv: InvoiceFingerprintInput): string {
   const canonical = [
     String(inv.invoiceNumber).trim(),
-    String(inv.sellerGstin).trim().toUpperCase(),
-    String(inv.buyerGstin).trim().toUpperCase(),
-    String(parseInt(String(inv.amountInr), 10)),
+    String(inv.buyerName).trim().toUpperCase(),
+    String(inv.currency).trim().toUpperCase(),
+    String(parseInt(String(inv.amount), 10)),
     String(inv.dueDate).trim(),
   ].join("|");
   return "0x" + createHash("sha256").update(canonical, "utf8").digest("hex");

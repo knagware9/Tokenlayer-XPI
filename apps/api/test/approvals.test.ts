@@ -157,7 +157,7 @@ describe("maker-checker: gated settlement + ungated pass-through", () => {
     const admin = await loginAs(app, "m1.admin@tokenlayer.dev", "m1admin123");
     await app.inject({ method: "POST", url: `${V1}/users`, headers: auth(admin), payload: { email: "ap.holder@x.dev", password: "secret1", role: "Buyer", walletAddress: HOLDER, kyc: { country: "IN" } } });
     await app.inject({ method: "POST", url: `${V1}/users`, headers: auth(admin), payload: { email: "ap.settle@x.dev", password: "secret1", role: "Auditor", walletAddress: PAYER, kyc: { country: "IN" } } });
-    const issued = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(admin), payload: { useCaseKey: "invoice-tokenization", name: "INV-AP-1", chainId: "fabric", initialSupply: "10000", treasuryAccount: HOLDER, metadata: { invoiceNumber: "INV-AP-1", sellerGstin: "27AAECS1234F1Z5", buyerGstin: "29AABCU9876R1Z3", amountInr: 1000000, dueDate: "2099-12-31" } } });
+    const issued = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(admin), payload: { useCaseKey: "invoice-tokenization", name: "INV-AP-1", chainId: "fabric", initialSupply: "10000", treasuryAccount: HOLDER, metadata: { invoiceNumber: "INV-AP-1", invoiceDate: "2026-07-01", buyerName: "JSW Steel Limited", currency: "INR", amount: 1000000, dueDate: "2099-12-31" } } });
     expect(issued.statusCode).toBe(201); // invoice issuance is NOT gated
     const assetId = issued.json().asset.id;
     const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
@@ -177,7 +177,7 @@ describe("maker-checker: gated settlement + ungated pass-through", () => {
     const admin = await loginAs(app, "m1.admin@tokenlayer.dev", "m1admin123");
     await app.inject({ method: "POST", url: `${V1}/users`, headers: auth(admin), payload: { email: "ap.holder2@x.dev", password: "secret1", role: "Buyer", walletAddress: HOLDER, kyc: { country: "IN" } } });
     await app.inject({ method: "POST", url: `${V1}/users`, headers: auth(admin), payload: { email: "ap.settle2@x.dev", password: "secret1", role: "Auditor", walletAddress: PAYER, kyc: { country: "IN" } } });
-    const assetId = (await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(admin), payload: { useCaseKey: "invoice-tokenization", name: "INV-AP-2", chainId: "fabric", initialSupply: "10000", treasuryAccount: HOLDER, metadata: { invoiceNumber: "INV-AP-2", sellerGstin: "27AAECS1234F1Z5", buyerGstin: "29AABCU9876R1Z3", amountInr: 1000000, dueDate: "2099-12-31" } } })).json().asset.id;
+    const assetId = (await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(admin), payload: { useCaseKey: "invoice-tokenization", name: "INV-AP-2", chainId: "fabric", initialSupply: "10000", treasuryAccount: HOLDER, metadata: { invoiceNumber: "INV-AP-2", invoiceDate: "2026-07-01", buyerName: "JSW Steel Limited", currency: "INR", amount: 1000000, dueDate: "2099-12-31" } } })).json().asset.id;
     const { cashflows } = (await app.inject({ method: "GET", url: `${V1}/assets/${assetId}/cashflows`, headers: auth(admin) })).json();
     const proposed = await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/cashflows/${cashflows[0].id}/execute`, headers: auth(admin), payload: { from: PAYER } });
     expect(proposed.statusCode).toBe(202); // PAYER is scoped but unfunded — checked at execution
@@ -195,7 +195,7 @@ describe("maker-checker: gated settlement + ungated pass-through", () => {
     const admin = await loginAs(app, "m1.admin@tokenlayer.dev", "m1admin123");
     await app.inject({ method: "POST", url: `${V1}/users`, headers: auth(admin), payload: { email: "ap.holder3@x.dev", password: "secret1", role: "Buyer", walletAddress: HOLDER, kyc: { country: "IN" } } });
     // Invoice issuance is ungated → 201 immediately with supply minted.
-    const issued = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(admin), payload: { useCaseKey: "invoice-tokenization", name: "INV-AP-3", chainId: "fabric", initialSupply: "10000", treasuryAccount: HOLDER, metadata: { invoiceNumber: "INV-AP-3", sellerGstin: "27AAECS1234F1Z5", buyerGstin: "29AABCU9876R1Z3", amountInr: 1000000, dueDate: "2099-12-31" } } });
+    const issued = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(admin), payload: { useCaseKey: "invoice-tokenization", name: "INV-AP-3", chainId: "fabric", initialSupply: "10000", treasuryAccount: HOLDER, metadata: { invoiceNumber: "INV-AP-3", invoiceDate: "2026-07-01", buyerName: "JSW Steel Limited", currency: "INR", amount: 1000000, dueDate: "2099-12-31" } } });
     expect(issued.statusCode).toBe(201);
     expect(issued.json().asset.status).toBe("active");
   });

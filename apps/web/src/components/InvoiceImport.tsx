@@ -5,49 +5,69 @@ import type { ChainInfo, UseCase } from "../types.js";
 
 // ============================================================================
 // Invoice Import — browser-side counterpart of scripts/erp-import.mjs.
-// Parses a CSV/JSON invoice export, previews the batch with local validation,
-// then tokenizes each valid row through the public API as a single fungible
-// issue: the invoice's face value is split into `supply = round(face / par)`
-// ERC-20 units minted to a holder. The server derives the canonical invoice
-// fingerprint and rejects an already-tokenized invoice with a 409
-// (DUPLICATE_ASSET) — the cross-channel double-tokenization guard.
+// Accepts the ERP invoice template (XLSX/CSV/JSON) with columns:
+//   Invoice No · Invoice Date · Buyer Name · Currency · Amount · Due Date · Status
+// Previews the batch with local validation (only 'Available' invoices are
+// eligible), then tokenizes each valid row through the public API as a single
+// fungible issue: the invoice's face value is split into
+// `supply = round(face / par)` ERC-20 units minted to a holder. The server
+// derives the canonical invoice fingerprint and rejects an already-tokenized
+// invoice with a 409 (DUPLICATE_ASSET) — the cross-channel double-tokenization
+// guard.
 // ============================================================================
 
-const INVOICE_FIELDS = ["invoiceNumber", "sellerGstin", "buyerGstin", "amountInr", "dueDate"] as const;
-const OPTIONAL_FIELDS = ["discountRatePct", "invoiceDocUrl"] as const;
-const CSV_HEADERS = [...INVOICE_FIELDS, ...OPTIONAL_FIELDS].join(",");
+const INVOICE_FIELDS = ["invoiceNumber", "invoiceDate", "buyerName", "currency", "amount", "dueDate"] as const;
+const OPTIONAL_FIELDS = ["status", "invoiceDocUrl"] as const;
 
-/** A representative ERP export (same canonical scheme as samples/erp/invoices.csv) for one-click demos. */
-const ERP_SAMPLE_CSV = `${CSV_HEADERS}
-INV-ERP-2026-401,27AAPFU0939F1ZV,29AABCT1332L1ZU,1650000,2026-11-15,8.4,https://vault.m1x.example/docs/INV-ERP-2026-401.pdf
-INV-ERP-2026-402,24AAACS1429B1ZL,27AABCR1718E1ZP,780000,2026-10-30,9.05,https://vault.m1x.example/docs/INV-ERP-2026-402.pdf
-INV-ERP-2026-403,29AACCF4587R1ZK,27AAACB2894G1ZJ,2950000,2026-12-05,7.75,https://vault.m1x.example/docs/INV-ERP-2026-403.pdf
-INV-ERP-2026-402,24AAACS1429B1ZL,27AABCR1718E1ZP,780000,2026-10-30,9.05,https://vault.m1x.example/docs/INV-ERP-2026-402-resubmit.pdf`;
+/** Template headers (the ERP export sheet) in display order. */
+const TEMPLATE_HEADERS = ["Invoice No", "Invoice Date", "Buyer Name", "Currency", "Amount", "Due Date", "Status"] as const;
+
+/** header (normalized: lowercase, alphanumerics only) → canonical field. */
+const HEADER_MAP: Record<string, string> = {
+  invoiceno: "invoiceNumber", invoicenumber: "invoiceNumber",
+  invoicedate: "invoiceDate",
+  buyername: "buyerName", buyer: "buyerName",
+  currency: "currency",
+  amount: "amount", amountinr: "amount",
+  duedate: "dueDate",
+  status: "status",
+  invoicedocurl: "invoiceDocUrl",
+};
+const normalizeHeader = (h: string): string => h.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/** A representative ERP export (the template scheme) for one-click demos. */
+const ERP_SAMPLE_CSV = `${TEMPLATE_HEADERS.join(",")}
+RAMCO-INV-020101-2026,2026-06-01,JSW Steel Limited,INR,371400,2026-08-15,Available
+RAMCO-INV-020102-2026,2026-06-04,ITC Limited,INR,103500,2026-08-18,Available
+RAMCO-INV-020103-2026,2026-06-06,Bajaj Auto Limited,INR,355000,2026-08-20,Available
+RAMCO-INV-020102-2026,2026-06-04,ITC Limited,INR,103500,2026-08-18,Available
+RAMCO-INV-020104-2026,2026-06-08,Vedanta Limited,INR,428900,2026-08-23,Paid`;
 
 type RowStatus = "invalid" | "pending" | "working" | "tokenized" | "duplicate" | "error";
 
 interface ImportRow {
   invoiceNumber: string;
-  sellerGstin: string;
-  buyerGstin: string;
-  amountInr: string;
+  invoiceDate: string;
+  buyerName: string;
+  currency: string;
+  amount: string;
   dueDate: string;
-  discountRatePct: string;
+  erpStatus: string;
   invoiceDocUrl: string;
   problems: string[];
   status: RowStatus;
   message?: string;
 }
 
-/** Canonical fingerprint — MUST match computeFingerprint in scripts/erp-import.mjs. */
+/** Canonical fingerprint — MUST match core invoiceFingerprint + scripts/erp-import.mjs. */
 export async function computeFingerprint(inv: {
-  invoiceNumber: string; sellerGstin: string; buyerGstin: string; amountInr: string; dueDate: string;
+  invoiceNumber: string; buyerName: string; currency: string; amount: string; dueDate: string;
 }): Promise<string> {
   const canonical = [
     String(inv.invoiceNumber).trim(),
-    String(inv.sellerGstin).trim().toUpperCase(),
-    String(inv.buyerGstin).trim().toUpperCase(),
-    String(parseInt(String(inv.amountInr), 10)),
+    String(inv.buyerName).trim().toUpperCase(),
+    String(inv.currency).trim().toUpperCase(),
+    String(parseInt(String(inv.amount), 10)),
     String(inv.dueDate).trim(),
   ].join("|");
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical));
@@ -55,8 +75,32 @@ export async function computeFingerprint(inv: {
 }
 
 /** Token supply for an invoice = round(face value / par value), at least 1. */
-function supplyFor(amountInr: string | number, parValue: string | number): number {
-  return Math.max(1, Math.round(Number(amountInr) / Math.max(1, Number(parValue) || 1)));
+function supplyFor(amount: string | number, parValue: string | number): number {
+  return Math.max(1, Math.round(Number(amount) / Math.max(1, Number(parValue) || 1)));
+}
+
+/** Excel serial date (days since 1899-12-30) → YYYY-MM-DD. */
+function excelSerialToISO(serial: number): string {
+  return new Date(Date.UTC(1899, 11, 30) + Math.round(serial) * 86400000).toISOString().slice(0, 10);
+}
+
+/** Map raw {header: value} objects to canonical-field records via HEADER_MAP,
+ * converting Excel date serials on the date fields. */
+function canonicalize(raws: Record<string, string>[]): Record<string, string>[] {
+  return raws.map((raw) => {
+    const rec: Record<string, string> = {};
+    for (const [header, value] of Object.entries(raw)) {
+      const field = HEADER_MAP[normalizeHeader(header)] ?? header;
+      let v = (value ?? "").trim();
+      // XLSX stores dates as day serials — convert plausible serials on date fields.
+      if ((field === "invoiceDate" || field === "dueDate") && /^\d{4,6}(\.0+)?$/.test(v)) {
+        const n = Number(v);
+        if (n > 20000 && n < 80000) v = excelSerialToISO(n);
+      }
+      rec[field] = v;
+    }
+    return rec;
+  });
 }
 
 /** Simple CSV: first line headers, comma-split, trimmed cells (matches the connector). */
@@ -70,11 +114,91 @@ function parseCsv(text: string): Record<string, string>[] {
   });
 }
 
-/** Local validation: required fields, schema patterns (generic), positive amount. */
-function validate(raw: Record<string, string>, useCase: UseCase): string[] {
+// --- minimal dependency-free XLSX reader ------------------------------------
+// An .xlsx is a zip of XML parts. We read the central directory, inflate
+// xl/sharedStrings.xml + the first worksheet with DecompressionStream, and
+// resolve shared-string cells. Enough for flat ERP export sheets.
+
+async function inflateEntry(buf: ArrayBuffer, offset: number, compressedSize: number, method: number): Promise<Uint8Array> {
+  const view = new DataView(buf);
+  if (view.getUint32(offset, true) !== 0x04034b50) throw new Error("bad zip local header");
+  const nameLen = view.getUint16(offset + 26, true);
+  const extraLen = view.getUint16(offset + 28, true);
+  const start = offset + 30 + nameLen + extraLen;
+  const bytes = new Uint8Array(buf, start, compressedSize);
+  if (method === 0) return bytes.slice();
+  const ds = new DecompressionStream("deflate-raw");
+  const stream = new Blob([bytes]).stream().pipeThrough(ds);
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+async function unzipParts(buf: ArrayBuffer, want: (name: string) => boolean): Promise<Map<string, Uint8Array>> {
+  const view = new DataView(buf);
+  // Find End Of Central Directory (scan backwards for its signature).
+  let eocd = -1;
+  for (let i = buf.byteLength - 22; i >= 0 && i > buf.byteLength - 22 - 65536; i--) {
+    if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error("not a valid .xlsx (no zip directory)");
+  const count = view.getUint16(eocd + 10, true);
+  let p = view.getUint32(eocd + 16, true); // central directory offset
+  const out = new Map<string, Uint8Array>();
+  for (let i = 0; i < count; i++) {
+    if (view.getUint32(p, true) !== 0x02014b50) break;
+    const method = view.getUint16(p + 10, true);
+    const compressedSize = view.getUint32(p + 20, true);
+    const nameLen = view.getUint16(p + 28, true);
+    const extraLen = view.getUint16(p + 30, true);
+    const commentLen = view.getUint16(p + 32, true);
+    const localOffset = view.getUint32(p + 42, true);
+    const name = new TextDecoder().decode(new Uint8Array(buf, p + 46, nameLen));
+    if (want(name)) out.set(name, await inflateEntry(buf, localOffset, compressedSize, method));
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  return out;
+}
+
+async function parseXlsx(buf: ArrayBuffer): Promise<Record<string, string>[]> {
+  const parts = await unzipParts(buf, (n) => n === "xl/sharedStrings.xml" || /^xl\/worksheets\/sheet\d+\.xml$/.test(n));
+  const dec = new TextDecoder();
+  const xml = (bytes: Uint8Array) => new DOMParser().parseFromString(dec.decode(bytes), "application/xml");
+  const shared: string[] = [];
+  const ss = parts.get("xl/sharedStrings.xml");
+  if (ss) for (const si of Array.from(xml(ss).getElementsByTagName("si"))) {
+    shared.push(Array.from(si.getElementsByTagName("t")).map((t) => t.textContent ?? "").join(""));
+  }
+  const sheetName = [...parts.keys()].filter((n) => n.startsWith("xl/worksheets/")).sort()[0];
+  if (!sheetName) throw new Error("no worksheet found in the .xlsx");
+  const sheet = xml(parts.get(sheetName)!);
+  const grid: string[][] = [];
+  for (const row of Array.from(sheet.getElementsByTagName("row"))) {
+    const cells: string[] = [];
+    for (const c of Array.from(row.getElementsByTagName("c"))) {
+      // Column index from the cell ref (e.g. "C7" → 2) so blanks don't shift columns.
+      const col = (c.getAttribute("r") ?? "").replace(/\d+/g, "").split("").reduce((a, ch) => a * 26 + (ch.charCodeAt(0) - 64), 0) - 1;
+      const t = c.getAttribute("t");
+      let v = "";
+      if (t === "inlineStr") v = Array.from(c.getElementsByTagName("t")).map((x) => x.textContent ?? "").join("");
+      else {
+        v = c.getElementsByTagName("v")[0]?.textContent ?? "";
+        if (t === "s" && v !== "") v = shared[Number(v)] ?? "";
+      }
+      cells[col >= 0 ? col : cells.length] = v;
+    }
+    grid.push(cells);
+  }
+  const headers = (grid[0] ?? []).map((h) => (h ?? "").trim());
+  if (headers.filter(Boolean).length === 0) throw new Error("the sheet has no header row");
+  return grid.slice(1)
+    .filter((r) => r.some((v) => (v ?? "").trim() !== ""))
+    .map((r) => Object.fromEntries(headers.map((h, i) => [h, (r[i] ?? "").trim()]).filter(([h]) => h !== "")));
+}
+
+/** Local validation: required fields, schema patterns, positive amount, ERP status gate. */
+function validate(rec: Record<string, string>, useCase: UseCase): string[] {
   const problems: string[] = [];
   for (const field of INVOICE_FIELDS) {
-    const value = (raw[field] ?? "").trim();
+    const value = (rec[field] ?? "").trim();
     if (!value) {
       problems.push(`${field} missing`);
       continue;
@@ -88,8 +212,11 @@ function validate(raw: Record<string, string>, useCase: UseCase): string[] {
       }
     }
   }
-  const amount = Number(raw.amountInr);
-  if (raw.amountInr && (!Number.isFinite(amount) || amount <= 0)) problems.push("amountInr must be a positive number");
+  const amount = Number(rec.amount);
+  if (rec.amount && (!Number.isFinite(amount) || amount <= 0)) problems.push("amount must be a positive number");
+  // Only ERP-'Available' invoices are eligible — financed/paid ones must not re-tokenize.
+  const erpStatus = (rec.status ?? "").trim();
+  if (erpStatus && erpStatus.toLowerCase() !== "available") problems.push(`status '${erpStatus}' — only Available invoices tokenize`);
   return problems;
 }
 
@@ -134,16 +261,17 @@ export function InvoiceImport({ useCase, chains, onTokenized }: Props): JSX.Elem
     setDone(false);
     try {
       if (raws.length === 0) throw new Error("No invoice rows found");
-      const parsedRows = raws.map((raw): ImportRow => {
-        const problems = validate(raw, useCase);
+      const parsedRows = canonicalize(raws).map((rec): ImportRow => {
+        const problems = validate(rec, useCase);
         return {
-          invoiceNumber: (raw.invoiceNumber ?? "").trim(),
-          sellerGstin: (raw.sellerGstin ?? "").trim(),
-          buyerGstin: (raw.buyerGstin ?? "").trim(),
-          amountInr: (raw.amountInr ?? "").trim(),
-          dueDate: (raw.dueDate ?? "").trim(),
-          discountRatePct: (raw.discountRatePct ?? "").trim(),
-          invoiceDocUrl: (raw.invoiceDocUrl ?? "").trim(),
+          invoiceNumber: (rec.invoiceNumber ?? "").trim(),
+          invoiceDate: (rec.invoiceDate ?? "").trim(),
+          buyerName: (rec.buyerName ?? "").trim(),
+          currency: (rec.currency ?? "").trim().toUpperCase(),
+          amount: (rec.amount ?? "").trim(),
+          dueDate: (rec.dueDate ?? "").trim(),
+          erpStatus: (rec.status ?? "").trim(),
+          invoiceDocUrl: (rec.invoiceDocUrl ?? "").trim(),
           problems,
           status: problems.length === 0 ? "pending" : "invalid",
         };
@@ -158,10 +286,11 @@ export function InvoiceImport({ useCase, chains, onTokenized }: Props): JSX.Elem
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const text = await file.text();
       let raws: Record<string, string>[];
-      if (/\.json$/i.test(file.name)) {
-        const parsed: unknown = JSON.parse(text);
+      if (/\.xlsx$/i.test(file.name)) {
+        raws = await parseXlsx(await file.arrayBuffer());
+      } else if (/\.json$/i.test(file.name)) {
+        const parsed: unknown = JSON.parse(await file.text());
         if (!Array.isArray(parsed)) throw new Error("JSON must be an array of invoice objects");
         raws = parsed.map((o) => {
           const rec: Record<string, string> = {};
@@ -169,7 +298,7 @@ export function InvoiceImport({ useCase, chains, onTokenized }: Props): JSX.Elem
           return rec;
         });
       } else {
-        raws = parseCsv(text);
+        raws = parseCsv(await file.text());
       }
       await ingest(raws, file.name);
     } catch (err) {
@@ -196,21 +325,22 @@ export function InvoiceImport({ useCase, chains, onTokenized }: Props): JSX.Elem
       if (!row || row.status === "invalid" || row.status === "tokenized" || row.status === "duplicate") continue;
       patchRow(i, { status: "working", message: undefined });
       // Fractionalize the face value into ERC-20 units minted to the holder.
-      const supply = supplyFor(row.amountInr, parValue);
+      const supply = supplyFor(row.amount, parValue);
       const metadata: Record<string, unknown> = {
         invoiceNumber: row.invoiceNumber,
-        sellerGstin: row.sellerGstin,
-        buyerGstin: row.buyerGstin,
-        amountInr: Number(row.amountInr),
+        invoiceDate: row.invoiceDate,
+        buyerName: row.buyerName,
+        currency: row.currency,
+        amount: Number(row.amount),
         dueDate: row.dueDate,
-        ...(row.discountRatePct ? { discountRatePct: Number(row.discountRatePct) } : {}),
+        ...(row.erpStatus ? { status: row.erpStatus } : {}),
         ...(row.invoiceDocUrl ? { invoiceDocUrl: row.invoiceDocUrl } : {}),
         // invoiceHash intentionally omitted — the server derives it.
       };
       try {
         await api.issue(token, {
           useCaseKey: useCase.key,
-          name: `${row.invoiceNumber} · ${row.sellerGstin.slice(0, 4)}→${row.buyerGstin.slice(0, 4)}`,
+          name: `${row.invoiceNumber} · ${row.buyerName}`,
           chainId,
           initialSupply: String(supply),
           treasuryAccount: holder,
@@ -237,9 +367,7 @@ export function InvoiceImport({ useCase, chains, onTokenized }: Props): JSX.Elem
   const pending = rows.filter((r) => r.status === "pending" || r.status === "working").length;
 
   const sampleCsvHref = useMemo(
-    () =>
-      "data:text/csv;charset=utf-8," +
-      encodeURIComponent(`${CSV_HEADERS}\nINV-2026-001,24AAACS1429B1ZL,27AABCR1718E1ZP,500000,2026-09-30,2.5,https://docs.example.com/INV-2026-001.pdf\n`),
+    () => "data:text/csv;charset=utf-8," + encodeURIComponent(ERP_SAMPLE_CSV + "\n"),
     [],
   );
 
@@ -249,11 +377,11 @@ export function InvoiceImport({ useCase, chains, onTokenized }: Props): JSX.Elem
         <div>
           <h2 className="font-semibold text-slate-900">Import invoices — ERP export or file upload</h2>
           <p className="text-xs text-slate-500 mt-1">
-            Ingest invoices two ways: load an <span className="font-medium text-slate-700">ERP export</span> (or the built-in
-            sample), or <span className="font-medium text-slate-700">upload</span> a CSV/JSON file. Each valid invoice is
-            tokenized into <span className="font-medium text-slate-700">round(face ÷ par)</span> fungible units minted to the
-            holder. The server derives each invoice's canonical fingerprint and rejects an already-tokenized invoice — even
-            if it arrived through another channel.
+            Upload the ERP invoice template (<span className="font-medium text-slate-700">.xlsx</span>, CSV, or JSON) or load
+            the built-in sample. Only <span className="font-medium text-slate-700">Available</span> invoices are eligible; each
+            is tokenized into <span className="font-medium text-slate-700">round(amount ÷ par)</span> fungible units minted to
+            the holder. The server derives each invoice's canonical fingerprint and rejects an already-tokenized invoice —
+            even if it arrived through another channel.
           </p>
           <button
             type="button"
@@ -270,7 +398,7 @@ export function InvoiceImport({ useCase, chains, onTokenized }: Props): JSX.Elem
             <span className="block text-xs font-medium text-slate-600 mb-1">Or upload invoice file</span>
             <input
               type="file"
-              accept=".csv,.json"
+              accept=".xlsx,.csv,.json"
               onChange={(e) => void handleFile(e)}
               disabled={busy}
               className="block w-full text-xs text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-brand-600 file:text-white file:px-3 file:py-1.5 file:text-xs file:font-medium hover:file:bg-brand-700 file:cursor-pointer"
@@ -296,7 +424,7 @@ export function InvoiceImport({ useCase, chains, onTokenized }: Props): JSX.Elem
               onChange={(e) => setParValue(e.target.value)}
               disabled={busy}
             />
-            <span className="block text-[11px] text-slate-400 mt-1">supply per invoice = round(face ÷ par)</span>
+            <span className="block text-[11px] text-slate-400 mt-1">supply per invoice = round(amount ÷ par)</span>
           </label>
           <label className="block">
             <span className="block text-xs font-medium text-slate-600 mb-1">Chain / DLT</span>
@@ -309,8 +437,8 @@ export function InvoiceImport({ useCase, chains, onTokenized }: Props): JSX.Elem
         </div>
 
         <p className="text-[11px] text-slate-400">
-          Expected columns: <span className="font-mono">{CSV_HEADERS}</span>{" "}
-          <a href={sampleCsvHref} download="invoices-sample.csv" className="text-brand-600 hover:underline">
+          Template columns: <span className="font-mono">{TEMPLATE_HEADERS.join(" · ")}</span>{" "}
+          <a href={sampleCsvHref} download="invoices-template.csv" className="text-brand-600 hover:underline">
             Download sample CSV
           </a>
         </p>
@@ -340,8 +468,8 @@ export function InvoiceImport({ useCase, chains, onTokenized }: Props): JSX.Elem
             <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
               <tr>
                 <th className="text-left font-medium px-4 py-2.5">Invoice</th>
-                <th className="text-left font-medium px-4 py-2.5">Seller → Buyer</th>
-                <th className="text-right font-medium px-4 py-2.5">Amount (INR)</th>
+                <th className="text-left font-medium px-4 py-2.5">Buyer</th>
+                <th className="text-right font-medium px-4 py-2.5">Amount</th>
                 <th className="text-right font-medium px-4 py-2.5">Tokens</th>
                 <th className="text-left font-medium px-4 py-2.5">Due date</th>
                 <th className="text-left font-medium px-4 py-2.5">Status</th>
@@ -350,11 +478,14 @@ export function InvoiceImport({ useCase, chains, onTokenized }: Props): JSX.Elem
             <tbody className="divide-y divide-slate-100">
               {rows.map((r, i) => (
                 <tr key={`${r.invoiceNumber}-${i}`} className={r.status === "invalid" ? "bg-red-50/40" : undefined}>
-                  <td className="px-4 py-2.5 font-medium text-slate-800">{r.invoiceNumber || <span className="text-slate-300">—</span>}</td>
-                  <td className="px-4 py-2.5 text-xs font-mono text-slate-600">{r.sellerGstin || "?"} → {r.buyerGstin || "?"}</td>
-                  <td className="px-4 py-2.5 text-right font-mono text-slate-700">{r.amountInr || "—"}</td>
+                  <td className="px-4 py-2.5 font-medium text-slate-800">
+                    {r.invoiceNumber || <span className="text-slate-300">—</span>}
+                    {r.invoiceDate && <div className="text-[11px] font-normal text-slate-400">{r.invoiceDate}</div>}
+                  </td>
+                  <td className="px-4 py-2.5 text-xs text-slate-600">{r.buyerName || "?"}</td>
+                  <td className="px-4 py-2.5 text-right font-mono text-slate-700">{r.amount ? `${Number(r.amount).toLocaleString("en-IN")} ${r.currency}` : "—"}</td>
                   <td className="px-4 py-2.5 text-right font-mono text-slate-700">
-                    {r.status === "invalid" || !r.amountInr ? "—" : supplyFor(r.amountInr, parValue).toLocaleString()}
+                    {r.status === "invalid" || !r.amount ? "—" : supplyFor(r.amount, parValue).toLocaleString()}
                   </td>
                   <td className="px-4 py-2.5 text-xs text-slate-600">{r.dueDate || "—"}</td>
                   <td className="px-4 py-2.5">

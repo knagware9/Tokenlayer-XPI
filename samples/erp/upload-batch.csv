@@ -1,3 +1,3 @@
-invoiceNumber,sellerGstin,buyerGstin,amountInr,dueDate,discountRatePct,invoiceDocUrl
-INV-UPL-2026-301,19AABCI5678K1ZQ,27AAPFU0939F1ZV,1450000,2026-10-12,8.75,https://vault.m1x.example/docs/INV-UPL-2026-301.pdf
-INV-ERP-2026-203,29AACCF4587R1ZK,27AAACB2894G1ZJ,3400000,2026-10-05,7.9,https://vault.m1x.example/docs/INV-ERP-2026-203-again.pdf
+Invoice No,Invoice Date,Buyer Name,Currency,Amount,Due Date,Status
+INV-UPL-2026-301,2026-06-28,HDFC Bank Treasury,INR,640000,2026-09-30,Available
+INV-ERP-2026-203,2026-06-20,Infosys Limited,INR,3400000,2026-10-05,Available

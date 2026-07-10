@@ -246,7 +246,7 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
                     <option value="number">number</option>
                     <option value="boolean">boolean</option>
                     <option value="enum">enum</option>
-                    <option value="document">document (URL)</option>
+                    <option value="document">document (PDF upload / URL)</option>
                   </select>
                   <label className="flex items-center gap-1 text-xs text-slate-500">
                     <input type="checkbox" checked={f.required} onChange={() => setFields((arr) => arr.map((x, j) => (j === i ? { ...x, required: !x.required } : x)))} />
