@@ -764,6 +764,15 @@ export const S: Record<string, FastifySchema> = {
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403) },
   },
 
+  mePortfolio: {
+    tags: ["Investor"], summary: "The caller's holdings, cash, and totals", security: bearer,
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401) },
+  },
+  meActivity: {
+    tags: ["Investor"], summary: "The caller's personal activity feed", security: bearer,
+    response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(400, 401) },
+  },
+
   creditCash: {
     tags: ["Cash"], summary: "Fund an account with CBDC / cash (Issuer / admin only)", security: bearer,
     body: {
