@@ -7,6 +7,9 @@ export interface KycDetails {
   idType?: string;
   idNumber?: string;
   documentRef?: string;
+  issuerDid?: string;
+  credentialId?: string;
+  verifiedAt?: string;
 }
 
 export interface UserRecord {
@@ -19,6 +22,7 @@ export interface UserRecord {
   active: boolean;
   kycStatus: KycStatus;
   kyc: KycDetails | null;
+  did?: string;
   createdAt: string;
 }
 
@@ -73,7 +77,7 @@ export interface UserRepository {
   findById(id: string): Promise<UserRecord | null>;
   create(input: Omit<UserRecord, "id" | "createdAt">): Promise<UserRecord>;
   list(useCaseKey?: string): Promise<UserRecord[]>;
-  update(id: string, patch: Partial<Pick<UserRecord, "passwordHash" | "accountId" | "active" | "kycStatus">>): Promise<UserRecord>;
+  update(id: string, patch: Partial<Pick<UserRecord, "passwordHash" | "accountId" | "active" | "kycStatus" | "did" | "kyc">>): Promise<UserRecord>;
   remove(id: string): Promise<void>;
 }
 

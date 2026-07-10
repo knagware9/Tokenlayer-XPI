@@ -854,4 +854,21 @@ export const S: Record<string, FastifySchema> = {
     },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
   },
+
+  identityChallenge: {
+    tags: ["Identity"], summary: "Issue a verification challenge for a user", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404) },
+  },
+  identityVerify: {
+    tags: ["Identity"], summary: "Verify a DID/VC presentation and set KYC", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    body: { type: "object", required: ["presentation"], properties: { presentation: { type: "string" } } },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
+  },
+  identityMint: {
+    tags: ["Identity"], summary: "Dev: mint a demo VP", security: bearer,
+    body: { type: "object", additionalProperties: true },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
+  },
 };

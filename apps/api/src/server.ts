@@ -4,6 +4,7 @@ import { buildChainRegistry } from "./chains.js";
 import { createEngine } from "./context.js";
 import { loadCurrencies } from "./currencies.js";
 import { env } from "./env.js";
+import { createMemoryChallengeStore } from "./identity-challenges.js";
 import {
   PrismaAccountRepository,
   PrismaAssetRepository,
@@ -61,6 +62,9 @@ async function main(): Promise<void> {
     documents,
     cashflows,
     proposals,
+    challenges: createMemoryChallengeStore(),
+    trustedKycIssuers: env.trustedKycIssuers,
+    devIssuerSeed: env.devKycIssuerSeed,
     currencies: loadCurrencies(),
     jwtSecret: env.jwtSecret,
     corsOrigins: env.corsOrigins,

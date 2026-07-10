@@ -28,6 +28,11 @@ services:
       # tMSTC (faucet: https://faucet.mstblockchain.com/) to deploy contracts on MST.
       MST_RPC_URL: ${MST_RPC_URL:-}
       MST_OPERATOR_KEY: ${MST_OPERATOR_KEY:-}
+      # DID/VC KYC: trusted issuer DID allowlist (empty ⇒ verification closed) + a
+      # dev-only issuer seed enabling POST /identity/mint for the demo. Values from
+      # .env (gitignored); the dev mint endpoint is absent in production (NODE_ENV).
+      TRUSTED_KYC_ISSUERS: ${TRUSTED_KYC_ISSUERS:-}
+      DEV_KYC_ISSUER_SEED: ${DEV_KYC_ISSUER_SEED:-}
       # Real-chain deploy: refuse to start unless besu is configured AND reachable.
       CHAIN_STRICT: "1"
 

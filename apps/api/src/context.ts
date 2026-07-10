@@ -3,6 +3,7 @@ import { RepositoryAuditSink } from "./audit-sink.js";
 import type { ChainRegistry } from "./chains.js";
 import { createComplianceProvider } from "./compliance-provider.js";
 import type { Currency } from "./currencies.js";
+import type { ChallengeStore } from "./identity-challenges.js";
 import type {
   AccountRepository,
   AssetRepository,
@@ -32,6 +33,11 @@ export interface AppDeps {
   documents: DocumentRepository;
   cashflows: CashflowRepository;
   proposals: ProposalRepository;
+  challenges: ChallengeStore;
+  /** Allowlist of trusted KYC credential issuer DIDs; empty/absent ⇒ no issuer is trusted (fail closed). */
+  trustedKycIssuers?: string[];
+  /** Dev-only deterministic issuer seed for the demo mint route (never set in production). */
+  devIssuerSeed?: string;
   currencies: Currency[];
   jwtSecret: string;
   /** CORS origin allowlist; defaults to the local dashboard when omitted (tests/demo). */

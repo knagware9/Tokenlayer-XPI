@@ -75,6 +75,13 @@ export interface Env {
    * demo/load environments where many users authenticate from one egress IP.
    */
   loginRateLimitMax?: number;
+  /**
+   * Allowlist of trusted KYC credential issuer DIDs (comma-separated in the env).
+   * Empty ⇒ no issuer is trusted, so identity verification fails closed.
+   */
+  trustedKycIssuers: string[];
+  /** Dev-only deterministic issuer seed for the demo mint route (unset in production). */
+  devKycIssuerSeed?: string;
 }
 
 const platformFeeAccount =
@@ -96,4 +103,6 @@ export const env: Env = {
   platformFeeAccount,
   marketEscrowAccount,
   loginRateLimitMax: process.env.LOGIN_RATE_LIMIT_MAX ? Number(process.env.LOGIN_RATE_LIMIT_MAX) : undefined,
+  trustedKycIssuers: (process.env.TRUSTED_KYC_ISSUERS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+  devKycIssuerSeed: process.env.DEV_KYC_ISSUER_SEED,
 };
