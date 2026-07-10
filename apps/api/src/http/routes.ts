@@ -1160,10 +1160,12 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return { status: "approved", did: result.holderDid, claims: result.credential!.claims, issuer: result.credential!.issuer };
   });
 
-  // Dev-only: mint a demo issuer-signed VC wrapped in a holder-signed VP over a
-  // challenge. Gated: only when a dev issuer seed is configured AND not production.
+  // Demo-only: mint a demo issuer-signed VC wrapped in a holder-signed VP over a
+  // challenge. Present ONLY when DEV_KYC_ISSUER_SEED is configured — that env var
+  // is the explicit switch (absent in a real deployment ⇒ 404), same real-or-absent
+  // pattern as chains/fees. A production operator must never set the dev seed.
   app.post("/identity/mint", { schema: S.identityMint, ...auth }, async (request, reply) => {
-    if (deps.isProduction || !deps.devIssuerSeed) return reply.code(404).send({ error: "NOT_FOUND", message: "not available" });
+    if (!deps.devIssuerSeed) return reply.code(404).send({ error: "NOT_FOUND", message: "not available" });
     if ((request.user as TokenClaims).role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "platform admin only" });
     const { subjectDid, holderSeed, claims, challenge } = request.body as { subjectDid?: string; holderSeed?: string; claims: Record<string, unknown>; challenge: string };
     const issuer = devKeyFromSeed(deps.devIssuerSeed);       // deterministic issuer (its did must be in TRUSTED_KYC_ISSUERS)
