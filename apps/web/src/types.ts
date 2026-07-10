@@ -227,6 +227,13 @@ export interface AnalyticsSummary {
   recent: { at: string; action: string; assetId: string; assetName: string; useCaseKey: string | null; chainId: string; summary: string }[];
 }
 
+export interface IdentityResult {
+  status: string;
+  did: string;
+  claims: Record<string, unknown>;
+  issuer: string;
+}
+
 export interface Holding {
   assetId: string; name: string; symbol: string; useCaseKey: string; chainId: string;
   units: string; unitPrice: string | null; currency: string | null; value: string | null;
