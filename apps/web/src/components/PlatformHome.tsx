@@ -1,67 +1,180 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { api, ApiError } from "../api.js";
+import { useAuth } from "../auth.js";
 import { useRoute } from "../router.js";
-import type { ChainInfo, UseCase } from "../types.js";
+import type { ChainInfo, ContractCode, UseCase } from "../types.js";
+import { ContractCodeView } from "./ContractCodeView.js";
 import { Dashboard } from "./Dashboard.js";
-import { UseCaseBuilder } from "./UseCaseBuilder.js";
+import { NetworksPanel } from "./NetworksPanel.js";
+import { ChainDeployBadge, UseCaseBuilder } from "./UseCaseBuilder.js";
+import { Card, EmptyState, Pill, SectionHeader, Skeleton } from "./ui.js";
+
+type Tab = "overview" | "use-cases" | "networks" | "create";
 
 export function PlatformHome({ useCases, chains, onReloadUseCases }: { useCases: UseCase[]; chains: ChainInfo[]; onReloadUseCases: () => void }): JSX.Element {
-  const { navigate } = useRoute();
-  const [selected, setSelected] = useState<string>(useCases[0]?.key ?? "");
-  const chosen = useCases.find((u) => u.key === selected);
+  const [tab, setTab] = useState<Tab>("overview");
+  const tabs: { id: Tab; label: string }[] = [
+    { id: "overview", label: "Overview" },
+    { id: "use-cases", label: "Use cases" },
+    { id: "networks", label: "Networks" },
+    { id: "create", label: "Create use case" },
+  ];
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h2 className="font-semibold text-slate-900 mb-3">Platform overview</h2>
-        <Dashboard />
+    <div>
+      <div className="flex gap-1 mb-5 flex-wrap">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={`px-4 py-2 rounded-lg text-sm font-medium ${tab === t.id ? "bg-white text-brand-700 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-800"}`}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
 
-      <div>
-        <h2 className="font-semibold text-slate-900 mb-1">Use cases</h2>
-        <p className="text-sm text-slate-500 mb-3">Select an existing use-case template and start tokenizing your assets.</p>
-        {useCases.length === 0 ? (
-          <p className="text-sm text-slate-500">No use cases yet — set one up below.</p>
-        ) : (
-          <div className="bg-white rounded-xl border border-slate-200 p-4 flex flex-col sm:flex-row sm:items-end gap-3">
-            <label className="flex-1 block">
-              <span className="text-xs font-medium text-slate-500">Use-case template</span>
-              <select
-                value={selected}
-                onChange={(e) => setSelected(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white"
-              >
-                {useCases.map((u) => (
-                  <option key={u.key} value={u.key}>
-                    {u.name} — {u.tokenStandard} ({u.symbol})
-                  </option>
-                ))}
-              </select>
-            </label>
-            {chosen && (
-              <div className="text-xs text-slate-400 sm:pb-2 sm:max-w-xs">
-                <span className="text-slate-500">{chosen.key}</span>
-                {chosen.description ? <span className="block line-clamp-2 mt-0.5">{chosen.description}</span> : null}
+      {tab === "overview" && (
+        <div>
+          <SectionHeader title="Platform overview" description="Cross-ledger issuance, holders and trading at a glance." />
+          <Dashboard />
+        </div>
+      )}
+
+      {tab === "use-cases" && <UseCasesTab useCases={useCases} chains={chains} onChanged={onReloadUseCases} />}
+
+      {tab === "networks" && (
+        <div>
+          <SectionHeader title="Networks" description="Every supported ledger, its configuration and a live connectivity probe." />
+          <NetworksPanel chains={chains} />
+        </div>
+      )}
+
+      {tab === "create" && (
+        <div>
+          <SectionHeader title="Create a use case" description="A guided setup — strong defaults, live contract-code preview, deploys on save." />
+          <UseCaseBuilder chains={chains} existing={useCases} onCreated={onReloadUseCases} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function UseCasesTab({ useCases, chains, onChanged }: { useCases: UseCase[]; chains: ChainInfo[]; onChanged: () => void }): JSX.Element {
+  const { navigate } = useRoute();
+  const [codeFor, setCodeFor] = useState<UseCase | null>(null);
+
+  const open = (key: string): void => {
+    // Land directly on the Asset Management tab of the chosen use case.
+    sessionStorage.setItem("tl:section", "assets");
+    navigate(`/${key}`);
+  };
+
+  return (
+    <div>
+      <SectionHeader title="Use cases" description="Select an existing use-case template and start tokenizing your assets." />
+      {useCases.length === 0 ? (
+        <Card>
+          <EmptyState icon="doc" title="No use cases yet" hint="Set one up in the Create use case tab — presets get you there in a minute." />
+        </Card>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {useCases.map((u) => (
+            <Card key={u.key} className="flex flex-col">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-slate-900 truncate">{u.name}</div>
+                  <div className="text-xs text-slate-400">{u.key}</div>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <Pill tone="info">{u.tokenStandard}</Pill>
+                  <Pill tone="muted">{u.symbol}</Pill>
+                </div>
               </div>
-            )}
-            <button
-              onClick={() => {
-                if (!selected) return;
-                // Land directly on the Asset Management tab of the chosen use case.
-                sessionStorage.setItem("tl:section", "assets");
-                navigate(`/${selected}`);
-              }}
-              disabled={!selected}
-              className="rounded-lg bg-brand-600 text-white px-4 py-2 text-sm font-semibold hover:bg-brand-700 disabled:opacity-50 whitespace-nowrap"
-            >
-              Start tokenizing →
+              {u.description && <p className="text-xs text-slate-500 mt-2 line-clamp-3">{u.description}</p>}
+              <div className="flex flex-wrap gap-1 mt-3">
+                {u.allowedChainIds.map((cid) => (
+                  <ChainDeployBadge
+                    key={cid}
+                    useCaseKey={u.key}
+                    chainId={cid}
+                    chain={chains.find((c) => c.id === cid)}
+                    deployed={u.contracts?.[cid]}
+                    onDeployed={onChanged}
+                  />
+                ))}
+              </div>
+              <div className="mt-4 pt-3 border-t border-slate-100 flex items-center gap-2">
+                <button
+                  onClick={() => open(u.key)}
+                  className="rounded-lg bg-brand-600 text-white px-3.5 py-1.5 text-xs font-semibold hover:bg-brand-700"
+                >
+                  Start tokenizing →
+                </button>
+                <button
+                  onClick={() => setCodeFor(u)}
+                  className="rounded-lg border border-slate-200 text-slate-600 px-3 py-1.5 text-xs font-medium hover:border-brand-400 hover:text-brand-700"
+                >
+                  View code
+                </button>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {codeFor && <CodeModal useCase={codeFor} chains={chains} onClose={() => setCodeFor(null)} />}
+    </div>
+  );
+}
+
+/** Modal showing the contract code backing a use case, per allowed chain. */
+function CodeModal({ useCase, chains, onClose }: { useCase: UseCase; chains: ChainInfo[]; onClose: () => void }): JSX.Element {
+  const { token } = useAuth();
+  const [chainId, setChainId] = useState(useCase.defaultChainId);
+  const [code, setCode] = useState<ContractCode | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!token) return;
+    setLoading(true);
+    setError(null);
+    setCode(null);
+    api
+      .useCaseCode(token, useCase.key, chainId)
+      .then((c) => setCode(c))
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Could not load the contract code"))
+      .finally(() => setLoading(false));
+  }, [token, useCase.key, chainId]);
+
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-start justify-center p-4 sm:p-8 z-50 overflow-y-auto" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl my-4" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-slate-100">
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-slate-900 truncate">
+              Contract code — {useCase.name} <span className="text-slate-400 font-normal">({useCase.symbol})</span>
+            </h3>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <select className="select w-auto text-xs" value={chainId} onChange={(e) => setChainId(e.target.value)}>
+              {useCase.allowedChainIds.map((id) => (
+                <option key={id} value={id}>
+                  {chains.find((c) => c.id === id)?.label ?? id}
+                </option>
+              ))}
+            </select>
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-lg leading-none px-1">
+              ×
             </button>
           </div>
-        )}
-      </div>
-
-      <div>
-        <h2 className="font-semibold text-slate-900 mb-3">Setup/Configure your Use case</h2>
-        <UseCaseBuilder chains={chains} existing={useCases} onCreated={onReloadUseCases} />
+        </div>
+        <div className="p-5">
+          {loading && <Skeleton lines={6} />}
+          {error && <p className="text-sm text-red-600 rounded-lg bg-red-50 border border-red-200 px-4 py-2">{error}</p>}
+          {code && <ContractCodeView code={code} />}
+        </div>
       </div>
     </div>
   );
