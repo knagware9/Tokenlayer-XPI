@@ -128,6 +128,16 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
 
   // --- catalog ------------------------------------------------------------
   app.get("/chains", { schema: S.chains, ...auth }, async () => deps.chains.list());
+  app.get("/chains/:id/status", { schema: S.chainStatus, ...auth }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    // probe() only throws for an unknown/absent chain (no adapter) — an
+    // unreachable network is a 200 with { reachable: false, error }.
+    try {
+      return await deps.chains.probe(id);
+    } catch (err) {
+      return notFound(reply, (err as Error).message);
+    }
+  });
   app.get("/currencies", { schema: S.currencies, ...auth }, async () => deps.currencies);
   app.get("/accounts", { schema: S.accounts, ...auth }, async (request) => scopedAccounts(request.user as TokenClaims));
 

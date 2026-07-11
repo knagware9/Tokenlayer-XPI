@@ -42,10 +42,36 @@ export const components: Record<string, unknown>[] = [
       family: { type: "string", enum: ["evm", "fabric", "canton", "mock"] },
       kind: { type: "string", enum: ["simulated", "evm"] },
       mode: { type: "string", enum: ["real", "simulated"] },
+      // false = supported catalog chain that is not connected (no adapter); it can
+      // be selected as an allowed DLT but assets cannot be issued on it yet.
+      available: { type: "boolean" },
+      // Whether the chain's connection config is present (EVM: rpc + key env;
+      // simulated-kind chains: always true). Mirrors adapter presence.
+      configured: { type: "boolean" },
+      expectedChainId: { type: "integer" },
       explorerUrl: { type: "string" },
       currencySymbol: { type: "string" },
+      faucetUrl: { type: "string" },
+      // Hostname only — never the full RPC URL (hosted RPC URLs can embed keys).
+      rpcHost: { type: "string" },
     },
-    required: ["id", "label", "family", "kind", "mode"],
+    required: ["id", "label", "family", "kind", "mode", "available", "configured"],
+  },
+  {
+    $id: "ChainStatus",
+    type: "object",
+    description: "On-demand liveness probe result for one chain.",
+    additionalProperties: true,
+    properties: {
+      id: { type: "string" },
+      reachable: { type: "boolean" },
+      mode: { type: "string", enum: ["real", "simulated"] },
+      chainId: { type: "string" },
+      operator: { type: "string" },
+      balance: { type: "string" },
+      error: { type: "string" },
+    },
+    required: ["id", "reachable", "mode"],
   },
   {
     $id: "PropertySchema",
@@ -414,6 +440,11 @@ export const S: Record<string, FastifySchema> = {
   me: { tags: ["Auth"], summary: "Current session principal", security: bearer, response: { 200: { type: "object", additionalProperties: true }, ...errs(401) } },
 
   chains: { tags: ["Catalog"], summary: "List configured chains/DLTs", security: bearer, response: { 200: { type: "array", items: { $ref: "Chain#" } }, ...errs(401) } },
+  chainStatus: {
+    tags: ["Catalog"], summary: "Probe one chain's live status (on-demand health check)", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    response: { 200: { $ref: "ChainStatus#" }, ...errs(401, 404) },
+  },
   currencies: { tags: ["Catalog"], summary: "List supported settlement currencies", security: bearer, response: { 200: { type: "array", items: { $ref: "Currency#" } }, ...errs(401) } },
   accounts: { tags: ["Catalog"], summary: "List demo accounts", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401) } },
 
