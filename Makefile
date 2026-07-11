@@ -5,7 +5,7 @@ COMPOSE      := docker compose -f docker-compose.yml
 COMPOSE_BESU := docker compose -f docker-compose.yml -f docker-compose.besu.yml
 
 .DEFAULT_GOAL := help
-.PHONY: help deploy deploy-besu deploy-sim verify verify-sim down down-besu besu-up besu-down fabric-up fabric-down logs status rebuild
+.PHONY: help deploy deploy-besu deploy-sim verify verify-sim down down-besu besu-up besu-down fabric-up fabric-down api-fabric logs status rebuild
 
 help: ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -49,6 +49,9 @@ fabric-up: ## Bring up a real Hyperledger Fabric network + deploy the tokenlayer
 
 fabric-down: ## Tear down the Fabric network and remove runtime artifacts
 	./infra/fabric/fabric-down.sh
+
+api-fabric: ## Run the API (host) against the real Fabric network from `make fabric-up`
+	./scripts/api-fabric.sh
 
 status: ## Show running containers
 	$(COMPOSE_BESU) ps
