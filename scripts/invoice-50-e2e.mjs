@@ -8,9 +8,10 @@
 //   configure/seed → onboard KYC/IN parties → tokenize 50 → block a duplicate →
 //   finance all 50 (discounted DvP) → settle a sample (gated redemption) →
 //   audit verify + anchor → analytics rollup.
-const API = "http://localhost:4000/api/v1";
-const N = 50;          // invoices to tokenize + finance
-const SETTLE = 5;      // of those, settle at maturity (gated redemption)
+const API = process.env.API ?? "http://localhost:4000/api/v1";
+const N = Number(process.env.N ?? 50);       // invoices to tokenize + finance (env N= for slower real ledgers)
+const SETTLE = Number(process.env.SETTLE ?? 5); // of those, settle at maturity (gated redemption)
+const CHAIN = process.env.CHAIN ?? "fabric";  // ledger to tokenize on
 const PAR = 1000;      // ₹ face value per fungible unit
 
 async function call(method, path, body, token) {
@@ -64,13 +65,13 @@ for (let i = 0; i < N; i++) {
     amount: face, dueDate: `2026-${String(9 + (i % 3)).padStart(2, "0")}-${String(1 + (i % 27)).padStart(2, "0")}`, status: "Available",
     discountRatePct: discountPct, invoiceDocUrl: `https://vault.m1x.example/docs/${runId}-${i}.pdf`,
   };
-  const r = await call("POST", "/assets", { useCaseKey: "invoice-tokenization", name: meta.invoiceNumber, chainId: "fabric", initialSupply: String(supply), treasuryAccount: SUP, metadata: meta, sale: { unitPrice: String(unitPrice), currency: CUR, treasuryAccount: SUP } }, issuer);
+  const r = await call("POST", "/assets", { useCaseKey: "invoice-tokenization", name: meta.invoiceNumber, chainId: CHAIN, initialSupply: String(supply), treasuryAccount: SUP, metadata: meta, sale: { unitPrice: String(unitPrice), currency: CUR, treasuryAccount: SUP } }, issuer);
   if (r.status === 201) { tokenized++; faceTotal += BigInt(face); invoices.push({ id: r.json.asset.id, face, supply, unitPrice, meta }); }
   else if (i === 0) ok(false, "first tokenize failed", r.json);
 }
 ok(tokenized === N, `tokenized ${tokenized}/${N} invoices → total face value ${inr(faceTotal)}`);
 // Uniqueness: re-tokenizing an existing invoice (same fingerprint) must be rejected.
-const dup = await call("POST", "/assets", { useCaseKey: "invoice-tokenization", name: "dupe", chainId: "fabric", initialSupply: "1", treasuryAccount: SUP, metadata: invoices[0].meta, sale: { unitPrice: "900", currency: CUR, treasuryAccount: SUP } }, issuer);
+const dup = await call("POST", "/assets", { useCaseKey: "invoice-tokenization", name: "dupe", chainId: CHAIN, initialSupply: "1", treasuryAccount: SUP, metadata: invoices[0].meta, sale: { unitPrice: "900", currency: CUR, treasuryAccount: SUP } }, issuer);
 ok(dup.status === 409, `duplicate invoice blocked → ${dup.json?.error}`, dup.json);
 
 console.log(`\n== 3) Finance all ${N} — financiers buy the discounted units (DvP) ==`);
