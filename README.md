@@ -181,9 +181,24 @@ pnpm api:dev                                       # terminal 2
 `ComplianceNFT` / `ComplianceToken3643` contracts. Besu and MST work the same way via
 `BESU_RPC_URL` / `MST_RPC_URL` (see `config/chains.json` and `apps/api/.env.example`).
 
+#### Besu (5-node QBFT dev network, vendored in-repo)
+
+The Besu network is **vendored in this repo** — genesis, node keys, and static
+nodes live in [`infra/besu-network/`](infra/besu-network/README.md) (dev-only
+keys, chainId 1337) and the nodes are defined in `docker-compose.besu-nodes.yml`:
+
+```bash
+make besu-up     # start besu-node1..5 on the `besu-network` docker network; RPC at localhost:8545
+make besu-down   # tear the nodes down
+```
+
+To use an external checkout of the network instead, set `BESU_PROJECT_DIR` — the
+same targets then start/stop the nodes from that project's compose file (its
+docker network must be reachable as `besu-network` for the overlay to attach).
+
 In the Docker deploy, `make deploy` wires Besu automatically via the `docker-compose.besu.yml`
-overlay; because `besu` is `required`, the default strict boot needs it reachable (see
-[DEPLOY.md](DEPLOY.md)).
+overlay (the api joins `besu-network` and reaches the RPC at `besu-node1:8545`); because `besu`
+is `required`, the default strict boot needs it reachable (see [DEPLOY.md](DEPLOY.md)).
 
 #### MST Testnet
 

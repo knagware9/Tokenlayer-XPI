@@ -1,10 +1,9 @@
-# Besu overlay — run the stack against the EXISTING 5-node Hyperledger Besu
-# QBFT network from the `deposittokenization` project.
+# Besu overlay — run the stack against the 5-node Hyperledger Besu QBFT network.
 #
-# Prereq: that network must be running (it owns the genesis, keys, validators):
-#   cd /Users/kamleshnagware/deposittokenization
-#   docker compose up -d besu-node1 besu-node2 besu-node3 besu-node4 besu-node5
-#   # (or ./besu-network/start-network.sh)
+# Prereq: the `besu-network` docker network must exist with the nodes on it.
+# It is created by `make besu-up`, which starts the IN-REPO nodes
+# (docker-compose.besu-nodes.yml + infra/besu-network/). An external checkout
+# works too, as long as it names its docker network `besu-network`.
 #
 # Then run TokenLayer against it:
 #   docker compose -f docker-compose.yml -f docker-compose.besu.yml up -d
@@ -37,7 +36,8 @@ services:
       CHAIN_STRICT: "1"
 
 networks:
-  # The bridge network created by the deposittokenization compose project.
+  # Created by `make besu-up` (in-repo nodes, docker-compose.besu-nodes.yml).
+  # An external checkout works too if it names the network `besu-network`.
   besu-net:
     external: true
-    name: deposittokenization_besu-network
+    name: besu-network
