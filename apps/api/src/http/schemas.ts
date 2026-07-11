@@ -74,6 +74,31 @@ export const components: Record<string, unknown>[] = [
     required: ["id", "reachable", "mode"],
   },
   {
+    $id: "ContractCode",
+    type: "object",
+    description: "The contract code backing a use case on one chain: the real Solidity source (EVM) or a truthful contract model (Fabric/Canton), plus the constructor args the platform passes at deploy time.",
+    additionalProperties: true,
+    properties: {
+      chainId: { type: "string" },
+      family: { type: "string", enum: ["evm", "fabric", "canton", "mock"] },
+      mode: { type: "string", enum: ["real", "simulated"] },
+      language: { type: "string" },
+      filename: { type: "string" },
+      source: { type: "string" },
+      constructorArgs: {
+        type: "array",
+        items: { type: "object", properties: { name: { type: "string" }, value: { type: "string" } }, required: ["name", "value"] },
+      },
+      // Present only on GET /use-cases/:key/code when the contract is deployed on that chain.
+      deployed: {
+        type: "object",
+        additionalProperties: true,
+        properties: { contractRef: { type: "string" }, deployTxHash: { type: "string" } },
+      },
+    },
+    required: ["chainId", "family", "mode", "language", "filename", "source", "constructorArgs"],
+  },
+  {
     $id: "PropertySchema",
     type: "object",
     additionalProperties: true,
@@ -470,6 +495,28 @@ export const S: Record<string, FastifySchema> = {
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     body: { type: "object", additionalProperties: false, required: ["chainId"], properties: { chainId: { type: "string" } } },
     response: { 200: { $ref: "UseCase#" }, ...errs(400, 401, 403, 404, 502) },
+  },
+  useCaseCode: {
+    tags: ["Use Cases"], summary: "Contract code backing a use case on one allowed chain", security: bearer,
+    params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
+    querystring: { type: "object", additionalProperties: false, required: ["chainId"], properties: { chainId: { type: "string" } } },
+    response: { 200: { $ref: "ContractCode#" }, ...errs(400, 401, 404) },
+  },
+  previewUseCaseCode: {
+    tags: ["Use Cases"], summary: "Preview the contract code for a not-yet-created use case (wizard review step)", security: bearer,
+    body: {
+      type: "object",
+      additionalProperties: false,
+      required: ["tokenStandard", "symbol", "name", "chainId"],
+      properties: {
+        tokenStandard: TOKEN_STANDARD,
+        symbol: { type: "string" },
+        name: { type: "string" },
+        allowlist: { type: "boolean" },
+        chainId: { type: "string" },
+      },
+    },
+    response: { 200: { $ref: "ContractCode#" }, ...errs(400, 401) },
   },
 
   issueAsset: {
