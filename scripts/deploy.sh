@@ -16,7 +16,9 @@ cd "$ROOT"
 
 # --- config (override via env) ----------------------------------------------
 MODE="besu"
-BESU_PROJECT_DIR="${BESU_PROJECT_DIR:-/Users/kamleshnagware/deposittokenization}"
+# Empty = use the IN-REPO vendored network (docker-compose.besu-nodes.yml).
+# Set BESU_PROJECT_DIR (or --besu-dir) to run an external checkout instead.
+BESU_PROJECT_DIR="${BESU_PROJECT_DIR:-}"
 API_PORT="${API_PORT:-4000}"
 WEB_PORT="${WEB_PORT:-8080}"
 BESU_RPC_PORT="${BESU_RPC_PORT:-8545}"
@@ -57,12 +59,16 @@ fi
 COMPOSE=(docker compose -f docker-compose.yml)
 
 if [[ "$MODE" == "besu" ]]; then
-  [[ -f "$BESU_PROJECT_DIR/docker-compose.yml" ]] || \
-    die "Besu network compose not found at $BESU_PROJECT_DIR (set BESU_PROJECT_DIR or --besu-dir)"
-
-  log "Starting the 5-node Hyperledger Besu QBFT network ($BESU_PROJECT_DIR)…"
-  docker compose -f "$BESU_PROJECT_DIR/docker-compose.yml" --project-directory "$BESU_PROJECT_DIR" \
-    up -d besu-node1 besu-node2 besu-node3 besu-node4 besu-node5
+  if [[ -n "$BESU_PROJECT_DIR" ]]; then
+    [[ -f "$BESU_PROJECT_DIR/docker-compose.yml" ]] || \
+      die "Besu network compose not found at $BESU_PROJECT_DIR (set BESU_PROJECT_DIR or --besu-dir)"
+    log "Starting the 5-node Hyperledger Besu QBFT network (external: $BESU_PROJECT_DIR)…"
+    docker compose -f "$BESU_PROJECT_DIR/docker-compose.yml" --project-directory "$BESU_PROJECT_DIR" \
+      up -d besu-node1 besu-node2 besu-node3 besu-node4 besu-node5
+  else
+    log "Starting the 5-node Hyperledger Besu QBFT network (in-repo: infra/besu-network)…"
+    docker compose -f docker-compose.besu-nodes.yml up -d
+  fi
 
   log "Waiting for Besu RPC + QBFT consensus (5 validators)…"
   for i in $(seq 1 60); do

@@ -50,6 +50,27 @@ export interface ChainInfo {
   explorerUrl?: string;
   /** Native gas-token symbol (e.g. tMSTC), when known. */
   currencySymbol?: string;
+  /** Whether the chain's connection config is present (EVM: rpc + operator key env; simulated-kind chains: always true). Mirrors adapter presence. */
+  configured: boolean;
+  /** EVM chains: the numeric chain id the RPC must report (from the catalog) — e.g. 91562037 for MST Testnet. */
+  expectedChainId?: number;
+  /** Faucet URL for obtaining test funds, when the chain has one. */
+  faucetUrl?: string;
+  /** Hostname of the configured RPC endpoint — NEVER the full URL (hosted RPC URLs can embed API keys). */
+  rpcHost?: string;
+}
+
+/** Result of an on-demand liveness probe (GET /chains/:id/status). */
+export interface ChainProbeResult {
+  id: string;
+  reachable: boolean;
+  mode: "real" | "simulated";
+  /** The numeric chain id the RPC reports (EVM), as a string. */
+  chainId?: string;
+  operator?: string;
+  balance?: string;
+  /** Failure detail — sanitised: never contains the RPC URL or host. */
+  error?: string;
 }
 
 export interface ChainRegistry {
@@ -57,6 +78,9 @@ export interface ChainRegistry {
   list(): ChainInfo[];
   /** Boot check: every configured EVM chain must answer eth_chainId, or this rejects. */
   assertConnectivity(): Promise<void>;
+  /** On-demand liveness probe of one chain. Never rejects for an unreachable network
+   * (that is `reachable: false` + error); throws only for an unknown/absent chain id. */
+  probe(chainId: string): Promise<ChainProbeResult>;
 }
 
 type Env = Record<string, string | undefined>;
@@ -85,13 +109,16 @@ export function buildChainRegistry(env: Env = process.env): ChainRegistry {
   // Real non-EVM adapters (e.g. a configured Fabric gateway) that expose a healthCheck —
   // probed at boot just like EVM chains so a configured-but-down network fails fast.
   const realProbes: { id: string; adapter: { healthCheck(): Promise<{ chainId: string; operator: string; balance: string }> } }[] = [];
+  // Configured RPC URLs per EVM chain — kept OUT of ChainInfo (hosted URLs can embed
+  // API keys); used only to derive rpcHost and to scrub probe error messages.
+  const rpcUrls = new Map<string, string>();
   let artifacts: Record<TokenStandard, ReturnType<typeof loadArtifact>> | null = null;
 
   for (const d of descriptors) {
     if (d.kind === "simulated") {
       const { adapter, real } = makeSimulatedOrReal(d.id, d.family, env);
       adapters.set(d.id, adapter);
-      infos.push({ id: d.id, label: d.label, family: d.family, kind: "simulated", mode: real ? "real" : "simulated", available: true });
+      infos.push({ id: d.id, label: d.label, family: d.family, kind: "simulated", mode: real ? "real" : "simulated", available: true, configured: true, faucetUrl: d.faucetUrl });
       if (real && typeof (adapter as { healthCheck?: unknown }).healthCheck === "function") {
         realProbes.push({ id: d.id, adapter: adapter as unknown as (typeof realProbes)[number]["adapter"] });
       }
@@ -104,7 +131,12 @@ export function buildChainRegistry(env: Env = process.env): ChainRegistry {
       artifacts ??= evmArtifacts();
       const adapter = new EvmLedgerAdapter({ chainId: d.id, rpcUrl, privateKey, artifacts, gas: d.gas, confirmations: d.confirmations });
       adapters.set(d.id, adapter);
-      infos.push({ id: d.id, label: d.label, family: d.family, kind: "evm", mode: "real", available: true, explorerUrl: d.explorerUrl, currencySymbol: d.currencySymbol });
+      rpcUrls.set(d.id, rpcUrl);
+      infos.push({
+        id: d.id, label: d.label, family: d.family, kind: "evm", mode: "real", available: true,
+        explorerUrl: d.explorerUrl, currencySymbol: d.currencySymbol,
+        configured: true, expectedChainId: d.expectedChainId, faucetUrl: d.faucetUrl, rpcHost: hostnameOf(rpcUrl),
+      });
       evmChains.push({ descriptor: d, adapter });
     } else if (d.required && strict) {
       throw new Error(
@@ -119,7 +151,11 @@ export function buildChainRegistry(env: Env = process.env): ChainRegistry {
       // surface it as a selectable option (available:false) when configuring a use
       // case. Selecting it leaves that chain's contract pending until it comes online.
       if (d.required) console.warn(`[chains] CHAIN_STRICT=0 — required chain '${d.id}' is NOT configured; it will be absent (not simulated).`);
-      infos.push({ id: d.id, label: d.label, family: d.family, kind: "evm", mode: "real", available: false, explorerUrl: d.explorerUrl, currencySymbol: d.currencySymbol });
+      infos.push({
+        id: d.id, label: d.label, family: d.family, kind: "evm", mode: "real", available: false,
+        explorerUrl: d.explorerUrl, currencySymbol: d.currencySymbol,
+        configured: false, expectedChainId: d.expectedChainId, faucetUrl: d.faucetUrl,
+      });
     }
   }
 
@@ -130,6 +166,23 @@ export function buildChainRegistry(env: Env = process.env): ChainRegistry {
       return adapter;
     },
     list: () => infos,
+    async probe(chainId: string): Promise<ChainProbeResult> {
+      const info = infos.find((c) => c.id === chainId);
+      const adapter = adapters.get(chainId);
+      // Unknown id, or a catalog chain with no adapter (absent EVM chain) — the
+      // route maps this to 404; there is nothing to probe.
+      if (!info || !adapter) throw new Error(`chain '${chainId}' is not configured`);
+      if (info.mode === "simulated") return { id: chainId, reachable: true, mode: "simulated" };
+      const target = adapter as { healthCheck?: () => Promise<{ chainId: string; operator: string; balance: string }> };
+      if (typeof target.healthCheck !== "function") return { id: chainId, reachable: true, mode: "real" };
+      try {
+        const h = await target.healthCheck();
+        return { id: chainId, reachable: true, mode: "real", chainId: h.chainId, operator: h.operator, balance: h.balance };
+      } catch (err) {
+        // Sanitised: never echo the RPC URL/host — hosted RPC URLs can embed API keys.
+        return { id: chainId, reachable: false, mode: "real", error: sanitizeProbeError((err as Error).message, rpcUrls.get(chainId)) };
+      }
+    },
     async assertConnectivity(): Promise<void> {
       for (const { descriptor: d, adapter } of evmChains) {
         let h: { chainId: string; operator: string; balance: string };
@@ -165,6 +218,34 @@ export function buildChainRegistry(env: Env = process.env): ChainRegistry {
       }
     },
   };
+}
+
+/** Hostname of an RPC URL, or undefined when unparsable. Never returns the full URL. */
+function hostnameOf(rpcUrl: string): string | undefined {
+  try {
+    return new URL(rpcUrl).hostname;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Strips anything that could leak the RPC endpoint from a probe error message:
+ * every URL-shaped token, plus the configured endpoint's host/hostname (hosted
+ * RPC URLs can embed API keys; hosts alone can identify private infrastructure).
+ */
+function sanitizeProbeError(message: string, rpcUrl?: string): string {
+  let out = message.replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, "<rpc>");
+  if (rpcUrl) {
+    try {
+      const u = new URL(rpcUrl);
+      out = out.split(u.host).join("<rpc-host>");
+      out = out.split(u.hostname).join("<rpc-host>");
+    } catch {
+      out = out.split(rpcUrl).join("<rpc>");
+    }
+  }
+  return out;
 }
 
 /**

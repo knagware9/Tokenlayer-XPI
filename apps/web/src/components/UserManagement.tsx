@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState } from "react";
 import { ApiError, api } from "../api.js";
 import { useAuth } from "../auth.js";
 import type { IdentityResult, Role, UseCase } from "../types.js";
+import { Pill } from "./ui.js";
 
 type Summary = { id: string; email: string; role: Role; useCaseKey: string | null; accountId: string | null; active: boolean; kycStatus: "pending" | "approved" | "rejected"; kyc: { legalName?: string; country?: string; idType?: string; idNumber?: string; documentRef?: string } | null };
 type Sub = "add" | "manage";
@@ -72,7 +73,7 @@ function AddUser({ useCaseKey, useCases, onAdded }: { useCaseKey: string; useCas
   }
 
   return (
-    <form onSubmit={create} className="bg-white rounded-xl border border-slate-200 p-6 space-y-4 max-w-2xl">
+    <form onSubmit={create} className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 space-y-4 max-w-2xl">
       <h2 className="font-semibold text-slate-900">{isPlatform ? "Create a Use-Case Admin" : "Add a user to this use case"}</h2>
       <div className="grid grid-cols-2 gap-4">
         <input className="input" placeholder="email" value={email} onChange={(e) => setEmail(e.target.value)} />
@@ -118,9 +119,9 @@ function ManageUsers({ rows, me, onChanged }: { rows: Summary[]; me?: string; on
   return (
     <div className="space-y-3">
       {error && <p className="text-sm text-red-600">{error}</p>}
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="text-xs text-slate-500 bg-slate-50"><tr><th className="text-left px-4 py-2">Email</th><th className="text-left px-4 py-2">Role</th><th className="text-left px-4 py-2">Use case</th><th className="text-left px-4 py-2">Status</th><th className="text-left px-4 py-2">KYC</th><th className="px-4 py-2 text-right">Actions</th></tr></thead>
+          <thead className="text-xs text-slate-500 bg-slate-50 uppercase tracking-wide"><tr><th className="text-left font-medium px-4 py-2.5">Email</th><th className="text-left font-medium px-4 py-2.5">Role</th><th className="text-left font-medium px-4 py-2.5">Use case</th><th className="text-left font-medium px-4 py-2.5">Status</th><th className="text-left font-medium px-4 py-2.5">KYC</th><th className="px-4 py-2.5 text-right font-medium">Actions</th></tr></thead>
           <tbody>
             {rows.map((u) => (
               <Fragment key={u.id}>
@@ -129,10 +130,12 @@ function ManageUsers({ rows, me, onChanged }: { rows: Summary[]; me?: string; on
                   <td className="px-4 py-2">{u.role}</td>
                   <td className="px-4 py-2 text-slate-500">{u.useCaseKey ?? "—"}</td>
                   <td className="px-4 py-2">
-                    <span className={`text-[11px] px-2 py-0.5 rounded-full ${u.active ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{u.active ? "active" : "suspended"}</span>
+                    <Pill tone={u.active ? "ok" : "warn"}>{u.active ? "active" : "suspended"}</Pill>
                   </td>
                   <td className="px-4 py-2">
-                    <span className={`text-[11px] px-2 py-0.5 rounded-full ${u.kycStatus === "approved" ? "bg-emerald-100 text-emerald-700" : u.kycStatus === "rejected" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`} title={u.kyc?.legalName ? `${u.kyc.legalName}${u.kyc.country ? " · " + u.kyc.country : ""}` : ""}>{u.kycStatus}</span>
+                    <span title={u.kyc?.legalName ? `${u.kyc.legalName}${u.kyc.country ? " · " + u.kyc.country : ""}` : ""}>
+                      <Pill tone={u.kycStatus === "approved" ? "ok" : u.kycStatus === "rejected" ? "danger" : "warn"}>{u.kycStatus}</Pill>
+                    </span>
                   </td>
                   <td className="px-4 py-2 text-right space-x-3">
                     {manageable(u) ? (

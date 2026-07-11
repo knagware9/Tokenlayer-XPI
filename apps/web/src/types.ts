@@ -21,8 +21,40 @@ export interface ChainInfo {
    * be selected as an allowed chain when configuring a use case, but no assets can be
    * issued on it until it is brought online. Absent/undefined is treated as available. */
   available?: boolean;
+  /** EVM chains: RPC + operator key env present. Absent chains are configured:false. */
+  configured?: boolean;
+  /** EVM chains: the numeric chain id the RPC must report (e.g. 91562037 for MST Testnet). */
+  expectedChainId?: number;
+  faucetUrl?: string;
   explorerUrl?: string;
   currencySymbol?: string;
+  /** Hostname of the configured RPC endpoint — never the full URL (hosted RPCs can embed keys). */
+  rpcHost?: string;
+}
+
+/** Result of GET /chains/:id/status — an on-demand connectivity probe. */
+export interface ChainStatus {
+  id: string;
+  reachable: boolean;
+  mode: "real" | "simulated";
+  /** The numeric chain id the RPC reports (EVM), as a string. */
+  chainId?: string;
+  operator?: string;
+  balance?: string;
+  /** Failure detail — sanitised server-side (never contains the RPC URL). */
+  error?: string;
+}
+
+/** The contract code that backs a use case on one chain (GET /use-cases/:key/code, POST /use-cases/preview-code). */
+export interface ContractCode {
+  chainId: string;
+  family: ChainFamily;
+  mode: "real" | "simulated";
+  language: string;
+  filename: string;
+  source: string;
+  constructorArgs: { name: string; value: string }[];
+  deployed?: { contractRef: string; deployTxHash: string };
 }
 
 export interface PropertySchema {

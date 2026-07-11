@@ -68,20 +68,20 @@ real**: the API refuses to start if it can't reach the Besu RPC. The simulated-o
 stack (`make deploy-sim`) boots with `CHAIN_STRICT=0`, which leaves besu **absent
 (never silently simulated)**, while `fabric`/`canton` remain available as clearly-labeled
 simulated chains. The steps below are what `make deploy` performs — run them manually for
-reference. The Besu overlay points the API at the **existing 5-node QBFT network** from the
-`deposittokenization` project, so the `besu` chain deploys real `ComplianceToken` /
-`ComplianceNFT` / T-REX contracts on-chain.
+reference. The Besu overlay points the API at the **in-repo 5-node QBFT network**
+(`infra/besu-network/` + `docker-compose.besu-nodes.yml`), so the `besu` chain deploys real
+`ComplianceToken` / `ComplianceNFT` / T-REX contracts on-chain.
 
-**1. Start the 5-node network** (it owns the genesis, validator keys, and static peers):
+**1. Start the 5-node network** (genesis, validator keys, and static peers are vendored in-repo):
 
 ```bash
-cd /Users/kamleshnagware/deposittokenization
-docker compose up -d besu-node1 besu-node2 besu-node3 besu-node4 besu-node5
-# (or ./besu-network/start-network.sh)
+make besu-up          # docker compose -f docker-compose.besu-nodes.yml up -d
+# external checkout instead: BESU_PROJECT_DIR=/path/to/checkout make besu-up
 ```
 
-This creates the docker network `deposittokenization_besu-network` (chainId 1337,
-QBFT, 5 validators, RPC on host `:8545`). The genesis pre-funds `0xfe3b…bd73` (~200 ETH).
+This creates the docker network `besu-network` (chainId 1337, QBFT, 5 validators, RPC on
+host `:8545`). The genesis pre-funds `0xfe3b…bd73` (~200 ETH). Dev-only keys — see
+`infra/besu-network/README.md`.
 
 **2. Run TokenLayer against it:**
 

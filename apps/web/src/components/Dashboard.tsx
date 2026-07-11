@@ -6,6 +6,7 @@ import type { AnalyticsSummary } from "../types.js";
 import { AreaChart } from "./charts/AreaChart.js";
 import { BarChart } from "./charts/BarChart.js";
 import { Donut, type DonutSlice } from "./charts/Donut.js";
+import { Card, EmptyState, Skeleton, StatCard, type IconName } from "./ui.js";
 
 /** A small fixed palette so a given ledger keeps the same colour across charts. */
 const LEDGER_COLORS: Record<string, string> = { besu: "#10b981", mst: "#6366f1", fabric: "#f59e0b", canton: "#8b5cf6", "local-evm": "#0ea5e9" };
@@ -43,14 +44,28 @@ export function Dashboard({ useCaseKey }: { useCaseKey?: string }): JSX.Element 
       .catch(() => setError("Could not load analytics"));
   }, [token, useCaseKey]);
 
-  if (error) return <div className="bg-white rounded-xl border border-slate-200 p-6 text-sm text-red-600">{error}</div>;
-  if (!data) return <div className="text-sm text-slate-400">Loading analytics…</div>;
+  if (error) return <Card><p className="text-sm text-red-600">{error}</p></Card>;
+  if (!data)
+    return (
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {Array.from({ length: 4 }, (_, i) => (
+            <Card key={i}><Skeleton lines={2} /></Card>
+          ))}
+        </div>
+        <Card><Skeleton lines={4} /></Card>
+      </div>
+    );
 
   if (data.totals.assets === 0) {
     return (
-      <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-sm text-slate-500">
-        No assets yet — issue one to see analytics here.
-      </div>
+      <Card>
+        <EmptyState
+          icon="coins"
+          title="No assets yet"
+          hint="Issue an asset to see cross-ledger analytics — supply, holders, value and trading activity."
+        />
+      </Card>
     );
   }
 
@@ -62,16 +77,18 @@ export function Dashboard({ useCaseKey }: { useCaseKey?: string }): JSX.Element 
     <div className="space-y-4">
       {/* headline cards — click to drill into the matching breakdown */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <Stat label="Tokenized value" value={fmtMoney(t.valueByCurrency)} sub={`${t.assets} assets · ${t.useCases} use case${t.useCases === 1 ? "" : "s"}`} onClick={() => scrollTo(data.scope === "platform" ? "dash-usecases" : "dash-ledger")} />
-        <Stat label="Total supply" value={fmtInt(t.supply)} sub="minted − burned" onClick={() => scrollTo("dash-ledger")} />
-        <Stat label="Holders" value={String(t.holders)} sub="distinct accounts" onClick={() => scrollTo(data.scope === "platform" ? "dash-usecases" : "dash-ledger")} />
-        <Stat label={`Traded (${data.activity.length}d)`} value={fmtMoney(t.tradedByCurrency)} sub={`${t.trades} trade${t.trades === 1 ? "" : "s"}`} onClick={() => scrollTo("dash-recent")} />
+        <Stat icon="coins" label="Tokenized value" value={fmtMoney(t.valueByCurrency)} sub={`${t.assets} assets · ${t.useCases} use case${t.useCases === 1 ? "" : "s"}`} onClick={() => scrollTo(data.scope === "platform" ? "dash-usecases" : "dash-ledger")} />
+        <Stat icon="spark" label="Total supply" value={fmtInt(t.supply)} sub="minted − burned" onClick={() => scrollTo("dash-ledger")} />
+        <Stat icon="users" label="Holders" value={String(t.holders)} sub="distinct accounts" onClick={() => scrollTo(data.scope === "platform" ? "dash-usecases" : "dash-ledger")} />
+        <Stat icon="arrow" label={`Traded (${data.activity.length}d)`} value={fmtMoney(t.tradedByCurrency)} sub={`${t.trades} trade${t.trades === 1 ? "" : "s"}`} onClick={() => scrollTo("dash-recent")} />
       </div>
 
       <div className="grid lg:grid-cols-2 gap-4">
-        <Card title="Supply by ledger" id="dash-ledger">
-          <Donut slices={ledgerSlices} />
-        </Card>
+        <div id="dash-ledger" className="scroll-mt-4">
+          <Card title="Supply by ledger">
+            <Donut slices={ledgerSlices} />
+          </Card>
+        </div>
         <Card title={`Activity — transactions / day (${data.activity.length}d)`}>
           <AreaChart points={activityPoints} />
           <div className="flex justify-between text-[10px] text-slate-400 mt-1">
@@ -82,88 +99,78 @@ export function Dashboard({ useCaseKey }: { useCaseKey?: string }): JSX.Element 
       </div>
 
       {data.scope === "platform" && data.byUseCase.length > 0 && (
-        <Card title="By use case" id="dash-usecases">
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead className="text-slate-400 text-[10px] uppercase tracking-wide">
-                <tr>
-                  <th className="text-left py-1.5">Use case</th>
-                  <th className="text-left">Ledger</th>
-                  <th className="text-right">Supply</th>
-                  <th className="text-right">Holders</th>
-                  <th className="text-right">Value</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.byUseCase.map((u) => (
-                  <tr key={u.useCaseKey} onClick={() => navigate(`/${u.useCaseKey}`)} title={`Open ${u.name}`} className="border-t border-slate-100 cursor-pointer hover:bg-slate-50">
-                    <td className="py-1.5">
-                      {u.name} <span className="text-slate-400">{u.symbol}</span>
-                    </td>
-                    <td>
-                      <span style={{ color: colorFor(u.chainId) }}>●</span> {u.chainId}
-                    </td>
-                    <td className="text-right tabular-nums">{fmtInt(u.supply)}</td>
-                    <td className="text-right tabular-nums">{u.holders}</td>
-                    <td className="text-right">{fmtMoney(u.valueByCurrency)}</td>
+        <div id="dash-usecases" className="scroll-mt-4">
+          <Card title="By use case">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="text-slate-400 text-[10px] uppercase tracking-wide">
+                  <tr>
+                    <th className="text-left py-1.5">Use case</th>
+                    <th className="text-left">Ledger</th>
+                    <th className="text-right">Supply</th>
+                    <th className="text-right">Holders</th>
+                    <th className="text-right">Value</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+                </thead>
+                <tbody>
+                  {data.byUseCase.map((u) => (
+                    <tr key={u.useCaseKey} onClick={() => navigate(`/${u.useCaseKey}`)} title={`Open ${u.name}`} className="border-t border-slate-100 cursor-pointer hover:bg-slate-50">
+                      <td className="py-1.5">
+                        {u.name} <span className="text-slate-400">{u.symbol}</span>
+                      </td>
+                      <td>
+                        <span style={{ color: colorFor(u.chainId) }}>●</span> {u.chainId}
+                      </td>
+                      <td className="text-right tabular-nums">{fmtInt(u.supply)}</td>
+                      <td className="text-right tabular-nums">{u.holders}</td>
+                      <td className="text-right">{fmtMoney(u.valueByCurrency)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
       )}
 
       <div className="grid lg:grid-cols-2 gap-4">
         <Card title="Supply by ledger (detail)">
           <BarChart bars={data.byLedger.map((l) => ({ label: `${l.chainId} · ${l.mode}`, value: Number(l.supply) }))} />
         </Card>
-        <Card title="Recent activity" id="dash-recent">
-          <ol className="space-y-1.5">
-            {data.recent.slice(0, 8).map((e, i) => {
-              const clickable = !!e.useCaseKey;
-              return (
-                <li
-                  key={`${e.at}-${e.assetId}-${i}`}
-                  onClick={clickable ? () => navigate(`/${e.useCaseKey}`) : undefined}
-                  title={clickable ? `Open ${e.assetName}` : undefined}
-                  className={`flex items-start gap-2 text-xs rounded px-1 -mx-1 ${clickable ? "cursor-pointer hover:bg-slate-50" : ""}`}
-                >
-                  <span className="mt-0.5 w-16 shrink-0 text-[10px] font-semibold text-brand-600 uppercase">{e.action}</span>
-                  <span className="flex-1 text-slate-600">
-                    <span className="text-slate-800">{e.assetName}</span> · {e.summary}
-                  </span>
-                  <span className="text-[10px] text-slate-400">{new Date(e.at).toLocaleDateString()}</span>
-                </li>
-              );
-            })}
-            {data.recent.length === 0 && <li className="text-xs text-slate-400">No activity yet.</li>}
-          </ol>
-        </Card>
+        <div id="dash-recent" className="scroll-mt-4">
+          <Card title="Recent activity">
+            <ol className="space-y-1.5">
+              {data.recent.slice(0, 8).map((e, i) => {
+                const clickable = !!e.useCaseKey;
+                return (
+                  <li
+                    key={`${e.at}-${e.assetId}-${i}`}
+                    onClick={clickable ? () => navigate(`/${e.useCaseKey}`) : undefined}
+                    title={clickable ? `Open ${e.assetName}` : undefined}
+                    className={`flex items-start gap-2 text-xs rounded px-1 -mx-1 ${clickable ? "cursor-pointer hover:bg-slate-50" : ""}`}
+                  >
+                    <span className="mt-0.5 w-16 shrink-0 text-[10px] font-semibold text-brand-600 uppercase">{e.action}</span>
+                    <span className="flex-1 text-slate-600">
+                      <span className="text-slate-800">{e.assetName}</span> · {e.summary}
+                    </span>
+                    <span className="text-[10px] text-slate-400">{new Date(e.at).toLocaleDateString()}</span>
+                  </li>
+                );
+              })}
+              {data.recent.length === 0 && <li className="text-xs text-slate-400">No activity yet.</li>}
+            </ol>
+          </Card>
+        </div>
       </div>
     </div>
   );
 }
 
-function Stat({ label, value, sub, onClick }: { label: string; value: string; sub?: string; onClick?: () => void }): JSX.Element {
+/** A StatCard that keeps the old drill-down click behavior. */
+function Stat({ icon, label, value, sub, onClick }: { icon: IconName; label: string; value: string; sub?: string; onClick?: () => void }): JSX.Element {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="text-left bg-white rounded-xl border border-slate-200 p-3 w-full transition hover:border-brand-500 hover:shadow-sm cursor-pointer"
-    >
-      <div className="text-[11px] text-slate-500">{label}</div>
-      <div className="text-lg font-bold text-slate-900 mt-0.5 break-words">{value}</div>
-      {sub && <div className="text-[10px] text-slate-400">{sub}</div>}
+    <button type="button" onClick={onClick} className="text-left w-full cursor-pointer transition hover:-translate-y-0.5">
+      <StatCard icon={icon} label={label} value={value} sub={sub} />
     </button>
-  );
-}
-
-function Card({ title, children, id }: { title: string; children: React.ReactNode; id?: string }): JSX.Element {
-  return (
-    <div id={id} className="bg-white rounded-xl border border-slate-200 p-4 scroll-mt-4">
-      <div className="font-semibold text-slate-800 text-sm mb-3">{title}</div>
-      {children}
-    </div>
   );
 }

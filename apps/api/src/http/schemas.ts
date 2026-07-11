@@ -42,10 +42,61 @@ export const components: Record<string, unknown>[] = [
       family: { type: "string", enum: ["evm", "fabric", "canton", "mock"] },
       kind: { type: "string", enum: ["simulated", "evm"] },
       mode: { type: "string", enum: ["real", "simulated"] },
+      // false = supported catalog chain that is not connected (no adapter); it can
+      // be selected as an allowed DLT but assets cannot be issued on it yet.
+      available: { type: "boolean" },
+      // Whether the chain's connection config is present (EVM: rpc + key env;
+      // simulated-kind chains: always true). Mirrors adapter presence.
+      configured: { type: "boolean" },
+      expectedChainId: { type: "integer" },
       explorerUrl: { type: "string" },
       currencySymbol: { type: "string" },
+      faucetUrl: { type: "string" },
+      // Hostname only — never the full RPC URL (hosted RPC URLs can embed keys).
+      rpcHost: { type: "string" },
     },
-    required: ["id", "label", "family", "kind", "mode"],
+    required: ["id", "label", "family", "kind", "mode", "available", "configured"],
+  },
+  {
+    $id: "ChainStatus",
+    type: "object",
+    description: "On-demand liveness probe result for one chain.",
+    additionalProperties: true,
+    properties: {
+      id: { type: "string" },
+      reachable: { type: "boolean" },
+      mode: { type: "string", enum: ["real", "simulated"] },
+      chainId: { type: "string" },
+      operator: { type: "string" },
+      balance: { type: "string" },
+      error: { type: "string" },
+    },
+    required: ["id", "reachable", "mode"],
+  },
+  {
+    $id: "ContractCode",
+    type: "object",
+    description: "The contract code backing a use case on one chain: the real Solidity source (EVM) or a truthful contract model (Fabric/Canton), plus the constructor args the platform passes at deploy time.",
+    additionalProperties: true,
+    properties: {
+      chainId: { type: "string" },
+      family: { type: "string", enum: ["evm", "fabric", "canton", "mock"] },
+      mode: { type: "string", enum: ["real", "simulated"] },
+      language: { type: "string" },
+      filename: { type: "string" },
+      source: { type: "string" },
+      constructorArgs: {
+        type: "array",
+        items: { type: "object", properties: { name: { type: "string" }, value: { type: "string" } }, required: ["name", "value"] },
+      },
+      // Present only on GET /use-cases/:key/code when the contract is deployed on that chain.
+      deployed: {
+        type: "object",
+        additionalProperties: true,
+        properties: { contractRef: { type: "string" }, deployTxHash: { type: "string" } },
+      },
+    },
+    required: ["chainId", "family", "mode", "language", "filename", "source", "constructorArgs"],
   },
   {
     $id: "PropertySchema",
@@ -414,6 +465,11 @@ export const S: Record<string, FastifySchema> = {
   me: { tags: ["Auth"], summary: "Current session principal", security: bearer, response: { 200: { type: "object", additionalProperties: true }, ...errs(401) } },
 
   chains: { tags: ["Catalog"], summary: "List configured chains/DLTs", security: bearer, response: { 200: { type: "array", items: { $ref: "Chain#" } }, ...errs(401) } },
+  chainStatus: {
+    tags: ["Catalog"], summary: "Probe one chain's live status (on-demand health check)", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    response: { 200: { $ref: "ChainStatus#" }, ...errs(401, 404) },
+  },
   currencies: { tags: ["Catalog"], summary: "List supported settlement currencies", security: bearer, response: { 200: { type: "array", items: { $ref: "Currency#" } }, ...errs(401) } },
   accounts: { tags: ["Catalog"], summary: "List demo accounts", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401) } },
 
@@ -439,6 +495,28 @@ export const S: Record<string, FastifySchema> = {
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     body: { type: "object", additionalProperties: false, required: ["chainId"], properties: { chainId: { type: "string" } } },
     response: { 200: { $ref: "UseCase#" }, ...errs(400, 401, 403, 404, 502) },
+  },
+  useCaseCode: {
+    tags: ["Use Cases"], summary: "Contract code backing a use case on one allowed chain", security: bearer,
+    params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
+    querystring: { type: "object", additionalProperties: false, required: ["chainId"], properties: { chainId: { type: "string" } } },
+    response: { 200: { $ref: "ContractCode#" }, ...errs(400, 401, 404) },
+  },
+  previewUseCaseCode: {
+    tags: ["Use Cases"], summary: "Preview the contract code for a not-yet-created use case (wizard review step)", security: bearer,
+    body: {
+      type: "object",
+      additionalProperties: false,
+      required: ["tokenStandard", "symbol", "name", "chainId"],
+      properties: {
+        tokenStandard: TOKEN_STANDARD,
+        symbol: { type: "string" },
+        name: { type: "string" },
+        allowlist: { type: "boolean" },
+        chainId: { type: "string" },
+      },
+    },
+    response: { 200: { $ref: "ContractCode#" }, ...errs(400, 401) },
   },
 
   issueAsset: {

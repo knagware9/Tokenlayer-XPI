@@ -3,6 +3,7 @@ import { api, ApiError } from "../api.js";
 import { useAuth } from "../auth.js";
 import { can } from "../rbac.js";
 import type { Asset, AuditVerify } from "../types.js";
+import { Pill } from "./ui.js";
 
 /** Relative "n ago" for an ISO timestamp. */
 function ago(iso: string): string {
@@ -78,7 +79,7 @@ export function IntegrityPanel({ useCaseKey }: { useCaseKey?: string }): JSX.Ele
       {error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2">{error}</div>}
       {notice && <div className="rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm px-4 py-2">{notice}</div>}
 
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
             <tr>
@@ -95,7 +96,7 @@ export function IntegrityPanel({ useCaseKey }: { useCaseKey?: string }): JSX.Ele
               return (
                 <tr key={asset.id}>
                   <td className="px-4 py-2.5 font-medium text-slate-800">{asset.name} <span className="text-slate-400 font-normal">{asset.symbol}</span></td>
-                  <td className="px-4 py-2.5"><span className={`text-xs px-2 py-0.5 rounded-full ${good ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>{good ? "✓ " : "✕ "}{label}</span></td>
+                  <td className="px-4 py-2.5"><Pill tone={good ? "ok" : "danger"}>{good ? "✓ " : "✕ "}{label}</Pill></td>
                   <td className="px-4 py-2.5 text-right font-mono text-slate-600">{v.count}</td>
                   <td className="px-4 py-2.5 text-xs text-slate-500">
                     {v.lastAnchor ? <span className="font-mono">#{v.lastAnchor.seq} · {v.lastAnchor.txHash.slice(0, 12)}… · {ago(v.lastAnchor.at)}</span> : <span className="text-slate-300">not anchored</span>}

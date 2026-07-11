@@ -26,15 +26,23 @@ verify: ## Smoke test: issue + buy, assert real on-chain contract
 verify-sim: ## Smoke test against the simulated stack
 	./scripts/verify.sh
 
-besu-up: ## Start only the external 5-node Besu network
-	docker compose -f $${BESU_PROJECT_DIR:-/Users/kamleshnagware/deposittokenization}/docker-compose.yml \
-	  --project-directory $${BESU_PROJECT_DIR:-/Users/kamleshnagware/deposittokenization} \
-	  up -d besu-node1 besu-node2 besu-node3 besu-node4 besu-node5
+besu-up: ## Start the 5-node Besu network (in-repo; set BESU_PROJECT_DIR for an external checkout)
+	@if [ -n "$${BESU_PROJECT_DIR:-}" ]; then \
+	  docker compose -f "$$BESU_PROJECT_DIR/docker-compose.yml" \
+	    --project-directory "$$BESU_PROJECT_DIR" \
+	    up -d besu-node1 besu-node2 besu-node3 besu-node4 besu-node5; \
+	else \
+	  docker compose -f docker-compose.besu-nodes.yml up -d; \
+	fi
 
-besu-down: ## Stop the external 5-node Besu network
-	docker compose -f $${BESU_PROJECT_DIR:-/Users/kamleshnagware/deposittokenization}/docker-compose.yml \
-	  --project-directory $${BESU_PROJECT_DIR:-/Users/kamleshnagware/deposittokenization} \
-	  stop besu-node1 besu-node2 besu-node3 besu-node4 besu-node5
+besu-down: ## Stop the 5-node Besu network (in-repo; set BESU_PROJECT_DIR for an external checkout)
+	@if [ -n "$${BESU_PROJECT_DIR:-}" ]; then \
+	  docker compose -f "$$BESU_PROJECT_DIR/docker-compose.yml" \
+	    --project-directory "$$BESU_PROJECT_DIR" \
+	    stop besu-node1 besu-node2 besu-node3 besu-node4 besu-node5; \
+	else \
+	  docker compose -f docker-compose.besu-nodes.yml down; \
+	fi
 
 fabric-up: ## Bring up a real Hyperledger Fabric network + deploy the tokenlayer chaincode
 	./infra/fabric/fabric-up.sh

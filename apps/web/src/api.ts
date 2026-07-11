@@ -1,4 +1,4 @@
-import type { AccountState, ActivityEvent, AnalyticsSummary, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, ChainInfo, IdentityResult, Listing, Portfolio, Proposal, Role, SessionUser, TokenInfo, Trade, UseCase } from "./types.js";
+import type { AccountState, ActivityEvent, AnalyticsSummary, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, ChainInfo, ChainStatus, ContractCode, IdentityResult, Listing, Portfolio, Proposal, Role, SessionUser, TokenInfo, TokenStandard, Trade, UseCase } from "./types.js";
 
 export interface Currency { code: string; label: string; }
 export interface CashBalance { currency: string; address: string; amount: string; }
@@ -46,6 +46,12 @@ export const api = {
       body: JSON.stringify({ email, password }),
     }),
   chains: (token: string) => request<ChainInfo[]>("/chains", token),
+  chainStatus: (token: string, id: string) =>
+    request<ChainStatus>(`/chains/${encodeURIComponent(id)}/status`, token),
+  useCaseCode: (token: string, key: string, chainId: string) =>
+    request<ContractCode>(`/use-cases/${encodeURIComponent(key)}/code?chainId=${encodeURIComponent(chainId)}`, token),
+  previewCode: (token: string, body: { tokenStandard: TokenStandard; symbol: string; name: string; allowlist?: boolean; chainId: string }) =>
+    request<ContractCode>("/use-cases/preview-code", token, { method: "POST", body: JSON.stringify(body) }),
   useCases: (token: string) => request<UseCase[]>("/use-cases", token),
   analytics: (token: string, opts: { useCaseKey?: string; days?: number } = {}) => {
     const q = new URLSearchParams();

@@ -6,6 +6,7 @@ import { ListingConflictError } from "../persistence/types.js";
 import { auditEntryHash, canCreateUser, canManageUsers, computeCashflowSchedule, didKeyFromSeed, generateDidKey, invoiceFingerprint, issueCredential, normalizeUseCaseDefinition, PolicyError, presentCredential, splitProRata, verifyChain, verifyPresentation, type Actor, type ChainEntry, type LifecycleAction, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { isSupportedCurrency } from "../currencies.js";
+import { renderContractCode } from "../contract-code.js";
 import { deployUseCaseContracts } from "../use-cases.js";
 import { computeAnalytics } from "../analytics.js";
 import { computeActivity, computePortfolio } from "../investor.js";
@@ -128,6 +129,16 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
 
   // --- catalog ------------------------------------------------------------
   app.get("/chains", { schema: S.chains, ...auth }, async () => deps.chains.list());
+  app.get("/chains/:id/status", { schema: S.chainStatus, ...auth }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    // probe() only throws for an unknown/absent chain (no adapter) — an
+    // unreachable network is a 200 with { reachable: false, error }.
+    try {
+      return await deps.chains.probe(id);
+    } catch (err) {
+      return notFound(reply, (err as Error).message);
+    }
+  });
   app.get("/currencies", { schema: S.currencies, ...auth }, async () => deps.currencies);
   app.get("/accounts", { schema: S.accounts, ...auth }, async (request) => scopedAccounts(request.user as TokenClaims));
 
@@ -170,6 +181,40 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       });
     }
     return reply.code(201).send(await deps.useCases.create({ ...definition, contracts }));
+  });
+
+  // The contract code that backs a use case on one allowed chain — the real
+  // Solidity source for EVM families, a truthful contract model for the
+  // simulated ones. Same visibility as GET /use-cases/:key (scoped read).
+  app.get("/use-cases/:key/code", { schema: S.useCaseCode, ...auth }, async (request, reply) => {
+    const { key } = request.params as { key: string };
+    if (!scopedToCaller(request.user as TokenClaims, key)) return notFound(reply, `unknown use case '${key}'`);
+    if (!(await deps.useCases.has(key))) return notFound(reply, `unknown use case '${key}'`);
+    const useCase = await deps.useCases.get(key);
+    const { chainId } = request.query as { chainId: string };
+    if (!useCase.allowedChainIds.includes(chainId)) {
+      return reply.code(400).send({ error: "CHAIN_NOT_ALLOWED", message: `chain '${chainId}' is not in the allowed chains for '${key}'` });
+    }
+    // Family/mode come from the catalog: an absent-but-known chain (configured:false)
+    // still renders — the code shows what WILL deploy once the chain is online.
+    const info = deps.chains.list().find((c) => c.id === chainId);
+    if (!info) return notFound(reply, `unknown chain '${chainId}'`);
+    const code = renderContractCode({
+      tokenStandard: useCase.tokenStandard, symbol: useCase.symbol, name: useCase.name,
+      allowlist: useCase.compliance.allowlist, chainFamily: info.family, mode: info.mode,
+    });
+    const deployed = useCase.contracts?.[chainId];
+    return { chainId, family: info.family, mode: info.mode, ...code, ...(deployed ? { deployed } : {}) };
+  });
+
+  // Same renderer, pre-create (the wizard's Review step) — nothing is persisted.
+  app.post("/use-cases/preview-code", { schema: S.previewUseCaseCode, ...auth }, async (request, reply) => {
+    const { tokenStandard, symbol, name, allowlist, chainId } =
+      request.body as { tokenStandard: string; symbol: string; name: string; allowlist?: boolean; chainId: string };
+    const info = deps.chains.list().find((c) => c.id === chainId);
+    if (!info) return reply.code(400).send({ error: "CHAIN_NOT_ALLOWED", message: `unknown chain '${chainId}' — not in the chain catalog` });
+    const code = renderContractCode({ tokenStandard, symbol, name, allowlist: allowlist ?? true, chainFamily: info.family, mode: info.mode });
+    return { chainId, family: info.family, mode: info.mode, ...code };
   });
 
   app.post("/use-cases/:key/deploy", { schema: S.deployUseCase, ...auth }, async (request, reply) => {
