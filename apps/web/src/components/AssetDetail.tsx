@@ -4,6 +4,7 @@ import { useAuth } from "../auth.js";
 import { can } from "../rbac.js";
 import { CashflowPanel } from "./CashflowPanel.js";
 import type { AccountState, Asset, AuditEntry, ChainInfo, Listing, Role, TokenInfo, Trade, UseCase } from "../types.js";
+import { Pill as UIPill, Skeleton } from "./ui.js";
 
 interface Props {
   assetId: string;
@@ -129,7 +130,12 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
     }
   }
 
-  if (!asset || !useCase) return <p className="text-sm text-slate-400">Loading…</p>;
+  if (!asset || !useCase)
+    return (
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6">
+        <Skeleton lines={5} />
+      </div>
+    );
 
   const isNft = asset.tokenType === "nonfungible";
   const canAllow = useCase.compliance.allowlist && can(role, "allow");
@@ -142,7 +148,7 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
         ← Back to assets
       </button>
 
-      <div className="bg-white rounded-xl border border-slate-200 p-6">
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6">
         <div className="flex items-start justify-between">
           <div>
             <h2 className="text-xl font-bold text-slate-900">
@@ -199,7 +205,7 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
       {useCase.terms && <CashflowPanel asset={asset} useCase={useCase} role={role} onChanged={() => { void reload(); onChanged(); }} />}
 
       {asset.unitPrice && asset.currency && can(role, "buy") && (
-        <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-3">
           <div className="text-sm font-semibold text-slate-800">Buy tokens</div>
           <div className="text-sm text-slate-600">
             Price: <strong>{asset.unitPrice} {asset.currency}</strong> per token
@@ -250,7 +256,7 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
       <Operations role={role} useCase={useCase} isNft={isNft} accounts={accounts} busy={busy} onRun={run} />
 
       {isNft && (
-        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
           <div className="px-4 py-2.5 border-b border-slate-100 text-xs font-semibold text-slate-500 uppercase tracking-wide">Tokens</div>
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-slate-400 text-[11px] uppercase">
@@ -278,7 +284,7 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
         <div className="px-4 py-2.5 border-b border-slate-100 text-xs font-semibold text-slate-500 uppercase tracking-wide">Holders</div>
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-slate-400 text-[11px] uppercase">
@@ -322,7 +328,7 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
         </table>
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 p-5">
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5">
         <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Audit trail</div>
         <ol className="space-y-2">
           {audit.map((e) => (
@@ -344,7 +350,7 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
       </div>
 
       {(["Issuer", "UseCaseAdmin", "PlatformAdmin"] as string[]).includes(role) && accounts.length > 0 && (
-        <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-3">
           <div className="text-sm font-semibold text-slate-800">Fund CBDC</div>
           <div className="grid grid-cols-3 gap-3">
             <select className="select" value={fundAccount} onChange={(e) => setFundAccount(e.target.value)}>
@@ -471,7 +477,7 @@ function Market({
   const sellReady = posInt(sellQty) && posInt(sellPrice) && sellCurrency !== "";
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
+    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-4">
       <div className="text-sm font-semibold text-slate-800">Market</div>
       {disabled ? (
         <p className="text-sm text-slate-500">Market is not enabled on this deployment.</p>
@@ -660,7 +666,7 @@ function OpForm({
   const ready = fields.every((f) => f.optional || state[f.name]);
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-2.5">
+    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-4 space-y-2.5">
       <div className="text-sm font-semibold text-slate-800">{title}</div>
       {fields.map((f) =>
         f.kind === "account" ? (
@@ -728,8 +734,12 @@ function ChainPill({ chain }: { chain?: ChainInfo }): JSX.Element {
 }
 
 function Pill({ tone, children }: { tone: "red" | "green" | "gray"; children: React.ReactNode }): JSX.Element {
-  const tones = { red: "bg-red-100 text-red-700", green: "bg-emerald-100 text-emerald-700", gray: "bg-slate-100 text-slate-400" };
-  return <span className={`inline-block mx-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium ${tones[tone]}`}>{children}</span>;
+  const map = { red: "danger", green: "ok", gray: "muted" } as const;
+  return (
+    <span className="inline-block mx-0.5">
+      <UIPill tone={map[tone]}>{children}</UIPill>
+    </span>
+  );
 }
 
 function summarize(e: AuditEntry): string {

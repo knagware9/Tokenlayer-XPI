@@ -2,13 +2,14 @@ import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../api.js";
 import { useAuth } from "../auth.js";
 import type { Proposal, UseCase } from "../types.js";
+import { Pill } from "./ui.js";
 
-const STATUS_TONE: Record<Proposal["status"], string> = {
-  pending: "bg-amber-100 text-amber-700",
-  approved: "bg-brand-50 text-brand-700",
-  executed: "bg-emerald-100 text-emerald-700",
-  rejected: "bg-slate-200 text-slate-600",
-  failed: "bg-red-100 text-red-700",
+const STATUS_TONE: Record<Proposal["status"], "ok" | "warn" | "danger" | "info" | "muted"> = {
+  pending: "warn",
+  approved: "info",
+  executed: "ok",
+  rejected: "muted",
+  failed: "danger",
 };
 
 /** One-line summary of what a proposal will do, from its server-built payload. */
@@ -69,7 +70,7 @@ export function ApprovalsPanel({ useCase, onChanged }: { useCase: UseCase; onCha
     <div className="space-y-4 max-w-3xl">
       {error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2">{error}</div>}
 
-      <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-3">
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 space-y-3">
         <h2 className="font-semibold text-slate-900">Pending approvals <span className="text-slate-400 font-normal">({pending.length})</span></h2>
         {pending.length === 0 && <p className="text-sm text-slate-400">Nothing awaiting approval.</p>}
         {pending.map((p) => {
@@ -100,7 +101,7 @@ export function ApprovalsPanel({ useCase, onChanged }: { useCase: UseCase; onCha
       </div>
 
       {decided.length > 0 && (
-        <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-2">
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 space-y-2">
           <h3 className="text-sm font-semibold text-slate-800">Recent decisions</h3>
           {decided.map((p) => (
             <div key={p.id} className="flex items-center justify-between text-sm py-1 border-b border-slate-50 last:border-0">
@@ -108,7 +109,7 @@ export function ApprovalsPanel({ useCase, onChanged }: { useCase: UseCase; onCha
                 <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-semibold uppercase mr-2">{p.kind}</span>
                 {summarize(p)}
               </span>
-              <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_TONE[p.status]}`} title={p.error ?? ""}>{p.status}</span>
+              <span title={p.error ?? ""}><Pill tone={STATUS_TONE[p.status]}>{p.status}</Pill></span>
             </div>
           ))}
         </div>

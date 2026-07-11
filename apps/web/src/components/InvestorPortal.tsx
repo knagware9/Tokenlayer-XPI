@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../api.js";
 import { useAuth } from "../auth.js";
 import type { ActivityEvent, Asset, Listing, Portfolio, UseCase } from "../types.js";
+import { Card, EmptyState, Skeleton, StatCard } from "./ui.js";
 
 type Tab = "offerings" | "portfolio" | "activity";
 
@@ -101,11 +102,17 @@ function InvestorOfferings({ useCases, onSubscribed }: { useCases: UseCase[]; on
             {a.availableSupply && <div className="text-[11px] text-slate-400">{fmt(a.availableSupply)} available</div>}
           </button>
         ))}
-        {assets.length === 0 && <p className="text-sm text-slate-400 col-span-full">No open offerings right now.</p>}
+        {assets.length === 0 && (
+          <div className="col-span-full">
+            <Card>
+              <EmptyState icon="coins" title="No open offerings right now" hint="New primary offerings appear here as soon as an issuer lists them." />
+            </Card>
+          </div>
+        )}
       </div>
 
       {selected && (
-        <div className="bg-white rounded-xl border border-slate-200 p-5 max-w-xl space-y-3">
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 max-w-xl space-y-3">
           <h3 className="font-semibold text-slate-900">Subscribe — {selected.name}</h3>
           <div className="text-xs text-slate-500 space-y-0.5">
             {Object.entries(selected.metadata).slice(0, 5).map(([k, v]) => (
@@ -126,7 +133,7 @@ function InvestorOfferings({ useCases, onSubscribed }: { useCases: UseCase[]; on
       )}
 
       {listings.length > 0 && (
-        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-100 font-semibold text-slate-800 text-sm">Secondary market</div>
           <table className="w-full text-sm">
             <tbody className="divide-y divide-slate-100">
@@ -155,14 +162,19 @@ function InvestorPortfolio(): JSX.Element {
   }, [token]);
   if (error === "NO_WALLET") return <NoWallet />;
   if (error) return <p className="text-sm text-red-600">{error}</p>;
-  if (!pf) return <p className="text-sm text-slate-400">Loading portfolio…</p>;
+  if (!pf)
+    return (
+      <Card>
+        <Skeleton lines={4} />
+      </Card>
+    );
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        <Stat label="Portfolio value" value={money(pf.totalByCurrency)} />
-        {pf.cash.map((c) => <Stat key={c.currency} label={`Cash · ${c.currency}`} value={fmt(c.amount)} />)}
+        <StatCard icon="coins" label="Portfolio value" value={money(pf.totalByCurrency)} />
+        {pf.cash.map((c) => <StatCard key={c.currency} icon="spark" label={`Cash · ${c.currency}`} value={fmt(c.amount)} />)}
       </div>
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
             <tr><th className="text-left font-medium px-4 py-2.5">Asset</th><th className="text-right font-medium px-4 py-2.5">Units</th><th className="text-right font-medium px-4 py-2.5">Value</th></tr>
@@ -175,7 +187,13 @@ function InvestorPortfolio(): JSX.Element {
                 <td className="px-4 py-2.5 text-right font-mono">{h.value ? `${fmt(h.value)} ${h.currency}` : "—"}</td>
               </tr>
             ))}
-            {pf.holdings.length === 0 && <tr><td colSpan={3} className="px-4 py-6 text-center text-sm text-slate-400">No holdings yet — subscribe to an offering.</td></tr>}
+            {pf.holdings.length === 0 && (
+              <tr>
+                <td colSpan={3}>
+                  <EmptyState icon="doc" title="No holdings yet" hint="Subscribe to an offering to build your portfolio." />
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -193,35 +211,35 @@ function InvestorActivity(): JSX.Element {
   }, [token]);
   if (error === "NO_WALLET") return <NoWallet />;
   if (error) return <p className="text-sm text-red-600">{error}</p>;
-  if (!events) return <p className="text-sm text-slate-400">Loading activity…</p>;
+  if (!events)
+    return (
+      <Card>
+        <Skeleton lines={4} />
+      </Card>
+    );
   const tone: Record<ActivityEvent["kind"], string> = { subscribed: "bg-brand-50 text-brand-700", received: "bg-emerald-100 text-emerald-700", sent: "bg-slate-100 text-slate-600", coupon: "bg-amber-100 text-amber-700", redemption: "bg-violet-100 text-violet-700" };
   return (
-    <div className="bg-white rounded-xl border border-slate-200 divide-y divide-slate-100">
+    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm divide-y divide-slate-100">
       {events.map((e, i) => (
         <div key={`${e.at}-${i}`} className="flex items-center gap-3 px-4 py-3 text-sm">
-          <span className={`text-xs px-2 py-0.5 rounded-full ${tone[e.kind]}`}>{e.kind}</span>
+          <span className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${tone[e.kind]}`}>{e.kind}</span>
           <span className="flex-1 text-slate-700"><span className="font-medium text-slate-900">{e.assetName}</span>{e.units && <> · {fmt(e.units)} units</>}{e.amount && <> · {fmt(e.amount)} {e.currency}</>}</span>
           <span className="text-xs text-slate-400">{ago(e.at)}</span>
         </div>
       ))}
-      {events.length === 0 && <p className="px-4 py-6 text-center text-sm text-slate-400">No activity yet.</p>}
-    </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }): JSX.Element {
-  return (
-    <div className="bg-white rounded-xl border border-slate-200 p-3">
-      <div className="text-[11px] text-slate-500">{label}</div>
-      <div className="text-lg font-bold text-slate-900 mt-0.5 break-words">{value}</div>
+      {events.length === 0 && <EmptyState icon="spark" title="No activity yet" hint="Subscriptions, transfers and coupon payments show up here." />}
     </div>
   );
 }
 
 function NoWallet(): JSX.Element {
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-sm text-slate-500">
-      Your account has no linked wallet yet — contact your desk administrator to link one.
-    </div>
+    <Card>
+      <EmptyState
+        icon="users"
+        title="No linked wallet yet"
+        hint="Contact your desk administrator to link a wallet to your account."
+      />
+    </Card>
   );
 }

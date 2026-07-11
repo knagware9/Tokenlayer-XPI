@@ -3,6 +3,7 @@ import { api } from "../api.js";
 import { useAuth } from "../auth.js";
 import { can } from "../rbac.js";
 import type { Asset, ChainInfo } from "../types.js";
+import { Card, EmptyState, Pill, Skeleton } from "./ui.js";
 
 interface Props {
   chains: ChainInfo[];
@@ -39,16 +40,21 @@ export function AssetList({ chains, refreshKey, onSelect, useCaseKey }: Props): 
 
   const chainOf = (id: string): ChainInfo | undefined => chains.find((c) => c.id === id);
 
-  if (loading) return <p className="text-sm text-slate-400">Loading assets…</p>;
+  if (loading)
+    return (
+      <Card>
+        <Skeleton lines={4} />
+      </Card>
+    );
   if (assets.length === 0)
     return (
-      <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-sm text-slate-500">
-        No assets yet.
-      </div>
+      <Card>
+        <EmptyState icon="coins" title="No assets yet" hint="Issue an asset from the Token Issuance tab to see it listed here." />
+      </Card>
     );
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
       <table className="w-full text-sm">
         <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
           <tr>
@@ -82,18 +88,19 @@ export function AssetList({ chains, refreshKey, onSelect, useCaseKey }: Props): 
                   {(() => {
                     const chain = chainOf(a.chainId);
                     const real = chain?.mode === "real";
-                    const tone = real ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500";
                     return (
-                      <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${tone}`} title={a.contractRef}>
-                        {real ? "⛓" : "🧪"} {chain?.label ?? a.chainId}{real ? "" : " · sim"}
+                      <span title={a.contractRef}>
+                        <Pill tone={real ? "ok" : "muted"}>
+                          {real ? "⛓" : "🧪"} {chain?.label ?? a.chainId}{real ? "" : " · sim"}
+                        </Pill>
                       </span>
                     );
                   })()}
                 </td>
                 <td className="px-4 py-3">
-                  {avail === "available" && <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Available</span>}
-                  {avail === "sold-out" && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Sold out</span>}
-                  {avail === "not-listed" && <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">Not listed</span>}
+                  {avail === "available" && <Pill tone="ok">Available</Pill>}
+                  {avail === "sold-out" && <Pill tone="warn">Sold out</Pill>}
+                  {avail === "not-listed" && <Pill tone="muted">Not listed</Pill>}
                 </td>
                 <td className="px-4 py-3 text-right">
                   {canBuy && avail === "available" && (
