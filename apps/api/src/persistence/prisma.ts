@@ -26,12 +26,18 @@ import type {
   CashflowRecord,
   CashflowRepository,
   CashRepository,
+  CredentialRecord,
+  CredentialRepository,
   DocumentRecord,
   DocumentRepository,
   KycDetails,
   KycStatus,
   ListingRecord,
   ListingRepository,
+  OrganizationRecord,
+  OrganizationRepository,
+  OrgStatus,
+  OrgType,
   Page,
   Paged,
   ProposalApproval,
@@ -57,6 +63,8 @@ const toUser = (r: {
   kycStatus: string;
   kyc: string | null;
   did: string | null;
+  orgId: string | null;
+  didSeedEncrypted: string | null;
   createdAt: Date;
 }): UserRecord => ({
   id: r.id,
@@ -69,6 +77,8 @@ const toUser = (r: {
   kycStatus: r.kycStatus as KycStatus,
   kyc: r.kyc ? (JSON.parse(r.kyc) as KycDetails) : null,
   did: r.did ?? undefined,
+  orgId: r.orgId ?? null,
+  didSeedEncrypted: r.didSeedEncrypted ?? null,
   createdAt: r.createdAt.toISOString(),
 });
 
@@ -87,7 +97,10 @@ export class PrismaUserRepository implements UserRepository {
   async list(useCaseKey?: string): Promise<UserRecord[]> {
     return (await prisma.user.findMany({ where: useCaseKey ? { useCaseKey } : undefined, orderBy: { createdAt: "asc" } })).map(toUser);
   }
-  async update(id: string, patch: Partial<Pick<UserRecord, "passwordHash" | "accountId" | "active" | "kycStatus" | "did" | "kyc">>): Promise<UserRecord> {
+  async listByOrg(orgId: string): Promise<UserRecord[]> {
+    return (await prisma.user.findMany({ where: { orgId }, orderBy: { createdAt: "asc" } })).map(toUser);
+  }
+  async update(id: string, patch: Partial<Pick<UserRecord, "passwordHash" | "accountId" | "active" | "kycStatus" | "did" | "kyc" | "orgId" | "didSeedEncrypted">>): Promise<UserRecord> {
     const { kyc, ...rest } = patch;
     return toUser(await prisma.user.update({ where: { id }, data: { ...rest, ...(kyc !== undefined ? { kyc: kyc ? JSON.stringify(kyc) : null } : {}) } }));
   }
@@ -321,6 +334,7 @@ interface UseCaseRow {
   terms: string;
   workflow: string;
   roles: string;
+  ownerOrgId: string | null;
 }
 
 /** Parse a JSON object column, tolerating null/empty/invalid → `{}`. */
@@ -361,6 +375,7 @@ function rowToUseCase(r: UseCaseRow): UseCaseDefinition {
     ...(r.uniqueBy ? { uniqueBy: r.uniqueBy } : {}),
     ...(Object.keys(terms).length > 0 ? { terms: terms as UseCaseDefinition["terms"] } : {}),
     ...(Object.keys(workflow).length > 0 ? { workflow: workflow as UseCaseDefinition["workflow"] } : {}),
+    ownerOrgId: r.ownerOrgId ?? undefined,
     roles: JSON.parse(r.roles),
   });
 }
@@ -385,6 +400,7 @@ function useCaseToData(def: UseCaseDefinition) {
     uniqueBy: def.uniqueBy ?? null,
     terms: JSON.stringify(def.terms ?? {}),
     workflow: JSON.stringify(def.workflow ?? {}),
+    ownerOrgId: def.ownerOrgId ?? null,
     roles: JSON.stringify(def.roles),
   };
 }
@@ -654,5 +670,72 @@ export class PrismaCashRepository implements CashRepository {
         update: { amount: next },
       });
     });
+  }
+}
+
+const toOrg = (r: {
+  id: string; name: string; orgType: string; registrationId: string | null; jurisdiction: string | null;
+  did: string; didSeedEncrypted: string; status: string; verified: boolean; verifiedAt: Date | null; createdAt: Date;
+}): OrganizationRecord => ({
+  id: r.id, name: r.name, orgType: r.orgType as OrgType, registrationId: r.registrationId, jurisdiction: r.jurisdiction,
+  did: r.did, didSeedEncrypted: r.didSeedEncrypted, status: r.status as OrgStatus, verified: r.verified,
+  verifiedAt: r.verifiedAt ? r.verifiedAt.toISOString() : null, createdAt: r.createdAt.toISOString(),
+});
+
+export class PrismaOrganizationRepository implements OrganizationRepository {
+  async create(input: Omit<OrganizationRecord, "id" | "createdAt">): Promise<OrganizationRecord> {
+    return toOrg(await prisma.organization.create({ data: { ...input, verifiedAt: input.verifiedAt ? new Date(input.verifiedAt) : null } }));
+  }
+  async get(id: string): Promise<OrganizationRecord | null> {
+    const r = await prisma.organization.findUnique({ where: { id } });
+    return r ? toOrg(r) : null;
+  }
+  async findByName(name: string): Promise<OrganizationRecord | null> {
+    const r = await prisma.organization.findUnique({ where: { name } });
+    return r ? toOrg(r) : null;
+  }
+  async findByRegistrationId(registrationId: string): Promise<OrganizationRecord | null> {
+    const r = await prisma.organization.findFirst({ where: { registrationId } });
+    return r ? toOrg(r) : null;
+  }
+  async list(): Promise<OrganizationRecord[]> {
+    return (await prisma.organization.findMany({ orderBy: { createdAt: "asc" } })).map(toOrg);
+  }
+  async setVerified(id: string, verified: boolean, verifiedAt: string | null): Promise<OrganizationRecord> {
+    return toOrg(await prisma.organization.update({ where: { id }, data: { verified, verifiedAt: verifiedAt ? new Date(verifiedAt) : null } }));
+  }
+  async setStatus(id: string, status: OrgStatus): Promise<OrganizationRecord> {
+    return toOrg(await prisma.organization.update({ where: { id }, data: { status } }));
+  }
+}
+
+const toCredential = (r: {
+  id: string; holderDid: string; issuerDid: string; type: string; vcJwt: string;
+  subjectClaims: string; issuedAt: Date; expiresAt: Date | null; revoked: boolean;
+}): CredentialRecord => ({
+  id: r.id, holderDid: r.holderDid, issuerDid: r.issuerDid, type: r.type, vcJwt: r.vcJwt,
+  subjectClaims: JSON.parse(r.subjectClaims) as Record<string, unknown>,
+  issuedAt: r.issuedAt.toISOString(), expiresAt: r.expiresAt ? r.expiresAt.toISOString() : null, revoked: r.revoked,
+});
+
+export class PrismaCredentialRepository implements CredentialRepository {
+  async create(input: Omit<CredentialRecord, "id">): Promise<CredentialRecord> {
+    return toCredential(await prisma.credential.create({
+      data: {
+        holderDid: input.holderDid, issuerDid: input.issuerDid, type: input.type, vcJwt: input.vcJwt,
+        subjectClaims: JSON.stringify(input.subjectClaims),
+        issuedAt: new Date(input.issuedAt), expiresAt: input.expiresAt ? new Date(input.expiresAt) : null, revoked: input.revoked,
+      },
+    }));
+  }
+  async listByHolder(holderDid: string): Promise<CredentialRecord[]> {
+    return (await prisma.credential.findMany({ where: { holderDid }, orderBy: { issuedAt: "asc" } })).map(toCredential);
+  }
+  async get(id: string): Promise<CredentialRecord | null> {
+    const r = await prisma.credential.findUnique({ where: { id } });
+    return r ? toCredential(r) : null;
+  }
+  async setRevoked(id: string, revoked: boolean): Promise<CredentialRecord> {
+    return toCredential(await prisma.credential.update({ where: { id }, data: { revoked } }));
   }
 }
