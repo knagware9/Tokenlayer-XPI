@@ -30,6 +30,9 @@ export NODE_ENV="${NODE_ENV:-development}"
 export DATABASE_URL="${DATABASE_URL:-file:./fabric-dev.db}"
 export JWT_SECRET="${JWT_SECRET:-dev-secret-fabric}"
 export PORT="${PORT:-4000}"
+# Allow BOTH the dockerized web (:8080) and the vite dev server (:5173) to call
+# this host API — the browser enforces CORS by origin.
+export CORS_ORIGINS="${CORS_ORIGINS:-http://localhost:8080,http://localhost:5173}"
 
 echo "[api-fabric] fabric REAL via $FABRIC_IDENTITY@$FABRIC_CHANNEL/$FABRIC_CHAINCODE"
 pnpm --filter @tokenlayer/api exec prisma db push --skip-generate >/dev/null 2>&1 || true
