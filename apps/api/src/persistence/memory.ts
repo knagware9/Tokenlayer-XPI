@@ -14,10 +14,15 @@ import type {
   CashflowRecord,
   CashflowRepository,
   CashRepository,
+  CredentialRecord,
+  CredentialRepository,
   DocumentRecord,
   DocumentRepository,
   ListingRecord,
   ListingRepository,
+  OrganizationRecord,
+  OrganizationRepository,
+  OrgStatus,
   Page,
   Paged,
   ProposalApproval,
@@ -52,7 +57,10 @@ export class MemoryUserRepository implements UserRepository {
     const all = [...this.byId.values()];
     return useCaseKey ? all.filter((u) => u.useCaseKey === useCaseKey) : all;
   }
-  async update(userId: string, patch: Partial<Pick<UserRecord, "passwordHash" | "accountId" | "active" | "kycStatus" | "did" | "kyc">>): Promise<UserRecord> {
+  async listByOrg(orgId: string): Promise<UserRecord[]> {
+    return [...this.byId.values()].filter((u) => u.orgId === orgId);
+  }
+  async update(userId: string, patch: Partial<Pick<UserRecord, "passwordHash" | "accountId" | "active" | "kycStatus" | "did" | "kyc" | "orgId" | "didSeedEncrypted">>): Promise<UserRecord> {
     const rec = this.byId.get(userId);
     if (!rec) throw new Error(`unknown user '${userId}'`);
     Object.assign(rec, patch);
@@ -403,6 +411,61 @@ export class MemoryAccountRepository implements AccountRepository {
     }
     const rec: AccountRecord = { id: id("acct"), address, label };
     this.byAddress.set(address, rec);
+    return rec;
+  }
+}
+
+export class MemoryOrganizationRepository implements OrganizationRepository {
+  private readonly byId = new Map<string, OrganizationRecord>();
+  async create(input: Omit<OrganizationRecord, "id" | "createdAt">): Promise<OrganizationRecord> {
+    const rec: OrganizationRecord = { ...input, id: id("org"), createdAt: now() };
+    this.byId.set(rec.id, rec);
+    return rec;
+  }
+  async get(orgId: string): Promise<OrganizationRecord | null> {
+    return this.byId.get(orgId) ?? null;
+  }
+  async findByName(name: string): Promise<OrganizationRecord | null> {
+    return [...this.byId.values()].find((o) => o.name === name) ?? null;
+  }
+  async findByRegistrationId(registrationId: string): Promise<OrganizationRecord | null> {
+    return [...this.byId.values()].find((o) => o.registrationId === registrationId) ?? null;
+  }
+  async list(): Promise<OrganizationRecord[]> {
+    return [...this.byId.values()];
+  }
+  async setVerified(orgId: string, verified: boolean, verifiedAt: string | null): Promise<OrganizationRecord> {
+    const rec = this.byId.get(orgId);
+    if (!rec) throw new Error(`unknown org '${orgId}'`);
+    rec.verified = verified;
+    rec.verifiedAt = verifiedAt;
+    return rec;
+  }
+  async setStatus(orgId: string, status: OrgStatus): Promise<OrganizationRecord> {
+    const rec = this.byId.get(orgId);
+    if (!rec) throw new Error(`unknown org '${orgId}'`);
+    rec.status = status;
+    return rec;
+  }
+}
+
+export class MemoryCredentialRepository implements CredentialRepository {
+  private readonly byId = new Map<string, CredentialRecord>();
+  async create(input: Omit<CredentialRecord, "id">): Promise<CredentialRecord> {
+    const rec: CredentialRecord = { ...input, id: id("cred") };
+    this.byId.set(rec.id, rec);
+    return rec;
+  }
+  async listByHolder(holderDid: string): Promise<CredentialRecord[]> {
+    return [...this.byId.values()].filter((c) => c.holderDid === holderDid);
+  }
+  async get(credId: string): Promise<CredentialRecord | null> {
+    return this.byId.get(credId) ?? null;
+  }
+  async setRevoked(credId: string, revoked: boolean): Promise<CredentialRecord> {
+    const rec = this.byId.get(credId);
+    if (!rec) throw new Error(`unknown credential '${credId}'`);
+    rec.revoked = revoked;
     return rec;
   }
 }
