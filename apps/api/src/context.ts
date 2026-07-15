@@ -4,6 +4,7 @@ import type { ChainRegistry } from "./chains.js";
 import { createComplianceProvider } from "./compliance-provider.js";
 import type { Currency } from "./currencies.js";
 import type { ChallengeStore } from "./identity-challenges.js";
+import type { Keystore } from "./keystore.js";
 import type {
   AccountRepository,
   AssetRepository,
@@ -11,8 +12,10 @@ import type {
   AuditRepository,
   CashflowRepository,
   CashRepository,
+  CredentialRepository,
   DocumentRepository,
   ListingRepository,
+  OrganizationRepository,
   ProposalRepository,
   UseCaseRepository,
   UserRepository,
@@ -33,6 +36,11 @@ export interface AppDeps {
   documents: DocumentRepository;
   cashflows: CashflowRepository;
   proposals: ProposalRepository;
+  organizations: OrganizationRepository;
+  credentials: CredentialRepository;
+  keystore: Keystore;
+  /** True iff DID_MASTER_KEY was explicitly configured (production must set it). */
+  didMasterConfigured: boolean;
   challenges: ChallengeStore;
   /** Allowlist of trusted KYC credential issuer DIDs; empty/absent ⇒ no issuer is trusted (fail closed). */
   trustedKycIssuers?: string[];

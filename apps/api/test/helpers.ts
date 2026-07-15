@@ -5,12 +5,15 @@ import { buildChainRegistry } from "../src/chains.js";
 import { createEngine } from "../src/context.js";
 import { loadCurrencies } from "../src/currencies.js";
 import { createMemoryChallengeStore } from "../src/identity-challenges.js";
+import { createKeystore } from "../src/keystore.js";
 import {
   MemoryAccountRepository,
   MemoryAssetRepository,
   MemoryAuditAnchorRepository,
   MemoryAuditRepository,
   MemoryCashflowRepository,
+  MemoryCredentialRepository,
+  MemoryOrganizationRepository,
   MemoryProposalRepository,
   MemoryCashRepository,
   MemoryDocumentRepository,
@@ -24,7 +27,7 @@ import { seedUseCases } from "../src/use-cases.js";
 /** Demo market escrow used by tests unless a test explicitly overrides it (pass `marketEscrowAccount: undefined` to disable the market). */
 export const TEST_MARKET_ESCROW = "0xcd3B766CCDd6AE721141F452C550Ca635964ce71";
 
-export async function buildTestApp(opts: { loginRateLimitMax?: number; platformFeeAccount?: string; marketEscrowAccount?: string; trustedKycIssuers?: string[]; devIssuerSeed?: string; isProduction?: boolean } = {}): Promise<FastifyInstance> {
+export async function buildTestApp(opts: { loginRateLimitMax?: number; platformFeeAccount?: string; marketEscrowAccount?: string; trustedKycIssuers?: string[]; devIssuerSeed?: string; isProduction?: boolean; didMasterConfigured?: boolean } = {}): Promise<FastifyInstance> {
   const rbac = new RbacPolicy();
   const chains = buildChainRegistry({ CHAIN_STRICT: "0" }); // simulated chains only — besu absent, never mocked
   const users = new MemoryUserRepository();
@@ -38,6 +41,9 @@ export async function buildTestApp(opts: { loginRateLimitMax?: number; platformF
   const documents = new MemoryDocumentRepository();
   const cashflows = new MemoryCashflowRepository();
   const proposals = new MemoryProposalRepository();
+  const organizations = new MemoryOrganizationRepository();
+  const credentials = new MemoryCredentialRepository();
+  const keystore = createKeystore("11".repeat(32));
   await seedDefaults(users, accounts);
   const engine = createEngine(useCases, rbac, chains, audit, { users, accounts });
   await seedUseCases(useCases, {
@@ -47,6 +53,7 @@ export async function buildTestApp(opts: { loginRateLimitMax?: number; platformF
   // The suite makes many logins from one IP; raise the throttle unless a test opts into it.
   return buildApp({
     useCases, rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents, cashflows, proposals,
+    organizations, credentials, keystore, didMasterConfigured: opts.didMasterConfigured ?? true,
     challenges: createMemoryChallengeStore(), trustedKycIssuers: opts.trustedKycIssuers,
     devIssuerSeed: opts.devIssuerSeed, isProduction: opts.isProduction,
     currencies: loadCurrencies(), jwtSecret: "test-secret",

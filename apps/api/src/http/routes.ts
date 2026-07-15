@@ -120,7 +120,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (!user.active) {
       return reply.code(401).send({ error: "ACCOUNT_SUSPENDED", message: "this account is suspended" });
     }
-    const claims: TokenClaims = { id: user.id, email: user.email, role: user.role, useCaseKey: user.useCaseKey };
+    const claims: TokenClaims = { id: user.id, email: user.email, role: user.role, useCaseKey: user.useCaseKey, orgId: user.orgId ?? null, did: user.did ?? null };
     const wallet = user.accountId ? await deps.accounts.findById(user.accountId) : null;
     return { token: app.jwt.sign(claims), user: { ...claims, walletAddress: wallet?.address ?? null } };
   });

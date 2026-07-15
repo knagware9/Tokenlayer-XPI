@@ -5,12 +5,15 @@ import { createEngine } from "./context.js";
 import { loadCurrencies } from "./currencies.js";
 import { env } from "./env.js";
 import { createMemoryChallengeStore } from "./identity-challenges.js";
+import { createKeystore } from "./keystore.js";
 import {
   PrismaAccountRepository,
   PrismaAssetRepository,
   PrismaAuditAnchorRepository,
   PrismaAuditRepository,
   PrismaCashflowRepository,
+  PrismaCredentialRepository,
+  PrismaOrganizationRepository,
   PrismaProposalRepository,
   PrismaCashRepository,
   PrismaDocumentRepository,
@@ -37,6 +40,9 @@ async function main(): Promise<void> {
   const documents = new PrismaDocumentRepository();
   const cashflows = new PrismaCashflowRepository();
   const proposals = new PrismaProposalRepository();
+  const organizations = new PrismaOrganizationRepository();
+  const credentials = new PrismaCredentialRepository();
+  const keystore = createKeystore(env.didMasterKey);
   // Demo users/accounts (with predictable passwords) are seeded only outside production.
   if (env.nodeEnv !== "production") await seedDefaults(users, accounts);
 
@@ -62,6 +68,10 @@ async function main(): Promise<void> {
     documents,
     cashflows,
     proposals,
+    organizations,
+    credentials,
+    keystore,
+    didMasterConfigured: env.didMasterConfigured,
     challenges: createMemoryChallengeStore(),
     trustedKycIssuers: env.trustedKycIssuers,
     devIssuerSeed: env.devKycIssuerSeed,
