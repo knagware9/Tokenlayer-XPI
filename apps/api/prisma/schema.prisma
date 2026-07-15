@@ -18,6 +18,8 @@ model User {
   kycStatus    String   @default("approved")
   kyc          String?
   did          String?
+  orgId            String?  // owning organization id (null for legacy/platform users)
+  didSeedEncrypted String?  // AES-256-GCM encrypted Ed25519 seed for this user's sub-DID
   createdAt    DateTime @default(now())
 }
 
@@ -68,6 +70,7 @@ model UseCase {
   terms            String   @default("{}") // JSON object: { principalField, maturityField, rateField?, frequency?, currency }
   workflow         String   @default("{}") // JSON object: { approvals?: { [gatedOp]: requiredApprovals } }
   roles           String // JSON array
+  ownerOrgId      String?  // owning organization id (null = legacy platform-owned)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 }
@@ -185,4 +188,38 @@ model Proposal {
   decidedAt     DateTime?
 
   @@index([useCaseKey, status])
+}
+
+// A tenant organization. Its parent did:key is custodial: didSeedEncrypted holds
+// the AES-256-GCM encrypted Ed25519 seed the platform signs membership VCs with.
+model Organization {
+  id               String   @id @default(cuid())
+  name             String   @unique
+  orgType          String // bank | corporate | msme | government | verifier
+  registrationId   String?
+  jurisdiction     String?
+  did              String   @unique
+  didSeedEncrypted String
+  status           String   @default("active") // active | suspended
+  verified         Boolean  @default(false)
+  verifiedAt       DateTime?
+  createdAt        DateTime @default(now())
+
+  @@index([status])
+}
+
+// A stored Verifiable Credential (VC-JWT) held by a subject DID. subjectClaims is
+// the decoded credentialSubject (JSON) for quick display without re-decoding.
+model Credential {
+  id            String   @id @default(cuid())
+  holderDid     String
+  issuerDid     String
+  type          String // e.g. "OrganizationMembership"
+  vcJwt         String
+  subjectClaims String // JSON-encoded credentialSubject
+  issuedAt      DateTime @default(now())
+  expiresAt     DateTime?
+  revoked       Boolean  @default(false)
+
+  @@index([holderDid])
 }
