@@ -7,9 +7,9 @@
  */
 
 /** Roles recognised by the platform's access-control policy. */
-export type Role = "PlatformAdmin" | "UseCaseAdmin" | "Issuer" | "Trader" | "Buyer" | "Auditor";
+export type Role = "PlatformAdmin" | "OrgAdmin" | "UseCaseAdmin" | "Issuer" | "Trader" | "Buyer" | "Auditor";
 
-export const ROLES: readonly Role[] = ["PlatformAdmin", "UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"];
+export const ROLES: readonly Role[] = ["PlatformAdmin", "OrgAdmin", "UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"];
 
 /** Every operation the platform can perform on an asset. */
 export type LifecycleAction =
@@ -153,6 +153,8 @@ export interface UseCaseDefinition {
   key: string;
   name: string;
   description?: string;
+  /** Owning organization id (null/undefined for legacy platform-owned use cases). */
+  ownerOrgId?: string;
   tokenStandard: TokenStandard;
   /** Derived from tokenStandard; kept explicit for convenience. */
   tokenType: TokenType;
