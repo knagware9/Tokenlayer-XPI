@@ -50,6 +50,13 @@ export const DEMO_PLATFORM_FEE_ACCOUNT = "0xdF3e18d64BC6A983f673Ab319CCaE4f1a57C
  */
 export const DEMO_MARKET_ESCROW_ACCOUNT = "0xcd3B766CCDd6AE721141F452C550Ca635964ce71";
 
+/**
+ * Fixed DEV DID master key used only when DID_MASTER_KEY is unset — enables the
+ * custodial keystore out of the box for local/demo runs. NEVER use in production;
+ * a real deployment MUST set DID_MASTER_KEY (32 bytes hex, e.g. `openssl rand -hex 32`).
+ */
+export const DEV_DID_MASTER_KEY = "0".repeat(64);
+
 export interface Env {
   port: number;
   nodeEnv: string;
@@ -82,6 +89,10 @@ export interface Env {
   trustedKycIssuers: string[];
   /** Dev-only deterministic issuer seed for the demo mint route (unset in production). */
   devKycIssuerSeed?: string;
+  /** 32-byte hex master key encrypting custodial DID seeds (real or dev default). */
+  didMasterKey: string;
+  /** True iff DID_MASTER_KEY was explicitly set (production must set it). */
+  didMasterConfigured: boolean;
 }
 
 const platformFeeAccount =
@@ -105,4 +116,13 @@ export const env: Env = {
   loginRateLimitMax: process.env.LOGIN_RATE_LIMIT_MAX ? Number(process.env.LOGIN_RATE_LIMIT_MAX) : undefined,
   trustedKycIssuers: (process.env.TRUSTED_KYC_ISSUERS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   devKycIssuerSeed: process.env.DEV_KYC_ISSUER_SEED,
+  didMasterKey: process.env.DID_MASTER_KEY ?? DEV_DID_MASTER_KEY,
+  didMasterConfigured: !!process.env.DID_MASTER_KEY,
 };
+
+if (!env.didMasterConfigured) {
+  console.warn(
+    "[keystore] DID_MASTER_KEY is not set — using an INSECURE dev key to encrypt custodial DID seeds. " +
+      "Set DID_MASTER_KEY (openssl rand -hex 32) before any production use.",
+  );
+}
