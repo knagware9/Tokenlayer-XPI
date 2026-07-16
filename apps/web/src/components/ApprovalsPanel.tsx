@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../api.js";
 import { useAuth } from "../auth.js";
-import type { Proposal, UseCase } from "../types.js";
+import type { Proposal } from "../types.js";
 import { Pill } from "./ui.js";
 
 const STATUS_TONE: Record<Proposal["status"], "ok" | "warn" | "danger" | "info" | "muted"> = {
@@ -15,6 +15,10 @@ const STATUS_TONE: Record<Proposal["status"], "ok" | "warn" | "danger" | "info" 
 /** One-line summary of what a proposal will do, from its server-built payload. */
 function summarize(p: Proposal): string {
   const pl = p.payload ?? {};
+  // Credential arms come first: "issue-credential" must not be swallowed by the
+  // looser asset-issuance arm below.
+  if (p.kind === "issue-credential") return `issue a ${String(pl.type ?? "credential")} to ${String((pl.claims as Record<string, unknown>)?.legalName ?? pl.subjectDid ?? "a subject")}`;
+  if (p.kind === "revoke-credential") return `revoke a credential — ${String(pl.reason ?? "no reason given")}`;
   if (p.kind === "issue") {
     const supply = pl.initialSupply as string | undefined;
     return supply ? `mint ${Number(supply).toLocaleString()} tokens to treasury on activation` : "activate the asset";
@@ -26,12 +30,13 @@ function summarize(p: Proposal): string {
 }
 
 /**
- * Maker-checker Approvals inbox: pending proposals in the active use case that
- * the signed-in user (a capability holder who is NOT the proposer) can approve
- * or reject, plus a log of recent decisions. Shown only when the use case
- * declares a workflow policy.
+ * Maker-checker Approvals inbox: every pending proposal the signed-in user (a
+ * capability holder who is NOT the proposer) can approve or reject — both
+ * use-case-scoped (asset issuance, cashflows) and org-scoped (credential
+ * issuance/revocation) — plus a log of recent decisions. The server decides
+ * what the caller may see, so this panel is scope-agnostic.
  */
-export function ApprovalsPanel({ useCase, onChanged }: { useCase: UseCase; onChanged: () => void }): JSX.Element {
+export function ApprovalsPanel({ onChanged }: { onChanged?: () => void }): JSX.Element {
   const { token, user } = useAuth();
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -45,7 +50,7 @@ export function ApprovalsPanel({ useCase, onChanged }: { useCase: UseCase; onCha
       /* transient — leave the last list */
     }
   }, [token]);
-  useEffect(() => { void reload(); }, [reload, useCase.key]);
+  useEffect(() => { void reload(); }, [reload]);
 
   const pending = proposals.filter((p) => p.status === "pending");
   const decided = proposals.filter((p) => p.status !== "pending").slice(0, 12);
@@ -58,7 +63,7 @@ export function ApprovalsPanel({ useCase, onChanged }: { useCase: UseCase; onCha
       const res = verdict === "approve" ? await api.approveProposal(token, p.id) : await api.rejectProposal(token, p.id);
       if (res.proposal.status === "failed") setError(`Execution failed: ${res.proposal.error ?? "unknown error"}`);
       await reload();
-      onChanged();
+      onChanged?.();
     } catch (err) {
       setError(err instanceof ApiError ? `${err.code ?? "Error"}: ${err.message}` : "Decision failed");
     } finally {

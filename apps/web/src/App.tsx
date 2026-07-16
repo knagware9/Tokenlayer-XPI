@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "./api.js";
 import { useAuth } from "./auth.js";
 import { useRoute } from "./router.js";
+import { ApprovalsPanel } from "./components/ApprovalsPanel.js";
 import { AssetManagement } from "./components/AssetManagement.js";
 import { Dashboard } from "./components/Dashboard.js";
 import { Header } from "./components/Header.js";
@@ -14,7 +15,7 @@ import { UserManagement } from "./components/UserManagement.js";
 import { canManageUsers } from "./rbac.js";
 import type { ChainInfo, UseCase } from "./types.js";
 
-type Section = "overview" | "assets" | "users" | "organizations" | "identity";
+type Section = "overview" | "assets" | "approvals" | "users" | "organizations" | "identity";
 
 export function App(): JSX.Element {
   const { token, user } = useAuth();
@@ -75,6 +76,7 @@ export function App(): JSX.Element {
   const sections: { id: Section; label: string }[] = [
     { id: "overview", label: "Overview" },
     { id: "assets", label: "Asset Management" },
+    { id: "approvals", label: "Approvals" },
     ...(canManageUsers(user.role) ? [{ id: "users" as Section, label: "User Management" }] : []),
     ...(isPlatform || user.role === "OrgAdmin" ? [{ id: "organizations" as Section, label: "Organizations" }] : []),
     { id: "identity" as Section, label: "My identity" },
@@ -97,6 +99,7 @@ export function App(): JSX.Element {
         </div>
         {section === "overview" && <Dashboard useCaseKey={activeUseCase} />}
         {section === "assets" && <AssetManagement useCaseKey={activeUseCase} useCases={useCases} chains={chains} />}
+        {section === "approvals" && <ApprovalsPanel />}
         {section === "users" && <UserManagement useCaseKey={activeUseCase} useCases={useCases} />}
         {section === "organizations" && <Organizations />}
         {section === "identity" && <MyIdentity />}

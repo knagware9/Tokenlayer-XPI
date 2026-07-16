@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ApiError, api } from "../api.js";
 import { useAuth } from "../auth.js";
 import type { OrgMember, OrgType, Organization, Role } from "../types.js";
+import { CredentialsPanel } from "./CredentialsPanel.js";
 import { Card, EmptyState, Pill, SectionHeader } from "./ui.js";
 
 const ORG_TYPES: OrgType[] = ["bank", "corporate", "msme", "government", "verifier"];
@@ -39,6 +40,8 @@ export function Organizations(): JSX.Element {
   };
   useEffect(reload, [token]);
 
+  const selectedOrg = orgs.find((o) => o.id === selected) ?? null;
+
   return (
     <div className="space-y-5">
       <SectionHeader
@@ -65,7 +68,7 @@ export function Organizations(): JSX.Element {
         </div>
       )}
 
-      {selected && <Members orgId={selected} />}
+      {selectedOrg && <Members org={selectedOrg} />}
     </div>
   );
 }
@@ -140,8 +143,9 @@ function CreateOrg({ onCreated }: { onCreated: () => void }): JSX.Element {
   );
 }
 
-function Members({ orgId }: { orgId: string }): JSX.Element {
+function Members({ org }: { org: Organization }): JSX.Element {
   const { token } = useAuth();
+  const orgId = org.id;
   const [rows, setRows] = useState<OrgMember[]>([]);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -205,6 +209,8 @@ function Members({ orgId }: { orgId: string }): JSX.Element {
           </table>
         </div>
       )}
+
+      <CredentialsPanel org={org} members={rows} />
     </div>
   );
 }
