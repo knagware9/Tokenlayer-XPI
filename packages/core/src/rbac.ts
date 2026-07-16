@@ -9,6 +9,7 @@ const FULL: readonly LifecycleAction[] = ["issue", "mint", "transfer", "burn", "
 
 const MATRIX: Record<Role, ReadonlySet<LifecycleAction>> = {
   PlatformAdmin: new Set<LifecycleAction>(FULL),
+  OrgAdmin: new Set<LifecycleAction>(["read"]),
   UseCaseAdmin: new Set<LifecycleAction>(FULL),
   Issuer: new Set<LifecycleAction>(["issue", "mint", "allow", "disallow", "freeze", "unfreeze", "read"]),
   Trader: new Set<LifecycleAction>(["transfer", "burn", "buy", "list", "cancel-listing", "read"]),

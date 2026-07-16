@@ -23,6 +23,8 @@ export interface UserRecord {
   kycStatus: KycStatus;
   kyc: KycDetails | null;
   did?: string;
+  orgId?: string | null;
+  didSeedEncrypted?: string | null;
   createdAt: string;
 }
 
@@ -77,7 +79,8 @@ export interface UserRepository {
   findById(id: string): Promise<UserRecord | null>;
   create(input: Omit<UserRecord, "id" | "createdAt">): Promise<UserRecord>;
   list(useCaseKey?: string): Promise<UserRecord[]>;
-  update(id: string, patch: Partial<Pick<UserRecord, "passwordHash" | "accountId" | "active" | "kycStatus" | "did" | "kyc">>): Promise<UserRecord>;
+  listByOrg(orgId: string): Promise<UserRecord[]>;
+  update(id: string, patch: Partial<Pick<UserRecord, "passwordHash" | "accountId" | "active" | "kycStatus" | "did" | "kyc" | "orgId" | "didSeedEncrypted">>): Promise<UserRecord>;
   remove(id: string): Promise<void>;
 }
 
@@ -305,4 +308,50 @@ export interface CashRepository {
   credit(currency: string, address: string, amount: string): Promise<void>;
   /** Payment leg: move `amount` from→to in `currency`; throws on insufficient funds. */
   transfer(currency: string, from: string, to: string, amount: string): Promise<void>;
+}
+
+export type OrgType = "bank" | "corporate" | "msme" | "government" | "verifier";
+export type OrgStatus = "active" | "suspended";
+
+export interface OrganizationRecord {
+  id: string;
+  name: string;
+  orgType: OrgType;
+  registrationId: string | null;
+  jurisdiction: string | null;
+  did: string;
+  didSeedEncrypted: string;
+  status: OrgStatus;
+  verified: boolean;
+  verifiedAt: string | null;
+  createdAt: string;
+}
+
+export interface OrganizationRepository {
+  create(input: Omit<OrganizationRecord, "id" | "createdAt">): Promise<OrganizationRecord>;
+  get(id: string): Promise<OrganizationRecord | null>;
+  findByName(name: string): Promise<OrganizationRecord | null>;
+  findByRegistrationId(registrationId: string): Promise<OrganizationRecord | null>;
+  list(): Promise<OrganizationRecord[]>;
+  setVerified(id: string, verified: boolean, verifiedAt: string | null): Promise<OrganizationRecord>;
+  setStatus(id: string, status: OrgStatus): Promise<OrganizationRecord>;
+}
+
+export interface CredentialRecord {
+  id: string;
+  holderDid: string;
+  issuerDid: string;
+  type: string;
+  vcJwt: string;
+  subjectClaims: Record<string, unknown>;
+  issuedAt: string;
+  expiresAt: string | null;
+  revoked: boolean;
+}
+
+export interface CredentialRepository {
+  create(input: Omit<CredentialRecord, "id">): Promise<CredentialRecord>;
+  listByHolder(holderDid: string): Promise<CredentialRecord[]>;
+  get(id: string): Promise<CredentialRecord | null>;
+  setRevoked(id: string, revoked: boolean): Promise<CredentialRecord>;
 }

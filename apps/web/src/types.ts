@@ -1,4 +1,4 @@
-export type Role = "PlatformAdmin" | "UseCaseAdmin" | "Issuer" | "Trader" | "Buyer" | "Auditor";
+export type Role = "PlatformAdmin" | "OrgAdmin" | "UseCaseAdmin" | "Issuer" | "Trader" | "Buyer" | "Auditor";
 
 export interface SessionUser {
   id: string;
@@ -6,6 +6,8 @@ export interface SessionUser {
   role: Role;
   useCaseKey: string | null;
   walletAddress?: string | null;
+  orgId?: string | null;
+  did?: string | null;
 }
 
 export type TokenStandard = "ERC-20" | "ERC-721" | "ERC-3643";
@@ -110,6 +112,8 @@ export interface UseCase {
   /** Maker-checker policy: gated op → required approvals. */
   workflow?: { approvals?: Record<string, number> };
   roles: Role[];
+  /** The organization that owns this use case. */
+  ownerOrgId?: string | null;
 }
 
 export interface Asset {
@@ -280,4 +284,47 @@ export interface ActivityEvent {
   at: string; kind: "subscribed" | "received" | "sent" | "coupon" | "redemption";
   assetId: string; assetName: string; units: string | null; amount: string | null;
   currency: string | null; txHash: string | null;
+}
+
+export type OrgType = "bank" | "corporate" | "msme" | "government" | "verifier";
+
+export interface Organization {
+  id: string;
+  name: string;
+  orgType: OrgType;
+  registrationId: string | null;
+  jurisdiction: string | null;
+  did: string;
+  verified: boolean;
+  status: string;
+  createdAt?: string;
+}
+
+export interface OrgMember {
+  id: string;
+  email: string;
+  role: Role;
+  useCaseKey: string | null;
+  did: string | null;
+  active: boolean;
+  kycStatus: string;
+}
+
+export interface HeldCredential {
+  id: string;
+  type: string[];
+  issuerDid: string;
+  holderDid: string;
+  claims: Record<string, unknown>;
+  issuedAt: string;
+  expiresAt: string | null;
+  revoked: boolean;
+  vcJwt: string;
+}
+
+export interface DidDocument {
+  id: string;
+  verificationMethod: { id: string; type: string; controller: string; publicKeyMultibase: string }[];
+  authentication: string[];
+  assertionMethod: string[];
 }

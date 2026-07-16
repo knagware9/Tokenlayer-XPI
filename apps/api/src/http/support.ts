@@ -7,6 +7,8 @@ export interface TokenClaims {
   email: string;
   role: Role;
   useCaseKey: string | null;
+  orgId?: string | null;
+  did?: string | null;
 }
 
 export function actorOf(request: FastifyRequest): Actor {
@@ -39,7 +41,7 @@ export function requireUser(deps: { users: UserRepository }) {
       await reply.code(401).send({ error: "UNAUTHORIZED", message: "session is no longer valid" });
       return;
     }
-    request.user = { id: user.id, email: user.email, role: user.role, useCaseKey: user.useCaseKey } satisfies TokenClaims;
+    request.user = { id: user.id, email: user.email, role: user.role, useCaseKey: user.useCaseKey, orgId: user.orgId ?? null, did: user.did ?? null } satisfies TokenClaims;
   };
 }
 

@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { AssetRecord, CashflowRecord, KycDetails, KycStatus, ListingRecord, ProposalRecord, UserRecord } from "../persistence/types.js";
+import type { AssetRecord, CashflowRecord, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { auditEntryHash, canCreateUser, canManageUsers, computeCashflowSchedule, didKeyFromSeed, generateDidKey, invoiceFingerprint, issueCredential, normalizeUseCaseDefinition, PolicyError, presentCredential, splitProRata, verifyChain, verifyPresentation, type Actor, type ChainEntry, type LifecycleAction, type Role, type UseCaseDefinition } from "@tokenlayer/core";
+import { auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, didKeyFromSeed, generateDidKey, invoiceFingerprint, issueCredential, normalizeUseCaseDefinition, PolicyError, presentCredential, publicKeyFromDidKey, splitProRata, verifyChain, verifyPresentation, type Actor, type ChainEntry, type LifecycleAction, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { isSupportedCurrency } from "../currencies.js";
 import { renderContractCode } from "../contract-code.js";
@@ -37,6 +37,11 @@ function decodeVcJti(vpJwt: string): string | null {
 // always yields the same DID (dev/demo issuer + holder reproducibility).
 function devKeyFromSeed(seed: string) {
   return didKeyFromSeed(createHash("sha256").update(seed).digest());
+}
+
+// Public projection of an org — NEVER includes didSeedEncrypted.
+function orgView(o: OrganizationRecord) {
+  return { id: o.id, name: o.name, orgType: o.orgType, registrationId: o.registrationId, jurisdiction: o.jurisdiction, did: o.did, verified: o.verified, status: o.status, createdAt: o.createdAt };
 }
 
 /** Registers every /api/v1 route on the given (prefixed) instance. */
@@ -107,6 +112,11 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return deps.proposals.create({ useCaseKey: useCase.key, assetId, kind: op, payload, proposerId: claims.id, proposerLabel: claims.email, required });
   }
 
+  // Org scope: PlatformAdmin acts on any org; an OrgAdmin only on their own.
+  function orgScoped(claims: TokenClaims, orgId: string): boolean {
+    return claims.role === "PlatformAdmin" || (claims.role === "OrgAdmin" && claims.orgId === orgId);
+  }
+
   // --- auth ---------------------------------------------------------------
   app.post("/auth/login", { schema: S.login }, async (request, reply) => {
     if (loginThrottled(request.ip)) {
@@ -120,7 +130,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (!user.active) {
       return reply.code(401).send({ error: "ACCOUNT_SUSPENDED", message: "this account is suspended" });
     }
-    const claims: TokenClaims = { id: user.id, email: user.email, role: user.role, useCaseKey: user.useCaseKey };
+    const claims: TokenClaims = { id: user.id, email: user.email, role: user.role, useCaseKey: user.useCaseKey, orgId: user.orgId ?? null, did: user.did ?? null };
     const wallet = user.accountId ? await deps.accounts.findById(user.accountId) : null;
     return { token: app.jwt.sign(claims), user: { ...claims, walletAddress: wallet?.address ?? null } };
   });
@@ -145,7 +155,9 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   app.get("/use-cases", { schema: S.listUseCases, ...auth }, async (request) => {
     const claims = request.user as TokenClaims;
     const all = await deps.useCases.list();
-    return claims.role === "PlatformAdmin" ? all : all.filter((u) => u.key === claims.useCaseKey);
+    if (claims.role === "PlatformAdmin") return all;
+    if (claims.role === "OrgAdmin") return all.filter((u) => u.ownerOrgId != null && u.ownerOrgId === claims.orgId);
+    return all.filter((u) => u.key === claims.useCaseKey);
   });
   app.get("/use-cases/:key", { schema: S.getUseCase, ...auth }, async (request, reply) => {
     const { key } = request.params as { key: string };
@@ -1122,7 +1134,21 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       kycStatus: "pending",
       kyc: b.kyc ?? null,
     });
-    return reply.code(201).send({ id: created.id, email: created.email, role: created.role, useCaseKey: created.useCaseKey, accountId: created.accountId, kycStatus: created.kycStatus });
+    // If the creator belongs to an org, the new user joins it with a sub-DID +
+    // membership VC (mirrors POST /orgs/:id/users). No org ⇒ behaves as before.
+    let mintedDid: string | null = null;
+    if (claims.orgId) {
+      const org = await deps.organizations.get(claims.orgId);
+      if (org) {
+        try {
+          mintedDid = await mintMembership(org, created, b.role);
+        } catch (err) {
+          await deps.users.remove(created.id);
+          throw err;
+        }
+      }
+    }
+    return reply.code(201).send({ id: created.id, email: created.email, role: created.role, useCaseKey: created.useCaseKey, accountId: created.accountId, kycStatus: created.kycStatus, orgId: claims.orgId ?? null, did: mintedDid });
   });
 
   app.delete("/users/:id", { schema: S.deleteUser, ...auth }, async (request, reply) => {
@@ -1150,6 +1176,125 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (b.kycStatus === "approved" || b.kycStatus === "rejected") patch.kycStatus = b.kycStatus;
     const updated = await deps.users.update(id, patch);
     return { id: updated.id, email: updated.email, role: updated.role, useCaseKey: updated.useCaseKey, accountId: updated.accountId, active: updated.active, kycStatus: updated.kycStatus };
+  });
+
+  // --- organizations -------------------------------------------------------
+  app.post("/orgs", { schema: S.createOrg, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    if (claims.role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only the Platform Admin may create organizations" });
+    if (!deps.didMasterConfigured && deps.isProduction) return reply.code(503).send({ error: "DID_KEYSTORE_UNCONFIGURED", message: "DID_MASTER_KEY must be set to create organizations" });
+    const b = request.body as { name: string; orgType: "bank" | "corporate" | "msme" | "government" | "verifier"; registrationId?: string; jurisdiction?: string };
+    if (await deps.organizations.findByName(b.name)) return reply.code(409).send({ error: "NAME_TAKEN", message: "an organization with that name already exists" });
+    if (b.registrationId && (await deps.organizations.findByRegistrationId(b.registrationId))) return reply.code(409).send({ error: "REGISTRATION_TAKEN", message: "an organization with that registration id already exists" });
+    const seed = deps.keystore.newSeed();
+    const didSeedEncrypted = deps.keystore.encryptSeed(seed);
+    const did = deps.keystore.keyOf(didSeedEncrypted).did;
+    const org = await deps.organizations.create({
+      name: b.name, orgType: b.orgType, registrationId: b.registrationId ?? null, jurisdiction: b.jurisdiction ?? null,
+      did, didSeedEncrypted, status: "active", verified: true, verifiedAt: new Date().toISOString(),
+    });
+    await deps.audit.append({ actorId: claims.id, action: "org-created" as LifecycleAction, payload: { orgId: org.id, name: org.name, did: org.did } });
+    return reply.code(201).send({ id: org.id, name: org.name, did: org.did, orgType: org.orgType, registrationId: org.registrationId, jurisdiction: org.jurisdiction, verified: org.verified, status: org.status });
+  });
+
+  app.get("/orgs", { schema: S.listOrgs, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    let rows;
+    if (claims.role === "PlatformAdmin") rows = await deps.organizations.list();
+    else if (claims.role === "OrgAdmin" && claims.orgId) { const o = await deps.organizations.get(claims.orgId); rows = o ? [o] : []; }
+    else return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to list organizations" });
+    return rows.map(orgView);
+  });
+
+  app.get("/orgs/:id", { schema: S.getOrg, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    if (!orgScoped(claims, id)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to view that organization" });
+    const org = await deps.organizations.get(id);
+    if (!org) return notFound(reply, "organization not found");
+    return orgView(org);
+  });
+
+  // Mint a sub-DID + OrganizationMembership VC for `user` under `org`, persisting
+  // the encrypted seed on the user and the VC in the credential store. Returns the
+  // minted DID. Throws on any failure so the caller can roll back the user row.
+  async function mintMembership(org: OrganizationRecord, user: UserRecord, role: Role): Promise<string> {
+    const now = Math.floor(Date.now() / 1000);
+    const seed = deps.keystore.newSeed();
+    const didSeedEncrypted = deps.keystore.encryptSeed(seed);
+    const did = deps.keystore.keyOf(didSeedEncrypted).did;
+    const memberSince = new Date(now * 1000).toISOString().slice(0, 10);
+    const { vcJwt, expiresAt } = deps.keystore.issueMembershipCredential({
+      orgEncSeed: org.didSeedEncrypted, orgDid: org.did, userDid: did,
+      claims: { organization: org.name, orgId: org.id, role, memberSince }, now,
+    });
+    await deps.users.update(user.id, { did, didSeedEncrypted, orgId: org.id });
+    await deps.credentials.create({
+      holderDid: did, issuerDid: org.did, type: "OrganizationMembership", vcJwt,
+      subjectClaims: { id: did, organization: org.name, orgId: org.id, role, memberSince },
+      issuedAt: new Date(now * 1000).toISOString(), expiresAt: new Date(expiresAt * 1000).toISOString(), revoked: false,
+    });
+    return did;
+  }
+
+  app.post("/orgs/:id/users", { schema: S.createMember, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    const b = request.body as { email: string; password: string; role: Role; useCaseKey?: string; walletAddress?: string; kyc?: KycDetails };
+    if (!orgScoped(claims, id)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to add members to that organization" });
+    if (!canCreateOrgMember(claims.role, b.role)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to create that member role" });
+    const org = await deps.organizations.get(id);
+    if (!org) return notFound(reply, "organization not found");
+    if (await deps.users.findByEmail(b.email)) return reply.code(400).send({ error: "EMAIL_TAKEN", message: "email already registered" });
+    let accountId: string | null = null;
+    if (b.walletAddress) accountId = (await deps.accounts.upsert(b.walletAddress, b.email)).id;
+    const created = await deps.users.create({
+      email: b.email, passwordHash: await bcrypt.hash(b.password, BCRYPT_ROUNDS), role: b.role,
+      useCaseKey: b.useCaseKey ?? null, accountId, active: true, kycStatus: "pending", kyc: b.kyc ?? null, orgId: id,
+    });
+    let did: string;
+    try {
+      did = await mintMembership(org, created, b.role);
+    } catch (err) {
+      await deps.users.remove(created.id); // no orphan user without a DID/VC
+      throw err;
+    }
+    await deps.audit.append({ actorId: claims.id, action: "member-added" as LifecycleAction, payload: { orgId: id, userId: created.id, did, role: b.role } });
+    return reply.code(201).send({ id: created.id, email: created.email, role: created.role, useCaseKey: created.useCaseKey, orgId: id, did, membershipVc: true });
+  });
+
+  app.get("/orgs/:id/members", { schema: S.listMembers, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    if (!orgScoped(claims, id)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to view that organization's members" });
+    const org = await deps.organizations.get(id);
+    if (!org) return notFound(reply, "organization not found");
+    const members = await deps.users.listByOrg(id);
+    return members.map((u) => ({ id: u.id, email: u.email, role: u.role, useCaseKey: u.useCaseKey, did: u.did ?? null, active: u.active, kycStatus: u.kycStatus }));
+  });
+
+  app.get("/dids/:did/document", { schema: S.didDocument, ...auth }, async (request, reply) => {
+    const { did } = request.params as { did: string };
+    try {
+      publicKeyFromDidKey(did); // validates it's a resolvable did:key ed25519
+    } catch {
+      return reply.code(400).send({ error: "UNSUPPORTED_DID", message: "only did:key ed25519 can be resolved" });
+    }
+    const vm = `${did}#0`;
+    return {
+      "@context": ["https://www.w3.org/ns/did/v1"],
+      id: did,
+      verificationMethod: [{ id: vm, type: "Ed25519VerificationKey2020", controller: did, publicKeyMultibase: did.slice("did:key:".length) }],
+      authentication: [vm],
+      assertionMethod: [vm],
+    };
+  });
+
+  app.get("/me/credentials", { schema: S.myCredentials, ...auth }, async (request) => {
+    const claims = request.user as TokenClaims;
+    if (!claims.did) return [];
+    const rows = await deps.credentials.listByHolder(claims.did);
+    return rows.map((c) => ({ id: c.id, type: c.type.split(","), issuerDid: c.issuerDid, holderDid: c.holderDid, claims: c.subjectClaims, issuedAt: c.issuedAt, expiresAt: c.expiresAt, revoked: c.revoked, vcJwt: c.vcJwt }));
   });
 
   // --- identity (DID / Verifiable Credentials) ------------------------------

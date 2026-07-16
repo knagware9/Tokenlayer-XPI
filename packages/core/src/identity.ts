@@ -80,13 +80,13 @@ export function verifyJwtSignature(jwt: string, publicKey: KeyObject): boolean {
   } catch { return false; }
 }
 
-export interface IssueInput { issuerDid: string; issuerKey: KeyObject; subjectDid: string; claims: Record<string, unknown>; expiresAt: number; now: number; }
-/** Mint a VC-JWT (dev/test helper). credentialSubject.id = subjectDid; jti = credential id. */
+export interface IssueInput { issuerDid: string; issuerKey: KeyObject; subjectDid: string; claims: Record<string, unknown>; expiresAt: number; now: number; type?: string[]; }
+/** Mint a VC-JWT (dev/test helper). credentialSubject.id = subjectDid; jti = credential id. Defaults to a KycCredential type. */
 export function issueCredential(i: IssueInput): string {
   return signJwt(
     { alg: "EdDSA", typ: "JWT", kid: `${i.issuerDid}#0` },
     { iss: i.issuerDid, sub: i.subjectDid, jti: `urn:uuid:${randomUUID()}`, iat: i.now, nbf: i.now, exp: i.expiresAt,
-      vc: { "@context": ["https://www.w3.org/2018/credentials/v1"], type: ["VerifiableCredential", "KycCredential"], credentialSubject: { id: i.subjectDid, ...i.claims } } },
+      vc: { "@context": ["https://www.w3.org/2018/credentials/v1"], type: i.type ?? ["VerifiableCredential", "KycCredential"], credentialSubject: { id: i.subjectDid, ...i.claims } } },
     i.issuerKey,
   );
 }
