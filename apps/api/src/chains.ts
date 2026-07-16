@@ -93,6 +93,11 @@ function evmArtifacts(): Record<TokenStandard, ReturnType<typeof loadArtifact>> 
   };
 }
 
+/** Registry artifacts for the identity registries (EVM only). */
+function registryArtifacts(): { didRegistry: ReturnType<typeof loadArtifact>; vcRegistry: ReturnType<typeof loadArtifact> } {
+  return { didRegistry: loadArtifact("DidRegistry"), vcRegistry: loadArtifact("VcRegistry") };
+}
+
 /**
  * Assembles every available ledger from config/chains.json. EVM chains are REAL
  * or ABSENT — there is no mock fallback. A `required` EVM chain (besu) aborts
@@ -129,7 +134,7 @@ export function buildChainRegistry(env: Env = process.env): ChainRegistry {
     const privateKey = (d.keyEnv ? env[d.keyEnv] : undefined) ?? env.EVM_OPERATOR_KEY;
     if (rpcUrl && privateKey) {
       artifacts ??= evmArtifacts();
-      const adapter = new EvmLedgerAdapter({ chainId: d.id, rpcUrl, privateKey, artifacts, gas: d.gas, confirmations: d.confirmations });
+      const adapter = new EvmLedgerAdapter({ chainId: d.id, rpcUrl, privateKey, artifacts, registryArtifacts: registryArtifacts(), gas: d.gas, confirmations: d.confirmations });
       adapters.set(d.id, adapter);
       rpcUrls.set(d.id, rpcUrl);
       infos.push({

@@ -7,6 +7,7 @@ export {
 export { SimulatedLedger } from "./simulated-ledger.js";
 export { EvmLedgerAdapter } from "./evm-adapter.js";
 export type { EvmAdapterConfig, GasMode } from "./evm-adapter.js";
+export * from "./credential-anchor.js";
 // Real (production) DLT adapters — activated by configuration, behind the same seam.
 export { FabricLedgerAdapter as FabricGatewayAdapter } from "./fabric/fabric-adapter.js";
 export type { FabricAdapterConfig } from "./fabric/fabric-adapter.js";

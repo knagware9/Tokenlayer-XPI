@@ -1,4 +1,15 @@
-import { Contract, ContractFactory, JsonRpcProvider, NonceManager, Wallet, ZeroAddress, formatEther, type InterfaceAbi } from "ethers";
+import {
+  Contract,
+  ContractFactory,
+  JsonRpcProvider,
+  NonceManager,
+  Wallet,
+  ZeroAddress,
+  ZeroHash,
+  formatEther,
+  id,
+  type InterfaceAbi,
+} from "ethers";
 import type {
   AssetDeploymentSpec,
   AssetRef,
@@ -10,6 +21,7 @@ import type {
 } from "@tokenlayer/core";
 import { loadTrexArtifacts } from "./trex/artifacts.js";
 import { TrexManager, type TrexSuiteRefs } from "./trex/trex-manager.js";
+import type { CredentialAnchor, DidRegistration, OnChainCredentialStatus } from "./credential-anchor.js";
 
 /**
  * A signer that assigns operator nonces from a local counter, fetched once and
@@ -49,6 +61,8 @@ export interface EvmAdapterConfig {
   privateKey: string;
   /** Compiled artifacts, one per supported standard. */
   artifacts: Record<TokenStandard, EvmArtifact>;
+  /** Registry artifacts. Absent ⇒ registry methods throw when called. */
+  registryArtifacts?: { didRegistry: EvmArtifact; vcRegistry: EvmArtifact };
   /** Gas pricing: "auto" lets ethers populate (EIP-1559/legacy); "zero" forces gasPrice 0. */
   gas?: GasMode;
   /** Confirmations to await per transaction (1 for instant-finality dev chains). */
@@ -65,13 +79,14 @@ export interface EvmAdapterConfig {
  * nonces, so transactions never race even when interleaved with compliance
  * reverts that consume no nonce.
  */
-export class EvmLedgerAdapter implements LedgerAdapter {
+export class EvmLedgerAdapter implements LedgerAdapter, CredentialAnchor {
   readonly chainId: string;
   readonly family: ChainFamily = "evm";
   private readonly provider: JsonRpcProvider;
   private readonly wallet: Wallet;
   private readonly signer: SerialNonceSigner;
   private readonly artifacts: Record<TokenStandard, EvmArtifact>;
+  private readonly registries?: { didRegistry: EvmArtifact; vcRegistry: EvmArtifact };
   private readonly gas: GasMode;
   private readonly confirmations: number;
   private queue: Promise<unknown> = Promise.resolve();
@@ -87,6 +102,7 @@ export class EvmLedgerAdapter implements LedgerAdapter {
     this.wallet = new Wallet(config.privateKey, this.provider);
     this.signer = new SerialNonceSigner(this.wallet);
     this.artifacts = config.artifacts;
+    this.registries = config.registryArtifacts;
     this.gas = config.gas ?? "auto";
     this.confirmations = config.confirmations ?? 1;
   }
@@ -291,5 +307,75 @@ export class EvmLedgerAdapter implements LedgerAdapter {
    */
   async anchor(_ref: AssetRef, hash: string): Promise<TxReceipt> {
     return this.send((ov) => this.signer.sendTransaction({ to: this.wallet.address, value: 0n, data: hash, ...ov }));
+  }
+
+  // --- CredentialAnchor (on-chain identity registries) ----------------------
+  // Commitments are hashed HERE so no caller can get them wrong: keccak256 of the
+  // credential id, and of the VC-JWT string (already canonical — no JSON
+  // canonicalization step, and therefore none of its fragility).
+
+  private requireRegistryArtifacts(): { didRegistry: EvmArtifact; vcRegistry: EvmArtifact } {
+    if (!this.registries) throw new Error("registry artifacts are not configured for this adapter");
+    return this.registries;
+  }
+
+  async deployRegistries(): Promise<{ didRegistry: string; vcRegistry: string; txHash: string }> {
+    return this.serialize(async () => {
+      const { didRegistry, vcRegistry } = this.requireRegistryArtifacts();
+      const didFactory = new ContractFactory(didRegistry.abi, didRegistry.bytecode, this.signer);
+      const did = await didFactory.deploy(this.gasOverrides());
+      await did.waitForDeployment();
+      const vcFactory = new ContractFactory(vcRegistry.abi, vcRegistry.bytecode, this.signer);
+      const vc = await vcFactory.deploy(this.gasOverrides());
+      await vc.waitForDeployment();
+      return {
+        didRegistry: await did.getAddress(),
+        vcRegistry: await vc.getAddress(),
+        txHash: vc.deploymentTransaction()?.hash ?? "",
+      };
+    });
+  }
+
+  async registerDid(registry: string, did: string): Promise<TxReceipt> {
+    const c = new Contract(registry, this.requireRegistryArtifacts().didRegistry.abi, this.signer);
+    return this.send((ov) => c.getFunction("registerDid")(did, ov));
+  }
+
+  async deactivateDid(registry: string, did: string): Promise<TxReceipt> {
+    const c = new Contract(registry, this.requireRegistryArtifacts().didRegistry.abi, this.signer);
+    return this.send((ov) => c.getFunction("deactivateDid")(did, ov));
+  }
+
+  async didRegistration(registry: string, did: string): Promise<DidRegistration> {
+    const c = new Contract(registry, this.requireRegistryArtifacts().didRegistry.abi, this.provider);
+    const rec = await c.getFunction("resolve")(did);
+    return { registered: BigInt(rec.registeredAt) > 0n, active: Boolean(rec.active) };
+  }
+
+  async anchorCredential(
+    registry: string,
+    credentialId: string,
+    vcJwt: string,
+    issuedAt: number,
+    expiresAt: number,
+  ): Promise<TxReceipt> {
+    const c = new Contract(registry, this.requireRegistryArtifacts().vcRegistry.abi, this.signer);
+    return this.send((ov) => c.getFunction("anchor")(id(credentialId), id(vcJwt), BigInt(issuedAt), BigInt(expiresAt), ov));
+  }
+
+  async revokeCredential(registry: string, credentialId: string): Promise<TxReceipt> {
+    const c = new Contract(registry, this.requireRegistryArtifacts().vcRegistry.abi, this.signer);
+    return this.send((ov) => c.getFunction("revoke")(id(credentialId), ov));
+  }
+
+  async credentialStatusOf(registry: string, credentialId: string): Promise<OnChainCredentialStatus> {
+    const c = new Contract(registry, this.requireRegistryArtifacts().vcRegistry.abi, this.provider);
+    const s = await c.getFunction("statusOf")(id(credentialId));
+    return {
+      exists: Boolean(s.exists),
+      revoked: Boolean(s.revoked),
+      revokedAt: BigInt(s.revokedAt) > 0n ? Number(s.revokedAt) : null,
+      vcHash: s.exists ? String(s.vcHash) : ZeroHash,
+    };
   }
 }

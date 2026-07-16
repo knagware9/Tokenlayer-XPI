@@ -229,3 +229,14 @@ model Credential {
 
   @@index([holderDid])
 }
+
+// The identity registries deployed on one chain. There is exactly one row per
+// chain that hosts them (in practice: REGISTRY_CHAIN_ID, default "besu"). The
+// row's existence IS the idempotency check for the boot-time deploy.
+model RegistryDeployment {
+  chainId      String   @id
+  didRegistry  String
+  vcRegistry   String
+  deployTxHash String
+  createdAt    DateTime @default(now())
+}

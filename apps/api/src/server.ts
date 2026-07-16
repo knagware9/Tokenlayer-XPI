@@ -18,9 +18,11 @@ import {
   PrismaCashRepository,
   PrismaDocumentRepository,
   PrismaListingRepository,
+  PrismaRegistryDeploymentRepository,
   PrismaUseCaseRepository,
   PrismaUserRepository,
 } from "./persistence/prisma.js";
+import { resolveIdentityRegistry } from "./registry.js";
 import { seedDefaults } from "./seed.js";
 import { seedUseCases } from "./use-cases.js";
 
@@ -53,6 +55,11 @@ async function main(): Promise<void> {
     availableChainIds: new Set(chains.list().map((c) => c.id)),
     deploy: (def, chainId) => engine.deployUseCaseContract(def, chainId),
   });
+  const registry = await resolveIdentityRegistry({
+    chainId: env.registryChainId,
+    chains,
+    deployments: new PrismaRegistryDeploymentRepository(),
+  });
   const app = await buildApp({
     useCases,
     rbac,
@@ -83,6 +90,7 @@ async function main(): Promise<void> {
     platformFeeAccount: env.platformFeeAccount,
     marketEscrowAccount: env.marketEscrowAccount,
     loginRateLimitMax: env.loginRateLimitMax,
+    registry,
   });
 
   await app.listen({ port: env.port, host: "0.0.0.0" });

@@ -984,19 +984,29 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 **Files:**
 - Modify: `apps/api/src/keystore.ts`, `apps/api/src/http/routes.ts`, `apps/api/src/http/schemas.ts`
 
-- [ ] **Step 1: Rename the credentialStatus type**
+- [ ] **Step 1: Update the credentialStatus comment — do NOT rename the type**
 
-In `apps/api/src/keystore.ts`, replace the `REVOCATION_STATUS_TYPE` constant + its comment:
+**REVISED DURING IMPLEMENTATION.** This step originally renamed `SimpleRevocationStatus2024` →
+`RevocationEndpoint2024`. That was wrong. The type means *"resolve this URL over HTTP"*, which never
+changed — only what sits behind the URL did, and that is invisible to the VC holder. Renaming would
+put two type strings in the wild meaning the same thing, forcing verifiers to handle both. (It also
+broke a protected test that issues a fresh VC in-test: "existing VCs keep their old string" held only
+for rows already in a database.)
+
+In `apps/api/src/keystore.ts`, KEEP `export const REVOCATION_STATUS_TYPE = "SimpleRevocationStatus2024";`
+byte-for-byte and replace ONLY its doc comment:
 
 ```typescript
 /**
- * OUR OWN status type — still deliberately NOT StatusList2021, which this is not.
- * Semantics: resolve this URL over HTTP; the answer is backed by an on-chain
- * registry when one is configured, and the response says which (`source`).
+ * OUR OWN status type — deliberately NOT StatusList2021, which this is not.
+ * Semantics: resolve this URL over HTTP. The answer is backed by an on-chain
+ * registry when one is configured and by the database otherwise; the response's
+ * `source` field says which. The type string is intentionally unchanged now that
+ * the endpoint is chain-backed: the VC-facing contract ("resolve this URL") never
+ * changed, and minting a second name for identical semantics would force every
+ * verifier to handle both.
  */
-export const REVOCATION_STATUS_TYPE = "RevocationEndpoint2024";
 ```
-Nothing else changes: existing VCs keep their old type string and resolve at the same URL, which serves both identically.
 
 - [ ] **Step 2: The three-way status resolution**
 
@@ -1589,7 +1599,7 @@ Then use **superpowers:finishing-a-development-branch**. Confirm the merge with 
 - `RegistryDeployment` model + `REGISTRY_CHAIN_ID` → Task 4. ✓
 - Boot deploy, idempotent on row existence, never throws, absent-tolerant; `AppDeps.registry` optional → Task 5 (+ idempotency proven live in Task 10 Step 5). ✓
 - Anchor-before-persist in `POST /orgs` (502, no rollback needed) + `issueCredentialKind`; revoke chain-first → Task 6. ✓
-- Strict three-way status (incl. the `exists: false` → DB fallback), DID `registration` block, `GET /registry`, `RevocationEndpoint2024` → Task 7. ✓
+- Strict three-way status (incl. the `exists: false` → DB fallback), DID `registration` block, `GET /registry` → Task 7 (the credentialStatus RENAME was dropped during implementation — see Task 7 Step 1). ✓
 - Testing: contracts on real EVM (1–2), test double for wiring (8), unanchored regression gate (8 Step 4), live E2E + independent `eth_call` (10). ✓
 - Web registry card + on-chain/anchored pills → Task 9. ✓
 - Privacy claims are enforced by construction (the contracts simply have no fields for DIDs/types) and asserted in Task 8's "member sub-DID is NOT registered" test. ✓

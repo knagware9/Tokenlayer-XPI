@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ApiError, api } from "../api.js";
 import { useAuth } from "../auth.js";
-import type { OrgMember, OrgType, Organization, Role } from "../types.js";
+import type { DidDocument, OrgMember, OrgType, Organization, Role } from "../types.js";
 import { CredentialsPanel } from "./CredentialsPanel.js";
 import { Card, EmptyState, Pill, SectionHeader } from "./ui.js";
 
@@ -42,6 +42,17 @@ export function Organizations(): JSX.Element {
 
   const selectedOrg = orgs.find((o) => o.id === selected) ?? null;
 
+  // Resolved once for the selected org only — a DID document per card would be
+  // one request per org on every render of the list.
+  const selectedDid = selectedOrg?.did ?? null;
+  const [registration, setRegistration] = useState<DidDocument["registration"]>(null);
+  useEffect(() => {
+    if (!token || !selectedDid) { setRegistration(null); return; }
+    void api.didDocument(token, selectedDid)
+      .then((d) => setRegistration(d.registration ?? null))
+      .catch(() => setRegistration(null));
+  }, [token, selectedDid]);
+
   return (
     <div className="space-y-5">
       <SectionHeader
@@ -63,7 +74,13 @@ export function Organizations(): JSX.Element {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {orgs.map((o) => (
-            <OrgCard key={o.id} org={o} selected={o.id === selected} onSelect={() => setSelected(o.id)} />
+            <OrgCard
+              key={o.id}
+              org={o}
+              selected={o.id === selected}
+              registration={o.id === selected ? registration : null}
+              onSelect={() => setSelected(o.id)}
+            />
           ))}
         </div>
       )}
@@ -73,7 +90,13 @@ export function Organizations(): JSX.Element {
   );
 }
 
-function OrgCard({ org, selected, onSelect }: { org: Organization; selected: boolean; onSelect: () => void }): JSX.Element {
+function OrgCard({ org, selected, registration, onSelect }: {
+  org: Organization;
+  selected: boolean;
+  /** Only ever set for the selected org — the DID document is resolved once, not per card. */
+  registration: DidDocument["registration"];
+  onSelect: () => void;
+}): JSX.Element {
   return (
     <button
       onClick={onSelect}
@@ -87,8 +110,13 @@ function OrgCard({ org, selected, onSelect }: { org: Organization; selected: boo
         <Pill tone="info">{org.orgType}</Pill>
         {org.jurisdiction && <Pill tone="muted">{org.jurisdiction}</Pill>}
       </div>
-      <div className="text-[11px] font-mono text-slate-500 truncate" title={org.did}>
-        {truncateDid(org.did)}
+      <div className="flex items-center gap-2 min-w-0">
+        <span className="text-[11px] font-mono text-slate-500 truncate" title={org.did}>
+          {truncateDid(org.did)}
+        </span>
+        {registration?.registered && (
+          <Pill tone={registration.active ? "ok" : "muted"}>{registration.active ? "on-chain" : "deactivated"}</Pill>
+        )}
       </div>
     </button>
   );

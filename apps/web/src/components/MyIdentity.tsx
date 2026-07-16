@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ApiError, api } from "../api.js";
 import { useAuth } from "../auth.js";
-import type { DidDocument, HeldCredential } from "../types.js";
+import type { CredentialStatusInfo, DidDocument, HeldCredential } from "../types.js";
 import { Card, EmptyState, Pill, SectionHeader, Skeleton } from "./ui.js";
 
 function truncateDid(v: string): string {
@@ -38,6 +38,16 @@ export function MyIdentity(): JSX.Element {
       .then(([d, c]) => { setDoc(d); setCreds(c); })
       .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load identity"));
   }, [token, did]);
+
+  // Whether each credential is anchored on-chain. The status endpoint is public,
+  // so it needs no token; a failure just omits that credential's pill.
+  const [statuses, setStatuses] = useState<Record<string, CredentialStatusInfo>>({});
+  useEffect(() => {
+    if (!creds?.length) return;
+    void Promise.all(
+      creds.map((c) => api.credentialStatus(c.id).then((s) => [c.id, s] as const).catch(() => null)),
+    ).then((rows) => setStatuses(Object.fromEntries(rows.filter(Boolean) as (readonly [string, CredentialStatusInfo])[])));
+  }, [creds]);
 
   if (!did) {
     return (
@@ -83,13 +93,20 @@ export function MyIdentity(): JSX.Element {
           </Card>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {creds.map((c) => (
+            {creds.map((c) => {
+              const status = statuses[c.id];
+              return (
               <div key={c.id} className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-4 space-y-2">
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex flex-wrap items-center gap-1.5 min-w-0">
                     {c.type.map((t) => <Pill key={t} tone="info">{t}</Pill>)}
                   </div>
-                  <Pill tone={c.revoked ? "danger" : "ok"}>{c.revoked ? "revoked" : "valid"}</Pill>
+                  <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0">
+                    <Pill tone={c.revoked ? "danger" : "ok"}>{c.revoked ? "revoked" : "valid"}</Pill>
+                    {status && (status.anchored
+                      ? <Pill tone="info">anchored · {status.chainId}</Pill>
+                      : <Pill tone="muted">unanchored</Pill>)}
+                  </div>
                 </div>
                 <div className="text-xs text-slate-600">
                   {issuerLabel(c) && <span className="font-medium text-slate-800">{issuerLabel(c)}</span>}
@@ -102,7 +119,8 @@ export function MyIdentity(): JSX.Element {
                 </div>
                 {c.revokedReason && <div className="text-xs text-rose-600 mt-0.5">Revoked: {c.revokedReason}</div>}
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

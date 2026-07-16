@@ -465,7 +465,7 @@ describe("revocation", () => {
   it("the public status endpoint reports a live credential without auth", async () => {
     const res = await app.inject({ method: "GET", url: `${V1}/credentials/${credentialId}/status` });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ id: credentialId, revoked: false, revokedAt: null, reason: null });
+    expect(res.json()).toEqual({ id: credentialId, revoked: false, revokedAt: null, reason: null, anchored: false, source: "database" });
   });
 
   it("404s the public status of an unknown id", async () => {
@@ -498,8 +498,12 @@ describe("revocation", () => {
     expect(status.reason).toBe(reason);
     expect(typeof status.revokedAt).toBe("string");
 
-    // ...and it leaks NOTHING else: no claims, no VC, no holder.
-    expect(Object.keys(status).sort()).toEqual(["id", "reason", "revoked", "revokedAt"]);
+    // ...and it leaks NOTHING else: no claims, no VC, no holder. `anchored` and
+    // `source` are the deliberate provenance fields — the point of the on-chain
+    // registry sub-project: they say whether the chain or the database answered.
+    // This suite runs with no registry, so the chain-only keys (chainId /
+    // registry / vcHash) must NOT appear here.
+    expect(Object.keys(status).sort()).toEqual(["anchored", "id", "reason", "revoked", "revokedAt", "source"].sort());
     const serialized = JSON.stringify(status);
     expect(serialized).not.toContain("Ada Lovelace");
     expect(serialized).not.toContain("P1234567");

@@ -891,7 +891,7 @@ export const S: Record<string, FastifySchema> = {
         jurisdiction: { type: "string" },
       },
     },
-    response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 409, 503) },
+    response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 409, 502, 503) },
   },
   listOrgs: { tags: ["Organizations"], summary: "List organizations in scope", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403) } },
   getOrg: {
@@ -954,6 +954,10 @@ export const S: Record<string, FastifySchema> = {
     tags: ["Credentials"], summary: "Public revocation status of a credential (no auth — verifiers must resolve it)",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(404) },
+  },
+  identityRegistry: {
+    tags: ["Identity"], summary: "The deployed on-chain identity registries (null when none)", security: bearer,
+    response: { 200: { type: "object", nullable: true, additionalProperties: true }, ...errs(401) },
   },
   orgCredentials: {
     tags: ["Credentials"], summary: "Credentials issued by an organization", security: bearer,

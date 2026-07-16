@@ -43,6 +43,8 @@ import type {
   ProposalApproval,
   ProposalRecord,
   ProposalRepository,
+  RegistryDeploymentRecord,
+  RegistryDeploymentRepository,
   SaleTerms,
   UseCaseRepository,
   UserRecord,
@@ -758,5 +760,22 @@ export class PrismaCredentialRepository implements CredentialRepository {
       where: { id },
       data: { revoked: true, revokedReason: input.reason, revokedBy: input.by, revokedAt: new Date(input.at) },
     }));
+  }
+}
+
+const toRegistry = (r: {
+  chainId: string; didRegistry: string; vcRegistry: string; deployTxHash: string; createdAt: Date;
+}): RegistryDeploymentRecord => ({
+  chainId: r.chainId, didRegistry: r.didRegistry, vcRegistry: r.vcRegistry,
+  deployTxHash: r.deployTxHash, createdAt: r.createdAt.toISOString(),
+});
+
+export class PrismaRegistryDeploymentRepository implements RegistryDeploymentRepository {
+  async get(chainId: string): Promise<RegistryDeploymentRecord | null> {
+    const r = await prisma.registryDeployment.findUnique({ where: { chainId } });
+    return r ? toRegistry(r) : null;
+  }
+  async create(input: Omit<RegistryDeploymentRecord, "createdAt">): Promise<RegistryDeploymentRecord> {
+    return toRegistry(await prisma.registryDeployment.create({ data: input }));
   }
 }

@@ -214,12 +214,20 @@ than discovering a silent fallback.
 - **`GET /registry`** (auth read) — `{ chainId, didRegistry, vcRegistry, deployTxHash, didCount } | null`,
   for the Networks view.
 
-### `credentialStatus` type
+### `credentialStatus` type — unchanged, deliberately
 
-`SimpleRevocationStatus2024` → `RevocationEndpoint2024`, described plainly as "resolve this URL over
-HTTP; backed by an on-chain registry when one is configured". Still deliberately **not** named
-StatusList2021, which it still is not. Existing VCs keep working: only the type string on
-newly-issued credentials changes, and the endpoint serves both identically.
+**REVISED DURING IMPLEMENTATION.** This section originally called for renaming
+`SimpleRevocationStatus2024` → `RevocationEndpoint2024`. That was wrong and is not being done.
+
+The type's semantics are *"resolve this URL over HTTP"* — and that never changed. What changed is what
+sits **behind** the URL, which is invisible to and irrelevant for the VC holder. Renaming would put two
+type strings in the wild meaning exactly the same thing, forcing every verifier to handle both for no
+benefit. The existing name was never dishonest: it deliberately avoids claiming to be StatusList2021.
+
+So the constant stays byte-for-byte; only its doc comment is updated to record that the endpoint is now
+chain-backed when a registry is configured, and that the response's `source` field says which.
+(Discovered because the rename broke a protected test that issues a fresh VC in-test — the "existing VCs
+keep their old string" reasoning held only for rows already in a database.)
 
 ## Privacy
 
