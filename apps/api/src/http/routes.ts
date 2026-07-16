@@ -1289,12 +1289,24 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       return reply.code(400).send({ error: "UNSUPPORTED_DID", message: "only did:key ed25519 can be resolved" });
     }
     const vm = `${did}#0`;
+    // The DID registry's read path. Without this the registry would be a
+    // write-only list — the exact decorative pattern this design rejects.
+    let registration: { registered: boolean; active: boolean; chainId: string; registry: string } | null = null;
+    if (deps.registry) {
+      try {
+        const r = await deps.registry.anchor.didRegistration(deps.registry.didRegistry, did);
+        registration = { ...r, chainId: deps.registry.chainId, registry: deps.registry.didRegistry };
+      } catch (err) {
+        request.log.error({ err }, "on-chain DID registration read failed");
+      }
+    }
     return {
       "@context": ["https://www.w3.org/ns/did/v1"],
       id: did,
       verificationMethod: [{ id: vm, type: "Ed25519VerificationKey2020", controller: did, publicKeyMultibase: did.slice("did:key:".length) }],
       authentication: [vm],
       assertionMethod: [vm],
+      registration,
     };
   });
 
@@ -1372,11 +1384,49 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
 
   // PUBLIC — a verifier holding only the VC must be able to resolve its status.
   // Returns revocation state ONLY: no claims, no holder, no VC.
+  //
+  // THREE-WAY resolution. The middle case is the one that matters:
+  //   1. no registry             -> database answer, anchored: false
+  //   2. registry AND exists     -> CHAIN answer, anchored: true
+  //   3. registry but NOT exists -> the credential predates the registry (or its
+  //      anchor never landed) -> database answer, anchored: false.
+  // Case 3 must NEVER be read as "the chain says not-revoked": an absent record
+  // is not a negative revocation. Doing so is exactly the fail-open bug this
+  // whole sub-project exists to avoid.
   app.get("/credentials/:id/status", { schema: S.credentialStatus }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const cred = await deps.credentials.get(id);
     if (!cred) return notFound(reply, "credential not found");
-    return { id: cred.id, revoked: cred.revoked, revokedAt: cred.revokedAt, reason: cred.revokedReason };
+    const fromDb = { id: cred.id, revoked: cred.revoked, revokedAt: cred.revokedAt, reason: cred.revokedReason };
+    if (!deps.registry) return { ...fromDb, anchored: false, source: "database" };
+    let onChain;
+    try {
+      onChain = await deps.registry.anchor.credentialStatusOf(deps.registry.vcRegistry, cred.id);
+    } catch (err) {
+      request.log.error({ err }, "on-chain status read failed");
+      return { ...fromDb, anchored: false, source: "database" };
+    }
+    if (!onChain.exists) return { ...fromDb, anchored: false, source: "database" };
+    return {
+      ...fromDb,
+      revoked: onChain.revoked,
+      revokedAt: onChain.revokedAt ? new Date(onChain.revokedAt * 1000).toISOString() : null,
+      anchored: true,
+      source: "chain",
+      chainId: deps.registry.chainId,
+      registry: deps.registry.vcRegistry,
+      vcHash: onChain.vcHash,
+    };
+  });
+
+  app.get("/registry", { schema: S.identityRegistry, ...auth }, async () => {
+    if (!deps.registry) return null;
+    return {
+      chainId: deps.registry.chainId,
+      didRegistry: deps.registry.didRegistry,
+      vcRegistry: deps.registry.vcRegistry,
+      deployTxHash: deps.registry.deployTxHash,
+    };
   });
 
   app.get("/orgs/:id/credentials", { schema: S.orgCredentials, ...auth }, async (request, reply) => {

@@ -22,9 +22,13 @@ export interface MembershipInput {
 }
 
 /**
- * OUR OWN revocation-status type — deliberately NOT named StatusList2021, which
- * this is not. It resolves to `{ revoked, revokedAt, reason }` over HTTP.
- * Sub-project #4 replaces it with a real on-chain status list.
+ * OUR OWN status type — deliberately NOT StatusList2021, which this is not.
+ * Semantics: resolve this URL over HTTP. The answer is backed by an on-chain
+ * registry when one is configured and by the database otherwise; the response's
+ * `source` field says which. The type string is intentionally unchanged now that
+ * the endpoint is chain-backed: the VC-facing contract ("resolve this URL") never
+ * changed, and minting a second name for identical semantics would force every
+ * verifier to handle both.
  */
 export const REVOCATION_STATUS_TYPE = "SimpleRevocationStatus2024";
 
