@@ -126,6 +126,56 @@ describe("GET /dids/:did/document", () => {
   });
 });
 
+describe("GET /use-cases (org scoping)", () => {
+  it("an OrgAdmin sees only use cases owned by their org", async () => {
+    const orgA = (await createOrg(admin, { name: "UC Org A", orgType: "corporate" })).json();
+    const orgB = (await createOrg(admin, { name: "UC Org B", orgType: "corporate" })).json();
+
+    const memberRes = await app.inject({
+      method: "POST", url: `${V1}/orgs/${orgA.id}/users`, headers: auth(admin),
+      payload: { email: `ucadmin.${orgA.id}@x.io`, password: "secret1", role: "OrgAdmin" },
+    });
+    expect(memberRes.statusCode).toBe(201);
+    const orgAdmin = await loginAs(app, `ucadmin.${orgA.id}@x.io`, "secret1");
+
+    const stamp = Date.now();
+    const keyA = `uc-org-a-${stamp}`;
+    const keyB = `uc-org-b-${stamp}`;
+    const base = {
+      tokenStandard: "ERC-20", symbol: "UCS", allowedChainIds: ["fabric"], defaultChainId: "fabric",
+      metadataSchema: { type: "object", properties: {} },
+      lifecycle: { mint: true, transfer: true, burn: true, freeze: true },
+      compliance: { allowlist: false, transferRestrictions: false },
+      roles: ["UseCaseAdmin", "Issuer"],
+    };
+    const createdA = await app.inject({
+      method: "POST", url: `${V1}/use-cases`, headers: auth(admin),
+      payload: { ...base, key: keyA, name: "UC Org A Case", ownerOrgId: orgA.id },
+    });
+    expect(createdA.statusCode).toBe(201);
+    const createdB = await app.inject({
+      method: "POST", url: `${V1}/use-cases`, headers: auth(admin),
+      payload: { ...base, key: keyB, name: "UC Org B Case", ownerOrgId: orgB.id },
+    });
+    expect(createdB.statusCode).toBe(201);
+
+    const scoped = await app.inject({ method: "GET", url: `${V1}/use-cases`, headers: auth(orgAdmin) });
+    expect(scoped.statusCode).toBe(200);
+    const scopedList = scoped.json() as Array<{ key: string; ownerOrgId?: string | null }>;
+    const scopedKeys = scopedList.map((u) => u.key);
+    expect(scopedKeys).toContain(keyA);
+    expect(scopedKeys).not.toContain(keyB);
+    // Legacy/seeded use cases have a null ownerOrgId and must not leak into an org-scoped view.
+    expect(scopedList.every((u) => u.ownerOrgId === orgA.id)).toBe(true);
+
+    const all = await app.inject({ method: "GET", url: `${V1}/use-cases`, headers: auth(admin) });
+    expect(all.statusCode).toBe(200);
+    const allKeys = (all.json() as Array<{ key: string }>).map((u) => u.key);
+    expect(allKeys).toContain(keyA);
+    expect(allKeys).toContain(keyB);
+  });
+});
+
 describe("back-compat", () => {
   it("a user created with no org gets no DID (legacy POST /users still works)", async () => {
     const uca = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
