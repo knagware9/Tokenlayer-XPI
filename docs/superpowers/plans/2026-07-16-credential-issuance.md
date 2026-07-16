@@ -1016,7 +1016,7 @@ In `apps/api/src/http/routes.ts`, add `CREDENTIAL_TYPES`, `credentialTypeDef` an
       return reply.code(403).send({ error: "SELF_ISSUED_ONLY", message: `'${def.type}' may only be issued to the issuing org's own members` });
     }
     if (!subject.did) return reply.code(400).send({ error: "SUBJECT_HAS_NO_DID", message: "the subject has no decentralized identifier" });
-    validateMetadata(b.claims, def.claimSchema); // throws VALIDATION_ERROR → 400
+    validateMetadata(b.claims, def.claimSchema); // throws PolicyError INVALID_METADATA (with { problems }) → 400
 
     const proposal = await deps.proposals.create({
       useCaseKey: null, orgId: org.id, assetId: null, kind: "issue-credential",
