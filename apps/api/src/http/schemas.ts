@@ -924,6 +924,11 @@ export const S: Record<string, FastifySchema> = {
     response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403, 404) },
   },
   myCredentials: { tags: ["Identity"], summary: "Credentials held by the caller", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401) } },
+  didDocument: {
+    tags: ["Identity"], summary: "Resolve a did:key into a W3C DID document", security: bearer,
+    params: { type: "object", required: ["did"], properties: { did: { type: "string" } } },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401) },
+  },
 
   listUsers: { tags: ["Users"], summary: "List users in scope", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403) } },
   createUser: {

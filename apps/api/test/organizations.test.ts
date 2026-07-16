@@ -107,3 +107,30 @@ describe("POST /orgs/:id/users (members)", () => {
     expect(members.json()[0]).toHaveProperty("did");
   });
 });
+
+describe("GET /dids/:did/document", () => {
+  it("resolves a did:key into a W3C DID document", async () => {
+    const org = (await createOrg(admin, { name: "DIDDoc Org", orgType: "verifier" })).json();
+    const res = await app.inject({ method: "GET", url: `${V1}/dids/${encodeURIComponent(org.did)}/document`, headers: auth(admin) });
+    expect(res.statusCode).toBe(200);
+    const doc = res.json();
+    expect(doc.id).toBe(org.did);
+    expect(doc.verificationMethod[0].type).toBe("Ed25519VerificationKey2020");
+    expect(doc.verificationMethod[0].publicKeyMultibase).toBe(org.did.slice("did:key:".length));
+    expect(doc.authentication[0]).toBe(`${org.did}#0`);
+  });
+
+  it("400s a non-did:key", async () => {
+    const res = await app.inject({ method: "GET", url: `${V1}/dids/${encodeURIComponent("did:web:example.com")}/document`, headers: auth(admin) });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
+describe("back-compat", () => {
+  it("a user created with no org gets no DID (legacy POST /users still works)", async () => {
+    const uca = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
+    const res = await app.inject({ method: "POST", url: `${V1}/users`, headers: auth(uca), payload: { email: `legacy.${Date.now()}@x.io`, password: "secret1", role: "Issuer" } });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().did ?? null).toBeNull();
+  });
+});

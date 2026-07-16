@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AssetRecord, CashflowRecord, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, didKeyFromSeed, generateDidKey, invoiceFingerprint, issueCredential, normalizeUseCaseDefinition, PolicyError, presentCredential, splitProRata, verifyChain, verifyPresentation, type Actor, type ChainEntry, type LifecycleAction, type Role, type UseCaseDefinition } from "@tokenlayer/core";
+import { auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, didKeyFromSeed, generateDidKey, invoiceFingerprint, issueCredential, normalizeUseCaseDefinition, PolicyError, presentCredential, publicKeyFromDidKey, splitProRata, verifyChain, verifyPresentation, type Actor, type ChainEntry, type LifecycleAction, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { isSupportedCurrency } from "../currencies.js";
 import { renderContractCode } from "../contract-code.js";
@@ -155,7 +155,9 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   app.get("/use-cases", { schema: S.listUseCases, ...auth }, async (request) => {
     const claims = request.user as TokenClaims;
     const all = await deps.useCases.list();
-    return claims.role === "PlatformAdmin" ? all : all.filter((u) => u.key === claims.useCaseKey);
+    if (claims.role === "PlatformAdmin") return all;
+    if (claims.role === "OrgAdmin") return all.filter((u) => u.ownerOrgId != null && u.ownerOrgId === claims.orgId);
+    return all.filter((u) => u.key === claims.useCaseKey);
   });
   app.get("/use-cases/:key", { schema: S.getUseCase, ...auth }, async (request, reply) => {
     const { key } = request.params as { key: string };
@@ -1132,7 +1134,21 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       kycStatus: "pending",
       kyc: b.kyc ?? null,
     });
-    return reply.code(201).send({ id: created.id, email: created.email, role: created.role, useCaseKey: created.useCaseKey, accountId: created.accountId, kycStatus: created.kycStatus });
+    // If the creator belongs to an org, the new user joins it with a sub-DID +
+    // membership VC (mirrors POST /orgs/:id/users). No org ⇒ behaves as before.
+    let mintedDid: string | null = null;
+    if (claims.orgId) {
+      const org = await deps.organizations.get(claims.orgId);
+      if (org) {
+        try {
+          mintedDid = await mintMembership(org, created, b.role);
+        } catch (err) {
+          await deps.users.remove(created.id);
+          throw err;
+        }
+      }
+    }
+    return reply.code(201).send({ id: created.id, email: created.email, role: created.role, useCaseKey: created.useCaseKey, accountId: created.accountId, kycStatus: created.kycStatus, orgId: claims.orgId ?? null, did: mintedDid });
   });
 
   app.delete("/users/:id", { schema: S.deleteUser, ...auth }, async (request, reply) => {
@@ -1255,6 +1271,23 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (!org) return notFound(reply, "organization not found");
     const members = await deps.users.listByOrg(id);
     return members.map((u) => ({ id: u.id, email: u.email, role: u.role, useCaseKey: u.useCaseKey, did: u.did ?? null, active: u.active, kycStatus: u.kycStatus }));
+  });
+
+  app.get("/dids/:did/document", { schema: S.didDocument, ...auth }, async (request, reply) => {
+    const { did } = request.params as { did: string };
+    try {
+      publicKeyFromDidKey(did); // validates it's a resolvable did:key ed25519
+    } catch {
+      return reply.code(400).send({ error: "UNSUPPORTED_DID", message: "only did:key ed25519 can be resolved" });
+    }
+    const vm = `${did}#0`;
+    return {
+      "@context": ["https://www.w3.org/ns/did/v1"],
+      id: did,
+      verificationMethod: [{ id: vm, type: "Ed25519VerificationKey2020", controller: did, publicKeyMultibase: did.slice("did:key:".length) }],
+      authentication: [vm],
+      assertionMethod: [vm],
+    };
   });
 
   app.get("/me/credentials", { schema: S.myCredentials, ...auth }, async (request) => {
