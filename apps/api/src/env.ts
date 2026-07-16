@@ -95,6 +95,8 @@ export interface Env {
   didMasterConfigured: boolean;
   /** Public base URL of this API, embedded in credentialStatus pointers on issued VCs. */
   publicApiUrl: string;
+  /** The single chain hosting the identity registries. Absent/unavailable ⇒ credentials issue unanchored. */
+  registryChainId: string;
 }
 
 const platformFeeAccount =
@@ -121,6 +123,7 @@ export const env: Env = {
   didMasterKey: process.env.DID_MASTER_KEY ?? DEV_DID_MASTER_KEY,
   didMasterConfigured: !!process.env.DID_MASTER_KEY,
   publicApiUrl: process.env.PUBLIC_API_URL ?? `http://localhost:${Number(process.env.PORT ?? 4000)}/api/v1`,
+  registryChainId: process.env.REGISTRY_CHAIN_ID ?? "besu",
 };
 
 if (!env.didMasterConfigured) {

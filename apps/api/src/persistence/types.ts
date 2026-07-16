@@ -370,3 +370,16 @@ export interface CredentialRepository {
   setRevoked(id: string, revoked: boolean): Promise<CredentialRecord>;
   revoke(id: string, input: { reason: string; by: string; at: string }): Promise<CredentialRecord>;
 }
+
+export interface RegistryDeploymentRecord {
+  chainId: string;
+  didRegistry: string;
+  vcRegistry: string;
+  deployTxHash: string;
+  createdAt: string;
+}
+
+export interface RegistryDeploymentRepository {
+  get(chainId: string): Promise<RegistryDeploymentRecord | null>;
+  create(input: Omit<RegistryDeploymentRecord, "createdAt">): Promise<RegistryDeploymentRecord>;
+}

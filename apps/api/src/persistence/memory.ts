@@ -28,6 +28,8 @@ import type {
   ProposalApproval,
   ProposalRecord,
   ProposalRepository,
+  RegistryDeploymentRecord,
+  RegistryDeploymentRepository,
   SaleTerms,
   UseCaseRepository,
   UserRecord,
@@ -487,6 +489,18 @@ export class MemoryCredentialRepository implements CredentialRepository {
     rec.revokedReason = input.reason;
     rec.revokedBy = input.by;
     rec.revokedAt = input.at;
+    return rec;
+  }
+}
+
+export class MemoryRegistryDeploymentRepository implements RegistryDeploymentRepository {
+  private readonly byChain = new Map<string, RegistryDeploymentRecord>();
+  async get(chainId: string): Promise<RegistryDeploymentRecord | null> {
+    return this.byChain.get(chainId) ?? null;
+  }
+  async create(input: Omit<RegistryDeploymentRecord, "createdAt">): Promise<RegistryDeploymentRecord> {
+    const rec: RegistryDeploymentRecord = { ...input, createdAt: now() };
+    this.byChain.set(rec.chainId, rec);
     return rec;
   }
 }
