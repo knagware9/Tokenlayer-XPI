@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AssetRecord, CashflowRecord, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, didKeyFromSeed, generateDidKey, invoiceFingerprint, issueCredential, normalizeUseCaseDefinition, PolicyError, presentCredential, publicKeyFromDidKey, splitProRata, verifyChain, verifyPresentation, type Actor, type ChainEntry, type LifecycleAction, type Role, type UseCaseDefinition } from "@tokenlayer/core";
+import { auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TYPES, credentialTypeDef, didKeyFromSeed, generateDidKey, invoiceFingerprint, issueCredential, normalizeUseCaseDefinition, PolicyError, presentCredential, publicKeyFromDidKey, splitProRata, validateMetadata, verifyChain, verifyPresentation, type Actor, type ChainEntry, type LifecycleAction, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { isSupportedCurrency } from "../currencies.js";
 import { renderContractCode } from "../contract-code.js";
@@ -1291,7 +1291,93 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const claims = request.user as TokenClaims;
     if (!claims.did) return [];
     const rows = await deps.credentials.listByHolder(claims.did);
-    return rows.map((c) => ({ id: c.id, type: c.type.split(","), issuerDid: c.issuerDid, holderDid: c.holderDid, claims: c.subjectClaims, issuedAt: c.issuedAt, expiresAt: c.expiresAt, revoked: c.revoked, vcJwt: c.vcJwt }));
+    return rows.map((c) => ({ id: c.id, type: c.type.split(","), issuerDid: c.issuerDid, holderDid: c.holderDid, claims: c.subjectClaims, issuedAt: c.issuedAt, expiresAt: c.expiresAt, revoked: c.revoked, revokedAt: c.revokedAt, revokedReason: c.revokedReason, vcJwt: c.vcJwt }));
+  });
+
+  // --- credentials ---------------------------------------------------------
+  app.get("/credential-types", { schema: S.credentialTypes, ...auth }, async () =>
+    Object.values(CREDENTIAL_TYPES).map((d) => ({
+      type: d.type, description: d.description, allowedIssuerOrgTypes: d.allowedIssuerOrgTypes,
+      requiredApprovals: d.requiredApprovals, validityDays: d.validityDays,
+      selfIssuedOnly: !!d.selfIssuedOnly, claimSchema: d.claimSchema,
+    })));
+
+  app.post("/credentials/requests", { schema: S.requestCredential, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const b = request.body as { type: string; subjectUserId: string; claims: Record<string, unknown>; issuerOrgId?: string };
+    if (claims.role !== "PlatformAdmin" && claims.role !== "OrgAdmin") {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "only a Platform Admin or an Org Admin may request credentials" });
+    }
+    // An OrgAdmin may only ever issue as their OWN org — any issuerOrgId in the
+    // body is ignored, never honoured (it would be a privilege escalation).
+    const issuerOrgId = claims.role === "OrgAdmin" ? claims.orgId : b.issuerOrgId;
+    if (!issuerOrgId) return reply.code(400).send({ error: "ISSUER_ORG_REQUIRED", message: "issuerOrgId is required" });
+    const org = await deps.organizations.get(issuerOrgId);
+    if (!org) return notFound(reply, "issuing organization not found");
+
+    const def = credentialTypeDef(b.type); // throws UNKNOWN_CREDENTIAL_TYPE → 400
+    if (!def.allowedIssuerOrgTypes.includes(org.orgType)) {
+      return reply.code(403).send({ error: "ISSUER_NOT_PERMITTED", message: `an org of type '${org.orgType}' may not issue '${def.type}'` });
+    }
+    const subject = await deps.users.findById(b.subjectUserId);
+    if (!subject) return notFound(reply, "subject user not found");
+    if (def.selfIssuedOnly && subject.orgId !== org.id) {
+      return reply.code(403).send({ error: "SELF_ISSUED_ONLY", message: `'${def.type}' may only be issued to the issuing org's own members` });
+    }
+    if (!subject.did) return reply.code(400).send({ error: "SUBJECT_HAS_NO_DID", message: "the subject has no decentralized identifier" });
+    validateMetadata(b.claims, def.claimSchema); // throws INVALID_METADATA → 400
+
+    const proposal = await deps.proposals.create({
+      useCaseKey: null, orgId: org.id, assetId: null, kind: "issue-credential",
+      payload: { type: def.type, subjectDid: subject.did, subjectUserId: subject.id, claims: b.claims, issuerOrgId: org.id },
+      proposerId: claims.id, proposerLabel: claims.email, required: def.requiredApprovals,
+    });
+    return reply.code(202).send({ proposal });
+  });
+
+  app.post("/credentials/:id/revoke", { schema: S.revokeCredential, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    const { reason } = request.body as { reason: string };
+    const cred = await deps.credentials.get(id);
+    if (!cred) return notFound(reply, "credential not found");
+    if (cred.revoked) return reply.code(409).send({ error: "ALREADY_REVOKED", message: "credential is already revoked" });
+    // Only the ISSUING org may revoke: find the org whose parent DID signed it.
+    const issuer = (await deps.organizations.list()).find((o) => o.did === cred.issuerDid);
+    if (!issuer) return notFound(reply, "issuing organization not found");
+    if (!orgScoped(claims, issuer.id)) {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "only the issuing organization may revoke this credential" });
+    }
+    // Depth comes from the credential's OWN type — revoking an AuthorizedSignatory
+    // costs the same approvals that issuing it did.
+    const def = credentialTypeDef(cred.type);
+    const proposal = await deps.proposals.create({
+      useCaseKey: null, orgId: issuer.id, assetId: null, kind: "revoke-credential",
+      payload: { credentialId: cred.id, reason },
+      proposerId: claims.id, proposerLabel: claims.email, required: def.requiredApprovals,
+    });
+    return reply.code(202).send({ proposal });
+  });
+
+  // PUBLIC — a verifier holding only the VC must be able to resolve its status.
+  // Returns revocation state ONLY: no claims, no holder, no VC.
+  app.get("/credentials/:id/status", { schema: S.credentialStatus }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const cred = await deps.credentials.get(id);
+    if (!cred) return notFound(reply, "credential not found");
+    return { id: cred.id, revoked: cred.revoked, revokedAt: cred.revokedAt, reason: cred.revokedReason };
+  });
+
+  app.get("/orgs/:id/credentials", { schema: S.orgCredentials, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    if (!orgScoped(claims, id)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to view that organization's credentials" });
+    const org = await deps.organizations.get(id);
+    if (!org) return notFound(reply, "organization not found");
+    return (await deps.credentials.listByIssuer(org.did)).map((c) => ({
+      id: c.id, type: c.type, holderDid: c.holderDid, claims: c.subjectClaims,
+      issuedAt: c.issuedAt, expiresAt: c.expiresAt, revoked: c.revoked, revokedAt: c.revokedAt, revokedReason: c.revokedReason,
+    }));
   });
 
   // --- identity (DID / Verifiable Credentials) ------------------------------
@@ -1487,8 +1573,14 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   app.get("/proposals", { schema: S.listProposals, ...auth }, async (request) => {
     const claims = request.user as TokenClaims;
     const q = request.query as { status?: string; useCaseKey?: string };
-    const useCaseKey = claims.role === "PlatformAdmin" ? q.useCaseKey : claims.useCaseKey ?? NO_USE_CASE;
-    return deps.proposals.list(useCaseKey, q.status);
+    if (claims.role === "PlatformAdmin") return deps.proposals.list(q.useCaseKey, q.status);
+    // A caller sees their use-case proposals AND their org's proposals. Both are
+    // indexed; the __none__ sentinel keeps an unscoped user from matching every
+    // null-useCaseKey (credential) proposal.
+    const byUseCase = await deps.proposals.list(claims.useCaseKey ?? NO_USE_CASE, q.status);
+    const byOrg = claims.orgId ? await deps.proposals.listByOrg(claims.orgId, q.status) : [];
+    const seen = new Set(byUseCase.map((p) => p.id));
+    return [...byUseCase, ...byOrg.filter((p) => !seen.has(p.id))];
   });
 
   // Run the finalized proposal's operation as the PROPOSER's identity (RBAC +

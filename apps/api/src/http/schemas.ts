@@ -930,6 +930,37 @@ export const S: Record<string, FastifySchema> = {
     response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401) },
   },
 
+  credentialTypes: { tags: ["Credentials"], summary: "The credential-type catalog", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401) } },
+  requestCredential: {
+    tags: ["Credentials"], summary: "Request a credential (gated by the type's approval depth)", security: bearer,
+    body: {
+      type: "object", additionalProperties: false, required: ["type", "subjectUserId", "claims"],
+      properties: {
+        type: { type: "string" },
+        subjectUserId: { type: "string" },
+        claims: { type: "object", additionalProperties: true },
+        issuerOrgId: { type: "string" },
+      },
+    },
+    response: { 202: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
+  },
+  revokeCredential: {
+    tags: ["Credentials"], summary: "Revoke a credential (gated; reason required)", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    body: { type: "object", additionalProperties: false, required: ["reason"], properties: { reason: { type: "string", minLength: 1 } } },
+    response: { 202: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404, 409) },
+  },
+  credentialStatus: {
+    tags: ["Credentials"], summary: "Public revocation status of a credential (no auth — verifiers must resolve it)",
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(404) },
+  },
+  orgCredentials: {
+    tags: ["Credentials"], summary: "Credentials issued by an organization", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403, 404) },
+  },
+
   listUsers: { tags: ["Users"], summary: "List users in scope", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403) } },
   createUser: {
     tags: ["Users"], summary: "Create a user (scoped)", security: bearer,
