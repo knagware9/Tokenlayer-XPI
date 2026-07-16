@@ -47,6 +47,30 @@ describe("keystore", () => {
     expect(expiresAt).toBe(now + 365 * 24 * 3600);
   });
 
+  it("issues an arbitrary org credential type with a status pointer and the given id", () => {
+    const ks = createKeystore(MASTER);
+    const orgEnc = ks.encryptSeed(ks.newSeed());
+    const org = ks.keyOf(orgEnc);
+    const subject = ks.keyOf(ks.encryptSeed(ks.newSeed()));
+    const now = 1_800_000_000;
+    const { vcJwt, expiresAt } = ks.issueOrgCredential({
+      orgEncSeed: orgEnc, orgDid: org.did, subjectDid: subject.did,
+      type: "KycCredential", claims: { legalName: "Priya R", country: "IN" },
+      credentialId: "cred-123", statusUrl: "https://api.example/credentials/cred-123/status",
+      validityDays: 365, now,
+    });
+    expect(verifyJwtSignature(vcJwt, publicKeyFromDidKey(org.did))).toBe(true);
+    const { payload } = decodeJwt(vcJwt);
+    const vc = payload.vc as { type: string[]; credentialSubject: { id: string; country: string }; credentialStatus: { id: string; type: string } };
+    expect(vc.type).toEqual(["VerifiableCredential", "KycCredential"]);
+    expect(vc.credentialSubject.id).toBe(subject.did);
+    expect(vc.credentialSubject.country).toBe("IN");
+    expect(vc.credentialStatus.id).toBe("https://api.example/credentials/cred-123/status");
+    expect(vc.credentialStatus.type).toBe("SimpleRevocationStatus2024");
+    expect(payload.jti).toBe("cred-123");
+    expect(expiresAt).toBe(now + 365 * 24 * 3600);
+  });
+
   it("throws on a master key that is not 32 bytes", () => {
     expect(() => createKeystore("abcd")).toThrow();
   });
