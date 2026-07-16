@@ -1,4 +1,4 @@
-import type { AccountState, ActivityEvent, AnalyticsSummary, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, ChainInfo, ChainStatus, ContractCode, IdentityResult, Listing, Portfolio, Proposal, Role, SessionUser, TokenInfo, TokenStandard, Trade, UseCase } from "./types.js";
+import type { AccountState, ActivityEvent, AnalyticsSummary, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, ChainInfo, ChainStatus, ContractCode, DidDocument, HeldCredential, IdentityResult, Listing, OrgMember, OrgType, Organization, Portfolio, Proposal, Role, SessionUser, TokenInfo, TokenStandard, Trade, UseCase } from "./types.js";
 
 export interface Currency { code: string; label: string; }
 export interface CashBalance { currency: string; address: string; amount: string; }
@@ -129,4 +129,13 @@ export const api = {
   identityMint: (token: string, body: { subjectDid?: string; holderSeed?: string; claims: Record<string, unknown>; challenge: string }) => request<{ presentation: string; holderDid: string; issuerDid: string }>(`/identity/mint`, token, { method: "POST", body: JSON.stringify(body) }),
   mePortfolio: (token: string) => request<Portfolio>("/me/portfolio", token),
   meActivity: (token: string) => request<ActivityEvent[]>("/me/activity", token),
+  orgs: (token: string) => request<Organization[]>("/orgs", token),
+  createOrg: (token: string, body: { name: string; orgType: OrgType; registrationId?: string; jurisdiction?: string }) =>
+    request<Organization>("/orgs", token, { method: "POST", body: JSON.stringify(body) }),
+  org: (token: string, id: string) => request<Organization>(`/orgs/${encodeURIComponent(id)}`, token),
+  orgMembers: (token: string, id: string) => request<OrgMember[]>(`/orgs/${encodeURIComponent(id)}/members`, token),
+  createMember: (token: string, id: string, body: { email: string; password: string; role: string; useCaseKey?: string; walletAddress?: string }) =>
+    request<{ id: string; did: string; membershipVc: boolean }>(`/orgs/${encodeURIComponent(id)}/users`, token, { method: "POST", body: JSON.stringify(body) }),
+  myCredentials: (token: string) => request<HeldCredential[]>("/me/credentials", token),
+  didDocument: (token: string, did: string) => request<DidDocument>(`/dids/${encodeURIComponent(did)}/document`, token),
 };

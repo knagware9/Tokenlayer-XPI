@@ -7,12 +7,14 @@ import { Dashboard } from "./components/Dashboard.js";
 import { Header } from "./components/Header.js";
 import { InvestorPortal } from "./components/InvestorPortal.js";
 import { Login } from "./components/Login.js";
+import { MyIdentity } from "./components/MyIdentity.js";
+import { Organizations } from "./components/Organizations.js";
 import { PlatformHome } from "./components/PlatformHome.js";
 import { UserManagement } from "./components/UserManagement.js";
 import { canManageUsers } from "./rbac.js";
 import type { ChainInfo, UseCase } from "./types.js";
 
-type Section = "overview" | "assets" | "users";
+type Section = "overview" | "assets" | "users" | "organizations" | "identity";
 
 export function App(): JSX.Element {
   const { token, user } = useAuth();
@@ -74,6 +76,8 @@ export function App(): JSX.Element {
     { id: "overview", label: "Overview" },
     { id: "assets", label: "Asset Management" },
     ...(canManageUsers(user.role) ? [{ id: "users" as Section, label: "User Management" }] : []),
+    ...(isPlatform || user.role === "OrgAdmin" ? [{ id: "organizations" as Section, label: "Organizations" }] : []),
+    { id: "identity" as Section, label: "My identity" },
   ];
 
   return (
@@ -94,6 +98,8 @@ export function App(): JSX.Element {
         {section === "overview" && <Dashboard useCaseKey={activeUseCase} />}
         {section === "assets" && <AssetManagement useCaseKey={activeUseCase} useCases={useCases} chains={chains} />}
         {section === "users" && <UserManagement useCaseKey={activeUseCase} useCases={useCases} />}
+        {section === "organizations" && <Organizations />}
+        {section === "identity" && <MyIdentity />}
       </main>
     </div>
   );
