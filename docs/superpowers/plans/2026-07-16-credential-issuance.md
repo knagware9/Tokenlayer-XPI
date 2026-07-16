@@ -1636,11 +1636,16 @@ Expected: core 141+8=149, adapters 42, contracts 20, api 185. All green.
 
 ```bash
 pkill -f "tsx watch src/server.ts"; rm -f apps/api/cred-e2e.db
-DATABASE_URL="file:./cred-e2e.db" JWT_SECRET="dev-secret-cred-e2e-testing" PORT=4000 NODE_ENV=development CHAIN_STRICT=0 pnpm api:dev &
+# The scratch DB must be pushed BEFORE boot or the server dies with P2021 (no tables).
+DATABASE_URL="file:./cred-e2e.db" pnpm --filter @tokenlayer/api exec prisma db push --skip-generate
+# LOGIN_RATE_LIMIT_MAX: the default throttle is 10 logins/IP/15min and this E2E makes
+# ~6 (plus re-runs), which is close enough to fail intermittently. Raise it for the run.
+DATABASE_URL="file:./cred-e2e.db" JWT_SECRET="dev-secret-cred-e2e-testing" PORT=4000 \
+  NODE_ENV=development CHAIN_STRICT=0 LOGIN_RATE_LIMIT_MAX=1000 pnpm api:dev &
 sleep 25
 node scripts/credential-issuance-e2e.mjs
 ```
-Expected: `✅ CREDENTIAL ISSUANCE END-TO-END PASSED`.
+Expected: `✅ CREDENTIAL ISSUANCE END-TO-END PASSED`. If you see `429 TOO_MANY_REQUESTS`, the throttle env var didn't take — restart the API (the counter is in-memory, per instance).
 
 - [ ] **Step 4: Independent verification proof**
 
