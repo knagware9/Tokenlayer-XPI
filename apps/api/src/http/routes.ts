@@ -103,7 +103,8 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const required = useCase.workflow?.approvals?.[op as keyof NonNullable<NonNullable<UseCaseDefinition["workflow"]>["approvals"]>];
     if (!required || required < 1) return null;
     const claims = request.user as TokenClaims;
-    return deps.proposals.create({ useCaseKey: useCase.key, assetId, kind: op, payload, proposerId: claims.id, proposerLabel: claims.email, required });
+    // Token proposals are use-case scoped, never org scoped.
+    return deps.proposals.create({ useCaseKey: useCase.key, orgId: null, assetId, kind: op, payload, proposerId: claims.id, proposerLabel: claims.email, required });
   }
 
   // Org scope: PlatformAdmin acts on any org; an OrgAdmin only on their own.
@@ -1224,9 +1225,11 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     });
     await deps.users.update(user.id, { did, didSeedEncrypted, orgId: org.id });
     await deps.credentials.create({
+      id: randomUUID(),
       holderDid: did, issuerDid: org.did, type: "OrganizationMembership", vcJwt,
       subjectClaims: { id: did, organization: org.name, orgId: org.id, role, memberSince },
-      issuedAt: new Date(now * 1000).toISOString(), expiresAt: new Date(expiresAt * 1000).toISOString(), revoked: false,
+      issuedAt: new Date(now * 1000).toISOString(), expiresAt: new Date(expiresAt * 1000).toISOString(),
+      revoked: false, revokedAt: null, revokedReason: null, revokedBy: null, proposalId: null,
     });
     return did;
   }

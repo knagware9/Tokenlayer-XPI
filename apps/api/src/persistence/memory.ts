@@ -341,6 +341,12 @@ export class MemoryProposalRepository implements ProposalRepository {
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .map((r) => this.clone(r));
   }
+  async listByOrg(orgId: string, status?: string): Promise<ProposalRecord[]> {
+    return [...this.rows.values()]
+      .filter((r) => r.orgId === orgId && (!status || r.status === status))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map((r) => this.clone(r));
+  }
   // addApproval/claimApproved/setStatus are each a single synchronous mutation
   // (no await between check and write) → atomic w.r.t. concurrent requests, as
   // the CashflowRepository CAS methods rely on.
@@ -451,13 +457,16 @@ export class MemoryOrganizationRepository implements OrganizationRepository {
 
 export class MemoryCredentialRepository implements CredentialRepository {
   private readonly byId = new Map<string, CredentialRecord>();
-  async create(input: Omit<CredentialRecord, "id">): Promise<CredentialRecord> {
-    const rec: CredentialRecord = { ...input, id: id("cred") };
+  async create(input: CredentialRecord): Promise<CredentialRecord> {
+    const rec: CredentialRecord = { ...input };
     this.byId.set(rec.id, rec);
     return rec;
   }
   async listByHolder(holderDid: string): Promise<CredentialRecord[]> {
     return [...this.byId.values()].filter((c) => c.holderDid === holderDid);
+  }
+  async listByIssuer(issuerDid: string): Promise<CredentialRecord[]> {
+    return [...this.byId.values()].filter((c) => c.issuerDid === issuerDid);
   }
   async get(credId: string): Promise<CredentialRecord | null> {
     return this.byId.get(credId) ?? null;
@@ -466,6 +475,15 @@ export class MemoryCredentialRepository implements CredentialRepository {
     const rec = this.byId.get(credId);
     if (!rec) throw new Error(`unknown credential '${credId}'`);
     rec.revoked = revoked;
+    return rec;
+  }
+  async revoke(credId: string, input: { reason: string; by: string; at: string }): Promise<CredentialRecord> {
+    const rec = this.byId.get(credId);
+    if (!rec) throw new Error(`unknown credential '${credId}'`);
+    rec.revoked = true;
+    rec.revokedReason = input.reason;
+    rec.revokedBy = input.by;
+    rec.revokedAt = input.at;
     return rec;
   }
 }

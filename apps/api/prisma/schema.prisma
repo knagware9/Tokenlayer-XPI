@@ -174,7 +174,8 @@ model Document {
 // concurrent Nth approvals execute the operation exactly once.
 model Proposal {
   id            String    @id @default(cuid())
-  useCaseKey    String
+  useCaseKey    String? // null for non-token (e.g. credential) proposals
+  orgId         String? // set for org-scoped kinds; null for token kinds
   assetId       String?
   kind          String // gated op: issue | mint | transfer | burn | freeze | unfreeze | cashflow-execute
   payload       String // JSON — everything the executor needs
@@ -188,6 +189,7 @@ model Proposal {
   decidedAt     DateTime?
 
   @@index([useCaseKey, status])
+  @@index([orgId, status])
 }
 
 // A tenant organization. Its parent did:key is custodial: didSeedEncrypted holds
@@ -220,6 +222,10 @@ model Credential {
   issuedAt      DateTime @default(now())
   expiresAt     DateTime?
   revoked       Boolean  @default(false)
+  revokedAt     DateTime?
+  revokedReason String?
+  revokedBy     String? // user id that proposed the revocation
+  proposalId    String? // the approved request that produced this credential
 
   @@index([holderDid])
 }
