@@ -1,4 +1,4 @@
-import type { AccountState, ActivityEvent, AnalyticsSummary, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, ChainInfo, ChainStatus, ContractCode, DidDocument, HeldCredential, IdentityResult, Listing, OrgMember, OrgType, Organization, Portfolio, Proposal, Role, SessionUser, TokenInfo, TokenStandard, Trade, UseCase } from "./types.js";
+import type { AccountState, ActivityEvent, AnalyticsSummary, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, ChainInfo, ChainStatus, ContractCode, CredentialTypeInfo, DidDocument, HeldCredential, IdentityResult, IssuedCredential, Listing, OrgMember, OrgType, Organization, Portfolio, Proposal, Role, SessionUser, TokenInfo, TokenStandard, Trade, UseCase } from "./types.js";
 
 export interface Currency { code: string; label: string; }
 export interface CashBalance { currency: string; address: string; amount: string; }
@@ -138,4 +138,12 @@ export const api = {
     request<{ id: string; did: string; membershipVc: boolean }>(`/orgs/${encodeURIComponent(id)}/users`, token, { method: "POST", body: JSON.stringify(body) }),
   myCredentials: (token: string) => request<HeldCredential[]>("/me/credentials", token),
   didDocument: (token: string, did: string) => request<DidDocument>(`/dids/${encodeURIComponent(did)}/document`, token),
+  credentialTypes: (token: string) => request<CredentialTypeInfo[]>("/credential-types", token),
+  // 202 → { proposal }: issuance is gated; nothing is issued until it is approved.
+  requestCredential: (token: string, body: { type: string; subjectUserId: string; claims: Record<string, unknown>; issuerOrgId?: string }) =>
+    request<{ proposal: Proposal }>("/credentials/requests", token, { method: "POST", body: JSON.stringify(body) }),
+  orgCredentials: (token: string, orgId: string) => request<IssuedCredential[]>(`/orgs/${encodeURIComponent(orgId)}/credentials`, token),
+  // 202 → { proposal }: revocation is gated too.
+  revokeCredential: (token: string, id: string, reason: string) =>
+    request<{ proposal: Proposal }>(`/credentials/${encodeURIComponent(id)}/revoke`, token, { method: "POST", body: JSON.stringify({ reason }) }),
 };

@@ -201,7 +201,10 @@ export interface ProposalApproval {
 /** A maker-checker proposal: a gated operation captured pending approval. */
 export interface Proposal {
   id: string;
-  useCaseKey: string;
+  /** null for org-scoped proposals (e.g. credential issuance/revocation). */
+  useCaseKey: string | null;
+  /** Set on org-scoped proposals; absent/null on use-case proposals. */
+  orgId?: string | null;
   assetId: string | null;
   kind: string;
   payload: Record<string, unknown>;
@@ -319,6 +322,8 @@ export interface HeldCredential {
   issuedAt: string;
   expiresAt: string | null;
   revoked: boolean;
+  revokedAt: string | null;
+  revokedReason: string | null;
   vcJwt: string;
 }
 
@@ -327,4 +332,28 @@ export interface DidDocument {
   verificationMethod: { id: string; type: string; controller: string; publicKeyMultibase: string }[];
   authentication: string[];
   assertionMethod: string[];
+}
+
+/** A credential type the platform can issue, with the claim shape it expects. */
+export interface CredentialTypeInfo {
+  type: string;
+  description: string;
+  allowedIssuerOrgTypes: string[];
+  requiredApprovals: number;
+  validityDays: number;
+  selfIssuedOnly: boolean;
+  claimSchema: { type: "object"; required?: string[]; properties: Record<string, { type: string; description?: string; enum?: string[]; pattern?: string; min?: number; max?: number }> };
+}
+
+/** A credential an organization has issued (GET /orgs/:id/credentials). */
+export interface IssuedCredential {
+  id: string;
+  type: string;
+  holderDid: string;
+  claims: Record<string, unknown>;
+  issuedAt: string;
+  expiresAt: string | null;
+  revoked: boolean;
+  revokedAt: string | null;
+  revokedReason: string | null;
 }

@@ -100,6 +100,7 @@ export function MyIdentity(): JSX.Element {
                 <div className="text-xs text-slate-500">
                   Issued {fmtDate(c.issuedAt)} · Expires {fmtDate(c.expiresAt)}
                 </div>
+                {c.revokedReason && <div className="text-xs text-rose-600 mt-0.5">Revoked: {c.revokedReason}</div>}
               </div>
             ))}
           </div>

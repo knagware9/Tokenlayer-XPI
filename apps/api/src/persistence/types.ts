@@ -1,4 +1,6 @@
-import type { Role, TokenStandard, TokenType, LifecycleAction, UseCaseDefinition, UseCaseSource } from "@tokenlayer/core";
+import type { Role, TokenStandard, TokenType, LifecycleAction, OrgType, UseCaseDefinition, UseCaseSource } from "@tokenlayer/core";
+
+export type { OrgType };
 
 export type KycStatus = "pending" | "approved" | "rejected";
 export interface KycDetails {
@@ -274,7 +276,10 @@ export interface ProposalApproval {
  */
 export interface ProposalRecord {
   id: string;
-  useCaseKey: string;
+  /** null for non-token (e.g. credential) proposals. */
+  useCaseKey: string | null;
+  /** Set for org-scoped kinds; null for token kinds. */
+  orgId: string | null;
   assetId: string | null;
   kind: string;
   payload: Record<string, unknown>;
@@ -293,6 +298,8 @@ export interface ProposalRepository {
   get(id: string): Promise<ProposalRecord | null>;
   /** Newest first, optionally scoped by use case and/or status. */
   list(useCaseKey?: string, status?: string): Promise<ProposalRecord[]>;
+  /** Newest first, scoped to one org, optionally by status. */
+  listByOrg(orgId: string, status?: string): Promise<ProposalRecord[]>;
   /** Append an approval; throws { code: "ALREADY_APPROVED" } if this userId already approved. */
   addApproval(id: string, approval: ProposalApproval): Promise<ProposalRecord>;
   /** Atomic CAS "pending"→`target` (approved | rejected). True iff this caller won the transition. */
@@ -310,7 +317,6 @@ export interface CashRepository {
   transfer(currency: string, from: string, to: string, amount: string): Promise<void>;
 }
 
-export type OrgType = "bank" | "corporate" | "msme" | "government" | "verifier";
 export type OrgStatus = "active" | "suspended";
 
 export interface OrganizationRecord {
@@ -331,6 +337,8 @@ export interface OrganizationRepository {
   create(input: Omit<OrganizationRecord, "id" | "createdAt">): Promise<OrganizationRecord>;
   get(id: string): Promise<OrganizationRecord | null>;
   findByName(name: string): Promise<OrganizationRecord | null>;
+  /** The org whose parent DID is `did` — the issuer of a credential signed by it. */
+  findByDid(did: string): Promise<OrganizationRecord | null>;
   findByRegistrationId(registrationId: string): Promise<OrganizationRecord | null>;
   list(): Promise<OrganizationRecord[]>;
   setVerified(id: string, verified: boolean, verifiedAt: string | null): Promise<OrganizationRecord>;
@@ -347,11 +355,18 @@ export interface CredentialRecord {
   issuedAt: string;
   expiresAt: string | null;
   revoked: boolean;
+  revokedAt: string | null;
+  revokedReason: string | null;
+  revokedBy: string | null;
+  proposalId: string | null;
 }
 
 export interface CredentialRepository {
-  create(input: Omit<CredentialRecord, "id">): Promise<CredentialRecord>;
+  /** `id` is supplied by the caller: the VC embeds it in `jti` + credentialStatus before signing. */
+  create(input: CredentialRecord): Promise<CredentialRecord>;
   listByHolder(holderDid: string): Promise<CredentialRecord[]>;
+  listByIssuer(issuerDid: string): Promise<CredentialRecord[]>;
   get(id: string): Promise<CredentialRecord | null>;
   setRevoked(id: string, revoked: boolean): Promise<CredentialRecord>;
+  revoke(id: string, input: { reason: string; by: string; at: string }): Promise<CredentialRecord>;
 }

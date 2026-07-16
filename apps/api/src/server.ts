@@ -77,6 +77,7 @@ async function main(): Promise<void> {
     devIssuerSeed: env.devKycIssuerSeed,
     currencies: loadCurrencies(),
     jwtSecret: env.jwtSecret,
+    publicApiUrl: env.publicApiUrl,
     corsOrigins: env.corsOrigins,
     isProduction: env.nodeEnv === "production",
     platformFeeAccount: env.platformFeeAccount,

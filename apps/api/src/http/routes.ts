@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AssetRecord, CashflowRecord, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, didKeyFromSeed, generateDidKey, invoiceFingerprint, issueCredential, normalizeUseCaseDefinition, PolicyError, presentCredential, publicKeyFromDidKey, splitProRata, verifyChain, verifyPresentation, type Actor, type ChainEntry, type LifecycleAction, type Role, type UseCaseDefinition } from "@tokenlayer/core";
+import { auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TYPES, credentialTypeDef, didKeyFromSeed, generateDidKey, invoiceFingerprint, issueCredential, normalizeUseCaseDefinition, PolicyError, presentCredential, publicKeyFromDidKey, splitProRata, validateMetadata, verifyChain, verifyPresentation, type Actor, type ChainEntry, type LifecycleAction, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { isSupportedCurrency } from "../currencies.js";
 import { renderContractCode } from "../contract-code.js";
@@ -11,6 +11,7 @@ import { deployUseCaseContracts } from "../use-cases.js";
 import { computeAnalytics } from "../analytics.js";
 import { computeActivity, computePortfolio } from "../investor.js";
 import { assetBalancesOf, coded, CodedError, dropPayerShare, executeCashflowCore, executeIssueActivation, runGatedAction } from "../executors.js";
+import { proposalKind } from "../proposal-kinds.js";
 import { S } from "./schemas.js";
 import { actorOf, contextOf, isPositiveIntString, notFound, requireUser, scopedToCaller, type TokenClaims } from "./support.js";
 
@@ -89,13 +90,6 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return all.filter((a) => allowed.has(a.id));
   }
 
-  // Maker-checker capability an approver must hold for each gated op. Every op
-  // maps to itself except cashflow-execute, which mirrors its route gate (issue).
-  const CAPABILITY_FOR: Record<string, LifecycleAction> = {
-    issue: "issue", mint: "mint", transfer: "transfer", burn: "burn",
-    freeze: "freeze", unfreeze: "unfreeze", "cashflow-execute": "issue",
-  };
-
   // When the use case gates `op`, capture the operation as a pending Proposal
   // instead of executing it. Returns the proposal (→ 202) or null when ungated.
   // The caller must have already run every request-time validation for the op.
@@ -109,7 +103,8 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const required = useCase.workflow?.approvals?.[op as keyof NonNullable<NonNullable<UseCaseDefinition["workflow"]>["approvals"]>];
     if (!required || required < 1) return null;
     const claims = request.user as TokenClaims;
-    return deps.proposals.create({ useCaseKey: useCase.key, assetId, kind: op, payload, proposerId: claims.id, proposerLabel: claims.email, required });
+    // Token proposals are use-case scoped, never org scoped.
+    return deps.proposals.create({ useCaseKey: useCase.key, orgId: null, assetId, kind: op, payload, proposerId: claims.id, proposerLabel: claims.email, required });
   }
 
   // Org scope: PlatformAdmin acts on any org; an OrgAdmin only on their own.
@@ -1230,9 +1225,11 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     });
     await deps.users.update(user.id, { did, didSeedEncrypted, orgId: org.id });
     await deps.credentials.create({
+      id: randomUUID(),
       holderDid: did, issuerDid: org.did, type: "OrganizationMembership", vcJwt,
       subjectClaims: { id: did, organization: org.name, orgId: org.id, role, memberSince },
-      issuedAt: new Date(now * 1000).toISOString(), expiresAt: new Date(expiresAt * 1000).toISOString(), revoked: false,
+      issuedAt: new Date(now * 1000).toISOString(), expiresAt: new Date(expiresAt * 1000).toISOString(),
+      revoked: false, revokedAt: null, revokedReason: null, revokedBy: null, proposalId: null,
     });
     return did;
   }
@@ -1294,7 +1291,93 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const claims = request.user as TokenClaims;
     if (!claims.did) return [];
     const rows = await deps.credentials.listByHolder(claims.did);
-    return rows.map((c) => ({ id: c.id, type: c.type.split(","), issuerDid: c.issuerDid, holderDid: c.holderDid, claims: c.subjectClaims, issuedAt: c.issuedAt, expiresAt: c.expiresAt, revoked: c.revoked, vcJwt: c.vcJwt }));
+    return rows.map((c) => ({ id: c.id, type: c.type.split(","), issuerDid: c.issuerDid, holderDid: c.holderDid, claims: c.subjectClaims, issuedAt: c.issuedAt, expiresAt: c.expiresAt, revoked: c.revoked, revokedAt: c.revokedAt, revokedReason: c.revokedReason, vcJwt: c.vcJwt }));
+  });
+
+  // --- credentials ---------------------------------------------------------
+  app.get("/credential-types", { schema: S.credentialTypes, ...auth }, async () =>
+    Object.values(CREDENTIAL_TYPES).map((d) => ({
+      type: d.type, description: d.description, allowedIssuerOrgTypes: d.allowedIssuerOrgTypes,
+      requiredApprovals: d.requiredApprovals, validityDays: d.validityDays,
+      selfIssuedOnly: !!d.selfIssuedOnly, claimSchema: d.claimSchema,
+    })));
+
+  app.post("/credentials/requests", { schema: S.requestCredential, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const b = request.body as { type: string; subjectUserId: string; claims: Record<string, unknown>; issuerOrgId?: string };
+    if (claims.role !== "PlatformAdmin" && claims.role !== "OrgAdmin") {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "only a Platform Admin or an Org Admin may request credentials" });
+    }
+    // An OrgAdmin may only ever issue as their OWN org — any issuerOrgId in the
+    // body is ignored, never honoured (it would be a privilege escalation).
+    const issuerOrgId = claims.role === "OrgAdmin" ? claims.orgId : b.issuerOrgId;
+    if (!issuerOrgId) return reply.code(400).send({ error: "ISSUER_ORG_REQUIRED", message: "issuerOrgId is required" });
+    const org = await deps.organizations.get(issuerOrgId);
+    if (!org) return notFound(reply, "issuing organization not found");
+
+    const def = credentialTypeDef(b.type); // throws UNKNOWN_CREDENTIAL_TYPE → 400
+    if (!def.allowedIssuerOrgTypes.includes(org.orgType)) {
+      return reply.code(403).send({ error: "ISSUER_NOT_PERMITTED", message: `an org of type '${org.orgType}' may not issue '${def.type}'` });
+    }
+    const subject = await deps.users.findById(b.subjectUserId);
+    if (!subject) return notFound(reply, "subject user not found");
+    if (def.selfIssuedOnly && subject.orgId !== org.id) {
+      return reply.code(403).send({ error: "SELF_ISSUED_ONLY", message: `'${def.type}' may only be issued to the issuing org's own members` });
+    }
+    if (!subject.did) return reply.code(400).send({ error: "SUBJECT_HAS_NO_DID", message: "the subject has no decentralized identifier" });
+    validateMetadata(b.claims, def.claimSchema); // throws INVALID_METADATA → 400
+
+    const proposal = await deps.proposals.create({
+      useCaseKey: null, orgId: org.id, assetId: null, kind: "issue-credential",
+      payload: { type: def.type, subjectDid: subject.did, subjectUserId: subject.id, claims: b.claims, issuerOrgId: org.id },
+      proposerId: claims.id, proposerLabel: claims.email, required: def.requiredApprovals,
+    });
+    return reply.code(202).send({ proposal });
+  });
+
+  app.post("/credentials/:id/revoke", { schema: S.revokeCredential, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    const { reason } = request.body as { reason: string };
+    const cred = await deps.credentials.get(id);
+    if (!cred) return notFound(reply, "credential not found");
+    if (cred.revoked) return reply.code(409).send({ error: "ALREADY_REVOKED", message: "credential is already revoked" });
+    // Only the ISSUING org may revoke: find the org whose parent DID signed it.
+    const issuer = await deps.organizations.findByDid(cred.issuerDid);
+    if (!issuer) return notFound(reply, "issuing organization not found");
+    if (!orgScoped(claims, issuer.id)) {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "only the issuing organization may revoke this credential" });
+    }
+    // Depth comes from the credential's OWN type — revoking an AuthorizedSignatory
+    // costs the same approvals that issuing it did.
+    const def = credentialTypeDef(cred.type);
+    const proposal = await deps.proposals.create({
+      useCaseKey: null, orgId: issuer.id, assetId: null, kind: "revoke-credential",
+      payload: { credentialId: cred.id, reason },
+      proposerId: claims.id, proposerLabel: claims.email, required: def.requiredApprovals,
+    });
+    return reply.code(202).send({ proposal });
+  });
+
+  // PUBLIC — a verifier holding only the VC must be able to resolve its status.
+  // Returns revocation state ONLY: no claims, no holder, no VC.
+  app.get("/credentials/:id/status", { schema: S.credentialStatus }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const cred = await deps.credentials.get(id);
+    if (!cred) return notFound(reply, "credential not found");
+    return { id: cred.id, revoked: cred.revoked, revokedAt: cred.revokedAt, reason: cred.revokedReason };
+  });
+
+  app.get("/orgs/:id/credentials", { schema: S.orgCredentials, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    if (!orgScoped(claims, id)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to view that organization's credentials" });
+    const org = await deps.organizations.get(id);
+    if (!org) return notFound(reply, "organization not found");
+    return (await deps.credentials.listByIssuer(org.did)).map((c) => ({
+      id: c.id, type: c.type, holderDid: c.holderDid, claims: c.subjectClaims,
+      issuedAt: c.issuedAt, expiresAt: c.expiresAt, revoked: c.revoked, revokedAt: c.revokedAt, revokedReason: c.revokedReason,
+    }));
   });
 
   // --- identity (DID / Verifiable Credentials) ------------------------------
@@ -1477,7 +1560,10 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   async function scopedProposal(request: FastifyRequest, reply: FastifyReply): Promise<ProposalRecord | null> {
     const { id } = request.params as { id: string };
     const p = await deps.proposals.get(id);
-    if (!p || !scopedToCaller(request.user as TokenClaims, p.useCaseKey)) {
+    // Visibility is per-kind: token kinds are use-case scoped, credential kinds
+    // org scoped. Never scopedToCaller here — a null useCaseKey would match every
+    // unscoped user (null === null) and leak across orgs.
+    if (!p || !(await proposalKind(p.kind).canView(deps, request.user as TokenClaims, p))) {
       notFound(reply, "proposal not found");
       return null;
     }
@@ -1487,34 +1573,20 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   app.get("/proposals", { schema: S.listProposals, ...auth }, async (request) => {
     const claims = request.user as TokenClaims;
     const q = request.query as { status?: string; useCaseKey?: string };
-    const useCaseKey = claims.role === "PlatformAdmin" ? q.useCaseKey : claims.useCaseKey ?? NO_USE_CASE;
-    return deps.proposals.list(useCaseKey, q.status);
+    if (claims.role === "PlatformAdmin") return deps.proposals.list(q.useCaseKey, q.status);
+    // A caller sees their use-case proposals AND their org's proposals. Both are
+    // indexed; the __none__ sentinel keeps an unscoped user from matching every
+    // null-useCaseKey (credential) proposal.
+    const byUseCase = await deps.proposals.list(claims.useCaseKey ?? NO_USE_CASE, q.status);
+    const byOrg = claims.orgId ? await deps.proposals.listByOrg(claims.orgId, q.status) : [];
+    const seen = new Set(byUseCase.map((p) => p.id));
+    return [...byUseCase, ...byOrg.filter((p) => !seen.has(p.id))];
   });
 
   // Run the finalized proposal's operation as the PROPOSER's identity (RBAC +
   // engine compliance re-apply to the proposer at execution time).
   async function executeProposal(request: FastifyRequest, p: ProposalRecord, proposer: Actor): Promise<void> {
-    const asset = p.assetId ? await deps.assets.get(p.assetId) : null;
-    if (p.kind === "issue") {
-      if (!asset) throw coded(404, "NOT_FOUND", "pending asset missing");
-      // Re-assert the asset is still awaiting approval (not rejected/decided elsewhere).
-      if (asset.status !== "pending_approval") throw coded(409, "ASSET_NOT_ACTIVE", `asset is ${asset.status}`);
-      await executeIssueActivation(deps, proposer, asset, p.payload as Parameters<typeof executeIssueActivation>[3]);
-    } else if (p.kind === "cashflow-execute") {
-      if (!asset) throw coded(404, "NOT_FOUND", "asset missing");
-      // Re-check the asset is live at approval time — it may have matured/frozen since propose.
-      if (asset.status !== "active") throw coded(409, "ASSET_NOT_ACTIVE", `asset is ${asset.status}`);
-      const cf = await deps.cashflows.get(String(p.payload.cfId));
-      if (!cf || cf.assetId !== asset.id) throw coded(404, "NOT_FOUND", "cashflow missing");
-      await executeCashflowCore(deps, proposer, asset, cf, String(p.payload.from), request.log);
-    } else {
-      if (!asset) throw coded(404, "NOT_FOUND", "asset missing");
-      // The direct action route rejects non-active assets before gating; the
-      // approval path must re-assert it (the asset may have matured/frozen since
-      // propose), or a gated mint/transfer could mutate a redeemed instrument.
-      if (asset.status !== "active") throw coded(409, "ASSET_NOT_ACTIVE", `asset is ${asset.status}`);
-      await runGatedAction(deps, proposer, asset, p.kind, (p.payload.body ?? {}) as Record<string, string>);
-    }
+    await proposalKind(p.kind).execute({ deps, log: request.log }, proposer, p);
   }
 
   async function decide(request: FastifyRequest, reply: FastifyReply, verdict: "approve" | "reject") {
@@ -1523,31 +1595,16 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const claims = request.user as TokenClaims;
     if (p.status !== "pending") return reply.code(409).send({ error: "PROPOSAL_NOT_PENDING", message: `proposal is ${p.status}` });
     if (claims.id === p.proposerId) return reply.code(403).send({ error: "SELF_APPROVAL", message: "the proposer may not decide their own proposal" });
-    const capability = CAPABILITY_FOR[p.kind];
-    if (!capability || !deps.rbac.can(claims.role, capability)) {
+    if (!(await proposalKind(p.kind).canApprove(deps, claims, p))) {
       return reply.code(403).send({ error: "NOT_ELIGIBLE", message: `role '${claims.role}' may not decide '${p.kind}' proposals` });
     }
-
-    // Refund an issuance fee captured at propose time (best-effort). Shared by
-    // rejection and failed activation so a gated issue never keeps a fee for an
-    // asset that never activated.
-    const refundIssuanceFee = async (): Promise<void> => {
-      const fee = p.payload.issuanceFee as { amount: string; currency: string; payer?: string } | undefined;
-      if (fee?.payer && deps.platformFeeAccount) {
-        await deps.cash.transfer(fee.currency, deps.platformFeeAccount, fee.payer, fee.amount).catch((refundErr) =>
-          request.log.error({ refundErr, proposalId: p.id }, "issuance fee refund failed — manual reconciliation required"));
-      }
-    };
 
     if (verdict === "reject") {
       // CAS pending → rejected FIRST, so a lost race yields 409 and a won race
       // never strands the proposal in a non-terminal state if a later step throws.
       if (!(await deps.proposals.claimDecided(p.id, "rejected"))) return reply.code(409).send({ error: "PROPOSAL_NOT_PENDING", message: "already decided" });
       const rejected = await deps.proposals.setStatus(p.id, "rejected");
-      if (p.kind === "issue" && p.assetId) {
-        await deps.assets.setStatus(p.assetId, "rejected");
-        await refundIssuanceFee();
-      }
+      await proposalKind(p.kind).compensate?.({ deps, log: request.log }, p, "rejected");
       return { proposal: rejected };
     }
 
@@ -1569,7 +1626,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const proposerUser = await deps.users.findById(p.proposerId);
     if (!proposerUser || !proposerUser.active) {
       // The captured issuance never activates — refund its fee (parity with reject).
-      if (p.kind === "issue") await refundIssuanceFee();
+      await proposalKind(p.kind).compensate?.({ deps, log: request.log }, p, "failed");
       return { proposal: await deps.proposals.setStatus(p.id, "failed", "PROPOSER_INACTIVE") };
     }
     try {
@@ -1578,7 +1635,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     } catch (err) {
       const code = err instanceof CodedError ? err.code : err instanceof PolicyError ? err.code : "EXECUTION_FAILED";
       // A gated issuance that fails to activate keeps no fee (parity with reject).
-      if (p.kind === "issue") await refundIssuanceFee();
+      await proposalKind(p.kind).compensate?.({ deps, log: request.log }, p, "failed");
       return { proposal: await deps.proposals.setStatus(p.id, "failed", `${code}: ${(err as Error).message}`) };
     }
   }

@@ -3,6 +3,7 @@ import { api, ApiError } from "../api.js";
 import { useAuth } from "../auth.js";
 import { useRoute } from "../router.js";
 import type { ChainInfo, ContractCode, UseCase } from "../types.js";
+import { ApprovalsPanel } from "./ApprovalsPanel.js";
 import { ContractCodeView } from "./ContractCodeView.js";
 import { Dashboard } from "./Dashboard.js";
 import { NetworksPanel } from "./NetworksPanel.js";
@@ -10,7 +11,7 @@ import { Organizations } from "./Organizations.js";
 import { ChainDeployBadge, UseCaseBuilder } from "./UseCaseBuilder.js";
 import { Card, EmptyState, Pill, SectionHeader, Skeleton } from "./ui.js";
 
-type Tab = "overview" | "organizations" | "use-cases" | "networks" | "create";
+type Tab = "overview" | "organizations" | "approvals" | "use-cases" | "networks" | "create";
 
 export function PlatformHome({ useCases, chains, onReloadUseCases }: { useCases: UseCase[]; chains: ChainInfo[]; onReloadUseCases: () => void }): JSX.Element {
   const [tab, setTab] = useState<Tab>("overview");
@@ -19,6 +20,8 @@ export function PlatformHome({ useCases, chains, onReloadUseCases }: { useCases:
   const tabs: { id: Tab; label: string }[] = [
     { id: "overview", label: "Overview" },
     { id: "organizations", label: "Organizations" },
+    // Credential issuance is org-scoped and gated, so its inbox lives beside Organizations.
+    { id: "approvals", label: "Approvals" },
     { id: "use-cases", label: "Use cases" },
     { id: "networks", label: "Networks" },
     { id: "create", label: "Create use case" },
@@ -46,6 +49,13 @@ export function PlatformHome({ useCases, chains, onReloadUseCases }: { useCases:
       )}
 
       {tab === "organizations" && <Organizations />}
+
+      {tab === "approvals" && (
+        <div>
+          <SectionHeader title="Approvals" description="Every proposal awaiting your decision — asset issuance, settlement and credentials." />
+          <ApprovalsPanel />
+        </div>
+      )}
 
       {tab === "use-cases" && <UseCasesTab useCases={useCases} chains={chains} onChanged={onReloadUseCases} />}
 

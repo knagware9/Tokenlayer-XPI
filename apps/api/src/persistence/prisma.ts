@@ -571,8 +571,8 @@ export class PrismaCashflowRepository implements CashflowRepository {
   }
 }
 
-const toProposal = (r: { id: string; useCaseKey: string; assetId: string | null; kind: string; payload: string; proposerId: string; proposerLabel: string; required: number; approvals: string; status: string; error: string | null; createdAt: Date; decidedAt: Date | null }): ProposalRecord => ({
-  id: r.id, useCaseKey: r.useCaseKey, assetId: r.assetId, kind: r.kind,
+const toProposal = (r: { id: string; useCaseKey: string | null; orgId: string | null; assetId: string | null; kind: string; payload: string; proposerId: string; proposerLabel: string; required: number; approvals: string; status: string; error: string | null; createdAt: Date; decidedAt: Date | null }): ProposalRecord => ({
+  id: r.id, useCaseKey: r.useCaseKey, orgId: r.orgId ?? null, assetId: r.assetId, kind: r.kind,
   payload: JSON.parse(r.payload) as Record<string, unknown>,
   proposerId: r.proposerId, proposerLabel: r.proposerLabel, required: r.required,
   approvals: JSON.parse(r.approvals) as ProposalApproval[],
@@ -584,7 +584,7 @@ export class PrismaProposalRepository implements ProposalRepository {
   async create(input: Omit<ProposalRecord, "id" | "approvals" | "status" | "error" | "createdAt" | "decidedAt">): Promise<ProposalRecord> {
     const r = await prisma.proposal.create({
       data: {
-        useCaseKey: input.useCaseKey, assetId: input.assetId, kind: input.kind,
+        useCaseKey: input.useCaseKey, orgId: input.orgId, assetId: input.assetId, kind: input.kind,
         payload: JSON.stringify(input.payload), proposerId: input.proposerId,
         proposerLabel: input.proposerLabel, required: input.required,
       },
@@ -598,6 +598,9 @@ export class PrismaProposalRepository implements ProposalRepository {
   async list(useCaseKey?: string, status?: string): Promise<ProposalRecord[]> {
     const where = { ...(useCaseKey ? { useCaseKey } : {}), ...(status ? { status } : {}) };
     return (await prisma.proposal.findMany({ where, orderBy: { createdAt: "desc" } })).map(toProposal);
+  }
+  async listByOrg(orgId: string, status?: string): Promise<ProposalRecord[]> {
+    return (await prisma.proposal.findMany({ where: { orgId, ...(status ? { status } : {}) }, orderBy: { createdAt: "desc" } })).map(toProposal);
   }
   async addApproval(id: string, approval: ProposalApproval): Promise<ProposalRecord> {
     // Optimistic-concurrency append: read-modify-write is not atomic in SQL, so
@@ -694,6 +697,10 @@ export class PrismaOrganizationRepository implements OrganizationRepository {
     const r = await prisma.organization.findUnique({ where: { name } });
     return r ? toOrg(r) : null;
   }
+  async findByDid(did: string): Promise<OrganizationRecord | null> {
+    const r = await prisma.organization.findUnique({ where: { did } });
+    return r ? toOrg(r) : null;
+  }
   async findByRegistrationId(registrationId: string): Promise<OrganizationRecord | null> {
     const r = await prisma.organization.findFirst({ where: { registrationId } });
     return r ? toOrg(r) : null;
@@ -712,24 +719,32 @@ export class PrismaOrganizationRepository implements OrganizationRepository {
 const toCredential = (r: {
   id: string; holderDid: string; issuerDid: string; type: string; vcJwt: string;
   subjectClaims: string; issuedAt: Date; expiresAt: Date | null; revoked: boolean;
+  revokedAt: Date | null; revokedReason: string | null; revokedBy: string | null; proposalId: string | null;
 }): CredentialRecord => ({
   id: r.id, holderDid: r.holderDid, issuerDid: r.issuerDid, type: r.type, vcJwt: r.vcJwt,
   subjectClaims: JSON.parse(r.subjectClaims) as Record<string, unknown>,
   issuedAt: r.issuedAt.toISOString(), expiresAt: r.expiresAt ? r.expiresAt.toISOString() : null, revoked: r.revoked,
+  revokedAt: r.revokedAt ? r.revokedAt.toISOString() : null, revokedReason: r.revokedReason,
+  revokedBy: r.revokedBy, proposalId: r.proposalId,
 });
 
 export class PrismaCredentialRepository implements CredentialRepository {
-  async create(input: Omit<CredentialRecord, "id">): Promise<CredentialRecord> {
+  async create(input: CredentialRecord): Promise<CredentialRecord> {
     return toCredential(await prisma.credential.create({
       data: {
+        id: input.id,
         holderDid: input.holderDid, issuerDid: input.issuerDid, type: input.type, vcJwt: input.vcJwt,
         subjectClaims: JSON.stringify(input.subjectClaims),
-        issuedAt: new Date(input.issuedAt), expiresAt: input.expiresAt ? new Date(input.expiresAt) : null, revoked: input.revoked,
+        issuedAt: new Date(input.issuedAt), expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
+        revoked: input.revoked, proposalId: input.proposalId,
       },
     }));
   }
   async listByHolder(holderDid: string): Promise<CredentialRecord[]> {
     return (await prisma.credential.findMany({ where: { holderDid }, orderBy: { issuedAt: "asc" } })).map(toCredential);
+  }
+  async listByIssuer(issuerDid: string): Promise<CredentialRecord[]> {
+    return (await prisma.credential.findMany({ where: { issuerDid }, orderBy: { issuedAt: "desc" } })).map(toCredential);
   }
   async get(id: string): Promise<CredentialRecord | null> {
     const r = await prisma.credential.findUnique({ where: { id } });
@@ -737,5 +752,11 @@ export class PrismaCredentialRepository implements CredentialRepository {
   }
   async setRevoked(id: string, revoked: boolean): Promise<CredentialRecord> {
     return toCredential(await prisma.credential.update({ where: { id }, data: { revoked } }));
+  }
+  async revoke(id: string, input: { reason: string; by: string; at: string }): Promise<CredentialRecord> {
+    return toCredential(await prisma.credential.update({
+      where: { id },
+      data: { revoked: true, revokedReason: input.reason, revokedBy: input.by, revokedAt: new Date(input.at) },
+    }));
   }
 }

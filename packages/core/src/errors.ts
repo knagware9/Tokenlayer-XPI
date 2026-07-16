@@ -14,7 +14,8 @@ export type PolicyErrorCode =
   | "INSUFFICIENT_FUNDS"
   | "HOLDER_LIMIT_EXCEEDED"
   | "LOCKUP_ACTIVE"
-  | "JURISDICTION_NOT_ALLOWED";
+  | "JURISDICTION_NOT_ALLOWED"
+  | "UNKNOWN_CREDENTIAL_TYPE";
 
 /** Raised when a request violates RBAC, lifecycle, or compliance policy. */
 export class PolicyError extends Error {
