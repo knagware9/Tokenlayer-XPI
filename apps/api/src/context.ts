@@ -48,6 +48,8 @@ export interface AppDeps {
   devIssuerSeed?: string;
   currencies: Currency[];
   jwtSecret: string;
+  /** Public base URL of this API (e.g. "http://localhost:4000/api/v1"), used to build resolvable credentialStatus URLs. */
+  publicApiUrl: string;
   /** CORS origin allowlist; defaults to the local dashboard when omitted (tests/demo). */
   corsOrigins?: string[];
   /** When true, hides API docs and other dev-only surfaces. */

@@ -93,6 +93,8 @@ export interface Env {
   didMasterKey: string;
   /** True iff DID_MASTER_KEY was explicitly set (production must set it). */
   didMasterConfigured: boolean;
+  /** Public base URL of this API, embedded in credentialStatus pointers on issued VCs. */
+  publicApiUrl: string;
 }
 
 const platformFeeAccount =
@@ -118,6 +120,7 @@ export const env: Env = {
   devKycIssuerSeed: process.env.DEV_KYC_ISSUER_SEED,
   didMasterKey: process.env.DID_MASTER_KEY ?? DEV_DID_MASTER_KEY,
   didMasterConfigured: !!process.env.DID_MASTER_KEY,
+  publicApiUrl: process.env.PUBLIC_API_URL ?? `http://localhost:${Number(process.env.PORT ?? 4000)}/api/v1`,
 };
 
 if (!env.didMasterConfigured) {

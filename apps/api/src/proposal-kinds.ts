@@ -12,6 +12,7 @@
  */
 import type { Actor, LifecycleAction } from "@tokenlayer/core";
 import type { AppDeps } from "./context.js";
+import { issueCredentialKind, revokeCredentialKind } from "./credential-kinds.js";
 import { coded, executeCashflowCore, executeIssueActivation, runGatedAction } from "./executors.js";
 import type { TokenClaims } from "./http/support.js";
 import { scopedToCaller } from "./http/support.js";
@@ -138,3 +139,9 @@ export function proposalKind(kind: string): ProposalKindHandler {
 export function allProposalKinds(): ProposalKindHandler[] {
   return [...HANDLERS.values()];
 }
+
+// Org-scoped credential kinds. Defined in their own module (which imports only
+// the `ProposalKindHandler` TYPE from here, so no runtime cycle) and registered
+// through the same registry as the token kinds above.
+registerProposalKind(issueCredentialKind);
+registerProposalKind(revokeCredentialKind);

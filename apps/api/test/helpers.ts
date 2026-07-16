@@ -56,7 +56,7 @@ export async function buildTestApp(opts: { loginRateLimitMax?: number; platformF
     organizations, credentials, keystore, didMasterConfigured: opts.didMasterConfigured ?? true,
     challenges: createMemoryChallengeStore(), trustedKycIssuers: opts.trustedKycIssuers,
     devIssuerSeed: opts.devIssuerSeed, isProduction: opts.isProduction,
-    currencies: loadCurrencies(), jwtSecret: "test-secret",
+    currencies: loadCurrencies(), jwtSecret: "test-secret", publicApiUrl: "http://test.local/api/v1",
     loginRateLimitMax: opts.loginRateLimitMax ?? 100000,
     platformFeeAccount: opts.platformFeeAccount,
     // Enabled by default so market routes are testable; an explicit
