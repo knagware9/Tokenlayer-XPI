@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AssetRecord, CashflowRecord, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { auditEntryHash, canCreateUser, canManageUsers, computeCashflowSchedule, didKeyFromSeed, generateDidKey, invoiceFingerprint, issueCredential, normalizeUseCaseDefinition, PolicyError, presentCredential, splitProRata, verifyChain, verifyPresentation, type Actor, type ChainEntry, type LifecycleAction, type Role, type UseCaseDefinition } from "@tokenlayer/core";
+import { auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, didKeyFromSeed, generateDidKey, invoiceFingerprint, issueCredential, normalizeUseCaseDefinition, PolicyError, presentCredential, splitProRata, verifyChain, verifyPresentation, type Actor, type ChainEntry, type LifecycleAction, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { isSupportedCurrency } from "../currencies.js";
 import { renderContractCode } from "../contract-code.js";
@@ -1197,6 +1197,71 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const org = await deps.organizations.get(id);
     if (!org) return notFound(reply, "organization not found");
     return orgView(org);
+  });
+
+  // Mint a sub-DID + OrganizationMembership VC for `user` under `org`, persisting
+  // the encrypted seed on the user and the VC in the credential store. Returns the
+  // minted DID. Throws on any failure so the caller can roll back the user row.
+  async function mintMembership(org: OrganizationRecord, user: UserRecord, role: Role): Promise<string> {
+    const now = Math.floor(Date.now() / 1000);
+    const seed = deps.keystore.newSeed();
+    const didSeedEncrypted = deps.keystore.encryptSeed(seed);
+    const did = deps.keystore.keyOf(didSeedEncrypted).did;
+    const memberSince = new Date(now * 1000).toISOString().slice(0, 10);
+    const { vcJwt, expiresAt } = deps.keystore.issueMembershipCredential({
+      orgEncSeed: org.didSeedEncrypted, orgDid: org.did, userDid: did,
+      claims: { organization: org.name, orgId: org.id, role, memberSince }, now,
+    });
+    await deps.users.update(user.id, { did, didSeedEncrypted, orgId: org.id });
+    await deps.credentials.create({
+      holderDid: did, issuerDid: org.did, type: "OrganizationMembership", vcJwt,
+      subjectClaims: { id: did, organization: org.name, orgId: org.id, role, memberSince },
+      issuedAt: new Date(now * 1000).toISOString(), expiresAt: new Date(expiresAt * 1000).toISOString(), revoked: false,
+    });
+    return did;
+  }
+
+  app.post("/orgs/:id/users", { schema: S.createMember, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    const b = request.body as { email: string; password: string; role: Role; useCaseKey?: string; walletAddress?: string; kyc?: KycDetails };
+    if (!orgScoped(claims, id)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to add members to that organization" });
+    if (!canCreateOrgMember(claims.role, b.role)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to create that member role" });
+    const org = await deps.organizations.get(id);
+    if (!org) return notFound(reply, "organization not found");
+    if (await deps.users.findByEmail(b.email)) return reply.code(400).send({ error: "EMAIL_TAKEN", message: "email already registered" });
+    let accountId: string | null = null;
+    if (b.walletAddress) accountId = (await deps.accounts.upsert(b.walletAddress, b.email)).id;
+    const created = await deps.users.create({
+      email: b.email, passwordHash: await bcrypt.hash(b.password, BCRYPT_ROUNDS), role: b.role,
+      useCaseKey: b.useCaseKey ?? null, accountId, active: true, kycStatus: "pending", kyc: b.kyc ?? null, orgId: id,
+    });
+    let did: string;
+    try {
+      did = await mintMembership(org, created, b.role);
+    } catch (err) {
+      await deps.users.remove(created.id); // no orphan user without a DID/VC
+      throw err;
+    }
+    await deps.audit.append({ actorId: claims.id, action: "member-added" as LifecycleAction, payload: { orgId: id, userId: created.id, did, role: b.role } });
+    return reply.code(201).send({ id: created.id, email: created.email, role: created.role, useCaseKey: created.useCaseKey, orgId: id, did, membershipVc: true });
+  });
+
+  app.get("/orgs/:id/members", { schema: S.listMembers, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    if (!orgScoped(claims, id)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to view that organization's members" });
+    const org = await deps.organizations.get(id);
+    if (!org) return notFound(reply, "organization not found");
+    const members = await deps.users.listByOrg(id);
+    return members.map((u) => ({ id: u.id, email: u.email, role: u.role, useCaseKey: u.useCaseKey, did: u.did ?? null, active: u.active, kycStatus: u.kycStatus }));
+  });
+
+  app.get("/me/credentials", { schema: S.myCredentials, ...auth }, async (request) => {
+    const claims = request.user as TokenClaims;
+    if (!claims.did) return [];
+    const rows = await deps.credentials.listByHolder(claims.did);
+    return rows.map((c) => ({ id: c.id, type: c.type.split(","), issuerDid: c.issuerDid, holderDid: c.holderDid, claims: c.subjectClaims, issuedAt: c.issuedAt, expiresAt: c.expiresAt, revoked: c.revoked, vcJwt: c.vcJwt }));
   });
 
   // --- identity (DID / Verifiable Credentials) ------------------------------

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { publicKeyFromDidKey } from "@tokenlayer/core";
+import { decodeJwt, publicKeyFromDidKey, verifyJwtSignature } from "@tokenlayer/core";
 import { auth, buildTestApp, loginAs, V1 } from "./helpers.js";
 
 let app: FastifyInstance;
@@ -55,5 +55,55 @@ describe("GET /orgs, GET /orgs/:id", () => {
     const one = await app.inject({ method: "GET", url: `${V1}/orgs/${created.id}`, headers: auth(admin) });
     expect(one.statusCode).toBe(200);
     expect(one.json().name).toBe("ReadMe Org");
+  });
+});
+
+describe("POST /orgs/:id/users (members)", () => {
+  it("mints a sub-DID + a membership VC that verifies against the org DID", async () => {
+    const org = (await createOrg(admin, { name: "Member Org", orgType: "bank" })).json();
+    const res = await app.inject({
+      method: "POST", url: `${V1}/orgs/${org.id}/users`, headers: auth(admin),
+      payload: { email: `issuer.${org.id}@x.io`, password: "secret1", role: "Issuer" },
+    });
+    expect(res.statusCode).toBe(201);
+    const member = res.json();
+    expect(member.did.startsWith("did:key:z")).toBe(true);
+    expect(member.membershipVc).toBe(true);
+
+    const memberToken = await loginAs(app, `issuer.${org.id}@x.io`, "secret1");
+    const creds = await app.inject({ method: "GET", url: `${V1}/me/credentials`, headers: auth(memberToken) });
+    expect(creds.statusCode).toBe(200);
+    const list = creds.json();
+    expect(list).toHaveLength(1);
+    expect(list[0].type).toContain("OrganizationMembership");
+    expect(verifyJwtSignature(list[0].vcJwt, publicKeyFromDidKey(org.did))).toBe(true);
+    expect((decodeJwt(list[0].vcJwt).payload.vc as { credentialSubject: { id: string } }).credentialSubject.id).toBe(member.did);
+  });
+
+  it("an OrgAdmin cannot mint a PlatformAdmin and cannot act on another org", async () => {
+    const orgA = (await createOrg(admin, { name: "Org A", orgType: "corporate" })).json();
+    const orgB = (await createOrg(admin, { name: "Org B", orgType: "corporate" })).json();
+    const adminRes = await app.inject({
+      method: "POST", url: `${V1}/orgs/${orgA.id}/users`, headers: auth(admin),
+      payload: { email: `orgadmin.${orgA.id}@x.io`, password: "secret1", role: "OrgAdmin" },
+    });
+    expect(adminRes.statusCode).toBe(201);
+    const orgAdmin = await loginAs(app, `orgadmin.${orgA.id}@x.io`, "secret1");
+
+    const cross = await app.inject({ method: "POST", url: `${V1}/orgs/${orgB.id}/users`, headers: auth(orgAdmin), payload: { email: "x@x.io", password: "secret1", role: "Issuer" } });
+    expect(cross.statusCode).toBe(403);
+    const esc = await app.inject({ method: "POST", url: `${V1}/orgs/${orgA.id}/users`, headers: auth(orgAdmin), payload: { email: "pa@x.io", password: "secret1", role: "PlatformAdmin" } });
+    expect(esc.statusCode).toBe(403);
+    const listB = await app.inject({ method: "GET", url: `${V1}/orgs/${orgB.id}/members`, headers: auth(orgAdmin) });
+    expect(listB.statusCode).toBe(403);
+  });
+
+  it("lists an org's members", async () => {
+    const org = (await createOrg(admin, { name: "Roster Org", orgType: "government" })).json();
+    await app.inject({ method: "POST", url: `${V1}/orgs/${org.id}/users`, headers: auth(admin), payload: { email: `a.${org.id}@x.io`, password: "secret1", role: "Auditor" } });
+    const members = await app.inject({ method: "GET", url: `${V1}/orgs/${org.id}/members`, headers: auth(admin) });
+    expect(members.statusCode).toBe(200);
+    expect(members.json().length).toBeGreaterThanOrEqual(1);
+    expect(members.json()[0]).toHaveProperty("did");
   });
 });

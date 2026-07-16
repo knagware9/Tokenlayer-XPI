@@ -899,6 +899,32 @@ export const S: Record<string, FastifySchema> = {
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404) },
   },
+  createMember: {
+    tags: ["Organizations"], summary: "Add a member (sub-DID + membership VC)", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    body: {
+      type: "object", additionalProperties: false, required: ["email", "password", "role"],
+      properties: {
+        email: { type: "string" },
+        password: { type: "string", minLength: 6 },
+        // "PlatformAdmin" is deliberately allowed through validation so that
+        // `canCreateOrgMember` rejects the escalation with a 403 (authorization),
+        // rather than the schema masking it as a 400 (validation).
+        role: { type: "string", enum: ["PlatformAdmin", "OrgAdmin", "UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"] },
+        useCaseKey: { type: "string" },
+        walletAddress: { type: "string" },
+        kyc: { type: "object", additionalProperties: false, properties: { legalName: { type: "string" }, country: { type: "string" }, idType: { type: "string" }, idNumber: { type: "string" }, documentRef: { type: "string" } } },
+      },
+    },
+    response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
+  },
+  listMembers: {
+    tags: ["Organizations"], summary: "List an organization's members", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403, 404) },
+  },
+  myCredentials: { tags: ["Identity"], summary: "Credentials held by the caller", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401) } },
+
   listUsers: { tags: ["Users"], summary: "List users in scope", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403) } },
   createUser: {
     tags: ["Users"], summary: "Create a user (scoped)", security: bearer,
