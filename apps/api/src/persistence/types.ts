@@ -1,4 +1,6 @@
-import type { Role, TokenStandard, TokenType, LifecycleAction, UseCaseDefinition, UseCaseSource } from "@tokenlayer/core";
+import type { Role, TokenStandard, TokenType, LifecycleAction, OrgType, UseCaseDefinition, UseCaseSource } from "@tokenlayer/core";
+
+export type { OrgType };
 
 export type KycStatus = "pending" | "approved" | "rejected";
 export interface KycDetails {
@@ -310,7 +312,6 @@ export interface CashRepository {
   transfer(currency: string, from: string, to: string, amount: string): Promise<void>;
 }
 
-export type OrgType = "bank" | "corporate" | "msme" | "government" | "verifier";
 export type OrgStatus = "active" | "suspended";
 
 export interface OrganizationRecord {

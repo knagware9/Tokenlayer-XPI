@@ -11,6 +11,11 @@ export type Role = "PlatformAdmin" | "OrgAdmin" | "UseCaseAdmin" | "Issuer" | "T
 
 export const ROLES: readonly Role[] = ["PlatformAdmin", "OrgAdmin", "UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"];
 
+/** The kind of tenant an organization is. */
+export type OrgType = "bank" | "corporate" | "msme" | "government" | "verifier";
+
+export const ORG_TYPES: readonly OrgType[] = ["bank", "corporate", "msme", "government", "verifier"];
+
 /** Every operation the platform can perform on an asset. */
 export type LifecycleAction =
   | "issue"
