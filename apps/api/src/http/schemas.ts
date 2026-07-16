@@ -891,7 +891,7 @@ export const S: Record<string, FastifySchema> = {
         jurisdiction: { type: "string" },
       },
     },
-    response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 409, 503) },
+    response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 409, 502, 503) },
   },
   listOrgs: { tags: ["Organizations"], summary: "List organizations in scope", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403) } },
   getOrg: {

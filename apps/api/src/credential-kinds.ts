@@ -44,6 +44,15 @@ export const issueCredentialKind: ProposalKindHandler = {
       orgEncSeed: org.didSeedEncrypted, orgDid: org.did, subjectDid: pl.subjectDid,
       type: pl.type, claims: pl.claims, credentialId, statusUrl, validityDays: def.validityDays, now,
     });
+    // Anchor BEFORE persisting. The executor is already all-or-nothing: if this
+    // throws, the proposal becomes `failed` and no credential row is created —
+    // which is why we need neither fire-and-forget nor a reconciliation job.
+    // No registry ⇒ issue unanchored (the status endpoint reports that honestly).
+    if (ctx.deps.registry) {
+      await ctx.deps.registry.anchor.anchorCredential(
+        ctx.deps.registry.vcRegistry, credentialId, vcJwt, now, expiresAt,
+      );
+    }
     await ctx.deps.credentials.create({
       id: credentialId,
       holderDid: pl.subjectDid,
@@ -73,6 +82,13 @@ export const revokeCredentialKind: ProposalKindHandler = {
     const cred = await ctx.deps.credentials.get(pl.credentialId);
     if (!cred) throw coded(404, "NOT_FOUND", "credential missing");
     if (cred.revoked) throw coded(409, "ALREADY_REVOKED", "credential is already revoked");
+    // Chain FIRST, then the database. A crash between the two leaves the chain
+    // revoked and the DB stale — and since the chain is authoritative when
+    // present, /status still answers correctly. The reverse order could report a
+    // revoked credential as valid on-chain forever.
+    if (ctx.deps.registry) {
+      await ctx.deps.registry.anchor.revokeCredential(ctx.deps.registry.vcRegistry, cred.id);
+    }
     await ctx.deps.credentials.revoke(cred.id, { reason: pl.reason, by: p.proposerId, at: new Date().toISOString() });
   },
 };

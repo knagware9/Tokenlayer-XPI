@@ -1184,6 +1184,17 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const seed = deps.keystore.newSeed();
     const didSeedEncrypted = deps.keystore.encryptSeed(seed);
     const did = deps.keystore.keyOf(didSeedEncrypted).did;
+    // Register on-chain BEFORE persisting, so a chain failure needs no rollback:
+    // nothing has been written yet. (Contrast mintMembership, which must delete
+    // the user row because the row precedes the VC.)
+    if (deps.registry) {
+      try {
+        await deps.registry.anchor.registerDid(deps.registry.didRegistry, did);
+      } catch (err) {
+        request.log.error({ err }, "org DID registration failed");
+        return reply.code(502).send({ error: "REGISTRY_UNAVAILABLE", message: "could not register the organization's DID on-chain — no organization was created" });
+      }
+    }
     const org = await deps.organizations.create({
       name: b.name, orgType: b.orgType, registrationId: b.registrationId ?? null, jurisdiction: b.jurisdiction ?? null,
       did, didSeedEncrypted, status: "active", verified: true, verifiedAt: new Date().toISOString(),
