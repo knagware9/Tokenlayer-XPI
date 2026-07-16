@@ -21,13 +21,14 @@ import {
   MemoryUseCaseRepository,
   MemoryUserRepository,
 } from "../src/persistence/memory.js";
+import type { IdentityRegistry } from "../src/registry.js";
 import { DEFAULT_USERS, seedDefaults } from "../src/seed.js";
 import { seedUseCases } from "../src/use-cases.js";
 
 /** Demo market escrow used by tests unless a test explicitly overrides it (pass `marketEscrowAccount: undefined` to disable the market). */
 export const TEST_MARKET_ESCROW = "0xcd3B766CCDd6AE721141F452C550Ca635964ce71";
 
-export async function buildTestApp(opts: { loginRateLimitMax?: number; platformFeeAccount?: string; marketEscrowAccount?: string; trustedKycIssuers?: string[]; devIssuerSeed?: string; isProduction?: boolean; didMasterConfigured?: boolean } = {}): Promise<FastifyInstance> {
+export async function buildTestApp(opts: { loginRateLimitMax?: number; platformFeeAccount?: string; marketEscrowAccount?: string; trustedKycIssuers?: string[]; devIssuerSeed?: string; isProduction?: boolean; didMasterConfigured?: boolean; registry?: IdentityRegistry } = {}): Promise<FastifyInstance> {
   const rbac = new RbacPolicy();
   const chains = buildChainRegistry({ CHAIN_STRICT: "0" }); // simulated chains only — besu absent, never mocked
   const users = new MemoryUserRepository();
@@ -62,6 +63,7 @@ export async function buildTestApp(opts: { loginRateLimitMax?: number; platformF
     // Enabled by default so market routes are testable; an explicit
     // `marketEscrowAccount: undefined` disables the market (503s).
     marketEscrowAccount: "marketEscrowAccount" in opts ? opts.marketEscrowAccount : TEST_MARKET_ESCROW,
+    registry: opts.registry,
   });
 }
 

@@ -20,6 +20,7 @@ import type {
   UseCaseRepository,
   UserRepository,
 } from "./persistence/types.js";
+import type { IdentityRegistry } from "./registry.js";
 
 export interface AppDeps {
   useCases: UseCaseRepository;
@@ -67,6 +68,8 @@ export interface AppDeps {
    * MARKET_DISABLED.
    */
   marketEscrowAccount?: string;
+  /** The on-chain identity registry. ABSENT when no chain hosts one — consumers must handle that explicitly. */
+  registry?: IdentityRegistry;
 }
 
 /**
