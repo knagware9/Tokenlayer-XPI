@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { AssetRecord, CashflowRecord, KycDetails, KycStatus, ListingRecord, ProposalRecord, UserRecord } from "../persistence/types.js";
+import type { AssetRecord, CashflowRecord, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
 import { auditEntryHash, canCreateUser, canManageUsers, computeCashflowSchedule, didKeyFromSeed, generateDidKey, invoiceFingerprint, issueCredential, normalizeUseCaseDefinition, PolicyError, presentCredential, splitProRata, verifyChain, verifyPresentation, type Actor, type ChainEntry, type LifecycleAction, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
@@ -37,6 +37,11 @@ function decodeVcJti(vpJwt: string): string | null {
 // always yields the same DID (dev/demo issuer + holder reproducibility).
 function devKeyFromSeed(seed: string) {
   return didKeyFromSeed(createHash("sha256").update(seed).digest());
+}
+
+// Public projection of an org — NEVER includes didSeedEncrypted.
+function orgView(o: OrganizationRecord) {
+  return { id: o.id, name: o.name, orgType: o.orgType, registrationId: o.registrationId, jurisdiction: o.jurisdiction, did: o.did, verified: o.verified, status: o.status, createdAt: o.createdAt };
 }
 
 /** Registers every /api/v1 route on the given (prefixed) instance. */
@@ -105,6 +110,11 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (!required || required < 1) return null;
     const claims = request.user as TokenClaims;
     return deps.proposals.create({ useCaseKey: useCase.key, assetId, kind: op, payload, proposerId: claims.id, proposerLabel: claims.email, required });
+  }
+
+  // Org scope: PlatformAdmin acts on any org; an OrgAdmin only on their own.
+  function orgScoped(claims: TokenClaims, orgId: string): boolean {
+    return claims.role === "PlatformAdmin" || (claims.role === "OrgAdmin" && claims.orgId === orgId);
   }
 
   // --- auth ---------------------------------------------------------------
@@ -1150,6 +1160,43 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (b.kycStatus === "approved" || b.kycStatus === "rejected") patch.kycStatus = b.kycStatus;
     const updated = await deps.users.update(id, patch);
     return { id: updated.id, email: updated.email, role: updated.role, useCaseKey: updated.useCaseKey, accountId: updated.accountId, active: updated.active, kycStatus: updated.kycStatus };
+  });
+
+  // --- organizations -------------------------------------------------------
+  app.post("/orgs", { schema: S.createOrg, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    if (claims.role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only the Platform Admin may create organizations" });
+    if (!deps.didMasterConfigured && deps.isProduction) return reply.code(503).send({ error: "DID_KEYSTORE_UNCONFIGURED", message: "DID_MASTER_KEY must be set to create organizations" });
+    const b = request.body as { name: string; orgType: "bank" | "corporate" | "msme" | "government" | "verifier"; registrationId?: string; jurisdiction?: string };
+    if (await deps.organizations.findByName(b.name)) return reply.code(409).send({ error: "NAME_TAKEN", message: "an organization with that name already exists" });
+    if (b.registrationId && (await deps.organizations.findByRegistrationId(b.registrationId))) return reply.code(409).send({ error: "REGISTRATION_TAKEN", message: "an organization with that registration id already exists" });
+    const seed = deps.keystore.newSeed();
+    const didSeedEncrypted = deps.keystore.encryptSeed(seed);
+    const did = deps.keystore.keyOf(didSeedEncrypted).did;
+    const org = await deps.organizations.create({
+      name: b.name, orgType: b.orgType, registrationId: b.registrationId ?? null, jurisdiction: b.jurisdiction ?? null,
+      did, didSeedEncrypted, status: "active", verified: true, verifiedAt: new Date().toISOString(),
+    });
+    await deps.audit.append({ actorId: claims.id, action: "org-created" as LifecycleAction, payload: { orgId: org.id, name: org.name, did: org.did } });
+    return reply.code(201).send({ id: org.id, name: org.name, did: org.did, orgType: org.orgType, registrationId: org.registrationId, jurisdiction: org.jurisdiction, verified: org.verified, status: org.status });
+  });
+
+  app.get("/orgs", { schema: S.listOrgs, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    let rows;
+    if (claims.role === "PlatformAdmin") rows = await deps.organizations.list();
+    else if (claims.role === "OrgAdmin" && claims.orgId) { const o = await deps.organizations.get(claims.orgId); rows = o ? [o] : []; }
+    else return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to list organizations" });
+    return rows.map(orgView);
+  });
+
+  app.get("/orgs/:id", { schema: S.getOrg, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    if (!orgScoped(claims, id)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to view that organization" });
+    const org = await deps.organizations.get(id);
+    if (!org) return notFound(reply, "organization not found");
+    return orgView(org);
   });
 
   // --- identity (DID / Verifiable Credentials) ------------------------------

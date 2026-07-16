@@ -880,6 +880,25 @@ export const S: Record<string, FastifySchema> = {
     },
   },
 
+  createOrg: {
+    tags: ["Organizations"], summary: "Create an organization + parent DID (PlatformAdmin)", security: bearer,
+    body: {
+      type: "object", additionalProperties: false, required: ["name", "orgType"],
+      properties: {
+        name: { type: "string", minLength: 1 },
+        orgType: { type: "string", enum: ["bank", "corporate", "msme", "government", "verifier"] },
+        registrationId: { type: "string" },
+        jurisdiction: { type: "string" },
+      },
+    },
+    response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 409, 503) },
+  },
+  listOrgs: { tags: ["Organizations"], summary: "List organizations in scope", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403) } },
+  getOrg: {
+    tags: ["Organizations"], summary: "Get an organization by id", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404) },
+  },
   listUsers: { tags: ["Users"], summary: "List users in scope", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403) } },
   createUser: {
     tags: ["Users"], summary: "Create a user (scoped)", security: bearer,
