@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, ApiError } from "../api.js";
 import { useAuth } from "../auth.js";
-import type { ChainInfo, ChainStatus } from "../types.js";
-import { Card, Icon, Pill, type IconName } from "./ui.js";
+import type { ChainInfo, ChainStatus, IdentityRegistryInfo } from "../types.js";
+import { Card, EmptyState, Icon, Pill, Skeleton, type IconName } from "./ui.js";
 
 /** Env vars an operator must set to bring an unconfigured EVM chain online (documentation, mirrors config/chains.json). */
 const ENV_VARS: Record<string, string[]> = {
@@ -23,11 +23,62 @@ export function modePill(chain: ChainInfo): JSX.Element {
 /** Networks view: every chain in the catalog with its configuration and an on-demand status probe. */
 export function NetworksPanel({ chains }: { chains: ChainInfo[] }): JSX.Element {
   return (
-    <div className="grid gap-4 sm:grid-cols-2">
-      {chains.map((c) => (
-        <ChainCard key={c.id} chain={c} />
-      ))}
+    <div className="space-y-4">
+      <IdentityRegistryCard />
+      <div className="grid gap-4 sm:grid-cols-2">
+        {chains.map((c) => (
+          <ChainCard key={c.id} chain={c} />
+        ))}
+      </div>
     </div>
+  );
+}
+
+/**
+ * Where DIDs and credential hashes are anchored. `undefined` = still loading;
+ * `null` = no chain hosts the registry, which the card states plainly rather
+ * than implying credentials are on-chain when they are not.
+ */
+function IdentityRegistryCard(): JSX.Element {
+  const { token } = useAuth();
+  const [registry, setRegistry] = useState<IdentityRegistryInfo | null | undefined>(undefined);
+
+  useEffect(() => {
+    if (!token) return;
+    void api.identityRegistry(token).then(setRegistry).catch(() => setRegistry(null));
+  }, [token]);
+
+  return (
+    <Card
+      title="Identity registry"
+      description="The contracts that anchor DIDs and credential status."
+      actions={registry ? <Pill tone="ok">on-chain</Pill> : undefined}
+    >
+      {registry === undefined ? (
+        <Skeleton lines={3} />
+      ) : registry === null ? (
+        <EmptyState
+          icon="shield"
+          title="No identity registry is configured"
+          hint="Credentials are issued unanchored and their status resolves from the database."
+        />
+      ) : (
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
+          <Row label="Chain">
+            <span className="font-mono text-slate-700">{registry.chainId}</span>
+          </Row>
+          <Row label="DID registry">
+            <span className="font-mono text-xs text-slate-700 break-all">{registry.didRegistry}</span>
+          </Row>
+          <Row label="VC registry">
+            <span className="font-mono text-xs text-slate-700 break-all">{registry.vcRegistry}</span>
+          </Row>
+          <Row label="Deploy tx">
+            <span className="font-mono text-xs text-slate-500 break-all">{registry.deployTxHash}</span>
+          </Row>
+        </dl>
+      )}
+    </Card>
   );
 }
 

@@ -332,6 +332,8 @@ export interface DidDocument {
   verificationMethod: { id: string; type: string; controller: string; publicKeyMultibase: string }[];
   authentication: string[];
   assertionMethod: string[];
+  /** On-chain registration of this DID, when a chain hosts the registry; null when unanchored. */
+  registration?: { registered: boolean; active: boolean; chainId: string; registry: string } | null;
 }
 
 /** A credential type the platform can issue, with the claim shape it expects. */
@@ -343,6 +345,29 @@ export interface CredentialTypeInfo {
   validityDays: number;
   selfIssuedOnly: boolean;
   claimSchema: { type: "object"; required?: string[]; properties: Record<string, { type: string; description?: string; enum?: string[]; pattern?: string; min?: number; max?: number }> };
+}
+
+/** The deployed identity registry contracts (GET /registry); null when no chain hosts them. */
+export interface IdentityRegistryInfo {
+  chainId: string;
+  didRegistry: string;
+  vcRegistry: string;
+  deployTxHash: string;
+}
+
+/** Revocation status of a credential (GET /credentials/:id/status — public, no auth).
+ * `source` says where the answer came from: the chain registry, or the database when unanchored. */
+export interface CredentialStatusInfo {
+  id: string;
+  revoked: boolean;
+  revokedAt: string | null;
+  reason: string | null;
+  anchored: boolean;
+  source: "chain" | "database";
+  /** Present only when source === "chain". */
+  chainId?: string;
+  registry?: string;
+  vcHash?: string;
 }
 
 /** A credential an organization has issued (GET /orgs/:id/credentials). */
