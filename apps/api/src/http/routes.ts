@@ -1343,7 +1343,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (!cred) return notFound(reply, "credential not found");
     if (cred.revoked) return reply.code(409).send({ error: "ALREADY_REVOKED", message: "credential is already revoked" });
     // Only the ISSUING org may revoke: find the org whose parent DID signed it.
-    const issuer = (await deps.organizations.list()).find((o) => o.did === cred.issuerDid);
+    const issuer = await deps.organizations.findByDid(cred.issuerDid);
     if (!issuer) return notFound(reply, "issuing organization not found");
     if (!orgScoped(claims, issuer.id)) {
       return reply.code(403).send({ error: "FORBIDDEN", message: "only the issuing organization may revoke this credential" });

@@ -697,6 +697,10 @@ export class PrismaOrganizationRepository implements OrganizationRepository {
     const r = await prisma.organization.findUnique({ where: { name } });
     return r ? toOrg(r) : null;
   }
+  async findByDid(did: string): Promise<OrganizationRecord | null> {
+    const r = await prisma.organization.findUnique({ where: { did } });
+    return r ? toOrg(r) : null;
+  }
   async findByRegistrationId(registrationId: string): Promise<OrganizationRecord | null> {
     const r = await prisma.organization.findFirst({ where: { registrationId } });
     return r ? toOrg(r) : null;

@@ -337,6 +337,8 @@ export interface OrganizationRepository {
   create(input: Omit<OrganizationRecord, "id" | "createdAt">): Promise<OrganizationRecord>;
   get(id: string): Promise<OrganizationRecord | null>;
   findByName(name: string): Promise<OrganizationRecord | null>;
+  /** The org whose parent DID is `did` — the issuer of a credential signed by it. */
+  findByDid(did: string): Promise<OrganizationRecord | null>;
   findByRegistrationId(registrationId: string): Promise<OrganizationRecord | null>;
   list(): Promise<OrganizationRecord[]>;
   setVerified(id: string, verified: boolean, verifiedAt: string | null): Promise<OrganizationRecord>;

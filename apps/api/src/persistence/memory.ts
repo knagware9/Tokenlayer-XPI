@@ -434,6 +434,9 @@ export class MemoryOrganizationRepository implements OrganizationRepository {
   async findByName(name: string): Promise<OrganizationRecord | null> {
     return [...this.byId.values()].find((o) => o.name === name) ?? null;
   }
+  async findByDid(did: string): Promise<OrganizationRecord | null> {
+    return [...this.byId.values()].find((o) => o.did === did) ?? null;
+  }
   async findByRegistrationId(registrationId: string): Promise<OrganizationRecord | null> {
     return [...this.byId.values()].find((o) => o.registrationId === registrationId) ?? null;
   }
