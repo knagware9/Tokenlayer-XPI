@@ -12,10 +12,11 @@ import { MyIdentity } from "./components/MyIdentity.js";
 import { Organizations } from "./components/Organizations.js";
 import { PlatformHome } from "./components/PlatformHome.js";
 import { UserManagement } from "./components/UserManagement.js";
+import { VerificationRequests } from "./components/VerificationRequests.js";
 import { canManageUsers } from "./rbac.js";
 import type { ChainInfo, UseCase } from "./types.js";
 
-type Section = "overview" | "assets" | "approvals" | "users" | "organizations" | "identity";
+type Section = "overview" | "assets" | "approvals" | "users" | "organizations" | "verify" | "identity";
 
 export function App(): JSX.Element {
   const { token, user } = useAuth();
@@ -50,13 +51,27 @@ export function App(): JSX.Element {
   const isPlatform = user.role === "PlatformAdmin";
   const activeUseCase = isPlatform ? routeKey : user.useCaseKey ?? "";
 
-  // Investors get the dedicated portal experience instead of the operator console.
+  // Investors get the dedicated portal experience instead of the operator console —
+  // plus a My-identity tab, so a Buyer holder can reach their credentials and their
+  // verification-request inbox (otherwise the holder side of verification is unreachable).
   if (user.role === "Buyer") {
+    const buyerTab: "portfolio" | "identity" = section === "identity" ? "identity" : "portfolio";
     return (
       <div className="min-h-screen">
         <Header />
         <main className="max-w-6xl mx-auto px-6 py-6">
-          <InvestorPortal useCases={useCases} />
+          <div className="flex gap-1 mb-5">
+            {([{ id: "portfolio", label: "Portfolio" }, { id: "identity", label: "My identity" }] as const).map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setSection(t.id === "identity" ? "identity" : "overview")}
+                className={`px-4 py-2 rounded-lg text-sm font-medium ${buyerTab === t.id ? "bg-white text-brand-700 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-800"}`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          {buyerTab === "portfolio" ? <InvestorPortal useCases={useCases} /> : <MyIdentity />}
         </main>
       </div>
     );
@@ -79,6 +94,7 @@ export function App(): JSX.Element {
     { id: "approvals", label: "Approvals" },
     ...(canManageUsers(user.role) ? [{ id: "users" as Section, label: "User Management" }] : []),
     ...(isPlatform || user.role === "OrgAdmin" ? [{ id: "organizations" as Section, label: "Organizations" }] : []),
+    ...(isPlatform || user.role === "OrgAdmin" ? [{ id: "verify" as Section, label: "Verification" }] : []),
     { id: "identity" as Section, label: "My identity" },
   ];
 
@@ -102,6 +118,7 @@ export function App(): JSX.Element {
         {section === "approvals" && <ApprovalsPanel />}
         {section === "users" && <UserManagement useCaseKey={activeUseCase} useCases={useCases} />}
         {section === "organizations" && <Organizations />}
+        {section === "verify" && <VerificationRequests />}
         {section === "identity" && <MyIdentity />}
       </main>
     </div>

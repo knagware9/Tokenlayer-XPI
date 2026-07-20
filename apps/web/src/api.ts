@@ -1,4 +1,4 @@
-import type { AccountState, ActivityEvent, AnalyticsSummary, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, ChainInfo, ChainStatus, ContractCode, CredentialStatusInfo, CredentialTypeInfo, DidDocument, HeldCredential, IdentityRegistryInfo, IdentityResult, IssuedCredential, Listing, OrgMember, OrgType, Organization, Portfolio, Proposal, Role, SessionUser, TokenInfo, TokenStandard, Trade, UseCase } from "./types.js";
+import type { AccountState, ActivityEvent, AnalyticsSummary, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, ChainInfo, ChainStatus, ContractCode, CredentialStatusInfo, CredentialTypeInfo, DidDocument, HeldCredential, IdentityRegistryInfo, IdentityResult, IssuedCredential, Listing, OrgMember, OrgType, Organization, Portfolio, Proposal, Role, SessionUser, TokenInfo, TokenStandard, Trade, UseCase, VerificationRequest, VerificationResult } from "./types.js";
 
 export interface Currency { code: string; label: string; }
 export interface CashBalance { currency: string; address: string; amount: string; }
@@ -150,4 +150,12 @@ export const api = {
   identityRegistry: (token: string) => request<IdentityRegistryInfo | null>("/registry", token),
   // Public: a verifier must be able to check a credential without an account.
   credentialStatus: (id: string) => request<CredentialStatusInfo>(`/credentials/${encodeURIComponent(id)}/status`, null),
+  createVerificationRequest: (token: string, body: { holderDid: string; requestedTypes: string[]; purpose: string }) =>
+    request<VerificationRequest>("/verification-requests", token, { method: "POST", body: JSON.stringify(body) }),
+  myVerificationRequests: (token: string) => request<VerificationRequest[]>("/me/verification-requests", token),
+  consentVerification: (token: string, id: string, credentialIds: string[]) =>
+    request<VerificationRequest>(`/verification-requests/${encodeURIComponent(id)}/consent`, token, { method: "POST", body: JSON.stringify({ credentialIds }) }),
+  rejectVerification: (token: string, id: string) =>
+    request<VerificationRequest>(`/verification-requests/${encodeURIComponent(id)}/reject`, token, { method: "POST", body: JSON.stringify({}) }),
+  verifyVerification: (token: string, id: string) => request<VerificationResult>(`/verification-requests/${encodeURIComponent(id)}/verify`, token),
 };

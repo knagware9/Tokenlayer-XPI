@@ -20,6 +20,7 @@ import {
   MemoryListingRepository,
   MemoryUseCaseRepository,
   MemoryUserRepository,
+  MemoryVerificationRequestRepository,
 } from "../src/persistence/memory.js";
 import type { IdentityRegistry } from "../src/registry.js";
 import { DEFAULT_USERS, seedDefaults } from "../src/seed.js";
@@ -44,6 +45,7 @@ export async function buildTestApp(opts: { loginRateLimitMax?: number; platformF
   const proposals = new MemoryProposalRepository();
   const organizations = new MemoryOrganizationRepository();
   const credentials = new MemoryCredentialRepository();
+  const verificationRequests = new MemoryVerificationRequestRepository();
   const keystore = createKeystore("11".repeat(32));
   await seedDefaults(users, accounts);
   const engine = createEngine(useCases, rbac, chains, audit, { users, accounts });
@@ -54,7 +56,7 @@ export async function buildTestApp(opts: { loginRateLimitMax?: number; platformF
   // The suite makes many logins from one IP; raise the throttle unless a test opts into it.
   return buildApp({
     useCases, rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents, cashflows, proposals,
-    organizations, credentials, keystore, didMasterConfigured: opts.didMasterConfigured ?? true,
+    organizations, credentials, verificationRequests, keystore, didMasterConfigured: opts.didMasterConfigured ?? true,
     challenges: createMemoryChallengeStore(), trustedKycIssuers: opts.trustedKycIssuers,
     devIssuerSeed: opts.devIssuerSeed, isProduction: opts.isProduction,
     currencies: loadCurrencies(), jwtSecret: "test-secret", publicApiUrl: "http://test.local/api/v1",

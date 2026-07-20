@@ -34,6 +34,9 @@ import type {
   UseCaseRepository,
   UserRecord,
   UserRepository,
+  VerificationRequestRecord,
+  VerificationRequestRepository,
+  VerificationStatus,
 } from "./types.js";
 import { ListingConflictError } from "./types.js";
 
@@ -501,6 +504,46 @@ export class MemoryRegistryDeploymentRepository implements RegistryDeploymentRep
   async create(input: Omit<RegistryDeploymentRecord, "createdAt">): Promise<RegistryDeploymentRecord> {
     const rec: RegistryDeploymentRecord = { ...input, createdAt: now() };
     this.byChain.set(rec.chainId, rec);
+    return rec;
+  }
+}
+
+export class MemoryVerificationRequestRepository implements VerificationRequestRepository {
+  private readonly byId = new Map<string, VerificationRequestRecord>();
+  async create(input: Omit<VerificationRequestRecord, "id" | "createdAt">): Promise<VerificationRequestRecord> {
+    const rec: VerificationRequestRecord = { ...input, id: id("vreq"), createdAt: now() };
+    this.byId.set(rec.id, rec);
+    return rec;
+  }
+  async get(reqId: string): Promise<VerificationRequestRecord | null> {
+    return this.byId.get(reqId) ?? null;
+  }
+  async listByHolder(holderDid: string, status?: string): Promise<VerificationRequestRecord[]> {
+    return [...this.byId.values()]
+      .filter((r) => r.holderDid === holderDid && (!status || r.status === status))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+  async listByVerifierOrg(orgId: string, status?: string): Promise<VerificationRequestRecord[]> {
+    return [...this.byId.values()]
+      .filter((r) => r.verifierOrgId === orgId && (!status || r.status === status))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+  async setConsented(reqId: string, input: { vpJwt: string; credentialIds: string[]; at: string }): Promise<VerificationRequestRecord> {
+    const rec = this.byId.get(reqId);
+    if (!rec) throw new Error(`unknown verification request '${reqId}'`);
+    rec.status = "consented"; rec.presentationVpJwt = input.vpJwt; rec.consentedCredentialIds = input.credentialIds; rec.consentedAt = input.at;
+    return rec;
+  }
+  async setStatus(reqId: string, status: VerificationStatus): Promise<VerificationRequestRecord> {
+    const rec = this.byId.get(reqId);
+    if (!rec) throw new Error(`unknown verification request '${reqId}'`);
+    rec.status = status;
+    return rec;
+  }
+  async setVerifierResult(reqId: string, input: { result: Record<string, unknown>; at: string }): Promise<VerificationRequestRecord> {
+    const rec = this.byId.get(reqId);
+    if (!rec) throw new Error(`unknown verification request '${reqId}'`);
+    rec.verifierResult = input.result; rec.verifiedAt = input.at;
     return rec;
   }
 }

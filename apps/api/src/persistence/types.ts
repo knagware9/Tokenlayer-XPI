@@ -383,3 +383,32 @@ export interface RegistryDeploymentRepository {
   get(chainId: string): Promise<RegistryDeploymentRecord | null>;
   create(input: Omit<RegistryDeploymentRecord, "createdAt">): Promise<RegistryDeploymentRecord>;
 }
+
+export type VerificationStatus = "pending" | "consented" | "rejected" | "expired";
+
+export interface VerificationRequestRecord {
+  id: string;
+  verifierOrgId: string;
+  holderDid: string;
+  requestedTypes: string[];
+  purpose: string;
+  challenge: string;
+  status: VerificationStatus;
+  presentationVpJwt: string | null;
+  consentedAt: string | null;
+  consentedCredentialIds: string[] | null;
+  verifierResult: Record<string, unknown> | null;
+  verifiedAt: string | null;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface VerificationRequestRepository {
+  create(input: Omit<VerificationRequestRecord, "id" | "createdAt">): Promise<VerificationRequestRecord>;
+  get(id: string): Promise<VerificationRequestRecord | null>;
+  listByHolder(holderDid: string, status?: string): Promise<VerificationRequestRecord[]>;
+  listByVerifierOrg(orgId: string, status?: string): Promise<VerificationRequestRecord[]>;
+  setConsented(id: string, input: { vpJwt: string; credentialIds: string[]; at: string }): Promise<VerificationRequestRecord>;
+  setStatus(id: string, status: VerificationStatus): Promise<VerificationRequestRecord>;
+  setVerifierResult(id: string, input: { result: Record<string, unknown>; at: string }): Promise<VerificationRequestRecord>;
+}

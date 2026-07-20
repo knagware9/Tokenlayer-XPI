@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { AssetRecord, CashflowRecord, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord } from "../persistence/types.js";
+import type { AssetRecord, CashflowRecord, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TYPES, credentialTypeDef, didKeyFromSeed, generateDidKey, invoiceFingerprint, issueCredential, normalizeUseCaseDefinition, PolicyError, presentCredential, publicKeyFromDidKey, splitProRata, validateMetadata, verifyChain, verifyPresentation, type Actor, type ChainEntry, type LifecycleAction, type Role, type UseCaseDefinition } from "@tokenlayer/core";
+import { auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TYPES, credentialTypeDef, decodeJwt, didKeyFromSeed, generateDidKey, invoiceFingerprint, issueCredential, normalizeUseCaseDefinition, PolicyError, presentCredential, presentCredentials, publicKeyFromDidKey, splitProRata, validateMetadata, verifyChain, verifyPresentation, verifyPresentationCredentials, type Actor, type ChainEntry, type LifecycleAction, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { isSupportedCurrency } from "../currencies.js";
 import { renderContractCode } from "../contract-code.js";
@@ -1439,6 +1439,200 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       id: c.id, type: c.type, holderDid: c.holderDid, claims: c.subjectClaims,
       issuedAt: c.issuedAt, expiresAt: c.expiresAt, revoked: c.revoked, revokedAt: c.revokedAt, revokedReason: c.revokedReason,
     }));
+  });
+
+  // --- verification (verifier-request → holder-consent → verify) -----------
+  // A public projection — never leaks the challenge (it's embedded in the VP) or
+  // the raw VP blob to a list view.
+  function vreqView(r: VerificationRequestRecord) {
+    return {
+      id: r.id, verifierOrgId: r.verifierOrgId, holderDid: r.holderDid, requestedTypes: r.requestedTypes,
+      purpose: r.purpose, status: r.status, consentedCredentialIds: r.consentedCredentialIds,
+      consentedAt: r.consentedAt, verifiedAt: r.verifiedAt, createdAt: r.createdAt, expiresAt: r.expiresAt,
+    };
+  }
+
+  app.post("/verification-requests", { schema: S.createVerificationRequest, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const b = request.body as { holderDid: string; requestedTypes: string[]; purpose: string };
+    if (claims.role !== "OrgAdmin" || !claims.orgId) {
+      return reply.code(403).send({ error: "NOT_A_VERIFIER", message: "only a verifier organization may request a presentation" });
+    }
+    const org = await deps.organizations.get(claims.orgId);
+    if (!org || org.orgType !== "verifier") {
+      return reply.code(403).send({ error: "NOT_A_VERIFIER", message: "your organization is not a verifier" });
+    }
+    const rec = await deps.verificationRequests.create({
+      verifierOrgId: org.id, holderDid: b.holderDid, requestedTypes: b.requestedTypes, purpose: b.purpose,
+      challenge: randomUUID(), status: "pending", presentationVpJwt: null, consentedAt: null,
+      consentedCredentialIds: null, verifierResult: null, verifiedAt: null,
+      expiresAt: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+    });
+    await deps.audit.append({ actorId: claims.id, action: "verification-requested" as LifecycleAction, payload: { requestId: rec.id, verifierOrgId: org.id, holderDid: b.holderDid, types: b.requestedTypes } });
+    return reply.code(201).send(vreqView(rec));
+  });
+
+  app.get("/me/verification-requests", { schema: S.myVerificationRequests, ...auth }, async (request) => {
+    const claims = request.user as TokenClaims;
+    if (!claims.did) return [];
+    const rows = await deps.verificationRequests.listByHolder(claims.did);
+    const mine = await deps.credentials.listByHolder(claims.did);
+    return rows.map((r) => ({
+      ...vreqView(r),
+      eligibleCredentials: mine
+        .filter((c) => !c.revoked && r.requestedTypes.includes(c.type))
+        .map((c) => ({ id: c.id, type: c.type, issuerDid: c.issuerDid, issuedAt: c.issuedAt })),
+    }));
+  });
+
+  app.get("/verification-requests/:id", { schema: S.getVerificationRequest, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    const r = await deps.verificationRequests.get(id);
+    const isHolder = !!claims.did && claims.did === r?.holderDid;
+    const isVerifier = !!r && orgScoped(claims, r.verifierOrgId);
+    if (!r || (!isHolder && !isVerifier)) return notFound(reply, "verification request not found");
+    return vreqView(r);
+  });
+
+  app.post("/verification-requests/:id/consent", { schema: S.consentVerificationRequest, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    const { credentialIds } = request.body as { credentialIds: string[] };
+    const r = await deps.verificationRequests.get(id);
+    if (!r) return notFound(reply, "verification request not found");
+    // Holder ONLY — one person authorizing disclosure of their OWN credentials.
+    if (!claims.did || claims.did !== r.holderDid) {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "only the holder may consent to this request" });
+    }
+    if (r.status !== "pending") return reply.code(409).send({ error: "REQUEST_NOT_PENDING", message: `request is ${r.status}` });
+    if (new Date(r.expiresAt).getTime() < Date.now()) {
+      await deps.verificationRequests.setStatus(r.id, "expired");
+      return reply.code(410).send({ error: "REQUEST_EXPIRED", message: "this verification request has expired" });
+    }
+    // Every chosen credential must be the holder's own, of a requested type, unrevoked.
+    const mine = await deps.credentials.listByHolder(claims.did);
+    const byId = new Map(mine.map((c) => [c.id, c]));
+    const chosen = credentialIds.map((cid) => byId.get(cid));
+    for (let i = 0; i < credentialIds.length; i++) {
+      const c = chosen[i];
+      if (!c || c.revoked || !r.requestedTypes.includes(c.type)) {
+        return reply.code(400).send({ error: "CREDENTIAL_NOT_ELIGIBLE", message: `credential '${credentialIds[i]}' is not an eligible, unrevoked, requested-type credential you hold` });
+      }
+    }
+    // Custodial VP signing: the caller IS the holder, so resolve their own seed.
+    const holderUser = await deps.users.findById(claims.id);
+    if (!holderUser?.didSeedEncrypted) {
+      return reply.code(409).send({ error: "HOLDER_KEY_UNAVAILABLE", message: "no custodial key is available for your DID" });
+    }
+    const holderKey = deps.keystore.keyOf(holderUser.didSeedEncrypted);
+    const vpJwt = presentCredentials({
+      holderDid: r.holderDid, holderKey: holderKey.privateKey,
+      vcJwts: chosen.map((c) => c!.vcJwt), challenge: r.challenge, now: Math.floor(Date.now() / 1000),
+    });
+    const updated = await deps.verificationRequests.setConsented(r.id, { vpJwt, credentialIds, at: new Date().toISOString() });
+    await deps.audit.append({ actorId: claims.id, action: "verification-consented" as LifecycleAction, payload: { requestId: r.id, verifierOrgId: r.verifierOrgId, credentialIds } });
+    return vreqView(updated);
+  });
+
+  app.post("/verification-requests/:id/reject", { schema: S.rejectVerificationRequest, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    const r = await deps.verificationRequests.get(id);
+    if (!r) return notFound(reply, "verification request not found");
+    if (!claims.did || claims.did !== r.holderDid) {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "only the holder may reject this request" });
+    }
+    if (r.status !== "pending") return reply.code(409).send({ error: "REQUEST_NOT_PENDING", message: `request is ${r.status}` });
+    const updated = await deps.verificationRequests.setStatus(r.id, "rejected");
+    await deps.audit.append({ actorId: claims.id, action: "verification-rejected" as LifecycleAction, payload: { requestId: r.id, verifierOrgId: r.verifierOrgId } });
+    return vreqView(updated);
+  });
+
+  app.get("/verification-requests/:id/verify", { schema: S.verifyVerificationRequest, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    const r = await deps.verificationRequests.get(id);
+    if (!r || !orgScoped(claims, r.verifierOrgId)) return notFound(reply, "verification request not found");
+    if (r.status !== "consented" || !r.presentationVpJwt) {
+      return reply.code(409).send({ error: "NOT_CONSENTED", message: `request is ${r.status}; nothing to verify` });
+    }
+    const vpJwt = r.presentationVpJwt;
+    const nowSec = Math.floor(Date.now() / 1000);
+
+    // STEP 1 — compute the trusted-issuer list (this is HOW core's trust check is
+    // fed, not a second check). Collect each inner VC's issuer DID, then decide
+    // trust: on-chain (registered && active) when a registry is configured, else
+    // the static allowlist. The subset that passes becomes trustedIssuers.
+    const issuerDids = new Set<string>();
+    try {
+      const vp = decodeJwt(vpJwt);
+      for (const raw of ((vp.payload.vp as { verifiableCredential?: unknown[] })?.verifiableCredential ?? [])) {
+        if (typeof raw === "string") { try { issuerDids.add(String(decodeJwt(raw).payload.iss ?? "")); } catch { /* skip */ } }
+      }
+    } catch { /* malformed → core fails it below */ }
+    const trusted: string[] = [];
+    for (const did of issuerDids) {
+      if (!did) continue;
+      if (deps.registry) {
+        try {
+          const reg = await deps.registry.anchor.didRegistration(deps.registry.didRegistry, did);
+          if (reg.registered && reg.active) trusted.push(did);
+        } catch (err) { request.log.error({ err, did }, "on-chain issuer-trust read failed"); }
+      } else if ((deps.trustedKycIssuers ?? []).includes(did)) {
+        trusted.push(did);
+      }
+    }
+
+    // STEP 2 — pure crypto verification against that trust list.
+    const core = verifyPresentationCredentials({ vpJwt, challenge: r.challenge, trustedIssuers: trusted, now: nowSec });
+
+    // STEP 3 — per-credential chain-backed revocation. core doesn't surface each
+    // VC's jti, so re-decode the presented VCs aligned BY INDEX to recover jti
+    // (our VCs set jti === Credential.id) and resolve revocation from it.
+    const presentedJtis: (string | null)[] = [];
+    try {
+      const vp = decodeJwt(vpJwt);
+      for (const raw of ((vp.payload.vp as { verifiableCredential?: unknown[] })?.verifiableCredential ?? [])) {
+        presentedJtis.push(typeof raw === "string" ? (() => { try { return String(decodeJwt(raw).payload.jti ?? "") || null; } catch { return null; } })() : null);
+      }
+    } catch { /* handled by core */ }
+
+    const credentials = await Promise.all(core.credentials.map(async (c, i) => {
+      const jti = presentedJtis[i] ?? null;
+      let revoked: boolean | "unknown" = "unknown";
+      let type: string | null = null;
+      if (jti) {
+        const stored = await deps.credentials.get(jti);
+        type = stored?.type ?? null;
+        if (deps.registry) {
+          try {
+            const st = await deps.registry.anchor.credentialStatusOf(deps.registry.vcRegistry, jti);
+            revoked = st.exists ? st.revoked : (stored ? stored.revoked : "unknown");
+          } catch (err) { request.log.error({ err }, "on-chain revocation read failed"); revoked = stored ? stored.revoked : "unknown"; }
+        } else {
+          revoked = stored ? stored.revoked : "unknown";
+        }
+      }
+      const notRevoked = revoked === false;
+      const checks = {
+        signature: c.reason !== "BAD_ISSUER_SIGNATURE" && c.reason !== "MALFORMED_PRESENTATION",
+        trusted: c.reason !== "UNTRUSTED_ISSUER",
+        notExpired: c.reason !== "CREDENTIAL_EXPIRED",
+        subjectBound: c.reason !== "SUBJECT_MISMATCH",
+        notRevoked,
+      };
+      return {
+        id: jti, type, issuer: c.credential?.issuer ?? null, claims: c.credential?.claims ?? null,
+        reason: c.reason ?? null, checks, valid: c.valid && notRevoked,
+      };
+    }));
+
+    const requestedCovered = r.requestedTypes.every((t) => credentials.some((c) => c.type === t && c.valid));
+    const result = { valid: core.valid && requestedCovered, holderDid: core.holderDid ?? null, reason: core.reason ?? null, purpose: r.purpose, credentials, verifiedAt: new Date().toISOString() };
+    await deps.verificationRequests.setVerifierResult(r.id, { result, at: result.verifiedAt });
+    await deps.audit.append({ actorId: claims.id, action: "verification-verified" as LifecycleAction, payload: { requestId: r.id, valid: result.valid, holderDid: core.holderDid ?? null } });
+    return result; // 200 even when valid:false
   });
 
   // --- identity (DID / Verifiable Credentials) ------------------------------

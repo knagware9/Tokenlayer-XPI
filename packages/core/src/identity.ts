@@ -131,3 +131,58 @@ export function verifyPresentation(input: VerifyInput): PresentationResult {
     return { valid: true, holderDid, credential: { issuer: issuerDid, subject: subjectId, claims: cs, issuedAt: nbf, expiresAt: exp } };
   } catch { return fail("MALFORMED_PRESENTATION"); }
 }
+
+export interface PresentManyInput { holderDid: string; holderKey: KeyObject; vcJwts: string[]; challenge: string; now: number; }
+/** Wrap N VC-JWTs in ONE holder-signed VP-JWT over a challenge. */
+export function presentCredentials(p: PresentManyInput): string {
+  return signJwt(
+    { alg: "EdDSA", typ: "JWT", kid: `${p.holderDid}#0` },
+    { iss: p.holderDid, nonce: p.challenge, iat: p.now,
+      vp: { "@context": ["https://www.w3.org/2018/credentials/v1"], type: ["VerifiablePresentation"], verifiableCredential: p.vcJwts } },
+    p.holderKey,
+  );
+}
+
+export interface PerCredentialResult { valid: boolean; reason?: string; credential?: VerifiedCredential; }
+export interface MultiPresentationResult { valid: boolean; reason?: string; holderDid?: string; credentials: PerCredentialResult[]; }
+export interface VerifyManyInput { vpJwt: string; challenge: string; trustedIssuers: string[]; now: number; }
+
+/**
+ * Verify a VP-JWT holding N credentials: the holder proof + challenge are checked
+ * ONCE, then EACH inner VC is checked independently (issuer sig, trust, expiry,
+ * subject binding). Fixes the single-VC verifier's silent drop of verifiableCredential[1..].
+ * Pure crypto — no revocation, no I/O; the caller composes those.
+ */
+export function verifyPresentationCredentials(input: VerifyManyInput): MultiPresentationResult {
+  const fail = (reason: string): MultiPresentationResult => ({ valid: false, reason, credentials: [] });
+  let vp;
+  try { vp = decodeJwt(input.vpJwt); } catch { return fail("MALFORMED_PRESENTATION"); }
+  const holderDid = String(vp.payload.iss ?? "");
+  if (!holderDid.startsWith("did:key:")) return fail("MALFORMED_PRESENTATION");
+  let holderKey;
+  try { holderKey = publicKeyFromDidKey(holderDid); } catch { return fail("MALFORMED_PRESENTATION"); }
+  if (!verifyJwtSignature(input.vpJwt, holderKey)) return fail("BAD_HOLDER_PROOF");
+  if (String(vp.payload.nonce ?? "") !== input.challenge) return fail("CHALLENGE_MISMATCH");
+  const vcJwts = (vp.payload.vp as { verifiableCredential?: unknown[] })?.verifiableCredential;
+  if (!Array.isArray(vcJwts) || vcJwts.length === 0) return fail("NO_CREDENTIAL");
+
+  const credentials: PerCredentialResult[] = vcJwts.map((raw): PerCredentialResult => {
+    const bad = (reason: string): PerCredentialResult => ({ valid: false, reason });
+    if (typeof raw !== "string") return bad("NO_CREDENTIAL");
+    let vc;
+    try { vc = decodeJwt(raw); } catch { return bad("MALFORMED_PRESENTATION"); }
+    const issuerDid = String(vc.payload.iss ?? "");
+    let issuerKey;
+    try { issuerKey = publicKeyFromDidKey(issuerDid); } catch { return bad("BAD_ISSUER_SIGNATURE"); }
+    if (!issuerDid.startsWith("did:key:") || !verifyJwtSignature(raw, issuerKey)) return bad("BAD_ISSUER_SIGNATURE");
+    if (!input.trustedIssuers.includes(issuerDid)) return bad("UNTRUSTED_ISSUER");
+    const exp = Number(vc.payload.exp ?? 0), nbf = Number(vc.payload.nbf ?? vc.payload.iat ?? 0);
+    if (!exp || exp < input.now || nbf > input.now) return bad("CREDENTIAL_EXPIRED");
+    const subjectId = String((vc.payload.vc as { credentialSubject?: { id?: string } })?.credentialSubject?.id ?? vc.payload.sub ?? "");
+    if (subjectId !== holderDid) return bad("SUBJECT_MISMATCH");
+    const cs = { ...(vc.payload.vc as { credentialSubject?: Record<string, unknown> }).credentialSubject };
+    delete (cs as { id?: unknown }).id;
+    return { valid: true, credential: { issuer: issuerDid, subject: subjectId, claims: cs, issuedAt: nbf, expiresAt: exp } };
+  });
+  return { valid: true, holderDid, credentials };
+}

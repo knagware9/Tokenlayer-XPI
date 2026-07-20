@@ -19,6 +19,7 @@ import type {
   ProposalRepository,
   UseCaseRepository,
   UserRepository,
+  VerificationRequestRepository,
 } from "./persistence/types.js";
 import type { IdentityRegistry } from "./registry.js";
 
@@ -39,6 +40,7 @@ export interface AppDeps {
   proposals: ProposalRepository;
   organizations: OrganizationRepository;
   credentials: CredentialRepository;
+  verificationRequests: VerificationRequestRepository;
   keystore: Keystore;
   /** True iff DID_MASTER_KEY was explicitly configured (production must set it). */
   didMasterConfigured: boolean;
