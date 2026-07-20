@@ -97,19 +97,20 @@ export async function loginAs(app: FastifyInstance, email: string, password: str
  * `maker` proposes, `checker` approves — they MUST be different managers who can
  * both see the proposal's scope (SELF_APPROVAL forbids proposer===approver).
  */
+interface UserSummary { id: string; email: string; role: string; useCaseKey: string | null; accountId: string | null; kycStatus: string; kyc: Record<string, unknown> | null }
 export async function onboardUser(
   app: FastifyInstance, maker: string, checker: string,
   body: { email: string; password: string; role: string; useCaseKey?: string; walletAddress?: string; kyc?: Record<string, unknown> },
-): Promise<{ id: string; email: string; role: string; useCaseKey: string | null; accountId: string | null; kycStatus: string; kyc: Record<string, unknown> | null }> {
+): Promise<UserSummary> {
   const res = await app.inject({ method: "POST", url: `${V1}/users`, headers: { authorization: `Bearer ${maker}` }, payload: body });
   if (res.statusCode !== 202) throw new Error(`onboardUser expected 202, got ${res.statusCode}: ${res.payload}`);
   const proposalId = res.json().proposal.id;
   const ap = await app.inject({ method: "POST", url: `${V1}/proposals/${proposalId}/approve`, headers: { authorization: `Bearer ${checker}` }, payload: {} });
   if (ap.statusCode !== 200) throw new Error(`onboardUser approve expected 200, got ${ap.statusCode}: ${ap.payload}`);
   const list = await app.inject({ method: "GET", url: `${V1}/users`, headers: { authorization: `Bearer ${checker}` } });
-  const user = (list.json() as Array<{ email: string }>).find((u) => u.email === body.email);
+  const user = (list.json() as UserSummary[]).find((u) => u.email === body.email);
   if (!user) throw new Error(`onboardUser: user ${body.email} not found after approval`);
-  return user as never;
+  return user;
 }
 
 /** Issue an asset for the given use case key, returning the new asset's id. */

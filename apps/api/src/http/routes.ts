@@ -1197,6 +1197,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (!target) return notFound(reply, "user not found");
     const sameScope = claims.role === "PlatformAdmin" || (canManageUsers(claims.role) && target.useCaseKey === claims.useCaseKey && target.role !== "UseCaseAdmin");
     if (!sameScope) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to revoke that user's identity" });
+    // null useCaseKey → scans all pending; the userId match below still scopes it.
     const pending = await deps.proposals.list(target.useCaseKey ?? undefined, "pending");
     if (pending.some((p) => p.kind === "revoke-user-identity" && (p.payload as { userId: string }).userId === id)) {
       return reply.code(409).send({ error: "ALREADY_PENDING", message: "a revoke proposal for this user is already pending" });
