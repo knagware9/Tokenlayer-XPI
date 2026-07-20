@@ -17,6 +17,7 @@ import { coded, executeCashflowCore, executeIssueActivation, runGatedAction } fr
 import type { TokenClaims } from "./http/support.js";
 import { scopedToCaller } from "./http/support.js";
 import type { ProposalRecord } from "./persistence/types.js";
+import { onboardUserKind, revokeUserIdentityKind } from "./user-kinds.js";
 
 /** Minimal logger shape (a Fastify request.log). */
 export interface KindLogger {
@@ -145,3 +146,8 @@ export function allProposalKinds(): ProposalKindHandler[] {
 // through the same registry as the token kinds above.
 registerProposalKind(issueCredentialKind);
 registerProposalKind(revokeCredentialKind);
+
+// Use-case-scoped user-lifecycle kinds. Same registry, same no-runtime-cycle
+// TYPE-only import pattern as the credential kinds above.
+registerProposalKind(onboardUserKind);
+registerProposalKind(revokeUserIdentityKind);

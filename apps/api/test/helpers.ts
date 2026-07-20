@@ -2,6 +2,7 @@ import { RbacPolicy } from "@tokenlayer/core";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.js";
 import { buildChainRegistry } from "../src/chains.js";
+import type { AppDeps } from "../src/context.js";
 import { createEngine } from "../src/context.js";
 import { loadCurrencies } from "../src/currencies.js";
 import { createMemoryChallengeStore } from "../src/identity-challenges.js";
@@ -22,12 +23,16 @@ import {
   MemoryUserRepository,
   MemoryVerificationRequestRepository,
 } from "../src/persistence/memory.js";
+import { ensurePlatformIssuerOrg } from "../src/platform-org.js";
 import type { IdentityRegistry } from "../src/registry.js";
 import { DEFAULT_USERS, seedDefaults } from "../src/seed.js";
 import { seedUseCases } from "../src/use-cases.js";
 
 /** Demo market escrow used by tests unless a test explicitly overrides it (pass `marketEscrowAccount: undefined` to disable the market). */
 export const TEST_MARKET_ESCROW = "0xcd3B766CCDd6AE721141F452C550Ca635964ce71";
+
+/** A second seeded PlatformAdmin (test-only) — the SoD checker for null-scope / brand-new-use-case onboarding proposals the sole admin proposes. */
+export const PLATFORM_ADMIN_2 = { email: "admin2@tokenlayer.dev", password: "admin123" } as const;
 
 export async function buildTestApp(opts: { loginRateLimitMax?: number; platformFeeAccount?: string; marketEscrowAccount?: string; trustedKycIssuers?: string[]; devIssuerSeed?: string; isProduction?: boolean; didMasterConfigured?: boolean; registry?: IdentityRegistry } = {}): Promise<FastifyInstance> {
   const rbac = new RbacPolicy();
@@ -47,6 +52,10 @@ export async function buildTestApp(opts: { loginRateLimitMax?: number; platformF
   const credentials = new MemoryCredentialRepository();
   const verificationRequests = new MemoryVerificationRequestRepository();
   const keystore = createKeystore("11".repeat(32));
+  // seedDefaults now creates the second PlatformAdmin (admin2@tokenlayer.dev) so
+  // gated onboarding of a brand-new use case's FIRST UseCaseAdmin (and any
+  // null-scope user) has an eligible second approver: SoD forbids
+  // proposer===approver, and only PlatformAdmins can approve those proposals.
   await seedDefaults(users, accounts);
   const engine = createEngine(useCases, rbac, chains, audit, { users, accounts });
   await seedUseCases(useCases, {
@@ -54,7 +63,7 @@ export async function buildTestApp(opts: { loginRateLimitMax?: number; platformF
     deploy: (def, chainId) => engine.deployUseCaseContract(def, chainId),
   });
   // The suite makes many logins from one IP; raise the throttle unless a test opts into it.
-  return buildApp({
+  const deps: AppDeps = {
     useCases, rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents, cashflows, proposals,
     organizations, credentials, verificationRequests, keystore, didMasterConfigured: opts.didMasterConfigured ?? true,
     challenges: createMemoryChallengeStore(), trustedKycIssuers: opts.trustedKycIssuers,
@@ -66,7 +75,9 @@ export async function buildTestApp(opts: { loginRateLimitMax?: number; platformF
     // `marketEscrowAccount: undefined` disables the market (503s).
     marketEscrowAccount: "marketEscrowAccount" in opts ? opts.marketEscrowAccount : TEST_MARKET_ESCROW,
     registry: opts.registry,
-  });
+  };
+  await ensurePlatformIssuerOrg(deps);
+  return buildApp(deps);
 }
 
 /** All v1 API routes live under this prefix. */
@@ -76,6 +87,28 @@ export const V1 = "/api/v1";
 export async function loginAs(app: FastifyInstance, email: string, password: string): Promise<string> {
   const res = await app.inject({ method: "POST", url: `${V1}/auth/login`, payload: { email, password } });
   return res.json().token as string;
+}
+
+/**
+ * Gated onboarding for tests: POST /users now returns a proposal; a second
+ * user-manager approves it. Returns the created user's summary (from GET /users).
+ * `maker` proposes, `checker` approves — they MUST be different managers who can
+ * both see the proposal's scope (SELF_APPROVAL forbids proposer===approver).
+ */
+interface UserSummary { id: string; email: string; role: string; useCaseKey: string | null; accountId: string | null; kycStatus: string; kyc: Record<string, unknown> | null }
+export async function onboardUser(
+  app: FastifyInstance, maker: string, checker: string,
+  body: { email: string; password: string; role: string; useCaseKey?: string; walletAddress?: string; kyc?: Record<string, unknown> },
+): Promise<UserSummary> {
+  const res = await app.inject({ method: "POST", url: `${V1}/users`, headers: { authorization: `Bearer ${maker}` }, payload: body });
+  if (res.statusCode !== 202) throw new Error(`onboardUser expected 202, got ${res.statusCode}: ${res.payload}`);
+  const proposalId = res.json().proposal.id;
+  const ap = await app.inject({ method: "POST", url: `${V1}/proposals/${proposalId}/approve`, headers: { authorization: `Bearer ${checker}` }, payload: {} });
+  if (ap.statusCode !== 200) throw new Error(`onboardUser approve expected 200, got ${ap.statusCode}: ${ap.payload}`);
+  const list = await app.inject({ method: "GET", url: `${V1}/users`, headers: { authorization: `Bearer ${checker}` } });
+  const user = (list.json() as UserSummary[]).find((u) => u.email === body.email);
+  if (!user) throw new Error(`onboardUser: user ${body.email} not found after approval`);
+  return user;
 }
 
 /** Issue an asset for the given use case key, returning the new asset's id. */
@@ -107,8 +140,13 @@ export const ACCOUNTS = { ALICE, BOB };
 // Legacy role-based login — kept for any tests that still use old-style roles.
 // Maps by the first seeded user with that role (PlatformAdmin → admin@…, etc.).
 // ---------------------------------------------------------------------------
-const PASSWORDS: Record<string, string> = Object.fromEntries(DEFAULT_USERS.map((u) => [u.role, u.password]));
-const EMAILS: Record<string, string> = Object.fromEntries(DEFAULT_USERS.map((u) => [u.role, u.email]));
+const PASSWORDS: Record<string, string> = {};
+const EMAILS: Record<string, string> = {};
+// First-wins so each role maps to its FIRST seeded user (e.g. PlatformAdmin →
+// admin@…, not the later admin2@… added for SoD).
+for (const u of DEFAULT_USERS) {
+  if (!(u.role in EMAILS)) { EMAILS[u.role] = u.email; PASSWORDS[u.role] = u.password; }
+}
 
 /** @deprecated Prefer loginAs(app, email, password). */
 export async function login(app: FastifyInstance, role: string): Promise<string> {

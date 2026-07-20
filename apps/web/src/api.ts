@@ -119,8 +119,12 @@ export const api = {
   creditCash: (token: string, account: string, currency: string, amount: string) =>
     request<{ ok: boolean; balance: string }>("/cash/credit", token, { method: "POST", body: JSON.stringify({ account, currency, amount }) }),
   users: (token: string) => request<{ id: string; email: string; role: Role; useCaseKey: string | null; accountId: string | null; active: boolean; kycStatus: "pending" | "approved" | "rejected"; kyc: { legalName?: string; country?: string; idType?: string; idNumber?: string; documentRef?: string } | null }[]>("/users", token),
+  // 202 → { proposal }: non-org onboarding is gated; the user does not exist until it is approved.
   createUser: (token: string, input: { email: string; password: string; role: Role; useCaseKey?: string; walletAddress?: string; kyc?: { legalName?: string; country?: string; idType?: string; idNumber?: string; documentRef?: string } }) =>
-    request<{ id: string; email: string; role: Role }>("/users", token, { method: "POST", body: JSON.stringify(input) }),
+    request<{ proposal: Proposal }>("/users", token, { method: "POST", body: JSON.stringify(input) }),
+  // 202 → { proposal }: identity revocation is gated.
+  revokeUserIdentity: (token: string, id: string, reason: string) =>
+    request<{ proposal: Proposal }>(`/users/${encodeURIComponent(id)}/revoke-identity`, token, { method: "POST", body: JSON.stringify({ reason }) }),
   updateUser: (token: string, id: string, patch: { password?: string; active?: boolean; kycStatus?: "approved" | "rejected" }) =>
     request<{ id: string }>(`/users/${id}`, token, { method: "PATCH", body: JSON.stringify(patch) }),
   deleteUser: (token: string, id: string) => request<void>(`/users/${id}`, token, { method: "DELETE" }),

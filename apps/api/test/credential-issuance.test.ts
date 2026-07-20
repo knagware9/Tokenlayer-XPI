@@ -200,16 +200,13 @@ describe("issue a KycCredential (happy path)", () => {
   it("rejects a subject that has no DID", async () => {
     const verifier = await createOrg("verifier", "NoDid Verifier");
     const maker = await addMember(verifier, "OrgAdmin");
-    // A legacy user created without an org gets no DID.
+    // A seeded (non-org) user has no DID — use one as the DID-less subject.
+    // (Gated onboarding now mints a custodial DID, so a freshly onboarded user
+    // would no longer exercise this path.)
     const uca = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
-    const legacy = await app.inject({
-      method: "POST", url: `${V1}/users`, headers: auth(uca),
-      payload: { email: `nodid.${tag()}@x.io`, password: "secret1", role: "Issuer" },
-    });
-    expect(legacy.statusCode).toBe(201);
-    expect(legacy.json().did ?? null).toBeNull();
+    const subjectId = (await app.inject({ method: "GET", url: `${V1}/me`, headers: auth(uca) })).json().id as string;
 
-    const res = await requestCredential(maker.token, { type: "KycCredential", subjectUserId: legacy.json().id, claims: KYC_CLAIMS });
+    const res = await requestCredential(maker.token, { type: "KycCredential", subjectUserId: subjectId, claims: KYC_CLAIMS });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe("SUBJECT_HAS_NO_DID");
   });

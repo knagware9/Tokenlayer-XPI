@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FastifyInstance, InjectOptions } from "fastify";
-import { ACCOUNTS, auth, buildTestApp, issueAsset, loginAs, V1 } from "./helpers.js";
+import { ACCOUNTS, auth, buildTestApp, issueAsset, loginAs, onboardUser, V1 } from "./helpers.js";
 
 let app: FastifyInstance;
 beforeAll(async () => {
@@ -385,9 +385,11 @@ describe("per-use-case tenancy", () => {
   it("a UseCaseAdmin creates an Issuer in-scope but cannot escalate or cross use cases", async () => {
     const app = await buildTestApp();
     const admin = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
-    const ok = await app.inject({ method: "POST", url: `${V1}/users`, headers: { authorization: `Bearer ${admin}` }, payload: { email: "new.issuer@x.dev", password: "secret1", role: "Issuer" } });
-    expect(ok.statusCode).toBe(201);
-    expect(ok.json().useCaseKey).toBe("carbon-credit");
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    // In-scope Issuer creation goes through gated onboarding (the platform admin checks).
+    const ok = await onboardUser(app, admin, platform, { email: "new.issuer@x.dev", password: "secret1", role: "Issuer" });
+    expect(ok.useCaseKey).toBe("carbon-credit");
+    // Escalation is rejected at the route BEFORE any proposal is created (403).
     const escalate = await app.inject({ method: "POST", url: `${V1}/users`, headers: { authorization: `Bearer ${admin}` }, payload: { email: "x@x.dev", password: "secret1", role: "UseCaseAdmin" } });
     expect(escalate.statusCode).toBe(403);
   });
@@ -400,10 +402,11 @@ describe("per-use-case tenancy", () => {
     // a UseCaseAdmin cannot provision a user into a foreign use case.
     const app = await buildTestApp();
     const admin = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
-    const res = await app.inject({ method: "POST", url: `${V1}/users`, headers: { authorization: `Bearer ${admin}` }, payload: { email: "x.cross@x.dev", password: "secret1", role: "Issuer", useCaseKey: "gold-loan" } });
-    // body.useCaseKey is ignored; user is silently created in the caller's own use case.
-    expect(res.statusCode).toBe(201);
-    expect(res.json().useCaseKey).toBe("carbon-credit");
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    // body.useCaseKey ("gold-loan") is ignored; the user is onboarded into the
+    // caller's own use case (carbon-credit), gated + checked by the platform admin.
+    const user = await onboardUser(app, admin, platform, { email: "x.cross@x.dev", password: "secret1", role: "Issuer", useCaseKey: "gold-loan" });
+    expect(user.useCaseKey).toBe("carbon-credit");
   });
 
   it("a Buyer is read-only", async () => {
@@ -418,7 +421,8 @@ describe("per-use-case tenancy", () => {
   it("edit (reset password), revoke (suspend), reactivate, and scope rules", async () => {
     const app = await buildTestApp();
     const admin = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
-    const created = (await app.inject({ method: "POST", url: `${V1}/users`, headers: { authorization: `Bearer ${admin}` }, payload: { email: "edit.me@x.dev", password: "secret1", role: "Issuer" } })).json();
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const created = await onboardUser(app, admin, platform, { email: "edit.me@x.dev", password: "secret1", role: "Issuer" });
     const reset = await app.inject({ method: "PATCH", url: `${V1}/users/${created.id}`, headers: { authorization: `Bearer ${admin}` }, payload: { password: "newpass1" } });
     expect(reset.statusCode).toBe(200);
     expect((await app.inject({ method: "POST", url: `${V1}/auth/login`, payload: { email: "edit.me@x.dev", password: "secret1" } })).statusCode).toBe(401);
@@ -437,7 +441,8 @@ describe("per-use-case tenancy", () => {
     const app = await buildTestApp();
     const goldAdmin = await loginAs(app, "gold.admin@tokenlayer.dev", "gold123");
     const carbonAdmin = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
-    const carbonIssuer = (await app.inject({ method: "POST", url: `${V1}/users`, headers: { authorization: `Bearer ${carbonAdmin}` }, payload: { email: "x.iss@x.dev", password: "secret1", role: "Issuer" } })).json();
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const carbonIssuer = await onboardUser(app, carbonAdmin, platform, { email: "x.iss@x.dev", password: "secret1", role: "Issuer" });
     const res = await app.inject({ method: "PATCH", url: `${V1}/users/${carbonIssuer.id}`, headers: { authorization: `Bearer ${goldAdmin}` }, payload: { active: false } });
     expect(res.statusCode).toBe(403);
   });
@@ -482,7 +487,9 @@ describe("per-use-case tenancy", () => {
     const admin = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
     const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     const wallet = "0x14dC79964da2C08b23698B3D3cc7Ca32193d9955"; // not linked by the seed
-    const created = (await app.inject({ method: "POST", url: `${V1}/users`, headers: { authorization: `Bearer ${admin}` }, payload: { email: "kyc.buyer@x.dev", password: "secret1", role: "Buyer", walletAddress: wallet, kyc: { legalName: "K Buyer", country: "IN", idType: "Passport", idNumber: "X1", documentRef: "doc://1" } } })).json();
+    // Onboard WITHOUT legalName so the credential is NOT minted at approval — the
+    // user lands KYC-pending, exercising the pending→approved allowlist gate below.
+    const created = await onboardUser(app, admin, platform, { email: "kyc.buyer@x.dev", password: "secret1", role: "Buyer", walletAddress: wallet, kyc: { country: "IN", idType: "Passport", idNumber: "X1", documentRef: "doc://1" } });
     expect(created.kycStatus).toBe("pending");
     const id = await issueAsset(app, platform, "carbon-credit");
     const blocked = await app.inject({ method: "POST", url: `${V1}/assets/${id}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: wallet } });
@@ -565,13 +572,9 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
     expect(issueRes.json().asset.unitPrice).toBe("5");
     expect(issueRes.json().asset.currency).toBe("CBDC-INR");
 
-    // Onboard a new Buyer with a wallet (BUYER_WALLET = Helios Energy Corp)
-    const createdBuyer = (await app.inject({
-      method: "POST",
-      url: `${V1}/users`,
-      headers: { authorization: `Bearer ${carbonAdmin}` },
-      payload: { email: "helios@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER_WALLET },
-    })).json();
+    // Onboard a new Buyer with a wallet (BUYER_WALLET = Helios Energy Corp),
+    // gated + checked by the platform admin.
+    const createdBuyer = await onboardUser(app, carbonAdmin, platform, { email: "helios@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER_WALLET });
     expect(createdBuyer.kycStatus).toBe("pending");
 
     // KYC-approve the buyer
@@ -642,13 +645,8 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
       },
     })).json().asset.id as string;
 
-    // Onboard buyer with a fresh email
-    const createdBuyer = (await app.inject({
-      method: "POST",
-      url: `${V1}/users`,
-      headers: { authorization: `Bearer ${carbonAdmin}` },
-      payload: { email: "helios2@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER_WALLET },
-    })).json();
+    // Onboard buyer with a fresh email (gated + checked by the platform admin)
+    const createdBuyer = await onboardUser(app, carbonAdmin, platform, { email: "helios2@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER_WALLET });
     await app.inject({ method: "PATCH", url: `${V1}/users/${createdBuyer.id}`, headers: { authorization: `Bearer ${carbonAdmin}` }, payload: { kycStatus: "approved" } });
 
     // Allow ONLY treasury (NOT the buyer wallet)
@@ -677,13 +675,8 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
     // Issue WITHOUT sale terms
     const assetId = (await issueAsset(app, platform, "carbon-credit"));
 
-    // Onboard buyer
-    const createdBuyer = (await app.inject({
-      method: "POST",
-      url: `${V1}/users`,
-      headers: { authorization: `Bearer ${carbonAdmin}` },
-      payload: { email: "helios3@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER_WALLET },
-    })).json();
+    // Onboard buyer (gated + checked by the platform admin)
+    const createdBuyer = await onboardUser(app, carbonAdmin, platform, { email: "helios3@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER_WALLET });
     await app.inject({ method: "PATCH", url: `${V1}/users/${createdBuyer.id}`, headers: { authorization: `Bearer ${carbonAdmin}` }, payload: { kycStatus: "approved" } });
     await creditCash(app, platform, BUYER_WALLET, "500");
     const buyerToken = await loginAs(app, "helios3@x.dev", "secret1");
@@ -712,12 +705,7 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
       },
     })).json().asset.id as string;
 
-    const createdBuyer = (await app.inject({
-      method: "POST",
-      url: `${V1}/users`,
-      headers: { authorization: `Bearer ${carbonAdmin}` },
-      payload: { email: "helios4@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER_WALLET },
-    })).json();
+    const createdBuyer = await onboardUser(app, carbonAdmin, platform, { email: "helios4@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER_WALLET });
     await app.inject({ method: "PATCH", url: `${V1}/users/${createdBuyer.id}`, headers: { authorization: `Bearer ${carbonAdmin}` }, payload: { kycStatus: "approved" } });
     await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: TREASURY_ADDR } });
     await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: BUYER_WALLET } });
@@ -751,12 +739,7 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
       },
     })).json().asset.id as string;
 
-    const createdBuyer = (await app.inject({
-      method: "POST",
-      url: `${V1}/users`,
-      headers: { authorization: `Bearer ${carbonAdmin}` },
-      payload: { email: "helios5@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER_WALLET },
-    })).json();
+    const createdBuyer = await onboardUser(app, carbonAdmin, platform, { email: "helios5@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER_WALLET });
     await app.inject({ method: "PATCH", url: `${V1}/users/${createdBuyer.id}`, headers: { authorization: `Bearer ${carbonAdmin}` }, payload: { kycStatus: "approved" } });
     await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: TREASURY_ADDR } });
     await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: BUYER_WALLET } });
@@ -852,13 +835,8 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
       },
     })).json().asset.id as string;
 
-    // Onboard a Buyer WITHOUT a walletAddress
-    const createdBuyer = (await app.inject({
-      method: "POST",
-      url: `${V1}/users`,
-      headers: { authorization: `Bearer ${carbonAdmin}` },
-      payload: { email: "nowallet@x.dev", password: "secret1", role: "Buyer" },
-    })).json();
+    // Onboard a Buyer WITHOUT a walletAddress (gated + checked by the platform admin)
+    const createdBuyer = await onboardUser(app, carbonAdmin, platform, { email: "nowallet@x.dev", password: "secret1", role: "Buyer" });
     expect(createdBuyer.accountId).toBeNull();
 
     // KYC-approve the buyer

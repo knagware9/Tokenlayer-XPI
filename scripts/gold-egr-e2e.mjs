@@ -20,12 +20,26 @@ const ok = (c, msg, d) => { if (c) console.log(`  ✓ ${msg}`); else { console.l
 const login = async (e, p) => (await call("POST", "/auth/login", { email: e, password: p }, null)).json?.token;
 const addr = (s) => "0x" + s.toLowerCase().padStart(40, "0");
 
+// Gated onboarding: POST /users now 202s a proposal; a second manager approves.
+async function onboardUser(makerTok, approverTok, body) {
+  const r = await call("POST", "/users", body, makerTok);
+  if (r.status === 201) return r.json;
+  if (r.status !== 202) return r.json;
+  await call("POST", `/proposals/${r.json.proposal.id}/approve`, {}, approverTok);
+  const list = await call("GET", "/users", null, approverTok);
+  return (list.json ?? []).find((u) => u.email === body.email);
+}
+
 // Fresh wallets (NOT seeded → jurisdiction resolves from our KYC, not a seeded user).
 const VAULT = addr("90111d"), JEWEL = addr("b0111e"), INVEST = addr("c0111f"), USBUY = addr("d0111a");
 const CUR = "CBDC-INR";
 
 const platform = await login("admin@tokenlayer.dev", "admin123");
-if (!platform) { console.error("platform login failed"); process.exit(2); }
+// A second PlatformAdmin: the SoD checker for the brand-new use case's first
+// UseCaseAdmin bootstrap (proposer≠approver, and only a PlatformAdmin can approve
+// a gold-egr-scoped onboarding, so the sole seeded admin cannot self-check it).
+const platform2 = await login("admin2@tokenlayer.dev", "admin123");
+if (!platform || !platform2) { console.error("platform login failed"); process.exit(2); }
 
 console.log("== 1) Configure + deploy the use case (from gold-egr.json) ==");
 let uc = await call("GET", "/use-cases/gold-egr", null, platform);
@@ -40,27 +54,28 @@ ok(uc.json?.symbol === "EGR" && Object.keys(uc.json?.contracts ?? {}).length > 0
 const chainId = Object.keys(uc.json?.contracts ?? { fabric: 1 })[0];
 
 console.log("\n== 2) Onboard parties (KYC / India jurisdiction) ==");
-async function ensureUser(creatorTok, email, password, role, wallet, country) {
+// Gated onboarding: `maker` proposes, `approver` (a different manager who can
+// also see gold-egr) approves. KYC(legalName+country) auto-approves on approval.
+async function ensureUser(makerTok, approverTok, email, password, role, wallet, country) {
   const kyc = country ? { legalName: email.split("@")[0], country } : undefined;
-  const r = await call("POST", "/users", { email, password, role, useCaseKey: "gold-egr", walletAddress: wallet, kyc }, creatorTok);
-  if (r.status === 201) return r.json.id;
+  const u = await onboardUser(makerTok, approverTok, { email, password, role, useCaseKey: "gold-egr", walletAddress: wallet, kyc });
+  if (u?.id) return u.id;
   // Already exists (rerun) — find the id via the users list.
-  const list = await call("GET", "/users", null, creatorTok);
+  const list = await call("GET", "/users", null, approverTok);
   return (list.json ?? []).find((u) => u.email === email)?.id;
 }
-const ucaId = await ensureUser(platform, "egr.admin@tokenlayer.dev", "egr123", "UseCaseAdmin", undefined, undefined);
+// Bootstrap the first UseCaseAdmin: platform proposes, platform2 checks (SoD).
+const ucaId = await ensureUser(platform, platform2, "egr.admin@tokenlayer.dev", "egr123", "UseCaseAdmin", undefined, undefined);
 ok(!!ucaId, "platform admin creates the gold-egr vault-desk admin (UseCaseAdmin)");
 const uca = await login("egr.admin@tokenlayer.dev", "egr123");
 
-const issuerId = await ensureUser(uca, "egr.vault@tokenlayer.dev", "egr123", "Issuer", VAULT, "IN");
-const jewelId = await ensureUser(uca, "egr.jeweller@tokenlayer.dev", "egr123", "Buyer", JEWEL, "IN");
-const investId = await ensureUser(uca, "egr.investor@tokenlayer.dev", "egr123", "Buyer", INVEST, "IN");
-const usId = await ensureUser(uca, "egr.usbuyer@tokenlayer.dev", "egr123", "Buyer", USBUY, "US");
+// The desk (uca) proposes each party; the platform admin approves (maker≠checker).
+const issuerId = await ensureUser(uca, platform, "egr.vault@tokenlayer.dev", "egr123", "Issuer", VAULT, "IN");
+const jewelId = await ensureUser(uca, platform, "egr.jeweller@tokenlayer.dev", "egr123", "Buyer", JEWEL, "IN");
+const investId = await ensureUser(uca, platform, "egr.investor@tokenlayer.dev", "egr123", "Buyer", INVEST, "IN");
+const usId = await ensureUser(uca, platform, "egr.usbuyer@tokenlayer.dev", "egr123", "Buyer", USBUY, "US");
 ok([issuerId, jewelId, investId, usId].every(Boolean), "desk onboards vault custodian + 2 IN buyers + 1 US buyer");
-for (const [id, who] of [[issuerId, "vault"], [jewelId, "jeweller"], [investId, "investor"], [usId, "usbuyer"]]) {
-  await call("PATCH", `/users/${id}`, { kycStatus: "approved" }, uca);
-}
-ok(true, "desk approves KYC for all onboarded parties");
+ok(true, "KYC auto-approved for all onboarded parties (VC issued on proposal approval)");
 for (const w of [JEWEL, INVEST, USBUY]) await call("POST", "/cash/credit", { account: w, currency: CUR, amount: "5000000" }, platform);
 ok(true, `funded buyers with 5,000,000 ${CUR} each`);
 const jewel = await login("egr.jeweller@tokenlayer.dev", "egr123");

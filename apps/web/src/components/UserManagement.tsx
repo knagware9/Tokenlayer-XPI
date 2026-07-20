@@ -8,7 +8,7 @@ type Summary = { id: string; email: string; role: Role; useCaseKey: string | nul
 type Sub = "add" | "manage";
 
 const ROLE_OPTIONS: Record<string, Role[]> = {
-  PlatformAdmin: ["UseCaseAdmin"],
+  PlatformAdmin: ["UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"],
   UseCaseAdmin: ["Issuer", "Buyer", "Auditor"],
 };
 
@@ -33,7 +33,7 @@ export function UserManagement({ useCaseKey, useCases }: { useCaseKey: string; u
         ))}
       </div>
       {sub === "add" ? (
-        <AddUser useCaseKey={useCaseKey} useCases={useCases} onAdded={() => { reload(); setSub("manage"); }} />
+        <AddUser useCaseKey={useCaseKey} useCases={useCases} />
       ) : (
         <ManageUsers rows={rows} me={user?.email} onChanged={reload} />
       )}
@@ -41,7 +41,7 @@ export function UserManagement({ useCaseKey, useCases }: { useCaseKey: string; u
   );
 }
 
-function AddUser({ useCaseKey, useCases, onAdded }: { useCaseKey: string; useCases: UseCase[]; onAdded: () => void }): JSX.Element {
+function AddUser({ useCaseKey, useCases }: { useCaseKey: string; useCases: UseCase[] }): JSX.Element {
   const { token, user } = useAuth();
   const isPlatform = user?.role === "PlatformAdmin";
   const roleOptions = ROLE_OPTIONS[user?.role ?? ""] ?? [];
@@ -56,17 +56,18 @@ function AddUser({ useCaseKey, useCases, onAdded }: { useCaseKey: string; useCas
   const [idNumber, setIdNumber] = useState("");
   const [documentRef, setDocumentRef] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const needsWallet = role === "Buyer";
+  const [notice, setNotice] = useState<string | null>(null);
 
   async function create(e: React.FormEvent): Promise<void> {
     e.preventDefault();
     setError(null);
+    setNotice(null);
     if (password.length < 6) { setError("Password must be at least 6 characters"); return; }
     try {
-      await api.createUser(token!, { email, password, role, useCaseKey: isPlatform ? selUseCase : undefined, walletAddress: needsWallet ? walletAddress : undefined, kyc: { legalName, country, idType, idNumber, documentRef } });
+      const r = await api.createUser(token!, { email, password, role, useCaseKey: isPlatform ? selUseCase : undefined, walletAddress: walletAddress || undefined, kyc: legalName && country ? { legalName, country, idType, idNumber, documentRef } : undefined });
+      setNotice(`Onboarding proposal submitted (${r.proposal.id.slice(0, 8)}…) — a second user-manager must approve it in Approvals.`);
       setEmail(""); setPassword(""); setWalletAddress("");
       setLegalName(""); setCountry(""); setIdType(""); setIdNumber(""); setDocumentRef("");
-      onAdded();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Create failed");
     }
@@ -74,7 +75,7 @@ function AddUser({ useCaseKey, useCases, onAdded }: { useCaseKey: string; useCas
 
   return (
     <form onSubmit={create} className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 space-y-4 max-w-2xl">
-      <h2 className="font-semibold text-slate-900">{isPlatform ? "Create a Use-Case Admin" : "Add a user to this use case"}</h2>
+      <h2 className="font-semibold text-slate-900">{isPlatform ? "Onboard a user" : "Add a user to this use case"}</h2>
       <div className="grid grid-cols-2 gap-4">
         <input className="input" placeholder="email" value={email} onChange={(e) => setEmail(e.target.value)} />
         <input className="input" type="password" placeholder="password (min 6)" value={password} onChange={(e) => setPassword(e.target.value)} />
@@ -86,7 +87,7 @@ function AddUser({ useCaseKey, useCases, onAdded }: { useCaseKey: string; useCas
             {useCases.map((u) => <option key={u.key} value={u.key}>{u.name}</option>)}
           </select>
         )}
-        {needsWallet && <input className="input" placeholder="wallet address 0x…" value={walletAddress} onChange={(e) => setWalletAddress(e.target.value)} />}
+        <input className="input" placeholder="wallet address 0x… (optional)" value={walletAddress} onChange={(e) => setWalletAddress(e.target.value)} />
       </div>
       <div className="border-t border-slate-100 pt-3">
         <p className="text-xs font-semibold text-slate-500 mb-2">KYC / onboarding (reviewed before the user can transact)</p>
@@ -99,6 +100,7 @@ function AddUser({ useCaseKey, useCases, onAdded }: { useCaseKey: string; useCas
         </div>
       </div>
       {error && <p className="text-sm text-red-600">{error}</p>}
+      {notice && <p className="text-sm text-emerald-600">{notice}</p>}
       <button type="submit" className="rounded-lg bg-brand-600 text-white py-1.5 px-4 text-sm font-medium hover:bg-brand-700">Create user</button>
     </form>
   );
@@ -109,9 +111,11 @@ function ManageUsers({ rows, me, onChanged }: { rows: Summary[]; me?: string; on
   const [editing, setEditing] = useState<Summary | null>(null);
   const [verifying, setVerifying] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const act = async (fn: () => Promise<unknown>): Promise<void> => {
     setError(null);
+    setNotice(null);
     try { await fn(); onChanged(); } catch (err) { setError(err instanceof ApiError ? err.message : "Action failed"); }
   };
   const manageable = (u: Summary): boolean => u.email !== me && u.role !== "PlatformAdmin";
@@ -119,6 +123,7 @@ function ManageUsers({ rows, me, onChanged }: { rows: Summary[]; me?: string; on
   return (
     <div className="space-y-3">
       {error && <p className="text-sm text-red-600">{error}</p>}
+      {notice && <p className="text-sm text-emerald-600">{notice}</p>}
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
         <table className="w-full text-sm">
           <thead className="text-xs text-slate-500 bg-slate-50 uppercase tracking-wide"><tr><th className="text-left font-medium px-4 py-2.5">Email</th><th className="text-left font-medium px-4 py-2.5">Role</th><th className="text-left font-medium px-4 py-2.5">Use case</th><th className="text-left font-medium px-4 py-2.5">Status</th><th className="text-left font-medium px-4 py-2.5">KYC</th><th className="px-4 py-2.5 text-right font-medium">Actions</th></tr></thead>
@@ -141,10 +146,12 @@ function ManageUsers({ rows, me, onChanged }: { rows: Summary[]; me?: string; on
                     {manageable(u) ? (
                       <>
                         {u.kycStatus === "pending" && <button onClick={() => setVerifying((v) => (v === u.id ? null : u.id))} className="text-xs text-brand-600 hover:text-brand-700 font-medium">Verify identity (DID/VC)</button>}
-                        {u.kycStatus !== "approved" && <button onClick={() => act(() => api.updateUser(token!, u.id, { kycStatus: "approved" }))} className="text-xs text-emerald-600 hover:text-emerald-700">Approve</button>}
-                        {u.kycStatus !== "rejected" && <button onClick={() => act(() => api.updateUser(token!, u.id, { kycStatus: "rejected" }))} className="text-xs text-red-500 hover:text-red-700">Reject</button>}
                         <button onClick={() => setEditing(u)} className="text-xs text-brand-600 hover:text-brand-700">Edit</button>
-                        <button onClick={() => act(() => api.updateUser(token!, u.id, { active: !u.active }))} className="text-xs text-amber-600 hover:text-amber-700">{u.active ? "Revoke" : "Reactivate"}</button>
+                        <button onClick={() => act(() => api.updateUser(token!, u.id, { active: !u.active }))} className="text-xs text-amber-600 hover:text-amber-700">{u.active ? "Suspend" : "Reactivate"}</button>
+                        {u.kycStatus !== "rejected" && (
+                          <button onClick={() => { const reason = window.prompt("Reason for revoking this user's identity?")?.trim(); if (reason) void act(() => api.revokeUserIdentity(token!, u.id, reason).then(() => setNotice("Revoke proposal submitted — pending approval."))); }}
+                            className="text-xs text-red-500 hover:text-red-700">Revoke identity</button>
+                        )}
                         <button onClick={() => act(() => api.deleteUser(token!, u.id))} className="text-xs text-red-500 hover:text-red-700">Delete</button>
                       </>
                     ) : (

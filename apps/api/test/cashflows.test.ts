@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { buildTestApp, V1, loginAs, auth } from "./helpers.js";
+import { buildTestApp, V1, loginAs, auth, onboardUser } from "./helpers.js";
 
 const UC = "invoice-tokenization";
 const HOLDER = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"; // Carol — seeded account, linkable
@@ -9,7 +9,8 @@ const inv = (n: string, due: string) => ({ invoiceNumber: n, invoiceDate: "2026-
 
 async function desk(app: FastifyInstance): Promise<string> {
   const admin = await loginAs(app, "m1.admin@tokenlayer.dev", "m1admin123");
-  await app.inject({ method: "POST", url: `${V1}/users`, headers: auth(admin), payload: { email: "cf.holder@x.dev", password: "secret1", role: "Buyer", walletAddress: HOLDER, kyc: { country: "IN" } } });
+  const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+  await onboardUser(app, admin, platform, { email: "cf.holder@x.dev", password: "secret1", role: "Buyer", walletAddress: HOLDER, kyc: { legalName: "CF Holder", country: "IN" } });
   return admin;
 }
 
@@ -19,8 +20,9 @@ async function desk(app: FastifyInstance): Promise<string> {
  * IN-KYC Auditor on the desk — the realistic "settlement account" flow.
  */
 async function linkPayer(app: FastifyInstance, admin: string): Promise<void> {
-  const res = await app.inject({ method: "POST", url: `${V1}/users`, headers: auth(admin), payload: { email: "m1.settlement@x.dev", password: "secret1", role: "Auditor", walletAddress: PAYER, kyc: { country: "IN" } } });
-  expect(res.statusCode).toBe(201);
+  const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+  const user = await onboardUser(app, admin, platform, { email: "m1.settlement@x.dev", password: "secret1", role: "Auditor", walletAddress: PAYER, kyc: { legalName: "M1 Settlement", country: "IN" } });
+  expect(user.id).toBeTruthy();
 }
 
 async function issueInvoice(app: FastifyInstance, admin: string, n: string, due: string): Promise<string> {
@@ -158,9 +160,10 @@ describe("cashflows: execution", () => {
     const assetId = await issueInvoice(app, admin, "INV-CF-13", "2099-12-31");
     // Link a foreign wallet to a carbon-credit user — visible only to that use case.
     const carbon = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     const FOREIGN = "0x976EA74026E726554dB657fA54763abd0C3a0aa9"; // GreenWing Airlines (seeded, unlinked)
-    const created = await app.inject({ method: "POST", url: `${V1}/users`, headers: auth(carbon), payload: { email: "carbon.settle@x.dev", password: "secret1", role: "Auditor", walletAddress: FOREIGN, kyc: { country: "IN" } } });
-    expect(created.statusCode).toBe(201);
+    const created = await onboardUser(app, carbon, platform, { email: "carbon.settle@x.dev", password: "secret1", role: "Auditor", walletAddress: FOREIGN, kyc: { legalName: "Carbon Settle", country: "IN" } });
+    expect(created.id).toBeTruthy();
     const { cashflows } = (await app.inject({ method: "GET", url: `${V1}/assets/${assetId}/cashflows`, headers: auth(admin) })).json();
     const exec = await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/cashflows/${cashflows[0].id}/execute`, headers: auth(admin), payload: { from: FOREIGN } });
     expect(exec.statusCode).toBe(403);

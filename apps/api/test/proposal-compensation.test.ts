@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { buildTestApp, V1, loginAs, auth } from "./helpers.js";
+import { buildTestApp, V1, loginAs, auth, onboardUser, PLATFORM_ADMIN_2 } from "./helpers.js";
 
 // The compensation seam: when a gated issuance will never activate, issueKind
 // .compensate() must undo BOTH halves of the propose-time side effects — the
@@ -45,16 +45,18 @@ async function setup(app: FastifyInstance) {
   const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
   expect((await app.inject({ method: "POST", url: `${V1}/use-cases`, headers: auth(platform), payload: GATED_FEE_UC })).statusCode).toBe(201);
 
-  const proposerUser = (await app.inject({
-    method: "POST", url: `${V1}/users`, headers: auth(platform),
-    payload: { email: "gf.admin@x.dev", password: "secret1", role: "UseCaseAdmin", useCaseKey: "gated-fee-note", walletAddress: ISSUER_WALLET, kyc: { country: "IN" } },
-  })).json();
-  // Issuers are created by the scoped UseCaseAdmin, not the platform admin.
+  // The FIRST UseCaseAdmin of a brand-new use case is bootstrapped by the platform
+  // admin proposing and a SECOND platform admin checking (no gated-fee-note UCA
+  // exists yet, and the proposer may not self-approve).
+  const platform2 = await loginAs(app, PLATFORM_ADMIN_2.email, PLATFORM_ADMIN_2.password);
+  const proposerUser = await onboardUser(app, platform, platform2, {
+    email: "gf.admin@x.dev", password: "secret1", role: "UseCaseAdmin", useCaseKey: "gated-fee-note", walletAddress: ISSUER_WALLET, kyc: { country: "IN" },
+  });
+  // Issuers are created by the scoped UseCaseAdmin (checked by the platform admin).
   const proposer = await loginAs(app, "gf.admin@x.dev", "secret1");
-  expect((await app.inject({
-    method: "POST", url: `${V1}/users`, headers: auth(proposer),
-    payload: { email: "gf.approver@x.dev", password: "secret1", role: "Issuer", useCaseKey: "gated-fee-note" },
-  })).statusCode).toBe(201);
+  await onboardUser(app, proposer, platform, {
+    email: "gf.approver@x.dev", password: "secret1", role: "Issuer", useCaseKey: "gated-fee-note",
+  });
 
   // The proposer must hold enough cash to pay the 100 issuance fee.
   await app.inject({ method: "POST", url: `${V1}/cash/credit`, headers: auth(platform), payload: { account: ISSUER_WALLET, currency: "CBDC-INR", amount: "500" } });

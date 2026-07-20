@@ -25,6 +25,16 @@ const login = async (e, p) => (await call("POST", "/auth/login", { email: e, pas
 const addr = (s) => "0x" + s.toLowerCase().padStart(40, "0");
 const inr = (n) => "₹" + Number(n).toLocaleString("en-IN");
 
+// Gated onboarding: POST /users now 202s a proposal; a second manager approves.
+async function onboardUser(makerTok, approverTok, body) {
+  const r = await call("POST", "/users", body, makerTok);
+  if (r.status === 201) return r.json;               // org-path callers still 201
+  if (r.status !== 202) return r.json;               // let callers assert failures
+  await call("POST", `/proposals/${r.json.proposal.id}/approve`, {}, approverTok);
+  const list = await call("GET", "/users", null, approverTok);
+  return (list.json ?? []).find((u) => u.email === body.email);
+}
+
 const SUP = addr("5099117e"), FIN1 = addr("f1a0117e"), FIN2 = addr("f2b0117e");
 const CUR = "CBDC-INR";
 const BUYERS = ["JSW Steel Limited", "ITC Limited", "Bajaj Auto Limited", "Reliance Industries Ltd"];
@@ -36,9 +46,12 @@ const issuer = await login("m1.issuer@tokenlayer.dev", "m1issuer123");
 if (!platform || !uca || !issuer) { console.error("login failed", { platform: !!platform, uca: !!uca, issuer: !!issuer }); process.exit(2); }
 
 console.log("== 1) Onboard TReDS parties (KYC / India jurisdiction) ==");
+// uca (m1.admin, invoice UCA) proposes; platform (PlatformAdmin) approves (maker≠checker).
+// Users inherit uca's invoice-tokenization scope; KYC(legalName+country) auto-approves.
 async function ensureUser(email, role, wallet, country) {
-  const r = await call("POST", "/users", { email, password: "treds123", role, walletAddress: wallet, kyc: country ? { legalName: email.split("@")[0], country } : undefined }, uca);
-  if (r.status === 201) { await call("PATCH", `/users/${r.json.id}`, { kycStatus: "approved" }, uca); return r.json.id; }
+  const u = await onboardUser(uca, platform, { email, password: "treds123", role, walletAddress: wallet, kyc: country ? { legalName: email.split("@")[0], country } : undefined });
+  if (u?.id) return u.id;
+  // Already exists (rerun) — find the id via the users list.
   const list = await call("GET", "/users", null, uca);
   return (list.json ?? []).find((u) => u.email === email)?.id;
 }

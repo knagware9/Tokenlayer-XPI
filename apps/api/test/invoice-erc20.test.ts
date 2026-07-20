@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { buildTestApp, V1, loginAs, auth } from "./helpers.js";
+import { buildTestApp, V1, loginAs, auth, onboardUser } from "./helpers.js";
 import { invoiceFingerprint } from "@tokenlayer/core";
 
 const UC = "invoice-tokenization";
@@ -14,7 +14,11 @@ const inv = { invoiceNumber: "INV-9001", invoiceDate: "2026-07-01", buyerName: "
 // so the treasury that the initial supply mints into must resolve to IN.
 async function invoiceAdmin(app: FastifyInstance): Promise<string> {
   const admin = await loginAs(app, "m1.admin@tokenlayer.dev", "m1admin123");
-  await app.inject({ method: "POST", url: `${V1}/users`, headers: auth(admin), payload: { email: "m1.holder@x.dev", password: "secret1", role: "Buyer", walletAddress: HOLDER, kyc: { country: "IN" } } });
+  const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+  // Gated onboarding: full KYC (legalName + country) → the checker's approval
+  // mints the credential and links HOLDER to an IN-KYC user, so the treasury mint
+  // resolves to IN jurisdiction.
+  await onboardUser(app, admin, platform, { email: "m1.holder@x.dev", password: "secret1", role: "Buyer", walletAddress: HOLDER, kyc: { legalName: "M1 Holder", country: "IN" } });
   return admin;
 }
 

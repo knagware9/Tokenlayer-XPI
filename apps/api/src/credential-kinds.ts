@@ -3,10 +3,9 @@
  * gated by the credential type's own maker-checker depth. These are ORG scoped —
  * unlike token kinds, which are use-case scoped.
  */
-import { randomUUID } from "node:crypto";
-import { credentialTypeDef } from "@tokenlayer/core";
 import type { AppDeps } from "./context.js";
 import { coded } from "./executors.js";
+import { issueCredentialFor, revokeCredentialById } from "./credential-issuance.js";
 import type { TokenClaims } from "./http/support.js";
 import type { ProposalKindHandler } from "./proposal-kinds.js";
 import type { ProposalRecord } from "./persistence/types.js";
@@ -32,38 +31,10 @@ export const issueCredentialKind: ProposalKindHandler = {
   canApprove: orgScopedView,
   async execute(ctx, _proposer, p) {
     const pl = p.payload as unknown as IssueCredentialPayload;
-    const def = credentialTypeDef(pl.type);
     const org = await ctx.deps.organizations.get(pl.issuerOrgId);
     if (!org) throw coded(404, "NOT_FOUND", "issuing organization missing");
-
-    // The id is generated BEFORE signing: the VC embeds it in jti + credentialStatus.
-    const credentialId = randomUUID();
-    const now = Math.floor(Date.now() / 1000);
-    const statusUrl = `${ctx.deps.publicApiUrl}/credentials/${credentialId}/status`;
-    const { vcJwt, expiresAt } = ctx.deps.keystore.issueOrgCredential({
-      orgEncSeed: org.didSeedEncrypted, orgDid: org.did, subjectDid: pl.subjectDid,
-      type: pl.type, claims: pl.claims, credentialId, statusUrl, validityDays: def.validityDays, now,
-    });
-    // Anchor BEFORE persisting. The executor is already all-or-nothing: if this
-    // throws, the proposal becomes `failed` and no credential row is created —
-    // which is why we need neither fire-and-forget nor a reconciliation job.
-    // No registry ⇒ issue unanchored (the status endpoint reports that honestly).
-    if (ctx.deps.registry) {
-      await ctx.deps.registry.anchor.anchorCredential(
-        ctx.deps.registry.vcRegistry, credentialId, vcJwt, now, expiresAt,
-      );
-    }
-    await ctx.deps.credentials.create({
-      id: credentialId,
-      holderDid: pl.subjectDid,
-      issuerDid: org.did,
-      type: pl.type,
-      vcJwt,
-      subjectClaims: { id: pl.subjectDid, ...pl.claims },
-      issuedAt: new Date(now * 1000).toISOString(),
-      expiresAt: new Date(expiresAt * 1000).toISOString(),
-      revoked: false, revokedAt: null, revokedReason: null, revokedBy: null,
-      proposalId: p.id,
+    await issueCredentialFor(ctx.deps, {
+      issuerOrg: org, subjectDid: pl.subjectDid, type: pl.type, claims: pl.claims, proposalId: p.id,
     });
   },
 };
@@ -79,16 +50,8 @@ export const revokeCredentialKind: ProposalKindHandler = {
   canApprove: orgScopedView,
   async execute(ctx, _proposer, p) {
     const pl = p.payload as unknown as RevokeCredentialPayload;
-    const cred = await ctx.deps.credentials.get(pl.credentialId);
-    if (!cred) throw coded(404, "NOT_FOUND", "credential missing");
-    if (cred.revoked) throw coded(409, "ALREADY_REVOKED", "credential is already revoked");
-    // Chain FIRST, then the database. A crash between the two leaves the chain
-    // revoked and the DB stale — and since the chain is authoritative when
-    // present, /status still answers correctly. The reverse order could report a
-    // revoked credential as valid on-chain forever.
-    if (ctx.deps.registry) {
-      await ctx.deps.registry.anchor.revokeCredential(ctx.deps.registry.vcRegistry, cred.id);
-    }
-    await ctx.deps.credentials.revoke(cred.id, { reason: pl.reason, by: p.proposerId, at: new Date().toISOString() });
+    await revokeCredentialById(ctx.deps, pl.credentialId, {
+      reason: pl.reason, by: p.proposerId, at: new Date().toISOString(),
+    });
   },
 };

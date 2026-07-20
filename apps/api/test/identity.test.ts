@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, it, expect } from "vitest";
 import { didKeyFromSeed, generateDidKey, issueCredential, presentCredential } from "@tokenlayer/core";
-import { buildTestApp, V1, loginAs, auth } from "./helpers.js";
+import { buildTestApp, V1, loginAs, auth, onboardUser } from "./helpers.js";
 
 // A deterministic trusted issuer shared by the test app + the test's credentials.
 const issuer = generateDidKey();
@@ -15,8 +15,11 @@ async function appWithIssuer() {
 }
 async function pendingInvestor(app: import("fastify").FastifyInstance) {
   const admin = await loginAs(app, "m1.admin@tokenlayer.dev", "m1admin123");
-  const created = await app.inject({ method: "POST", url: `${V1}/users`, headers: auth(admin), payload: { email: `inv.${Math.random().toString(36).slice(2)}@x.dev`, password: "secret1", role: "Buyer" } });
-  return { admin, userId: created.json().id as string };
+  const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+  // Gated onboarding: the invoice-desk admin proposes, the platform admin checks.
+  // The Buyer lands in the desk's use case (invoice-tokenization), KYC pending.
+  const created = await onboardUser(app, admin, platform, { email: `inv.${Math.random().toString(36).slice(2)}@x.dev`, password: "secret1", role: "Buyer" });
+  return { admin, userId: created.id };
 }
 
 describe("identity verification", () => {

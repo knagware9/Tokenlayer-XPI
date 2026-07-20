@@ -12,6 +12,8 @@ export interface KycDetails {
   issuerDid?: string;
   credentialId?: string;
   verifiedAt?: string;
+  revokedAt?: string;
+  revokeReason?: string;
 }
 
 export interface UserRecord {
