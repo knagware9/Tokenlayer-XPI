@@ -30,6 +30,16 @@ const addr = (s) => "0x" + s.toLowerCase().padStart(40, "0");
 const inr = (n) => "₹" + Number(n).toLocaleString("en-IN");
 const runId = String(Date.now()).slice(-7);
 
+// Gated onboarding: POST /users now 202s a proposal; a second manager approves.
+async function onboardUser(makerTok, approverTok, body) {
+  const r = await call("POST", "/users", body, makerTok);
+  if (r.status === 201) return r.json;               // org-path callers still 201
+  if (r.status !== 202) return r.json;               // let callers assert failures
+  await call("POST", `/proposals/${r.json.proposal.id}/approve`, {}, approverTok);
+  const list = await call("GET", "/users", null, approverTok);
+  return (list.json ?? []).find((u) => u.email === body.email);
+}
+
 // A DID/VC round-trip for one user: challenge → dev issuer mints a holder-signed
 // VP with an IN credential → the desk verifies it → the user's KYC flips approved.
 async function verifyIdentity(mgr, userId, legalName) {
@@ -55,7 +65,9 @@ ok(mintProbe.status === 200, "dev issuer minter is available (DID/VC demo enable
 
 console.log("\n== 1) Onboard the MSME supplier + a financier — PENDING, no KYC country ==");
 const SUP = addr("50a11e" + runId), FIN = addr("f1a11e" + runId);
-const mkUser = async (email, wallet) => (await call("POST", "/users", { email, password: "didvc123", role: "Buyer", walletAddress: wallet }, uca)).json;
+// uca (m1.admin, invoice UCA) proposes; platform (PlatformAdmin) approves (maker≠checker).
+// No KYC → the onboarded buyer stays pending until it DID/VC-verifies below.
+const mkUser = async (email, wallet) => await onboardUser(uca, platform, { email, password: "didvc123", role: "Buyer", walletAddress: wallet });
 const supU = await mkUser(`didvc.supplier.${runId}@tokenlayer.dev`, SUP);
 const finU = await mkUser(`didvc.financier.${runId}@tokenlayer.dev`, FIN);
 ok(supU?.kycStatus === "pending" && finU?.kycStatus === "pending", "supplier + financier created, both kycStatus=pending", { sup: supU?.kycStatus, fin: finU?.kycStatus });

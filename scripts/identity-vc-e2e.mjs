@@ -16,6 +16,16 @@ const ok = (c, msg, d) => { if (c) console.log(`  ✓ ${msg}`); else { console.l
 const login = async (e, p) => (await call("POST", "/auth/login", { email: e, password: p }, null)).json?.token;
 const addr = (s) => "0x" + s.toLowerCase().padStart(40, "0");
 
+// Gated onboarding: POST /users now 202s a proposal; a second manager approves.
+async function onboardUser(makerTok, approverTok, body) {
+  const r = await call("POST", "/users", body, makerTok);
+  if (r.status === 201) return r.json;               // org-path callers still 201
+  if (r.status !== 202) return r.json;               // let callers assert failures
+  await call("POST", `/proposals/${r.json.proposal.id}/approve`, {}, approverTok);
+  const list = await call("GET", "/users", null, approverTok);
+  return (list.json ?? []).find((u) => u.email === body.email);
+}
+
 const runId = String(Date.now()).slice(-7);
 const W = addr("d1d0" + runId), PW = addr("9a4e" + runId);
 const CUR = "CBDC-INR";
@@ -25,9 +35,11 @@ const admin = await login("m1.admin@tokenlayer.dev", "m1admin123");
 if (!platform || !admin) { console.error("login failed"); process.exit(2); }
 
 console.log("== 1) Onboard a pending investor (wallet, NO KYC country) ==");
-const inv = await call("POST", "/users", { email: `did.investor.${runId}@tokenlayer.dev`, password: "invest123", role: "Buyer", walletAddress: W }, admin);
-ok(inv.status === 201 && inv.json?.kycStatus === "pending", "investor created, kycStatus=pending", inv.json);
-const userId = inv.json?.id;
+// platform (PlatformAdmin) proposes; admin (m1.admin, invoice UCA) approves — scope
+// to invoice-tokenization so m1.admin is an eligible checker (maker≠checker).
+const inv = await onboardUser(platform, admin, { email: `did.investor.${runId}@tokenlayer.dev`, password: "invest123", role: "Buyer", useCaseKey: "invoice-tokenization", walletAddress: W });
+ok(inv?.kycStatus === "pending" && !!inv?.id, "investor created, kycStatus=pending", inv);
+const userId = inv?.id;
 
 console.log("\n== 2) Desk verifies the investor's DID/VC presentation ==");
 const ch = await call("POST", `/users/${userId}/identity/challenge`, {}, admin);
@@ -54,8 +66,8 @@ ok(u?.kycStatus === "approved" && u?.kyc?.country === "IN" && u?.kyc?.issuerDid 
 
 console.log("\n== 6) The verified investor can now subscribe (jurisdiction passes) ==");
 // Payer treasury linked to an IN user so its mint passes jurisdiction.
-const pid = await call("POST", "/users", { email: `did.payer.${runId}@tokenlayer.dev`, password: "invest123", role: "Auditor", walletAddress: PW, kyc: { legalName: "Treasury", country: "IN" } }, admin);
-await call("PATCH", `/users/${pid.json?.id}`, { kycStatus: "approved" }, admin);
+// KYC(legalName+country) → approval auto-issues the VC + sets kycStatus approved.
+await onboardUser(platform, admin, { email: `did.payer.${runId}@tokenlayer.dev`, password: "invest123", role: "Auditor", useCaseKey: "invoice-tokenization", walletAddress: PW, kyc: { legalName: "Treasury", country: "IN" } });
 const issue = await call("POST", "/assets", { useCaseKey: "invoice-tokenization", name: `INV-DID-${runId}`, chainId: "fabric", initialSupply: "1000", treasuryAccount: PW, metadata: { invoiceNumber: `INV-DID-${runId}`, invoiceDate: "2026-07-02", buyerName: "ITC Limited", currency: "INR", amount: 1000000, dueDate: "2026-12-31" }, sale: { unitPrice: "900", currency: CUR, treasuryAccount: PW } }, admin);
 ok(issue.status === 201, "desk issues an offering", issue.json);
 const assetId = issue.json?.asset?.id;

@@ -13,6 +13,16 @@ const ok = (c, msg, d) => { if (c) console.log(`  ✓ ${msg}`); else { console.l
 const login = async (e, p) => (await call("POST", "/auth/login", { email: e, password: p }, null)).json?.token;
 const addr = (s) => "0x" + s.toLowerCase().padStart(40, "0");
 
+// Gated onboarding: POST /users now 202s a proposal; a second manager approves.
+async function onboardUser(makerTok, approverTok, body) {
+  const r = await call("POST", "/users", body, makerTok);
+  if (r.status === 201) return r.json;               // org-path callers still 201
+  if (r.status !== 202) return r.json;               // let callers assert failures
+  await call("POST", `/proposals/${r.json.proposal.id}/approve`, {}, approverTok);
+  const list = await call("GET", "/users", null, approverTok);
+  return (list.json ?? []).find((u) => u.email === body.email);
+}
+
 const runId = String(Date.now()).slice(-7);
 const INVESTOR = addr("14e57" + runId), PAYER = addr("9a4e2" + runId);
 const CUR = "CBDC-INR";
@@ -23,11 +33,11 @@ const platform = await login("admin@tokenlayer.dev", "admin123");
 if (!admin || !issuer || !platform) { console.error("login failed"); process.exit(2); }
 
 console.log("== 1) Onboard the investor (IN KYC) + payer ==");
+// admin (m1.admin) is the invoice-tokenization UCA → propose; platform (PlatformAdmin)
+// approves (maker≠checker). Scope to invoice-tokenization so the offering below is
+// buyable; KYC(legalName+country) makes approval auto-issue the VC + set approved.
 async function mkUser(email, role, wallet) {
-  const r = await call("POST", "/users", { email, password: "invest123", role, walletAddress: wallet, kyc: { legalName: email.split("@")[0], country: "IN" } }, admin);
-  if (r.status !== 201) return null;
-  await call("PATCH", `/users/${r.json.id}`, { kycStatus: "approved" }, admin);
-  return r.json.id;
+  return await onboardUser(admin, platform, { email, password: "invest123", role, useCaseKey: "invoice-tokenization", walletAddress: wallet, kyc: { legalName: email.split("@")[0], country: "IN" } });
 }
 const invId = await mkUser(`investor.${runId}@tokenlayer.dev`, "Buyer", INVESTOR);
 const payId = await mkUser(`payer.${runId}@tokenlayer.dev`, "Auditor", PAYER);
