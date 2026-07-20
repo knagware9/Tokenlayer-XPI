@@ -207,7 +207,7 @@ function InvestorPortfolio(): JSX.Element {
         </table>
       </div>
       {selling && <SellPanel holding={selling} onDone={() => { setSelling(null); void reload(); }} onClose={() => setSelling(null)} />}
-      <MyListings wallet={pf.wallet} holdings={pf.holdings} refreshKey={refreshKey} />
+      <MyListings wallet={pf.wallet} holdings={pf.holdings} refreshKey={refreshKey} reload={() => void reload()} />
     </div>
   );
 }
@@ -245,7 +245,7 @@ function SellPanel({ holding, onDone, onClose }: { holding: Holding; onDone: () 
   );
 }
 
-function MyListings({ wallet, holdings, refreshKey }: { wallet: string; holdings: Holding[]; refreshKey: number }): JSX.Element | null {
+function MyListings({ wallet, holdings, refreshKey, reload }: { wallet: string; holdings: Holding[]; refreshKey: number; reload: () => void }): JSX.Element | null {
   const { token } = useAuth();
   const [mine, setMine] = useState<Array<Listing & { assetName: string; assetId: string }>>([]);
   // NOTE: We only know asset ids from the current holdings, so this iterates pf.holdings.
@@ -267,7 +267,7 @@ function MyListings({ wallet, holdings, refreshKey }: { wallet: string; holdings
       {mine.map((l) => (
         <div key={l.id} className="flex items-center justify-between py-1.5 border-t border-slate-100 text-sm">
           <span>{l.assetName} · {l.quantity} @ {l.unitPrice} {l.currency}</span>
-          <button onClick={() => void api.cancelListing(token!, l.id).then(() => setMine((m) => m.filter((x) => x.id !== l.id)))}
+          <button onClick={() => void api.cancelListing(token!, l.id).then(() => { setMine((m) => m.filter((x) => x.id !== l.id)); reload(); })}
             className="text-xs text-red-500 hover:text-red-700">Cancel</button>
         </div>
       ))}
