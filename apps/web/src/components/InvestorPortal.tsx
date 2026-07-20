@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../api.js";
 import { useAuth } from "../auth.js";
-import type { ActivityEvent, Asset, Listing, Portfolio, UseCase } from "../types.js";
+import type { ActivityEvent, Asset, Holding, Listing, Portfolio, UseCase } from "../types.js";
 import { Card, EmptyState, Skeleton, StatCard } from "./ui.js";
 
 type Tab = "offerings" | "portfolio" | "activity";
@@ -156,10 +156,18 @@ function InvestorPortfolio(): JSX.Element {
   const { token } = useAuth();
   const [pf, setPf] = useState<Portfolio | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [selling, setSelling] = useState<Holding | null>(null);
+  const reload = useCallback(async () => {
     if (!token) return;
-    api.mePortfolio(token).then(setPf).catch((e) => setError(e instanceof ApiError && e.code === "NO_WALLET" ? "NO_WALLET" : "Could not load portfolio"));
+    try {
+      setPf(await api.mePortfolio(token));
+      setRefreshKey((k) => k + 1);
+    } catch (e) {
+      setError(e instanceof ApiError && e.code === "NO_WALLET" ? "NO_WALLET" : "Could not load portfolio");
+    }
   }, [token]);
+  useEffect(() => { void reload(); }, [reload]);
   if (error === "NO_WALLET") return <NoWallet />;
   if (error) return <p className="text-sm text-red-600">{error}</p>;
   if (!pf)
@@ -177,7 +185,7 @@ function InvestorPortfolio(): JSX.Element {
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
-            <tr><th className="text-left font-medium px-4 py-2.5">Asset</th><th className="text-right font-medium px-4 py-2.5">Units</th><th className="text-right font-medium px-4 py-2.5">Value</th></tr>
+            <tr><th className="text-left font-medium px-4 py-2.5">Asset</th><th className="text-right font-medium px-4 py-2.5">Units</th><th className="text-right font-medium px-4 py-2.5">Value</th><th className="text-right font-medium px-4 py-2.5">Actions</th></tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {pf.holdings.map((h) => (
@@ -185,11 +193,12 @@ function InvestorPortfolio(): JSX.Element {
                 <td className="px-4 py-2.5 font-medium text-slate-800">{h.name} <span className="text-slate-400 font-normal">{h.symbol}</span></td>
                 <td className="px-4 py-2.5 text-right font-mono">{fmt(h.units)}</td>
                 <td className="px-4 py-2.5 text-right font-mono">{h.value ? `${fmt(h.value)} ${h.currency}` : "—"}</td>
+                <td className="px-4 py-2.5 text-right"><button onClick={() => setSelling(h)} className="text-xs text-brand-600 hover:text-brand-700 font-medium">Sell</button></td>
               </tr>
             ))}
             {pf.holdings.length === 0 && (
               <tr>
-                <td colSpan={3}>
+                <td colSpan={4}>
                   <EmptyState icon="doc" title="No holdings yet" hint="Subscribe to an offering to build your portfolio." />
                 </td>
               </tr>
@@ -197,7 +206,72 @@ function InvestorPortfolio(): JSX.Element {
           </tbody>
         </table>
       </div>
+      {selling && <SellPanel holding={selling} onDone={() => { setSelling(null); void reload(); }} onClose={() => setSelling(null)} />}
+      <MyListings wallet={pf.wallet} holdings={pf.holdings} refreshKey={refreshKey} />
     </div>
+  );
+}
+
+function SellPanel({ holding, onDone, onClose }: { holding: Holding; onDone: () => void; onClose: () => void }): JSX.Element {
+  const { token } = useAuth();
+  const [quantity, setQuantity] = useState("");
+  const [unitPrice, setUnitPrice] = useState(holding.unitPrice ?? "");
+  const [currency, setCurrency] = useState(holding.currency ?? "CBDC-INR");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function sell(): Promise<void> {
+    setError(null); setBusy(true);
+    try { await api.createListing(token!, holding.assetId, { quantity, unitPrice, currency }); onDone(); }
+    catch (err) { setError(err instanceof ApiError ? err.message : "Listing failed"); }
+    finally { setBusy(false); }
+  }
+  return (
+    <Card>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-slate-900">Sell — {holding.name}</h3>
+        <button onClick={onClose} className="text-xs text-slate-400 hover:text-slate-600">Close</button>
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <input className="input" type="number" placeholder={`quantity (≤ ${holding.units})`} value={quantity} onChange={(e) => setQuantity(e.target.value)} />
+        <input className="input" type="number" placeholder="unit price" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} />
+        <select className="select" value={currency} onChange={(e) => setCurrency(e.target.value)}>
+          {["CBDC-INR", "USDC", "e-GBP"].map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </div>
+      {error && <p className="text-xs text-red-600 mt-2">{error}</p>}
+      <button onClick={() => void sell()} disabled={busy || !quantity || !unitPrice}
+        className="mt-3 rounded-lg bg-brand-600 text-white px-4 py-1.5 text-xs font-medium hover:bg-brand-700 disabled:opacity-40">List for sale</button>
+    </Card>
+  );
+}
+
+function MyListings({ wallet, holdings, refreshKey }: { wallet: string; holdings: Holding[]; refreshKey: number }): JSX.Element | null {
+  const { token } = useAuth();
+  const [mine, setMine] = useState<Array<Listing & { assetName: string; assetId: string }>>([]);
+  // NOTE: We only know asset ids from the current holdings, so this iterates pf.holdings.
+  // Edge case: selling ALL units of an asset escrows them out of the seller's balance, so the
+  // asset can drop out of pf.holdings and its open listing would then stop showing here. Partial
+  // sells (the common case) keep the holding visible. Accepted limitation for this task — there is
+  // no "my open listings" endpoint to enumerate listings independent of current holdings.
+  useEffect(() => {
+    if (!token) return;
+    void Promise.all(holdings.map(async (h) => (await api.listings(token, h.assetId).catch(() => []))
+      .filter((l) => l.seller.toLowerCase() === wallet.toLowerCase() && (l.status ?? "open") === "open")
+      .map((l) => ({ ...l, assetName: h.name, assetId: h.assetId }))))
+      .then((groups) => setMine(groups.flat()));
+  }, [token, wallet, holdings, refreshKey]);
+  if (mine.length === 0) return null;
+  return (
+    <Card>
+      <h3 className="text-sm font-semibold text-slate-900 mb-2">My listings</h3>
+      {mine.map((l) => (
+        <div key={l.id} className="flex items-center justify-between py-1.5 border-t border-slate-100 text-sm">
+          <span>{l.assetName} · {l.quantity} @ {l.unitPrice} {l.currency}</span>
+          <button onClick={() => void api.cancelListing(token!, l.id).then(() => setMine((m) => m.filter((x) => x.id !== l.id)))}
+            className="text-xs text-red-500 hover:text-red-700">Cancel</button>
+        </div>
+      ))}
+    </Card>
   );
 }
 
