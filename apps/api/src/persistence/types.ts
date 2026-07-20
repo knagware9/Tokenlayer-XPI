@@ -319,7 +319,7 @@ export interface CashRepository {
   transfer(currency: string, from: string, to: string, amount: string): Promise<void>;
 }
 
-export type OrgStatus = "active" | "suspended";
+export type OrgStatus = "pending" | "active" | "suspended" | "rejected";
 
 export interface OrganizationRecord {
   id: string;
