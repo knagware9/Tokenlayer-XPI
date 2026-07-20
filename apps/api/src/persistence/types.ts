@@ -345,6 +345,7 @@ export interface OrganizationRepository {
   list(): Promise<OrganizationRecord[]>;
   setVerified(id: string, verified: boolean, verifiedAt: string | null): Promise<OrganizationRecord>;
   setStatus(id: string, status: OrgStatus): Promise<OrganizationRecord>;
+  remove(id: string): Promise<void>;
 }
 
 export interface CredentialRecord {

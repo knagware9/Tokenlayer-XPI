@@ -461,6 +461,9 @@ export class MemoryOrganizationRepository implements OrganizationRepository {
     rec.status = status;
     return rec;
   }
+  async remove(orgId: string): Promise<void> {
+    this.byId.delete(orgId);
+  }
 }
 
 export class MemoryCredentialRepository implements CredentialRepository {

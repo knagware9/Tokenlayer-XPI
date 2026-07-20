@@ -1236,12 +1236,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         kycStatus: "pending", kyc: { legalName: b.admin.name }, orgId: org.id,
       });
     } catch (err) {
-      // NOTE: OrganizationRepository exposes no delete/remove method (neither the
-      // interface nor Memory/Prisma implementations), so the just-created pending
-      // org cannot be rolled back here — it is orphaned (no admin user) and its
-      // name/registrationId are permanently unavailable for re-registration, since
-      // findByName/findByRegistrationId don't filter by status. Flagged for a
-      // follow-up: either add OrganizationRepository.remove() or accept the risk.
+      await deps.organizations.remove(org.id).catch(() => undefined); // roll back the orphaned pending org
       throw err;
     }
     await deps.audit.append({ actorId: "self-registration", action: "org-registered" as LifecycleAction, payload: { orgId: org.id, name: org.name } });
