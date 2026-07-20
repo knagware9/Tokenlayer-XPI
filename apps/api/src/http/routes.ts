@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { AssetRecord, CashflowRecord, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord } from "../persistence/types.js";
+import type { AssetRecord, CashflowRecord, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
 import { auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TYPES, credentialTypeDef, didKeyFromSeed, generateDidKey, invoiceFingerprint, issueCredential, normalizeUseCaseDefinition, PolicyError, presentCredential, publicKeyFromDidKey, splitProRata, validateMetadata, verifyChain, verifyPresentation, type Actor, type ChainEntry, type LifecycleAction, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
@@ -1439,6 +1439,60 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       id: c.id, type: c.type, holderDid: c.holderDid, claims: c.subjectClaims,
       issuedAt: c.issuedAt, expiresAt: c.expiresAt, revoked: c.revoked, revokedAt: c.revokedAt, revokedReason: c.revokedReason,
     }));
+  });
+
+  // --- verification (verifier-request → holder-consent → verify) -----------
+  // A public projection — never leaks the challenge (it's embedded in the VP) or
+  // the raw VP blob to a list view.
+  function vreqView(r: VerificationRequestRecord) {
+    return {
+      id: r.id, verifierOrgId: r.verifierOrgId, holderDid: r.holderDid, requestedTypes: r.requestedTypes,
+      purpose: r.purpose, status: r.status, consentedCredentialIds: r.consentedCredentialIds,
+      consentedAt: r.consentedAt, verifiedAt: r.verifiedAt, createdAt: r.createdAt, expiresAt: r.expiresAt,
+    };
+  }
+
+  app.post("/verification-requests", { schema: S.createVerificationRequest, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const b = request.body as { holderDid: string; requestedTypes: string[]; purpose: string };
+    if (claims.role !== "OrgAdmin" || !claims.orgId) {
+      return reply.code(403).send({ error: "NOT_A_VERIFIER", message: "only a verifier organization may request a presentation" });
+    }
+    const org = await deps.organizations.get(claims.orgId);
+    if (!org || org.orgType !== "verifier") {
+      return reply.code(403).send({ error: "NOT_A_VERIFIER", message: "your organization is not a verifier" });
+    }
+    const rec = await deps.verificationRequests.create({
+      verifierOrgId: org.id, holderDid: b.holderDid, requestedTypes: b.requestedTypes, purpose: b.purpose,
+      challenge: randomUUID(), status: "pending", presentationVpJwt: null, consentedAt: null,
+      consentedCredentialIds: null, verifierResult: null, verifiedAt: null,
+      expiresAt: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+    });
+    await deps.audit.append({ actorId: claims.id, action: "verification-requested" as LifecycleAction, payload: { requestId: rec.id, verifierOrgId: org.id, holderDid: b.holderDid, types: b.requestedTypes } });
+    return reply.code(201).send(vreqView(rec));
+  });
+
+  app.get("/me/verification-requests", { schema: S.myVerificationRequests, ...auth }, async (request) => {
+    const claims = request.user as TokenClaims;
+    if (!claims.did) return [];
+    const rows = await deps.verificationRequests.listByHolder(claims.did);
+    const mine = await deps.credentials.listByHolder(claims.did);
+    return rows.map((r) => ({
+      ...vreqView(r),
+      eligibleCredentials: mine
+        .filter((c) => !c.revoked && r.requestedTypes.includes(c.type))
+        .map((c) => ({ id: c.id, type: c.type, issuerDid: c.issuerDid, issuedAt: c.issuedAt })),
+    }));
+  });
+
+  app.get("/verification-requests/:id", { schema: S.getVerificationRequest, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    const r = await deps.verificationRequests.get(id);
+    const isHolder = !!claims.did && claims.did === r?.holderDid;
+    const isVerifier = !!r && orgScoped(claims, r.verifierOrgId);
+    if (!r || (!isHolder && !isVerifier)) return notFound(reply, "verification request not found");
+    return vreqView(r);
   });
 
   // --- identity (DID / Verifiable Credentials) ------------------------------

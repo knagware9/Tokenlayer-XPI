@@ -965,6 +965,41 @@ export const S: Record<string, FastifySchema> = {
     response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403, 404) },
   },
 
+  createVerificationRequest: {
+    tags: ["Verification"], summary: "A verifier org requests a credential presentation", security: bearer,
+    body: {
+      type: "object", additionalProperties: false, required: ["holderDid", "requestedTypes", "purpose"],
+      properties: {
+        holderDid: { type: "string", minLength: 1 },
+        requestedTypes: { type: "array", items: { type: "string" }, minItems: 1 },
+        purpose: { type: "string", minLength: 1 },
+      },
+    },
+    response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403) },
+  },
+  myVerificationRequests: { tags: ["Verification"], summary: "The caller's inbound verification requests", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401) } },
+  getVerificationRequest: {
+    tags: ["Verification"], summary: "One verification request (holder or verifier org)", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 404) },
+  },
+  consentVerificationRequest: {
+    tags: ["Verification"], summary: "Holder consents, selecting credentials to disclose", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    body: { type: "object", additionalProperties: false, required: ["credentialIds"], properties: { credentialIds: { type: "array", items: { type: "string" }, minItems: 1 } } },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404, 409, 410) },
+  },
+  rejectVerificationRequest: {
+    tags: ["Verification"], summary: "Holder declines a verification request", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404, 409) },
+  },
+  verifyVerificationRequest: {
+    tags: ["Verification"], summary: "The verifier runs verification on the consented presentation", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404, 409) },
+  },
+
   listUsers: { tags: ["Users"], summary: "List users in scope", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403) } },
   createUser: {
     tags: ["Users"], summary: "Create a user (scoped)", security: bearer,
