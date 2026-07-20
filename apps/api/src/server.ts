@@ -1,11 +1,13 @@
 import { RbacPolicy } from "@tokenlayer/core";
 import { buildApp } from "./app.js";
 import { buildChainRegistry } from "./chains.js";
+import type { AppDeps } from "./context.js";
 import { createEngine } from "./context.js";
 import { loadCurrencies } from "./currencies.js";
 import { env } from "./env.js";
 import { createMemoryChallengeStore } from "./identity-challenges.js";
 import { createKeystore } from "./keystore.js";
+import { ensurePlatformIssuerOrg } from "./platform-org.js";
 import {
   PrismaAccountRepository,
   PrismaAssetRepository,
@@ -62,7 +64,7 @@ async function main(): Promise<void> {
     chains,
     deployments: new PrismaRegistryDeploymentRepository(),
   });
-  const app = await buildApp({
+  const deps: AppDeps = {
     useCases,
     rbac,
     engine,
@@ -94,7 +96,9 @@ async function main(): Promise<void> {
     marketEscrowAccount: env.marketEscrowAccount,
     loginRateLimitMax: env.loginRateLimitMax,
     registry,
-  });
+  };
+  await ensurePlatformIssuerOrg(deps);
+  const app = await buildApp(deps);
 
   await app.listen({ port: env.port, host: "0.0.0.0" });
   const chainList = chains.list().map((c) => c.id).join(", ");

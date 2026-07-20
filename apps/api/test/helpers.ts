@@ -2,6 +2,7 @@ import { RbacPolicy } from "@tokenlayer/core";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.js";
 import { buildChainRegistry } from "../src/chains.js";
+import type { AppDeps } from "../src/context.js";
 import { createEngine } from "../src/context.js";
 import { loadCurrencies } from "../src/currencies.js";
 import { createMemoryChallengeStore } from "../src/identity-challenges.js";
@@ -22,6 +23,7 @@ import {
   MemoryUserRepository,
   MemoryVerificationRequestRepository,
 } from "../src/persistence/memory.js";
+import { ensurePlatformIssuerOrg } from "../src/platform-org.js";
 import type { IdentityRegistry } from "../src/registry.js";
 import { DEFAULT_USERS, seedDefaults } from "../src/seed.js";
 import { seedUseCases } from "../src/use-cases.js";
@@ -54,7 +56,7 @@ export async function buildTestApp(opts: { loginRateLimitMax?: number; platformF
     deploy: (def, chainId) => engine.deployUseCaseContract(def, chainId),
   });
   // The suite makes many logins from one IP; raise the throttle unless a test opts into it.
-  return buildApp({
+  const deps: AppDeps = {
     useCases, rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents, cashflows, proposals,
     organizations, credentials, verificationRequests, keystore, didMasterConfigured: opts.didMasterConfigured ?? true,
     challenges: createMemoryChallengeStore(), trustedKycIssuers: opts.trustedKycIssuers,
@@ -66,7 +68,9 @@ export async function buildTestApp(opts: { loginRateLimitMax?: number; platformF
     // `marketEscrowAccount: undefined` disables the market (503s).
     marketEscrowAccount: "marketEscrowAccount" in opts ? opts.marketEscrowAccount : TEST_MARKET_ESCROW,
     registry: opts.registry,
-  });
+  };
+  await ensurePlatformIssuerOrg(deps);
+  return buildApp(deps);
 }
 
 /** All v1 API routes live under this prefix. */
