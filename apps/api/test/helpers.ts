@@ -140,8 +140,13 @@ export const ACCOUNTS = { ALICE, BOB };
 // Legacy role-based login — kept for any tests that still use old-style roles.
 // Maps by the first seeded user with that role (PlatformAdmin → admin@…, etc.).
 // ---------------------------------------------------------------------------
-const PASSWORDS: Record<string, string> = Object.fromEntries(DEFAULT_USERS.map((u) => [u.role, u.password]));
-const EMAILS: Record<string, string> = Object.fromEntries(DEFAULT_USERS.map((u) => [u.role, u.email]));
+const PASSWORDS: Record<string, string> = {};
+const EMAILS: Record<string, string> = {};
+// First-wins so each role maps to its FIRST seeded user (e.g. PlatformAdmin →
+// admin@…, not the later admin2@… added for SoD).
+for (const u of DEFAULT_USERS) {
+  if (!(u.role in EMAILS)) { EMAILS[u.role] = u.email; PASSWORDS[u.role] = u.password; }
+}
 
 /** @deprecated Prefer loginAs(app, email, password). */
 export async function login(app: FastifyInstance, role: string): Promise<string> {
