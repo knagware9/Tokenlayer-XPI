@@ -13,7 +13,7 @@ export const PLATFORM_ORG_NAME = "TokenLayer Platform";
 type PlatformOrgDeps = Pick<AppDeps, "organizations" | "keystore" | "registry">;
 
 export async function ensurePlatformIssuerOrg(deps: PlatformOrgDeps): Promise<OrganizationRecord> {
-  const existing = (await deps.organizations.list()).find((o) => o.name === PLATFORM_ORG_NAME);
+  const existing = await deps.organizations.findByName(PLATFORM_ORG_NAME);
   if (existing) return existing;
   const seed = deps.keystore.newSeed();
   const didSeedEncrypted = deps.keystore.encryptSeed(seed);
