@@ -49,6 +49,9 @@ import type {
   UseCaseRepository,
   UserRecord,
   UserRepository,
+  VerificationRequestRecord,
+  VerificationRequestRepository,
+  VerificationStatus,
 } from "./types.js";
 import { ListingConflictError } from "./types.js";
 
@@ -777,5 +780,56 @@ export class PrismaRegistryDeploymentRepository implements RegistryDeploymentRep
   }
   async create(input: Omit<RegistryDeploymentRecord, "createdAt">): Promise<RegistryDeploymentRecord> {
     return toRegistry(await prisma.registryDeployment.create({ data: input }));
+  }
+}
+
+const toVerificationRequest = (r: {
+  id: string; verifierOrgId: string; holderDid: string; requestedTypes: string; purpose: string; challenge: string;
+  status: string; presentationVpJwt: string | null; consentedAt: Date | null; consentedCredentialIds: string | null;
+  verifierResult: string | null; verifiedAt: Date | null; createdAt: Date; expiresAt: Date;
+}): VerificationRequestRecord => ({
+  id: r.id, verifierOrgId: r.verifierOrgId, holderDid: r.holderDid,
+  requestedTypes: JSON.parse(r.requestedTypes) as string[], purpose: r.purpose, challenge: r.challenge,
+  status: r.status as VerificationStatus, presentationVpJwt: r.presentationVpJwt,
+  consentedAt: r.consentedAt ? r.consentedAt.toISOString() : null,
+  consentedCredentialIds: r.consentedCredentialIds ? (JSON.parse(r.consentedCredentialIds) as string[]) : null,
+  verifierResult: r.verifierResult ? (JSON.parse(r.verifierResult) as Record<string, unknown>) : null,
+  verifiedAt: r.verifiedAt ? r.verifiedAt.toISOString() : null,
+  createdAt: r.createdAt.toISOString(), expiresAt: r.expiresAt.toISOString(),
+});
+
+export class PrismaVerificationRequestRepository implements VerificationRequestRepository {
+  async create(input: Omit<VerificationRequestRecord, "id" | "createdAt">): Promise<VerificationRequestRecord> {
+    return toVerificationRequest(await prisma.verificationRequest.create({
+      data: {
+        verifierOrgId: input.verifierOrgId, holderDid: input.holderDid,
+        requestedTypes: JSON.stringify(input.requestedTypes), purpose: input.purpose, challenge: input.challenge,
+        status: input.status, presentationVpJwt: input.presentationVpJwt,
+        consentedAt: input.consentedAt ? new Date(input.consentedAt) : null,
+        consentedCredentialIds: input.consentedCredentialIds ? JSON.stringify(input.consentedCredentialIds) : null,
+        verifierResult: input.verifierResult ? JSON.stringify(input.verifierResult) : null,
+        verifiedAt: input.verifiedAt ? new Date(input.verifiedAt) : null,
+        expiresAt: new Date(input.expiresAt),
+      },
+    }));
+  }
+  async get(id: string): Promise<VerificationRequestRecord | null> {
+    const r = await prisma.verificationRequest.findUnique({ where: { id } });
+    return r ? toVerificationRequest(r) : null;
+  }
+  async listByHolder(holderDid: string, status?: string): Promise<VerificationRequestRecord[]> {
+    return (await prisma.verificationRequest.findMany({ where: { holderDid, ...(status ? { status } : {}) }, orderBy: { createdAt: "desc" } })).map(toVerificationRequest);
+  }
+  async listByVerifierOrg(orgId: string, status?: string): Promise<VerificationRequestRecord[]> {
+    return (await prisma.verificationRequest.findMany({ where: { verifierOrgId: orgId, ...(status ? { status } : {}) }, orderBy: { createdAt: "desc" } })).map(toVerificationRequest);
+  }
+  async setConsented(id: string, input: { vpJwt: string; credentialIds: string[]; at: string }): Promise<VerificationRequestRecord> {
+    return toVerificationRequest(await prisma.verificationRequest.update({ where: { id }, data: { status: "consented", presentationVpJwt: input.vpJwt, consentedCredentialIds: JSON.stringify(input.credentialIds), consentedAt: new Date(input.at) } }));
+  }
+  async setStatus(id: string, status: VerificationStatus): Promise<VerificationRequestRecord> {
+    return toVerificationRequest(await prisma.verificationRequest.update({ where: { id }, data: { status } }));
+  }
+  async setVerifierResult(id: string, input: { result: Record<string, unknown>; at: string }): Promise<VerificationRequestRecord> {
+    return toVerificationRequest(await prisma.verificationRequest.update({ where: { id }, data: { verifierResult: JSON.stringify(input.result), verifiedAt: new Date(input.at) } }));
   }
 }

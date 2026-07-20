@@ -20,6 +20,7 @@ import {
   MemoryListingRepository,
   MemoryUseCaseRepository,
   MemoryUserRepository,
+  MemoryVerificationRequestRepository,
 } from "./persistence/memory.js";
 import { DEFAULT_ACCOUNTS, seedDefaults } from "./seed.js";
 import { seedUseCases } from "./use-cases.js";
@@ -50,7 +51,7 @@ async function main(): Promise<void> {
   });
   const cash = new MemoryCashRepository();
   const listings = new MemoryListingRepository();
-  const app = await buildApp({ useCases, rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents: new MemoryDocumentRepository(), cashflows: new MemoryCashflowRepository(), proposals: new MemoryProposalRepository(), organizations: new MemoryOrganizationRepository(), credentials: new MemoryCredentialRepository(), keystore: createKeystore("11".repeat(32)), didMasterConfigured: true, challenges: createMemoryChallengeStore(), currencies: loadCurrencies(), jwtSecret: "demo", publicApiUrl: "http://localhost:4000/api/v1" });
+  const app = await buildApp({ useCases, rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents: new MemoryDocumentRepository(), cashflows: new MemoryCashflowRepository(), proposals: new MemoryProposalRepository(), organizations: new MemoryOrganizationRepository(), credentials: new MemoryCredentialRepository(), verificationRequests: new MemoryVerificationRequestRepository(), keystore: createKeystore("11".repeat(32)), didMasterConfigured: true, challenges: createMemoryChallengeStore(), currencies: loadCurrencies(), jwtSecret: "demo", publicApiUrl: "http://localhost:4000/api/v1" });
   const token = (await post(app, "/auth/login", null, { email: "admin@tokenlayer.dev", password: "admin123" })).body.token;
 
   // 1. ERC-20 across every available DLT — identical behaviour everywhere.

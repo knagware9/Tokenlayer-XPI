@@ -240,3 +240,25 @@ model RegistryDeployment {
   deployTxHash String
   createdAt    DateTime @default(now())
 }
+
+// A verifier's request for the holder to present credentials. Holder consent (a
+// single direct action, not maker-checker) triggers custodial VP signing.
+model VerificationRequest {
+  id                     String    @id @default(cuid())
+  verifierOrgId          String
+  holderDid              String
+  requestedTypes         String // JSON array of credential-type strings
+  purpose                String
+  challenge              String
+  status                 String    @default("pending") // pending | consented | rejected | expired
+  presentationVpJwt      String? // the holder-signed VP, set at consent
+  consentedAt            DateTime?
+  consentedCredentialIds String? // JSON array, set at consent
+  verifierResult         String? // JSON verification result, set at verify
+  verifiedAt             DateTime?
+  createdAt              DateTime  @default(now())
+  expiresAt              DateTime
+
+  @@index([holderDid, status])
+  @@index([verifierOrgId, status])
+}
