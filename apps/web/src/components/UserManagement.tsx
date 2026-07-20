@@ -115,6 +115,7 @@ function ManageUsers({ rows, me, onChanged }: { rows: Summary[]; me?: string; on
 
   const act = async (fn: () => Promise<unknown>): Promise<void> => {
     setError(null);
+    setNotice(null);
     try { await fn(); onChanged(); } catch (err) { setError(err instanceof ApiError ? err.message : "Action failed"); }
   };
   const manageable = (u: Summary): boolean => u.email !== me && u.role !== "PlatformAdmin";
@@ -148,7 +149,7 @@ function ManageUsers({ rows, me, onChanged }: { rows: Summary[]; me?: string; on
                         <button onClick={() => setEditing(u)} className="text-xs text-brand-600 hover:text-brand-700">Edit</button>
                         <button onClick={() => act(() => api.updateUser(token!, u.id, { active: !u.active }))} className="text-xs text-amber-600 hover:text-amber-700">{u.active ? "Suspend" : "Reactivate"}</button>
                         {u.kycStatus !== "rejected" && (
-                          <button onClick={() => { setNotice(null); const reason = window.prompt("Reason for revoking this user's identity?"); if (reason) void act(() => api.revokeUserIdentity(token!, u.id, reason).then(() => setNotice("Revoke proposal submitted — pending approval."))); }}
+                          <button onClick={() => { const reason = window.prompt("Reason for revoking this user's identity?")?.trim(); if (reason) void act(() => api.revokeUserIdentity(token!, u.id, reason).then(() => setNotice("Revoke proposal submitted — pending approval."))); }}
                             className="text-xs text-red-500 hover:text-red-700">Revoke identity</button>
                         )}
                         <button onClick={() => act(() => api.deleteUser(token!, u.id))} className="text-xs text-red-500 hover:text-red-700">Delete</button>
