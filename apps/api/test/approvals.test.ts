@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { buildTestApp, V1, loginAs, auth } from "./helpers.js";
+import { buildTestApp, V1, loginAs, auth, onboardUser, PLATFORM_ADMIN_2 } from "./helpers.js";
 
 // Seeded accounts (unlinked → usable as treasuries/holders).
 const BOB = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC";
@@ -101,10 +101,14 @@ describe("maker-checker: thresholds + concurrency", () => {
       roles: ["UseCaseAdmin", "Issuer", "Buyer", "Auditor"],
     };
     expect((await app.inject({ method: "POST", url: `${V1}/use-cases`, headers: auth(platform), payload: def })).statusCode).toBe(201);
-    await app.inject({ method: "POST", url: `${V1}/users`, headers: auth(platform), payload: { email: "t2.admin@x.dev", password: "secret1", role: "UseCaseAdmin", useCaseKey: "t2-note" } });
+    // Bootstrapping the FIRST UseCaseAdmin of a brand-new use case is gated too:
+    // the platform admin proposes, a SECOND platform admin checks (no t2-note UCA
+    // exists yet, and the proposer may not self-approve).
+    const platform2 = await loginAs(app, PLATFORM_ADMIN_2.email, PLATFORM_ADMIN_2.password);
+    await onboardUser(app, platform, platform2, { email: "t2.admin@x.dev", password: "secret1", role: "UseCaseAdmin", useCaseKey: "t2-note" });
     const adminTok = await loginAs(app, "t2.admin@x.dev", "secret1");
     for (const e of ["t2.i1@x.dev", "t2.i2@x.dev"]) {
-      await app.inject({ method: "POST", url: `${V1}/users`, headers: auth(adminTok), payload: { email: e, password: "secret1", role: "Issuer", useCaseKey: "t2-note" } });
+      await onboardUser(app, adminTok, platform, { email: e, password: "secret1", role: "Issuer", useCaseKey: "t2-note" });
     }
     return { adminTok, iss1: await loginAs(app, "t2.i1@x.dev", "secret1"), iss2: await loginAs(app, "t2.i2@x.dev", "secret1"), chainId: "fabric" };
   }
@@ -133,8 +137,9 @@ describe("maker-checker: thresholds + concurrency", () => {
   it("two concurrent final approvals execute the operation exactly once", async () => {
     const app = await buildTestApp();
     const admin = await loginAs(app, "bond.admin@tokenlayer.dev", "bond123");
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     // corporate-bond gates issue:1 — add a second eligible approver.
-    await app.inject({ method: "POST", url: `${V1}/users`, headers: auth(admin), payload: { email: "bond.iss2@x.dev", password: "secret1", role: "Issuer", useCaseKey: "corporate-bond" } });
+    await onboardUser(app, admin, platform, { email: "bond.iss2@x.dev", password: "secret1", role: "Issuer", useCaseKey: "corporate-bond" });
     const { proposal, asset } = (await proposeBond(app, admin, "BOND-RACE")).json();
     const a1 = await loginAs(app, "bond.issuer@tokenlayer.dev", "bond123");
     const a2 = await loginAs(app, "bond.iss2@x.dev", "secret1");
@@ -155,12 +160,12 @@ describe("maker-checker: gated settlement + ungated pass-through", () => {
   it("invoice settlement is proposal-gated: 202 then approval pays out and matures", async () => {
     const app = await buildTestApp();
     const admin = await loginAs(app, "m1.admin@tokenlayer.dev", "m1admin123");
-    await app.inject({ method: "POST", url: `${V1}/users`, headers: auth(admin), payload: { email: "ap.holder@x.dev", password: "secret1", role: "Buyer", walletAddress: HOLDER, kyc: { country: "IN" } } });
-    await app.inject({ method: "POST", url: `${V1}/users`, headers: auth(admin), payload: { email: "ap.settle@x.dev", password: "secret1", role: "Auditor", walletAddress: PAYER, kyc: { country: "IN" } } });
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    await onboardUser(app, admin, platform, { email: "ap.holder@x.dev", password: "secret1", role: "Buyer", walletAddress: HOLDER, kyc: { legalName: "AP Holder", country: "IN" } });
+    await onboardUser(app, admin, platform, { email: "ap.settle@x.dev", password: "secret1", role: "Auditor", walletAddress: PAYER, kyc: { legalName: "AP Settle", country: "IN" } });
     const issued = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(admin), payload: { useCaseKey: "invoice-tokenization", name: "INV-AP-1", chainId: "fabric", initialSupply: "10000", treasuryAccount: HOLDER, metadata: { invoiceNumber: "INV-AP-1", invoiceDate: "2026-07-01", buyerName: "JSW Steel Limited", currency: "INR", amount: 1000000, dueDate: "2099-12-31" } } });
     expect(issued.statusCode).toBe(201); // invoice issuance is NOT gated
     const assetId = issued.json().asset.id;
-    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     await app.inject({ method: "POST", url: `${V1}/cash/credit`, headers: auth(platform), payload: { account: PAYER, currency: "CBDC-INR", amount: "1000000" } });
     const { cashflows } = (await app.inject({ method: "GET", url: `${V1}/assets/${assetId}/cashflows`, headers: auth(admin) })).json();
     const proposed = await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/cashflows/${cashflows[0].id}/execute`, headers: auth(admin), payload: { from: PAYER } });
@@ -175,8 +180,9 @@ describe("maker-checker: gated settlement + ungated pass-through", () => {
   it("an approved execution that fails (unfunded payer) becomes a failed proposal, error preserved", async () => {
     const app = await buildTestApp();
     const admin = await loginAs(app, "m1.admin@tokenlayer.dev", "m1admin123");
-    await app.inject({ method: "POST", url: `${V1}/users`, headers: auth(admin), payload: { email: "ap.holder2@x.dev", password: "secret1", role: "Buyer", walletAddress: HOLDER, kyc: { country: "IN" } } });
-    await app.inject({ method: "POST", url: `${V1}/users`, headers: auth(admin), payload: { email: "ap.settle2@x.dev", password: "secret1", role: "Auditor", walletAddress: PAYER, kyc: { country: "IN" } } });
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    await onboardUser(app, admin, platform, { email: "ap.holder2@x.dev", password: "secret1", role: "Buyer", walletAddress: HOLDER, kyc: { legalName: "AP Holder2", country: "IN" } });
+    await onboardUser(app, admin, platform, { email: "ap.settle2@x.dev", password: "secret1", role: "Auditor", walletAddress: PAYER, kyc: { legalName: "AP Settle2", country: "IN" } });
     const assetId = (await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(admin), payload: { useCaseKey: "invoice-tokenization", name: "INV-AP-2", chainId: "fabric", initialSupply: "10000", treasuryAccount: HOLDER, metadata: { invoiceNumber: "INV-AP-2", invoiceDate: "2026-07-01", buyerName: "JSW Steel Limited", currency: "INR", amount: 1000000, dueDate: "2099-12-31" } } })).json().asset.id;
     const { cashflows } = (await app.inject({ method: "GET", url: `${V1}/assets/${assetId}/cashflows`, headers: auth(admin) })).json();
     const proposed = await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/cashflows/${cashflows[0].id}/execute`, headers: auth(admin), payload: { from: PAYER } });
@@ -193,7 +199,8 @@ describe("maker-checker: gated settlement + ungated pass-through", () => {
   it("an ungated operation on the same platform still executes instantly", async () => {
     const app = await buildTestApp();
     const admin = await loginAs(app, "m1.admin@tokenlayer.dev", "m1admin123");
-    await app.inject({ method: "POST", url: `${V1}/users`, headers: auth(admin), payload: { email: "ap.holder3@x.dev", password: "secret1", role: "Buyer", walletAddress: HOLDER, kyc: { country: "IN" } } });
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    await onboardUser(app, admin, platform, { email: "ap.holder3@x.dev", password: "secret1", role: "Buyer", walletAddress: HOLDER, kyc: { legalName: "AP Holder3", country: "IN" } });
     // Invoice issuance is ungated → 201 immediately with supply minted.
     const issued = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(admin), payload: { useCaseKey: "invoice-tokenization", name: "INV-AP-3", chainId: "fabric", initialSupply: "10000", treasuryAccount: HOLDER, metadata: { invoiceNumber: "INV-AP-3", invoiceDate: "2026-07-01", buyerName: "JSW Steel Limited", currency: "INR", amount: 1000000, dueDate: "2099-12-31" } } });
     expect(issued.statusCode).toBe(201);

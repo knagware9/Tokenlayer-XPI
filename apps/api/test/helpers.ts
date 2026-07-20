@@ -1,4 +1,5 @@
 import { RbacPolicy } from "@tokenlayer/core";
+import bcrypt from "bcryptjs";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.js";
 import { buildChainRegistry } from "../src/chains.js";
@@ -31,6 +32,9 @@ import { seedUseCases } from "../src/use-cases.js";
 /** Demo market escrow used by tests unless a test explicitly overrides it (pass `marketEscrowAccount: undefined` to disable the market). */
 export const TEST_MARKET_ESCROW = "0xcd3B766CCDd6AE721141F452C550Ca635964ce71";
 
+/** A second seeded PlatformAdmin (test-only) — the SoD checker for null-scope / brand-new-use-case onboarding proposals the sole admin proposes. */
+export const PLATFORM_ADMIN_2 = { email: "admin2@tokenlayer.dev", password: "admin123" } as const;
+
 export async function buildTestApp(opts: { loginRateLimitMax?: number; platformFeeAccount?: string; marketEscrowAccount?: string; trustedKycIssuers?: string[]; devIssuerSeed?: string; isProduction?: boolean; didMasterConfigured?: boolean; registry?: IdentityRegistry } = {}): Promise<FastifyInstance> {
   const rbac = new RbacPolicy();
   const chains = buildChainRegistry({ CHAIN_STRICT: "0" }); // simulated chains only — besu absent, never mocked
@@ -50,6 +54,11 @@ export async function buildTestApp(opts: { loginRateLimitMax?: number; platformF
   const verificationRequests = new MemoryVerificationRequestRepository();
   const keystore = createKeystore("11".repeat(32));
   await seedDefaults(users, accounts);
+  // A SECOND PlatformAdmin so gated onboarding of a brand-new use case's FIRST
+  // UseCaseAdmin (and any null-scope user) has an eligible second approver:
+  // SoD forbids proposer===approver, and only PlatformAdmins can approve those
+  // proposals, so the sole seeded admin cannot self-check the bootstrap.
+  await users.create({ email: PLATFORM_ADMIN_2.email, passwordHash: bcrypt.hashSync(PLATFORM_ADMIN_2.password, 10), role: "PlatformAdmin", useCaseKey: null, accountId: null, active: true, kycStatus: "approved", kyc: null });
   const engine = createEngine(useCases, rbac, chains, audit, { users, accounts });
   await seedUseCases(useCases, {
     availableChainIds: new Set(chains.list().map((c) => c.id)),
@@ -80,6 +89,27 @@ export const V1 = "/api/v1";
 export async function loginAs(app: FastifyInstance, email: string, password: string): Promise<string> {
   const res = await app.inject({ method: "POST", url: `${V1}/auth/login`, payload: { email, password } });
   return res.json().token as string;
+}
+
+/**
+ * Gated onboarding for tests: POST /users now returns a proposal; a second
+ * user-manager approves it. Returns the created user's summary (from GET /users).
+ * `maker` proposes, `checker` approves — they MUST be different managers who can
+ * both see the proposal's scope (SELF_APPROVAL forbids proposer===approver).
+ */
+export async function onboardUser(
+  app: FastifyInstance, maker: string, checker: string,
+  body: { email: string; password: string; role: string; useCaseKey?: string; walletAddress?: string; kyc?: Record<string, unknown> },
+): Promise<{ id: string; email: string; role: string; useCaseKey: string | null; accountId: string | null; kycStatus: string; kyc: Record<string, unknown> | null }> {
+  const res = await app.inject({ method: "POST", url: `${V1}/users`, headers: { authorization: `Bearer ${maker}` }, payload: body });
+  if (res.statusCode !== 202) throw new Error(`onboardUser expected 202, got ${res.statusCode}: ${res.payload}`);
+  const proposalId = res.json().proposal.id;
+  const ap = await app.inject({ method: "POST", url: `${V1}/proposals/${proposalId}/approve`, headers: { authorization: `Bearer ${checker}` }, payload: {} });
+  if (ap.statusCode !== 200) throw new Error(`onboardUser approve expected 200, got ${ap.statusCode}: ${ap.payload}`);
+  const list = await app.inject({ method: "GET", url: `${V1}/users`, headers: { authorization: `Bearer ${checker}` } });
+  const user = (list.json() as Array<{ email: string }>).find((u) => u.email === body.email);
+  if (!user) throw new Error(`onboardUser: user ${body.email} not found after approval`);
+  return user as never;
 }
 
 /** Issue an asset for the given use case key, returning the new asset's id. */

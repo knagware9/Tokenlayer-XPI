@@ -177,10 +177,14 @@ describe("GET /use-cases (org scoping)", () => {
 });
 
 describe("back-compat", () => {
-  it("a user created with no org gets no DID (legacy POST /users still works)", async () => {
+  it("a non-org POST /users is now gated behind an onboard-user proposal (202)", async () => {
+    // Use-case user management is maker-checker: the non-org path no longer
+    // creates the user directly — it parks an onboard-user proposal for a second
+    // user-manager to approve (which then mints the custodial DID on execution).
     const uca = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
     const res = await app.inject({ method: "POST", url: `${V1}/users`, headers: auth(uca), payload: { email: `legacy.${Date.now()}@x.io`, password: "secret1", role: "Issuer" } });
-    expect(res.statusCode).toBe(201);
-    expect(res.json().did ?? null).toBeNull();
+    expect(res.statusCode).toBe(202);
+    expect(res.json().proposal.kind).toBe("onboard-user");
+    expect(res.json().proposal.useCaseKey).toBe("carbon-credit");
   });
 });

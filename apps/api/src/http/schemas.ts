@@ -1009,7 +1009,7 @@ export const S: Record<string, FastifySchema> = {
       properties: {
         email: { type: "string" },
         password: { type: "string", minLength: 6 },
-        role: { type: "string", enum: ["UseCaseAdmin", "Issuer", "Buyer", "Auditor"] },
+        role: { type: "string", enum: ["UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"] },
         useCaseKey: { type: "string" },
         walletAddress: { type: "string" },
         kyc: {
@@ -1019,7 +1019,13 @@ export const S: Record<string, FastifySchema> = {
         },
       },
     },
-    response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403) },
+    response: { 201: { type: "object", additionalProperties: true }, 202: { type: "object", additionalProperties: true }, ...errs(400, 401, 403) },
+  },
+  revokeUserIdentity: {
+    tags: ["Users"], summary: "Revoke a user's identity (gated; reason required)", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    body: { type: "object", additionalProperties: false, required: ["reason"], properties: { reason: { type: "string", minLength: 1 } } },
+    response: { 202: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404, 409) },
   },
   uploadDocument: {
     tags: ["Documents"], summary: "Upload a document (base64); returns its URL + sha256", security: bearer,

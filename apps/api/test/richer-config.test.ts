@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { buildTestApp, V1, loginAs, auth } from "./helpers.js";
+import { buildTestApp, V1, loginAs, auth, onboardUser } from "./helpers.js";
 
 // A platform fee account distinct from any seeded buyer/treasury address.
 const FEE_ACCOUNT = "0xdF3e18d64BC6A983f673Ab319CCaE4f1a57C7097";
@@ -80,12 +80,9 @@ describe("richer low-code config: compliance rules + fees", () => {
       },
     })).json().asset;
 
-    // Onboard + KYC-approve a Buyer (via the scoped UseCaseAdmin) with a linked wallet.
-    const buyer = (await app.inject({
-      method: "POST", url: `${V1}/users`, headers: auth(carbonAdmin),
-      payload: { email: "feebuyer@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER_WALLET, kyc: { country: "IN" } },
-    })).json();
-    await app.inject({ method: "PATCH", url: `${V1}/users/${buyer.id}`, headers: auth(carbonAdmin), payload: { kycStatus: "approved" } });
+    // Onboard + KYC-approve a Buyer (via the scoped UseCaseAdmin, checked by the
+    // platform admin) with a linked wallet. Full KYC → approved with country IN.
+    await onboardUser(app, carbonAdmin, platform, { email: "feebuyer@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER_WALLET, kyc: { legalName: "Fee Buyer", country: "IN" } });
     await app.inject({ method: "POST", url: `${V1}/assets/${asset.id}/actions/allow`, headers: auth(platform), payload: { account: BUYER_WALLET } });
 
     // Fund + buy 10 → cost = 50, fee = floor(50 * 250 / 10000) = 1, treasury gets 49.
@@ -120,12 +117,9 @@ describe("richer low-code config: compliance rules + fees", () => {
     const carbon = (await app.inject({ method: "GET", url: `${V1}/use-cases/carbon-credit`, headers: auth(platform) })).json();
     await app.inject({ method: "PUT", url: `${V1}/use-cases/carbon-credit`, headers: auth(platform), payload: { ...carbon, compliance: { ...carbon.compliance, allowedJurisdictions: ["IN", "US"] } } });
 
-    // Buyer with a non-permitted KYC country (GB), allowlisted + funded.
-    const buyer = (await app.inject({
-      method: "POST", url: `${V1}/users`, headers: auth(carbonAdmin),
-      payload: { email: "gbbuyer@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER_WALLET, kyc: { country: "GB" } },
-    })).json();
-    await app.inject({ method: "PATCH", url: `${V1}/users/${buyer.id}`, headers: auth(carbonAdmin), payload: { kycStatus: "approved" } });
+    // Buyer with a non-permitted KYC country (GB), KYC-approved (so only the
+    // jurisdiction rule — not KYC — blocks the buy), allowlisted + funded.
+    await onboardUser(app, carbonAdmin, platform, { email: "gbbuyer@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER_WALLET, kyc: { legalName: "GB Buyer", country: "GB" } });
     await app.inject({ method: "POST", url: `${V1}/assets/${asset.id}/actions/allow`, headers: auth(platform), payload: { account: BUYER_WALLET } });
     await app.inject({ method: "POST", url: `${V1}/cash/credit`, headers: auth(platform), payload: { account: BUYER_WALLET, currency: "CBDC-INR", amount: "1000" } });
 

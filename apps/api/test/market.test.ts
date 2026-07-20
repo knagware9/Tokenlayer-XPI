@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { buildTestApp, V1, loginAs, auth, TEST_MARKET_ESCROW } from "./helpers.js";
+import { buildTestApp, V1, loginAs, auth, onboardUser, TEST_MARKET_ESCROW } from "./helpers.js";
 
 // A platform fee account distinct from any seeded buyer/treasury address.
 const FEE_ACCOUNT = "0xdF3e18d64BC6A983f673Ab319CCaE4f1a57C7097";
@@ -64,11 +64,9 @@ async function setupMarket() {
   const buyRes = await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/buy`, headers: auth(seller), payload: { quantity: "100" } });
   expect(buyRes.statusCode).toBe(200);
 
-  // BUYER2 onboarded by the UseCaseAdmin, KYC-approved, allowlisted, funded.
-  const b2 = (await app.inject({
-    method: "POST", url: `${V1}/users`, headers: auth(carbonAdmin),
-    payload: { email: "buyer2@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER2_WALLET, kyc: { country: "IN" } },
-  })).json();
+  // BUYER2 onboarded by the UseCaseAdmin (checked by the platform admin),
+  // KYC-approved, allowlisted, funded.
+  const b2 = await onboardUser(app, carbonAdmin, platform, { email: "buyer2@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER2_WALLET, kyc: { country: "IN" } });
   await app.inject({ method: "PATCH", url: `${V1}/users/${b2.id}`, headers: auth(carbonAdmin), payload: { kycStatus: "approved" } });
   await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: auth(carbonAdmin), payload: { account: BUYER2_WALLET } });
   await app.inject({ method: "POST", url: `${V1}/cash/credit`, headers: auth(platform), payload: { account: BUYER2_WALLET, currency: CBDC, amount: "1000" } });
@@ -85,10 +83,7 @@ async function onboardBuyer(
   fundAmount?: string,
 ): Promise<string> {
   const { app, platform, carbonAdmin, assetId } = ctx;
-  const u = (await app.inject({
-    method: "POST", url: `${V1}/users`, headers: auth(carbonAdmin),
-    payload: { email, password: "secret1", role: "Buyer", walletAddress: wallet, kyc: { country: "IN" } },
-  })).json();
+  const u = await onboardUser(app, carbonAdmin, platform, { email, password: "secret1", role: "Buyer", walletAddress: wallet, kyc: { country: "IN" } });
   await app.inject({ method: "PATCH", url: `${V1}/users/${u.id}`, headers: auth(carbonAdmin), payload: { kycStatus: "approved" } });
   await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: auth(carbonAdmin), payload: { account: wallet } });
   if (fundAmount) {
@@ -175,10 +170,7 @@ describe("secondary market: escrowed sell-listings", () => {
     expect(own.json().error).toBe("OWN_LISTING");
 
     // a buyer with no cash is blocked cleanly — nothing moves anywhere
-    const b3 = (await app.inject({
-      method: "POST", url: `${V1}/users`, headers: auth(carbonAdmin),
-      payload: { email: "pauper@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER3_WALLET, kyc: { country: "IN" } },
-    })).json();
+    const b3 = await onboardUser(app, carbonAdmin, platform, { email: "pauper@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER3_WALLET, kyc: { country: "IN" } });
     await app.inject({ method: "PATCH", url: `${V1}/users/${b3.id}`, headers: auth(carbonAdmin), payload: { kycStatus: "approved" } });
     await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: auth(carbonAdmin), payload: { account: BUYER3_WALLET } });
     const pauper = await loginAs(app, "pauper@x.dev", "secret1");

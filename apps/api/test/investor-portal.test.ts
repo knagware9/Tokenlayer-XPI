@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { buildTestApp, V1, loginAs, auth } from "./helpers.js";
+import { buildTestApp, V1, loginAs, auth, onboardUser } from "./helpers.js";
 
 const INVESTOR_WALLET = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"; // Carol — seeded account, unlinked
 // Helios Energy Corp — seeded account NOT linked to any seeded user. The seeded
@@ -12,9 +12,10 @@ const inv = (n: string) => ({ invoiceNumber: n, invoiceDate: "2026-07-01", buyer
 
 async function investorSetup(app: FastifyInstance): Promise<{ admin: string; investor: string }> {
   const admin = await loginAs(app, "m1.admin@tokenlayer.dev", "m1admin123");
-  const created = (await app.inject({ method: "POST", url: `${V1}/users`, headers: auth(admin), payload: { email: "inv.portal@x.dev", password: "secret1", role: "Buyer", walletAddress: INVESTOR_WALLET, kyc: { country: "IN" } } })).json();
-  // Approve KYC — the allowlist action refuses wallets whose owner is pending.
-  await app.inject({ method: "PATCH", url: `${V1}/users/${created.id}`, headers: auth(admin), payload: { kycStatus: "approved" } });
+  const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+  // Gated onboarding with full KYC (legalName + country) → the checker's approval
+  // mints the KycCredential and the investor lands KYC-approved with country IN.
+  await onboardUser(app, admin, platform, { email: "inv.portal@x.dev", password: "secret1", role: "Buyer", walletAddress: INVESTOR_WALLET, kyc: { legalName: "Inv Portal", country: "IN" } });
   const investor = await loginAs(app, "inv.portal@x.dev", "secret1");
   return { admin, investor };
 }
@@ -22,8 +23,9 @@ async function investorSetup(app: FastifyInstance): Promise<{ admin: string; inv
 /** Link an IN-KYC user to the payer wallet BEFORE issuance: the issue mints the
  * initial supply to the treasury, and compliance checks its jurisdiction. */
 async function linkPayer(app: FastifyInstance, admin: string, email: string): Promise<void> {
-  const res = await app.inject({ method: "POST", url: `${V1}/users`, headers: auth(admin), payload: { email, password: "secret1", role: "Auditor", walletAddress: PAYER, kyc: { country: "IN" } } });
-  expect(res.statusCode).toBe(201);
+  const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+  const user = await onboardUser(app, admin, platform, { email, password: "secret1", role: "Auditor", walletAddress: PAYER, kyc: { legalName: "Inv Payer", country: "IN" } });
+  expect(user.kycStatus).toBe("approved");
 }
 
 describe("investor portal endpoints", () => {

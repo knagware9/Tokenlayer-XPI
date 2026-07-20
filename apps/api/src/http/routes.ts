@@ -1117,22 +1117,24 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to create that user" });
     }
     if (await deps.users.findByEmail(b.email)) return reply.code(400).send({ error: "EMAIL_TAKEN", message: "email already registered" });
-    let accountId: string | null = null;
-    if (b.walletAddress) accountId = (await deps.accounts.upsert(b.walletAddress, b.email)).id;
-    const created = await deps.users.create({
-      email: b.email,
-      passwordHash: await bcrypt.hash(b.password, BCRYPT_ROUNDS),
-      role: b.role,
-      useCaseKey: targetUseCaseKey,
-      accountId,
-      active: true,
-      kycStatus: "pending",
-      kyc: b.kyc ?? null,
-    });
-    // If the creator belongs to an org, the new user joins it with a sub-DID +
-    // membership VC (mirrors POST /orgs/:id/users). No org ⇒ behaves as before.
-    let mintedDid: string | null = null;
+
+    // If the creator belongs to an org, the new user joins it DIRECTLY with a
+    // sub-DID + membership VC (mirrors POST /orgs/:id/users) — org-member
+    // onboarding stays direct.
     if (claims.orgId) {
+      let accountId: string | null = null;
+      if (b.walletAddress) accountId = (await deps.accounts.upsert(b.walletAddress, b.email)).id;
+      const created = await deps.users.create({
+        email: b.email,
+        passwordHash: await bcrypt.hash(b.password, BCRYPT_ROUNDS),
+        role: b.role,
+        useCaseKey: targetUseCaseKey,
+        accountId,
+        active: true,
+        kycStatus: "pending",
+        kyc: b.kyc ?? null,
+      });
+      let mintedDid: string | null = null;
       const org = await deps.organizations.get(claims.orgId);
       if (org) {
         try {
@@ -1142,8 +1144,22 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
           throw err;
         }
       }
+      return reply.code(201).send({ id: created.id, email: created.email, role: created.role, useCaseKey: created.useCaseKey, accountId: created.accountId, kycStatus: created.kycStatus, orgId: claims.orgId ?? null, did: mintedDid });
     }
-    return reply.code(201).send({ id: created.id, email: created.email, role: created.role, useCaseKey: created.useCaseKey, accountId: created.accountId, kycStatus: created.kycStatus, orgId: claims.orgId ?? null, did: mintedDid });
+
+    // Use-case user management is maker-checker: hash the password NOW (plaintext
+    // never enters the proposal store) and park everything in an onboard-user
+    // proposal for a second user-manager to approve.
+    const kyc = b.kyc && b.kyc.legalName && b.kyc.country ? b.kyc : null;
+    const proposal = await deps.proposals.create({
+      useCaseKey: targetUseCaseKey, orgId: null, assetId: null, kind: "onboard-user",
+      payload: {
+        email: b.email, passwordHash: await bcrypt.hash(b.password, BCRYPT_ROUNDS),
+        role: b.role, useCaseKey: targetUseCaseKey, walletAddress: b.walletAddress ?? null, kyc,
+      },
+      proposerId: claims.id, proposerLabel: claims.email, required: 1,
+    });
+    return reply.code(202).send({ proposal });
   });
 
   app.delete("/users/:id", { schema: S.deleteUser, ...auth }, async (request, reply) => {
@@ -1171,6 +1187,26 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (b.kycStatus === "approved" || b.kycStatus === "rejected") patch.kycStatus = b.kycStatus;
     const updated = await deps.users.update(id, patch);
     return { id: updated.id, email: updated.email, role: updated.role, useCaseKey: updated.useCaseKey, accountId: updated.accountId, active: updated.active, kycStatus: updated.kycStatus };
+  });
+
+  app.post("/users/:id/revoke-identity", { schema: S.revokeUserIdentity, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    const { reason } = request.body as { reason: string };
+    const target = await deps.users.findById(id);
+    if (!target) return notFound(reply, "user not found");
+    const sameScope = claims.role === "PlatformAdmin" || (canManageUsers(claims.role) && target.useCaseKey === claims.useCaseKey && target.role !== "UseCaseAdmin");
+    if (!sameScope) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to revoke that user's identity" });
+    const pending = await deps.proposals.list(target.useCaseKey ?? undefined, "pending");
+    if (pending.some((p) => p.kind === "revoke-user-identity" && (p.payload as { userId: string }).userId === id)) {
+      return reply.code(409).send({ error: "ALREADY_PENDING", message: "a revoke proposal for this user is already pending" });
+    }
+    const proposal = await deps.proposals.create({
+      useCaseKey: target.useCaseKey, orgId: null, assetId: null, kind: "revoke-user-identity",
+      payload: { userId: id, reason },
+      proposerId: claims.id, proposerLabel: claims.email, required: 1,
+    });
+    return reply.code(202).send({ proposal });
   });
 
   // --- organizations -------------------------------------------------------
