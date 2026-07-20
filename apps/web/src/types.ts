@@ -382,3 +382,29 @@ export interface IssuedCredential {
   revokedAt: string | null;
   revokedReason: string | null;
 }
+
+export interface VerificationRequest {
+  id: string;
+  verifierOrgId: string;
+  holderDid: string;
+  requestedTypes: string[];
+  purpose: string;
+  status: "pending" | "consented" | "rejected" | "expired";
+  consentedCredentialIds: string[] | null;
+  consentedAt: string | null;
+  verifiedAt: string | null;
+  createdAt: string;
+  expiresAt: string;
+  eligibleCredentials?: { id: string; type: string; issuerDid: string; issuedAt: string }[];
+}
+export interface VerificationResult {
+  valid: boolean;
+  holderDid: string | null;
+  reason: string | null;
+  purpose: string;
+  verifiedAt: string;
+  credentials: { id: string | null; type: string | null; issuer: string | null; reason: string | null;
+    claims: Record<string, unknown> | null;
+    checks: { signature: boolean; trusted: boolean; notExpired: boolean; subjectBound: boolean; notRevoked: boolean | "unknown" };
+    valid: boolean }[];
+}

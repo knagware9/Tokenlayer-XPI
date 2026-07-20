@@ -1,0 +1,90 @@
+import { useEffect, useState } from "react";
+import { ApiError, api } from "../api.js";
+import { useAuth } from "../auth.js";
+import type { CredentialTypeInfo, VerificationResult } from "../types.js";
+import { Card, Pill } from "./ui.js";
+
+function errMessage(err: unknown, fallback: string): string {
+  return err instanceof ApiError ? err.message : fallback;
+}
+
+/**
+ * Verifier side: request a presentation from a holder, then run verification on
+ * the consented presentation. Non-verifier orgs are gated by the API's
+ * NOT_A_VERIFIER — the form simply surfaces that error for them.
+ */
+export function VerificationRequests(): JSX.Element {
+  const { token } = useAuth();
+  const [types, setTypes] = useState<CredentialTypeInfo[]>([]);
+  const [holderDid, setHolderDid] = useState("");
+  const [picked, setPicked] = useState<Record<string, boolean>>({});
+  const [purpose, setPurpose] = useState("");
+  const [reqId, setReqId] = useState<string | null>(null);
+  const [result, setResult] = useState<VerificationResult | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => { if (token) void api.credentialTypes(token).then(setTypes).catch(() => setTypes([])); }, [token]);
+
+  async function submit(): Promise<void> {
+    if (!token) return;
+    const requestedTypes = Object.keys(picked).filter((k) => picked[k]);
+    if (!holderDid || requestedTypes.length === 0 || !purpose) { setErr("holder DID, at least one type, and a purpose are required"); return; }
+    setErr(null); setResult(null);
+    try {
+      const r = await api.createVerificationRequest(token, { holderDid: holderDid.trim(), requestedTypes, purpose: purpose.trim() });
+      setReqId(r.id); setMsg(`Requested — waiting for the holder to consent (request ${r.id.slice(0, 8)}…).`);
+    } catch (e) { setErr(errMessage(e, "Request failed")); }
+  }
+  async function runVerify(): Promise<void> {
+    if (!token || !reqId) return;
+    setErr(null);
+    try { setResult(await api.verifyVerification(token, reqId)); }
+    catch (e) { setErr(errMessage(e, "Verification failed")); }
+  }
+
+  const check = (ok: boolean | "unknown"): JSX.Element => (
+    <Pill tone={ok === true ? "ok" : ok === "unknown" ? "muted" : "danger"}>{ok === true ? "✓" : ok === "unknown" ? "?" : "✗"}</Pill>
+  );
+
+  return (
+    <div className="space-y-5">
+      <Card title="Request a presentation" description="Ask a holder to present specific credentials. They consent and choose what to disclose.">
+        {err && <div className="text-sm text-rose-600 mb-2">{err}</div>}
+        {msg && <div className="text-sm text-emerald-600 mb-2">{msg}</div>}
+        <input className="input w-full mb-2" placeholder="Holder DID (did:key:…)" value={holderDid} onChange={(e) => setHolderDid(e.target.value)} />
+        <div className="flex flex-wrap gap-3 mb-2">
+          {types.map((t) => (
+            <label key={t.type} className="text-sm flex items-center gap-1">
+              <input type="checkbox" checked={!!picked[t.type]} onChange={(e) => setPicked({ ...picked, [t.type]: e.target.checked })} /> {t.type}
+            </label>
+          ))}
+        </div>
+        <input className="input w-full mb-3" placeholder="Purpose (e.g. investor onboarding)" value={purpose} onChange={(e) => setPurpose(e.target.value)} />
+        <div className="flex gap-2">
+          <button className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white" onClick={() => void submit()}>Request</button>
+          {reqId && <button className="rounded-lg border border-slate-200 px-4 py-2 text-sm" onClick={() => void runVerify()}>Run verification</button>}
+        </div>
+      </Card>
+
+      {result && (
+        <Card title="Verification result" description={result.valid ? "Presentation is valid." : "Presentation did not fully verify."}>
+          <div className="mb-2"><Pill tone={result.valid ? "ok" : "danger"}>{result.valid ? "valid" : "invalid"}</Pill> <span className="text-xs text-slate-500">holder {result.holderDid?.slice(0, 20)}…</span></div>
+          <div className="space-y-2">
+            {result.credentials.map((c, i) => (
+              <div key={i} className="border border-slate-100 rounded-lg p-3">
+                <div className="font-medium">{c.type ?? "unknown credential"} {c.reason && <span className="text-xs text-rose-600">· {c.reason}</span>}</div>
+                <div className="flex flex-wrap gap-3 text-xs mt-1 items-center">
+                  <span>sig {check(c.checks.signature)}</span><span>trusted {check(c.checks.trusted)}</span>
+                  <span>not-expired {check(c.checks.notExpired)}</span><span>subject {check(c.checks.subjectBound)}</span>
+                  <span>not-revoked {check(c.checks.notRevoked)}</span>
+                </div>
+                {c.claims && <div className="text-xs text-slate-500 mt-1">{Object.entries(c.claims).map(([k, v]) => `${k}: ${String(v)}`).join(" · ")}</div>}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}

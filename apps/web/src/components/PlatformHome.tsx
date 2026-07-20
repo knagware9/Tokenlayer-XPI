@@ -9,9 +9,10 @@ import { Dashboard } from "./Dashboard.js";
 import { NetworksPanel } from "./NetworksPanel.js";
 import { Organizations } from "./Organizations.js";
 import { ChainDeployBadge, UseCaseBuilder } from "./UseCaseBuilder.js";
+import { VerificationRequests } from "./VerificationRequests.js";
 import { Card, EmptyState, Pill, SectionHeader, Skeleton } from "./ui.js";
 
-type Tab = "overview" | "organizations" | "approvals" | "use-cases" | "networks" | "create";
+type Tab = "overview" | "organizations" | "approvals" | "verify" | "use-cases" | "networks" | "create";
 
 export function PlatformHome({ useCases, chains, onReloadUseCases }: { useCases: UseCase[]; chains: ChainInfo[]; onReloadUseCases: () => void }): JSX.Element {
   const [tab, setTab] = useState<Tab>("overview");
@@ -22,6 +23,7 @@ export function PlatformHome({ useCases, chains, onReloadUseCases }: { useCases:
     { id: "organizations", label: "Organizations" },
     // Credential issuance is org-scoped and gated, so its inbox lives beside Organizations.
     { id: "approvals", label: "Approvals" },
+    { id: "verify", label: "Verification" },
     { id: "use-cases", label: "Use cases" },
     { id: "networks", label: "Networks" },
     { id: "create", label: "Create use case" },
@@ -54,6 +56,13 @@ export function PlatformHome({ useCases, chains, onReloadUseCases }: { useCases:
         <div>
           <SectionHeader title="Approvals" description="Every proposal awaiting your decision — asset issuance, settlement and credentials." />
           <ApprovalsPanel />
+        </div>
+      )}
+
+      {tab === "verify" && (
+        <div>
+          <SectionHeader title="Verification" description="Request a credential presentation from a holder, then run per-credential verification." />
+          <VerificationRequests />
         </div>
       )}
 

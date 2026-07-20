@@ -3,6 +3,7 @@ import { ApiError, api } from "../api.js";
 import { useAuth } from "../auth.js";
 import type { CredentialStatusInfo, DidDocument, HeldCredential } from "../types.js";
 import { Card, EmptyState, Pill, SectionHeader, Skeleton } from "./ui.js";
+import { VerificationInbox } from "./VerificationInbox.js";
 
 function truncateDid(v: string): string {
   return v.length > 28 ? `${v.slice(0, 18)}…${v.slice(-6)}` : v;
@@ -124,6 +125,8 @@ export function MyIdentity(): JSX.Element {
           </div>
         )}
       </div>
+
+      <VerificationInbox />
     </div>
   );
 }

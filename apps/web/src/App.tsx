@@ -12,10 +12,11 @@ import { MyIdentity } from "./components/MyIdentity.js";
 import { Organizations } from "./components/Organizations.js";
 import { PlatformHome } from "./components/PlatformHome.js";
 import { UserManagement } from "./components/UserManagement.js";
+import { VerificationRequests } from "./components/VerificationRequests.js";
 import { canManageUsers } from "./rbac.js";
 import type { ChainInfo, UseCase } from "./types.js";
 
-type Section = "overview" | "assets" | "approvals" | "users" | "organizations" | "identity";
+type Section = "overview" | "assets" | "approvals" | "users" | "organizations" | "verify" | "identity";
 
 export function App(): JSX.Element {
   const { token, user } = useAuth();
@@ -79,6 +80,7 @@ export function App(): JSX.Element {
     { id: "approvals", label: "Approvals" },
     ...(canManageUsers(user.role) ? [{ id: "users" as Section, label: "User Management" }] : []),
     ...(isPlatform || user.role === "OrgAdmin" ? [{ id: "organizations" as Section, label: "Organizations" }] : []),
+    ...(isPlatform || user.role === "OrgAdmin" ? [{ id: "verify" as Section, label: "Verification" }] : []),
     { id: "identity" as Section, label: "My identity" },
   ];
 
@@ -102,6 +104,7 @@ export function App(): JSX.Element {
         {section === "approvals" && <ApprovalsPanel />}
         {section === "users" && <UserManagement useCaseKey={activeUseCase} useCases={useCases} />}
         {section === "organizations" && <Organizations />}
+        {section === "verify" && <VerificationRequests />}
         {section === "identity" && <MyIdentity />}
       </main>
     </div>
