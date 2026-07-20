@@ -4,11 +4,11 @@ import { assignableRoles, canCreateOrgMember, canManageUsers, canCreateUser } fr
 import { ROLES } from "../src/types.js";
 
 describe("user-policy", () => {
-  it("PlatformAdmin may only mint UseCaseAdmins, in an explicit use case", () => {
-    expect(assignableRoles("PlatformAdmin")).toEqual(["UseCaseAdmin"]);
+  it("PlatformAdmin may mint any roster role, in an explicit use case (gated onboarding)", () => {
+    expect(assignableRoles("PlatformAdmin")).toEqual(["UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"]);
     expect(canCreateUser({ role: "PlatformAdmin", useCaseKey: null }, "UseCaseAdmin", "carbon-credit")).toBe(true);
     expect(canCreateUser({ role: "PlatformAdmin", useCaseKey: null }, "UseCaseAdmin", null)).toBe(false);
-    expect(canCreateUser({ role: "PlatformAdmin", useCaseKey: null }, "Issuer", "carbon-credit")).toBe(false);
+    expect(canCreateUser({ role: "PlatformAdmin", useCaseKey: null }, "Issuer", "carbon-credit")).toBe(true);
   });
   it("UseCaseAdmin may create roster roles only in their own use case", () => {
     expect(assignableRoles("UseCaseAdmin")).toEqual(["Issuer", "Buyer", "Auditor"]);
@@ -61,5 +61,19 @@ describe("canCreateOrgMember", () => {
   it("never allows creating a PlatformAdmin", () => {
     expect(canCreateOrgMember("PlatformAdmin", "PlatformAdmin")).toBe(false);
     expect(canCreateOrgMember("OrgAdmin", "PlatformAdmin")).toBe(false);
+  });
+});
+
+describe("PlatformAdmin assignable roles (gated onboarding)", () => {
+  it("PlatformAdmin may assign every roster role", () => {
+    expect(assignableRoles("PlatformAdmin")).toEqual(["UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"]);
+  });
+  it("PlatformAdmin may create a Buyer in a named use case, but never without one", () => {
+    expect(canCreateUser({ role: "PlatformAdmin", useCaseKey: null }, "Buyer", "invoice-tokenization")).toBe(true);
+    expect(canCreateUser({ role: "PlatformAdmin", useCaseKey: null }, "Buyer", null)).toBe(false);
+  });
+  it("UseCaseAdmin scope is unchanged", () => {
+    expect(canCreateUser({ role: "UseCaseAdmin", useCaseKey: "a" }, "Buyer", "a")).toBe(true);
+    expect(canCreateUser({ role: "UseCaseAdmin", useCaseKey: "a" }, "Buyer", "b")).toBe(false);
   });
 });

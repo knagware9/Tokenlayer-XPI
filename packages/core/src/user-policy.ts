@@ -16,7 +16,9 @@ export function canManageUsers(role: Role): boolean {
 
 /** Which roles a given manager may assign to a new user. */
 export function assignableRoles(role: Role): Role[] {
-  if (role === "PlatformAdmin") return ["UseCaseAdmin"];
+  // PlatformAdmin may provision the full roster (gated onboarding approves it),
+  // not just UseCaseAdmins; scoping still requires a named use case below.
+  if (role === "PlatformAdmin") return ["UseCaseAdmin", ...ORG_INTERNAL_ROLES.filter((r) => r !== "UseCaseAdmin")];
   if (role === "OrgAdmin") return [...ORG_INTERNAL_ROLES];
   if (role === "UseCaseAdmin") return ["Issuer", "Buyer", "Auditor"];
   return [];
@@ -24,7 +26,7 @@ export function assignableRoles(role: Role): Role[] {
 
 /**
  * May `manager` create a user with `targetRole` in `targetUseCaseKey`?
- * - PlatformAdmin: only UseCaseAdmin, and a use case must be named.
+ * - PlatformAdmin: any roster role, and a use case must be named.
  * - UseCaseAdmin: only roster roles, and only in their own use case.
  */
 export function canCreateUser(manager: ManagerRef, targetRole: Role, targetUseCaseKey: string | null): boolean {
