@@ -1229,11 +1229,21 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       jurisdiction: b.company.jurisdiction ?? null, did, didSeedEncrypted,
       status: "pending", verified: false, verifiedAt: null,
     });
-    await deps.users.create({
-      email: b.admin.email, passwordHash: await bcrypt.hash(b.admin.password, BCRYPT_ROUNDS),
-      role: "OrgAdmin", useCaseKey: null, accountId: null, active: false,
-      kycStatus: "pending", kyc: { legalName: b.admin.name }, orgId: org.id,
-    });
+    try {
+      await deps.users.create({
+        email: b.admin.email, passwordHash: await bcrypt.hash(b.admin.password, BCRYPT_ROUNDS),
+        role: "OrgAdmin", useCaseKey: null, accountId: null, active: false,
+        kycStatus: "pending", kyc: { legalName: b.admin.name }, orgId: org.id,
+      });
+    } catch (err) {
+      // NOTE: OrganizationRepository exposes no delete/remove method (neither the
+      // interface nor Memory/Prisma implementations), so the just-created pending
+      // org cannot be rolled back here — it is orphaned (no admin user) and its
+      // name/registrationId are permanently unavailable for re-registration, since
+      // findByName/findByRegistrationId don't filter by status. Flagged for a
+      // follow-up: either add OrganizationRepository.remove() or accept the risk.
+      throw err;
+    }
     await deps.audit.append({ actorId: "self-registration", action: "org-registered" as LifecycleAction, payload: { orgId: org.id, name: org.name } });
     return reply.code(202).send({ organizationId: org.id, status: org.status });
   });

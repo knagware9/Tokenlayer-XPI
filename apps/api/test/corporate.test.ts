@@ -26,5 +26,7 @@ describe("corporate self-registration", () => {
     expect(dupName.statusCode).toBe(409);
     const dupEmail = await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: { ...registerBody, company: { ...registerBody.company, name: "Different Co", registrationId: "U999" } } });
     expect(dupEmail.statusCode).toBe(409);
+    const dupRegistrationId = await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: { ...registerBody, company: { ...registerBody.company, name: "Yet Another Co" }, admin: { ...registerBody.admin, email: "third@x.dev" } } });
+    expect(dupRegistrationId.statusCode).toBe(409);
   });
 });
