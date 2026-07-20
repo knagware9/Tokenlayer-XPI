@@ -126,12 +126,10 @@ describe("gated onboarding — duplicate email", () => {
   it("rejects a proposal for an already-existing email at propose time", async () => {
     const app = await buildTestApp();
     const carbon = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
-    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     // carbon.admin@tokenlayer.dev is already seeded.
     const res = await propose(app, carbon, { email: "carbon.admin@tokenlayer.dev", password: "secret1", role: "Buyer", kyc: { legalName: "Dup", country: "IN" } });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe("EMAIL_TAKEN");
-    expect(admin).toBeTruthy();
   });
 
   it("race: two proposals for the same NEW email → first executes, second fails EMAIL_TAKEN; exactly one user", async () => {
@@ -198,7 +196,7 @@ describe("gated identity revocation — chain-backed", () => {
     // An asset to allowlist against — succeeds while KYC is approved.
     const assetId = await issueAsset(app, carbon, "carbon-credit");
     const allowOk = await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: auth(carbon), payload: { account: wallet } });
-    expect(allowOk.statusCode).not.toBe(400);
+    expect(allowOk.statusCode).toBe(200);
 
     // Propose + approve the revoke (chain-first).
     const rev = await app.inject({ method: "POST", url: `${V1}/users/${user.id}/revoke-identity`, headers: auth(carbon), payload: { reason: "exit" } });
