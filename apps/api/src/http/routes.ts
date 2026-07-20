@@ -1211,6 +1211,33 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   });
 
   // --- organizations -------------------------------------------------------
+  app.post("/orgs/register", { schema: S.registerOrg }, async (request, reply) => {
+    if (loginThrottled(request.ip)) return reply.code(429).send({ error: "TOO_MANY_REQUESTS", message: "too many attempts; try again later" });
+    if (!deps.didMasterConfigured && deps.isProduction) return reply.code(503).send({ error: "DID_KEYSTORE_UNCONFIGURED", message: "DID_MASTER_KEY must be set" });
+    const b = request.body as { company: { name: string; orgType: "bank" | "corporate" | "msme" | "government"; registrationId?: string; jurisdiction?: string }; admin: { name: string; email: string; password: string } };
+    if (await deps.organizations.findByName(b.company.name)) return reply.code(409).send({ error: "NAME_TAKEN", message: "an organization with that name already exists" });
+    if (b.company.registrationId && (await deps.organizations.findByRegistrationId(b.company.registrationId))) return reply.code(409).send({ error: "REGISTRATION_TAKEN", message: "an organization with that registration id already exists" });
+    if (await deps.users.findByEmail(b.admin.email)) return reply.code(409).send({ error: "EMAIL_TAKEN", message: "email already registered" });
+
+    // Mint the org DID now, but DO NOT register it on-chain and DO NOT activate —
+    // a pending org's DID is trusted nowhere (verifier trust keys off the registry).
+    const seed = deps.keystore.newSeed();
+    const didSeedEncrypted = deps.keystore.encryptSeed(seed);
+    const did = deps.keystore.keyOf(didSeedEncrypted).did;
+    const org = await deps.organizations.create({
+      name: b.company.name, orgType: b.company.orgType, registrationId: b.company.registrationId ?? null,
+      jurisdiction: b.company.jurisdiction ?? null, did, didSeedEncrypted,
+      status: "pending", verified: false, verifiedAt: null,
+    });
+    await deps.users.create({
+      email: b.admin.email, passwordHash: await bcrypt.hash(b.admin.password, BCRYPT_ROUNDS),
+      role: "OrgAdmin", useCaseKey: null, accountId: null, active: false,
+      kycStatus: "pending", kyc: { legalName: b.admin.name }, orgId: org.id,
+    });
+    await deps.audit.append({ actorId: "self-registration", action: "org-registered" as LifecycleAction, payload: { orgId: org.id, name: org.name } });
+    return reply.code(202).send({ organizationId: org.id, status: org.status });
+  });
+
   app.post("/orgs", { schema: S.createOrg, ...auth }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     if (claims.role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only the Platform Admin may create organizations" });

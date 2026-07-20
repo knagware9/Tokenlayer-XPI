@@ -893,6 +893,28 @@ export const S: Record<string, FastifySchema> = {
     },
     response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 409, 502, 503) },
   },
+  registerOrg: {
+    tags: ["Organizations"], summary: "Public corporate self-registration (pending platform approval)",
+    body: {
+      type: "object", additionalProperties: false, required: ["company", "admin"],
+      properties: {
+        company: {
+          type: "object", additionalProperties: false, required: ["name", "orgType"],
+          properties: {
+            name: { type: "string", minLength: 1 },
+            orgType: { type: "string", enum: ["bank", "corporate", "msme", "government"] },
+            registrationId: { type: "string" },
+            jurisdiction: { type: "string" },
+          },
+        },
+        admin: {
+          type: "object", additionalProperties: false, required: ["name", "email", "password"],
+          properties: { name: { type: "string", minLength: 1 }, email: { type: "string" }, password: { type: "string", minLength: 8 } },
+        },
+      },
+    },
+    response: { 202: { type: "object", additionalProperties: true }, ...errs(400, 409, 429) },
+  },
   listOrgs: { tags: ["Organizations"], summary: "List organizations in scope", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403) } },
   getOrg: {
     tags: ["Organizations"], summary: "Get an organization by id", security: bearer,
