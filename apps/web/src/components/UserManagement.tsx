@@ -75,7 +75,7 @@ function AddUser({ useCaseKey, useCases }: { useCaseKey: string; useCases: UseCa
 
   return (
     <form onSubmit={create} className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 space-y-4 max-w-2xl">
-      <h2 className="font-semibold text-slate-900">{isPlatform ? "Create a Use-Case Admin" : "Add a user to this use case"}</h2>
+      <h2 className="font-semibold text-slate-900">{isPlatform ? "Onboard a user" : "Add a user to this use case"}</h2>
       <div className="grid grid-cols-2 gap-4">
         <input className="input" placeholder="email" value={email} onChange={(e) => setEmail(e.target.value)} />
         <input className="input" type="password" placeholder="password (min 6)" value={password} onChange={(e) => setPassword(e.target.value)} />
