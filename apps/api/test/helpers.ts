@@ -1,5 +1,4 @@
 import { RbacPolicy } from "@tokenlayer/core";
-import bcrypt from "bcryptjs";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.js";
 import { buildChainRegistry } from "../src/chains.js";
@@ -53,12 +52,11 @@ export async function buildTestApp(opts: { loginRateLimitMax?: number; platformF
   const credentials = new MemoryCredentialRepository();
   const verificationRequests = new MemoryVerificationRequestRepository();
   const keystore = createKeystore("11".repeat(32));
+  // seedDefaults now creates the second PlatformAdmin (admin2@tokenlayer.dev) so
+  // gated onboarding of a brand-new use case's FIRST UseCaseAdmin (and any
+  // null-scope user) has an eligible second approver: SoD forbids
+  // proposer===approver, and only PlatformAdmins can approve those proposals.
   await seedDefaults(users, accounts);
-  // A SECOND PlatformAdmin so gated onboarding of a brand-new use case's FIRST
-  // UseCaseAdmin (and any null-scope user) has an eligible second approver:
-  // SoD forbids proposer===approver, and only PlatformAdmins can approve those
-  // proposals, so the sole seeded admin cannot self-check the bootstrap.
-  await users.create({ email: PLATFORM_ADMIN_2.email, passwordHash: bcrypt.hashSync(PLATFORM_ADMIN_2.password, 10), role: "PlatformAdmin", useCaseKey: null, accountId: null, active: true, kycStatus: "approved", kyc: null });
   const engine = createEngine(useCases, rbac, chains, audit, { users, accounts });
   await seedUseCases(useCases, {
     availableChainIds: new Set(chains.list().map((c) => c.id)),
