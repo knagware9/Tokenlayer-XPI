@@ -55,6 +55,7 @@ export const onboardUserKind: ProposalKindHandler = {
       email: pl.email, passwordHash: pl.passwordHash, role: pl.role, useCaseKey: pl.useCaseKey,
       accountId, active: true, kycStatus: "pending", kyc: pl.kyc ?? null,
     });
+    let issuedCredentialId: string | null = null;
     try {
       // Mint the custodial DID (same custody as org members: encrypted Ed25519 seed).
       const seed = deps.keystore.newSeed();
@@ -68,6 +69,7 @@ export const onboardUserKind: ProposalKindHandler = {
           claims: { legalName: pl.kyc.legalName, country: pl.kyc.country },
           proposalId: p.id,
         });
+        issuedCredentialId = cred.id;
         await deps.users.update(created.id, {
           kycStatus: "approved",
           kyc: { ...pl.kyc, issuerDid: issuerOrg.did, credentialId: cred.id, verifiedAt: new Date().toISOString() },
@@ -78,8 +80,18 @@ export const onboardUserKind: ProposalKindHandler = {
         payload: { userId: created.id, email: pl.email, role: pl.role, did, kyc: pl.kyc ? { country: pl.kyc.country } : null },
       });
     } catch (err) {
-      // DID mint / credential issuance failed ⇒ no user row survives (mirrors the
-      // org-member rollback). Proposal becomes `failed`; the operator re-proposes.
+      // DID mint / credential issuance / the post-issuance update / audit append
+      // failed ⇒ no user row AND no live credential survives (mirrors the
+      // org-member rollback). A credential may already be persisted (and
+      // on-chain anchored) by this point, so revoke it chain-first before
+      // dropping the user row — best-effort: a revoke failure here must not
+      // mask the original error. Proposal becomes `failed`; the operator
+      // re-proposes.
+      if (issuedCredentialId) {
+        await revokeCredentialById(deps, issuedCredentialId, {
+          reason: "onboarding rolled back", by: proposer.id, at: new Date().toISOString(),
+        }).catch(() => undefined);
+      }
       await deps.users.remove(created.id).catch(() => undefined);
       throw err;
     }
