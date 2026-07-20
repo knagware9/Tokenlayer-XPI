@@ -18,7 +18,7 @@ export function canManageUsers(role: Role): boolean {
 export function assignableRoles(role: Role): Role[] {
   // PlatformAdmin may provision the full roster (gated onboarding approves it),
   // not just UseCaseAdmins; scoping still requires a named use case below.
-  if (role === "PlatformAdmin") return ["UseCaseAdmin", ...ORG_INTERNAL_ROLES.filter((r) => r !== "UseCaseAdmin")];
+  if (role === "PlatformAdmin") return [...ORG_INTERNAL_ROLES];
   if (role === "OrgAdmin") return [...ORG_INTERNAL_ROLES];
   if (role === "UseCaseAdmin") return ["Issuer", "Buyer", "Auditor"];
   return [];
