@@ -241,5 +241,14 @@ describe("DID issuance ceremony", () => {
     expect(login.statusCode).toBe(401);
     const view = (await app.inject({ method: "GET", url: `${V1}/orgs/${orgId}`, headers: { authorization: `Bearer ${platform}` } })).json();
     expect(view.credentials.filter((c: { type: string }) => c.type === "OrganizationCredential")).toHaveLength(0);
+
+    // The recovery story: a RETRIED approve must succeed even though the DID is
+    // already on the DidRegistry (whose registerDid reverts on duplicates — the
+    // fake mirrors that), thanks to check-then-register.
+    const retry = await app.inject({ method: "POST", url: `${V1}/orgs/${orgId}/approve`, headers: { authorization: `Bearer ${platform}` }, payload: {} });
+    expect(retry.statusCode).toBe(200);
+    expect(retry.json().orgCredentialId).toBeTruthy();
+    const relogin = await app.inject({ method: "POST", url: `${V1}/auth/login`, payload: { email: registerBody.admin.email, password: registerBody.admin.password } });
+    expect(relogin.statusCode).toBe(200);
   });
 });

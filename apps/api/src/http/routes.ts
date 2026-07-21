@@ -1386,7 +1386,11 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (org.status !== "pending") return reply.code(409).send({ error: "NOT_PENDING", message: `organization is ${org.status}` });
     if (deps.registry) {
       try {
-        await deps.registry.anchor.registerDid(deps.registry.didRegistry, org.did);
+        // Check-then-register: a RETRIED approve (after a post-registration
+        // rollback, e.g. a transient anchor failure) finds the DID already on
+        // the DidRegistry, whose registerDid reverts AlreadyRegistered.
+        const { registered } = await deps.registry.anchor.didRegistration(deps.registry.didRegistry, org.did);
+        if (!registered) await deps.registry.anchor.registerDid(deps.registry.didRegistry, org.did);
       } catch (err) {
         request.log.error({ err }, "org DID registration failed");
         return reply.code(502).send({ error: "REGISTRY_UNAVAILABLE", message: "could not register the organization's DID on-chain — nothing was changed" });
