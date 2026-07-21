@@ -21,9 +21,30 @@ const BCRYPT_ROUNDS = 12;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 
 const MAX_DOC_BYTES = 5 * 1024 * 1024;
+// A 5MB document is ~6.8MB as base64 JSON — upload routes override the app-global
+// 256KB bodyLimit with this (the decoded bytes are still capped at MAX_DOC_BYTES).
+const DOC_UPLOAD_BODY_LIMIT = 8 * 1024 * 1024;
 // Allowlisted document content types — stored bytes are served back later, so an
 // arbitrary type (e.g. text/html) would enable stored XSS on the API origin.
 const ALLOWED_DOC_TYPES = new Set(["application/pdf", "image/png", "image/jpeg", "image/webp", "text/plain"]);
+
+/**
+ * Validate and store one base64 document upload. Shared by the authenticated
+ * store and the public KYB route so their error surface cannot drift. Throws
+ * coded 415/400/413 (mapped by the global error handler).
+ */
+async function storeUploadedDocument(
+  documents: AppDeps["documents"],
+  body: { contentType: string; dataBase64: string },
+): Promise<{ id: string; sha256: string; size: number }> {
+  if (!ALLOWED_DOC_TYPES.has(body.contentType)) {
+    throw coded(415, "UNSUPPORTED_DOCUMENT_TYPE", `contentType must be one of: ${[...ALLOWED_DOC_TYPES].join(", ")}`);
+  }
+  const bytes = Buffer.from(body.dataBase64, "base64");
+  if (bytes.length === 0) throw coded(400, "BAD_DOCUMENT", "empty document");
+  if (bytes.length > MAX_DOC_BYTES) throw coded(413, "DOCUMENT_TOO_LARGE", `max ${MAX_DOC_BYTES} bytes`);
+  return documents.create({ contentType: body.contentType, bytes });
+}
 
 // Extract the inner VC's `jti` (credential id) from a VP-JWT, or null on any
 // malformed input. Used to record the verified credential's id on the user.
@@ -1234,16 +1255,9 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   // Public: a registrant uploads a statutory certificate BEFORE registering. Same
   // limits as the authenticated store; throttled like /orgs/register. The caller
   // cannot read the document back — only authenticated reviewers can.
-  app.post("/orgs/register/documents", { schema: S.uploadKybDocument, bodyLimit: 8 * 1024 * 1024 }, async (request, reply) => {
+  app.post("/orgs/register/documents", { schema: S.uploadKybDocument, bodyLimit: DOC_UPLOAD_BODY_LIMIT }, async (request, reply) => {
     if (loginThrottled(request.ip)) return reply.code(429).send({ error: "TOO_MANY_REQUESTS", message: "too many attempts; try again later" });
-    const { contentType, dataBase64 } = request.body as { contentType: string; dataBase64: string };
-    if (!ALLOWED_DOC_TYPES.has(contentType)) {
-      return reply.code(415).send({ error: "UNSUPPORTED_DOCUMENT_TYPE", message: `contentType must be one of: ${[...ALLOWED_DOC_TYPES].join(", ")}` });
-    }
-    const bytes = Buffer.from(dataBase64, "base64");
-    if (bytes.length === 0) return reply.code(400).send({ error: "BAD_DOCUMENT", message: "empty document" });
-    if (bytes.length > MAX_DOC_BYTES) return reply.code(413).send({ error: "DOCUMENT_TOO_LARGE", message: `max ${MAX_DOC_BYTES} bytes` });
-    const doc = await deps.documents.create({ contentType, bytes });
+    const doc = await storeUploadedDocument(deps.documents, request.body as { contentType: string; dataBase64: string });
     return reply.code(201).send({ id: doc.id, sha256: doc.sha256, size: doc.size });
   });
 
@@ -2094,20 +2108,10 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   // Only desk operators (issue-capable) and auditors may read stored documents —
   // these hold sensitive off-ledger invoice evidence, not public assets.
   const canReadDoc = (role: Role): boolean => deps.rbac.can(role, "issue") || role === "Auditor";
-  // Override the app-global 256KB bodyLimit for uploads: a 5MB document is ~6.8MB
-  // as base64 JSON, so allow 8MB here (the route still enforces MAX_DOC_BYTES on
-  // the decoded bytes).
-  app.post("/documents", { schema: S.uploadDocument, bodyLimit: 8 * 1024 * 1024, ...auth }, async (request, reply) => {
+  app.post("/documents", { schema: S.uploadDocument, bodyLimit: DOC_UPLOAD_BODY_LIMIT, ...auth }, async (request, reply) => {
     const actor = actorOf(request);
     if (!deps.rbac.can(actor.role, "issue")) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to upload documents" });
-    const { contentType, dataBase64 } = request.body as { contentType: string; dataBase64: string };
-    if (!ALLOWED_DOC_TYPES.has(contentType)) {
-      return reply.code(415).send({ error: "UNSUPPORTED_DOCUMENT_TYPE", message: `contentType must be one of: ${[...ALLOWED_DOC_TYPES].join(", ")}` });
-    }
-    const bytes = Buffer.from(dataBase64, "base64");
-    if (bytes.length === 0) return reply.code(400).send({ error: "BAD_DOCUMENT", message: "empty document" });
-    if (bytes.length > MAX_DOC_BYTES) return reply.code(413).send({ error: "DOCUMENT_TOO_LARGE", message: `max ${MAX_DOC_BYTES} bytes` });
-    const doc = await deps.documents.create({ contentType, bytes });
+    const doc = await storeUploadedDocument(deps.documents, request.body as { contentType: string; dataBase64: string });
     return reply.code(201).send({ id: doc.id, url: `/api/v1/documents/${doc.id}`, sha256: doc.sha256, size: doc.size });
   });
   app.get("/documents/:id", { schema: S.getDocument, ...auth }, async (request, reply) => {

@@ -333,7 +333,9 @@ export interface KybDocumentRef {
 /**
  * India-specific KYB details captured at corporate self-registration and shown to
  * the Platform Admin at approval. Statutory identifiers (CIN/PAN/GSTIN) are stored
- * as reference numbers only — no document files are held here.
+ * as reference numbers plus REFERENCES to uploaded certificates in the document
+ * store (id + sha256) — the file bytes themselves live in the store, gated behind
+ * the authenticated document read route.
  */
 export interface CompanyProfile {
   cin: string;
