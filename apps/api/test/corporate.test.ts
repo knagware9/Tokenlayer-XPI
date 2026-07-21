@@ -3,7 +3,12 @@ import { buildTestApp, loginAs, V1 } from "./helpers.js";
 import { FakeAnchor, fakeRegistry } from "./fake-anchor.js";
 
 const registerBody = {
-  company: { name: "Globex Trade Pvt Ltd", orgType: "corporate", registrationId: "U12345", jurisdiction: "IN" },
+  company: {
+    name: "Globex Trade Pvt Ltd", orgType: "corporate",
+    cin: "U72900MH2020PTC123456", pan: "AABCU9603R", gstin: "27AABCU9603R1Z5",
+    state: "Maharashtra", pincode: "400001", dateOfIncorporation: "2020-06-15",
+    category: "private-limited", companyStatus: "active",
+  },
   admin: { name: "Rhea Kapoor", email: "rhea@globex.dev", password: "corp-secret-1" },
 };
 
@@ -17,18 +22,29 @@ describe("corporate self-registration", () => {
     expect(typeof orgId).toBe("string");
     const login = await app.inject({ method: "POST", url: `${V1}/auth/login`, payload: { email: registerBody.admin.email, password: registerBody.admin.password } });
     expect(login.statusCode).toBe(401);
+    // The India KYB profile is persisted and visible to the platform admin at approval.
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const pending = (await app.inject({ method: "GET", url: `${V1}/orgs?status=pending`, headers: { authorization: `Bearer ${platform}` } })).json();
+    const mine = pending.find((o: { id: string }) => o.id === orgId);
+    expect(mine.registrationId).toBe(registerBody.company.cin); // CIN is the registration id
+    expect(mine.companyProfile).toMatchObject({
+      cin: "U72900MH2020PTC123456", pan: "AABCU9603R", gstin: "27AABCU9603R1Z5",
+      state: "Maharashtra", pincode: "400001", category: "private-limited", companyStatus: "active",
+    });
   });
-  it("rejects a verifier orgType and duplicate name/registration/email", async () => {
+  it("rejects a verifier orgType, an invalid category, and duplicate name/CIN/email", async () => {
     const app = await buildTestApp();
     const verifier = await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: { ...registerBody, company: { ...registerBody.company, orgType: "verifier" } } });
     expect(verifier.statusCode).toBe(400);
+    const badCategory = await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: { ...registerBody, company: { ...registerBody.company, category: "sole-prop" } } });
+    expect(badCategory.statusCode).toBe(400);
     await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: registerBody });
     const dupName = await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: { ...registerBody, admin: { ...registerBody.admin, email: "other@x.dev" } } });
     expect(dupName.statusCode).toBe(409);
-    const dupEmail = await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: { ...registerBody, company: { ...registerBody.company, name: "Different Co", registrationId: "U999" } } });
+    const dupEmail = await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: { ...registerBody, company: { ...registerBody.company, name: "Different Co", cin: "U99999MH2021PTC999999" } } });
     expect(dupEmail.statusCode).toBe(409);
-    const dupRegistrationId = await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: { ...registerBody, company: { ...registerBody.company, name: "Yet Another Co" }, admin: { ...registerBody.admin, email: "third@x.dev" } } });
-    expect(dupRegistrationId.statusCode).toBe(409);
+    const dupCin = await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: { ...registerBody, company: { ...registerBody.company, name: "Yet Another Co" }, admin: { ...registerBody.admin, email: "third@x.dev" } } });
+    expect(dupCin.statusCode).toBe(409);
   });
 });
 

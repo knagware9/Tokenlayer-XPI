@@ -7,6 +7,7 @@ describe("MemoryOrganizationRepository", () => {
     const org = await repo.create({
       name: "Acme Bank", orgType: "bank", registrationId: "REG-1", jurisdiction: "IN",
       did: "did:key:zOrg", didSeedEncrypted: "enc", status: "active", verified: true, verifiedAt: "2026-07-11T00:00:00.000Z",
+      companyProfile: null,
     });
     expect(org.id).toBeTruthy();
     expect((await repo.get(org.id))?.name).toBe("Acme Bank");

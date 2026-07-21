@@ -1,11 +1,29 @@
 import { useEffect, useState } from "react";
 import { ApiError, api } from "../api.js";
 import { useAuth } from "../auth.js";
-import type { DidDocument, OrgMember, OrgType, Organization, Role } from "../types.js";
+import type { CompanyCategory, DidDocument, OrgMember, OrgType, Organization, Role } from "../types.js";
 import { CredentialsPanel } from "./CredentialsPanel.js";
 import { Card, EmptyState, Pill, SectionHeader } from "./ui.js";
 
 const ORG_TYPES: OrgType[] = ["bank", "corporate", "msme", "government", "verifier"];
+
+const CATEGORY_LABELS: Record<CompanyCategory, string> = {
+  "private-limited": "Private Limited",
+  "public-limited": "Public Limited",
+  llp: "LLP",
+  opc: "OPC",
+  "section-8": "Section 8",
+};
+
+/** A compact label/value pair for the KYB details grid. */
+function Kv({ label, value }: { label: string; value: string }): JSX.Element {
+  return (
+    <div className="min-w-0">
+      <dt className="text-slate-400">{label}</dt>
+      <dd className="font-medium text-slate-700 truncate">{value}</dd>
+    </div>
+  );
+}
 
 // Mirrors the server's canCreateOrgMember: only a PlatformAdmin may mint an OrgAdmin.
 const MEMBER_ROLES: Role[] = ["OrgAdmin", "UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"];
@@ -185,33 +203,50 @@ function PendingOrgs({ pending, onApproved, onRejected }: {
     <Card title="Pending corporate registrations" description="Self-service sign-ups awaiting a platform decision.">
       {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
       <div className="space-y-2">
-        {pending.map((o) => (
-          <div key={o.id} className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 px-4 py-3">
-            <div className="min-w-0">
-              <div className="text-sm font-semibold text-slate-900 truncate">{o.name}</div>
-              <div className="mt-1 flex flex-wrap items-center gap-2">
-                <Pill tone="info">{o.orgType}</Pill>
-                {o.jurisdiction && <Pill tone="muted">{o.jurisdiction}</Pill>}
+        {pending.map((o) => {
+          const p = o.companyProfile;
+          return (
+            <div key={o.id} className="rounded-lg border border-slate-200 px-4 py-3">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-slate-900 truncate">{o.name}</div>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <Pill tone="info">{o.orgType}</Pill>
+                    {p && <Pill tone="muted">{CATEGORY_LABELS[p.category] ?? p.category}</Pill>}
+                    {p && <Pill tone={p.companyStatus === "active" ? "ok" : "warn"}>{p.companyStatus}</Pill>}
+                    {o.jurisdiction && <Pill tone="muted">{o.jurisdiction}</Pill>}
+                  </div>
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <button
+                    onClick={() => void approve(o.id)}
+                    disabled={busy === o.id}
+                    className="text-xs rounded bg-brand-600 text-white px-3 py-1.5 font-medium hover:bg-brand-700 disabled:opacity-40"
+                  >
+                    Approve
+                  </button>
+                  <button
+                    onClick={() => void reject(o.id)}
+                    disabled={busy === o.id}
+                    className="text-xs rounded border border-slate-300 text-slate-600 px-3 py-1.5 font-medium hover:bg-slate-50 disabled:opacity-40"
+                  >
+                    Reject
+                  </button>
+                </div>
               </div>
+              {p && (
+                <dl className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5 border-t border-slate-100 pt-3 text-xs">
+                  <Kv label="CIN" value={p.cin} />
+                  <Kv label="PAN" value={p.pan} />
+                  <Kv label="GSTIN" value={p.gstin || "—"} />
+                  <Kv label="Incorporated" value={p.dateOfIncorporation} />
+                  <Kv label="State" value={p.state} />
+                  <Kv label="Pincode" value={p.pincode} />
+                </dl>
+              )}
             </div>
-            <div className="flex gap-2 shrink-0">
-              <button
-                onClick={() => void approve(o.id)}
-                disabled={busy === o.id}
-                className="text-xs rounded bg-brand-600 text-white px-3 py-1.5 font-medium hover:bg-brand-700 disabled:opacity-40"
-              >
-                Approve
-              </button>
-              <button
-                onClick={() => void reject(o.id)}
-                disabled={busy === o.id}
-                className="text-xs rounded border border-slate-300 text-slate-600 px-3 py-1.5 font-medium hover:bg-slate-50 disabled:opacity-40"
-              >
-                Reject
-              </button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </Card>
   );

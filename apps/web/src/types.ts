@@ -291,6 +291,20 @@ export interface ActivityEvent {
 
 export type OrgType = "bank" | "corporate" | "msme" | "government" | "verifier";
 
+export type CompanyCategory = "private-limited" | "public-limited" | "llp" | "opc" | "section-8";
+
+/** India KYB details captured at corporate self-registration. */
+export interface CompanyProfile {
+  cin: string;
+  pan: string;
+  gstin: string | null;
+  state: string;
+  pincode: string;
+  dateOfIncorporation: string;
+  category: CompanyCategory;
+  companyStatus: "active" | "inactive";
+}
+
 export interface Organization {
   id: string;
   name: string;
@@ -300,6 +314,7 @@ export interface Organization {
   did: string;
   verified: boolean;
   status: string;
+  companyProfile?: CompanyProfile | null;
   createdAt?: string;
 }
 
