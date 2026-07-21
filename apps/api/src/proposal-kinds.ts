@@ -18,6 +18,7 @@ import type { TokenClaims } from "./http/support.js";
 import { scopedToCaller } from "./http/support.js";
 import type { ProposalRecord } from "./persistence/types.js";
 import { onboardUserKind, revokeUserIdentityKind } from "./user-kinds.js";
+import { createUseCaseKind } from "./usecase-kinds.js";
 
 /** Minimal logger shape (a Fastify request.log). */
 export interface KindLogger {
@@ -151,3 +152,8 @@ registerProposalKind(revokeCredentialKind);
 // TYPE-only import pattern as the credential kinds above.
 registerProposalKind(onboardUserKind);
 registerProposalKind(revokeUserIdentityKind);
+
+// Org-scoped use-case configuration kind: an OrgAdmin proposes a new org-owned
+// use case; a PlatformAdmin approval creates + deploys it. Same registry, same
+// no-runtime-cycle TYPE-only import pattern as the kinds above.
+registerProposalKind(createUseCaseKind);

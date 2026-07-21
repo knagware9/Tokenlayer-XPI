@@ -84,3 +84,46 @@ describe("org approval", () => {
     expect(list.length).toBe(1);
   });
 });
+
+describe("gated use-case config", () => {
+  async function activeOrgAdmin(app: import("fastify").FastifyInstance) {
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const orgId = (await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: registerBody })).json().organizationId as string;
+    await app.inject({ method: "POST", url: `${V1}/orgs/${orgId}/approve`, headers: { authorization: `Bearer ${platform}` }, payload: {} });
+    const adminTok = (await app.inject({ method: "POST", url: `${V1}/auth/login`, payload: { email: registerBody.admin.email, password: registerBody.admin.password } })).json().token as string;
+    return { platform, adminTok, orgId };
+  }
+  // A complete, schema-valid definition on a chain that is deployable in the test app (fabric).
+  const def = {
+    key: "globex-notes", name: "Globex Notes", symbol: "GXN", tokenStandard: "ERC-20",
+    allowedChainIds: ["fabric"], defaultChainId: "fabric",
+    metadataSchema: { type: "object", properties: {} },
+    lifecycle: { mint: true, transfer: true, burn: true, freeze: true },
+    compliance: { allowlist: true, transferRestrictions: false },
+    roles: ["UseCaseAdmin", "Issuer"],
+  };
+
+  it("an OrgAdmin proposes a use case (202) and a PlatformAdmin approval creates+deploys it, org-owned", async () => {
+    const app = await buildTestApp();
+    const { platform, adminTok, orgId } = await activeOrgAdmin(app);
+    const prop = await app.inject({ method: "POST", url: `${V1}/use-cases`, headers: { authorization: `Bearer ${adminTok}` }, payload: def });
+    expect(prop.statusCode).toBe(202);
+    expect(prop.json().proposal.kind).toBe("create-use-case");
+    const pid = prop.json().proposal.id;
+    // The proposer may not decide their own proposal (SoD).
+    const self = await app.inject({ method: "POST", url: `${V1}/proposals/${pid}/approve`, headers: { authorization: `Bearer ${adminTok}` }, payload: {} });
+    expect(self.statusCode).toBe(403);
+    const appr = await app.inject({ method: "POST", url: `${V1}/proposals/${pid}/approve`, headers: { authorization: `Bearer ${platform}` }, payload: {} });
+    expect(appr.json().proposal.status).toBe("executed");
+    const uc = (await app.inject({ method: "GET", url: `${V1}/use-cases`, headers: { authorization: `Bearer ${platform}` } })).json().find((u: { key: string }) => u.key === "globex-notes");
+    expect(uc.ownerOrgId).toBe(orgId);
+    expect(Object.keys(uc.contracts).length).toBeGreaterThan(0);
+  });
+
+  it("a PlatformAdmin creating a use case still deploys directly (201, unchanged)", async () => {
+    const app = await buildTestApp();
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const res = await app.inject({ method: "POST", url: `${V1}/use-cases`, headers: { authorization: `Bearer ${platform}` }, payload: { ...def, key: "pa-direct" } });
+    expect(res.statusCode).toBe(201);
+  });
+});

@@ -161,7 +161,12 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return deps.useCases.get(key);
   });
   app.post("/use-cases", { schema: S.createUseCase, ...auth }, async (request, reply) => {
-    if ((request.user as TokenClaims).role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only the Platform Admin may create use cases" });
+    const claims = request.user as TokenClaims;
+    // A PlatformAdmin creates directly (201); an active OrgAdmin proposes an
+    // org-owned use case for a PlatformAdmin to approve (maker-checker, 202).
+    if (claims.role !== "PlatformAdmin" && !(claims.role === "OrgAdmin" && claims.orgId)) {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "only the Platform Admin or an Org Admin may create use cases" });
+    }
     // Normalise (validates shape + fills tokenType) before deploying so an invalid
     // definition fails fast without deploying any contract.
     let definition: UseCaseDefinition;
@@ -170,6 +175,19 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     } catch (err) {
       if (err instanceof PolicyError) return reply.code(400).send({ error: err.code, message: err.message });
       throw err;
+    }
+    // OrgAdmin: gated. Stamp ownerOrgId from the caller's own claims (never the
+    // client body) AFTER normalising, and park a create-use-case proposal for a
+    // PlatformAdmin to approve — the deploy happens on approval, not here.
+    if (claims.role === "OrgAdmin") {
+      if (await deps.useCases.has(definition.key)) return reply.code(409).send({ error: "USECASE_EXISTS", message: `use case '${definition.key}' already exists` });
+      const owned = { ...definition, ownerOrgId: claims.orgId as string };
+      const proposal = await deps.proposals.create({
+        useCaseKey: null, orgId: claims.orgId as string, assetId: null, kind: "create-use-case",
+        payload: owned as unknown as Record<string, unknown>,
+        proposerId: claims.id, proposerLabel: claims.email, required: 1,
+      });
+      return reply.code(202).send({ proposal });
     }
     // Deploy the use case's contract on each allowed chain that is available in the
     // registry (fabric is always available in the simulated stack). Best-effort per
