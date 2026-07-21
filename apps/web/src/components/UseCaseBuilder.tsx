@@ -185,10 +185,13 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
   const [previewTab, setPreviewTab] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const tokenType = standard === "ERC-721" ? "nonfungible" : "fungible";
-  const isAdmin = user?.role === "PlatformAdmin";
+  // A PlatformAdmin creates+deploys directly; an OrgAdmin submits a gated proposal
+  // (POST /use-cases returns 202). Both may drive the wizard.
+  const canConfigure = user?.role === "PlatformAdmin" || user?.role === "OrgAdmin";
   const chainOf = (id: string): ChainInfo | undefined => chains.find((c) => c.id === id);
 
   // ---------- derived per-step validation ----------
@@ -277,6 +280,7 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
     setBusy(true);
     setError(null);
     setOk(null);
+    setNotice(null);
     try {
       const properties: Record<string, PropertySchema> = {};
       for (const f of fields) {
@@ -337,14 +341,20 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
         workflow: Object.keys(approvalsOut).length ? { approvals: approvalsOut } : undefined,
         roles: [...ALL_ROLES],
       };
-      const created = await api.createUseCase(token, def);
-      const deployed = Object.keys(created.contracts ?? {});
-      setOk(
-        `Created "${created.name}" (${created.symbol}, ${created.tokenStandard}). ` +
-          (deployed.length ? `Contract deployed on: ${deployed.join(", ")}.` : "No contract deployed yet."),
-      );
-      reset();
-      onCreated();
+      const res = await api.createUseCase(token, def);
+      if ("proposal" in res) {
+        // 202: an OrgAdmin's request is gated — nothing is created until a PlatformAdmin approves.
+        setNotice(`Use case submitted (${res.proposal.id.slice(0, 8)}…) — pending platform approval in Approvals.`);
+        reset();
+      } else {
+        const deployed = Object.keys(res.contracts ?? {});
+        setOk(
+          `Created "${res.name}" (${res.symbol}, ${res.tokenStandard}). ` +
+            (deployed.length ? `Contract deployed on: ${deployed.join(", ")}.` : "No contract deployed yet."),
+        );
+        reset();
+        onCreated();
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not create use case");
     } finally {
@@ -380,10 +390,10 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
     setPreviewTab("");
   }
 
-  if (!isAdmin) {
+  if (!canConfigure) {
     return (
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 text-sm text-slate-500">
-        Only a <span className="font-medium text-slate-700">Platform Admin</span> can create use cases.
+        Only a <span className="font-medium text-slate-700">Platform Admin</span> or an <span className="font-medium text-slate-700">Org Admin</span> can configure use cases.
       </div>
     );
   }
@@ -429,6 +439,7 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
         {/* step pane */}
         <div className="flex-1 p-5 md:p-6 min-w-0">
           {ok && <div className="mb-4 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm px-4 py-2">{ok}</div>}
+          {notice && <div className="mb-4 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm px-4 py-2">{notice}</div>}
 
           {step === 0 && (
             <StepBasics

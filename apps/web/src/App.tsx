@@ -6,13 +6,17 @@ import { ApprovalsPanel } from "./components/ApprovalsPanel.js";
 import { AssetManagement } from "./components/AssetManagement.js";
 import { Dashboard } from "./components/Dashboard.js";
 import { Header } from "./components/Header.js";
+import { Home } from "./components/Home.js";
 import { InvestorPortal } from "./components/InvestorPortal.js";
 import { Login } from "./components/Login.js";
 import { MyIdentity } from "./components/MyIdentity.js";
 import { Organizations } from "./components/Organizations.js";
 import { PlatformHome } from "./components/PlatformHome.js";
+import { Signup } from "./components/Signup.js";
+import { UseCaseBuilder } from "./components/UseCaseBuilder.js";
 import { UserManagement } from "./components/UserManagement.js";
 import { VerificationRequests } from "./components/VerificationRequests.js";
+import { SectionHeader } from "./components/ui.js";
 import { canManageUsers } from "./rbac.js";
 import type { ChainInfo, UseCase } from "./types.js";
 
@@ -46,7 +50,13 @@ export function App(): JSX.Element {
     setSection(want === "assets" ? "assets" : "overview");
   }, [user?.role === "PlatformAdmin" ? routeKey : user?.useCaseKey]);
 
-  if (!token || !user) return <Login />;
+  // Public (unauthenticated) surface: a marketing homepage plus the corporate
+  // self-registration flow. The first path segment selects the screen.
+  if (!token || !user) {
+    if (routeKey === "signup") return <Signup />;
+    if (routeKey === "login") return <Login />;
+    return <Home />;
+  }
 
   const isPlatform = user.role === "PlatformAdmin";
   const activeUseCase = isPlatform ? routeKey : user.useCaseKey ?? "";
@@ -113,7 +123,14 @@ export function App(): JSX.Element {
             </button>
           ))}
         </div>
-        {section === "overview" && <Dashboard useCaseKey={activeUseCase} />}
+        {section === "overview" && (user.role === "OrgAdmin" ? (
+          <div>
+            <SectionHeader title="Configure a use case" description="Design your tokenization use case low-code; it is submitted to the platform for approval, then deploys automatically." />
+            <UseCaseBuilder chains={chains} existing={useCases} onCreated={reloadUseCases} />
+          </div>
+        ) : (
+          <Dashboard useCaseKey={activeUseCase} />
+        ))}
         {section === "assets" && <AssetManagement useCaseKey={activeUseCase} useCases={useCases} chains={chains} />}
         {section === "approvals" && <ApprovalsPanel />}
         {section === "users" && <UserManagement useCaseKey={activeUseCase} useCases={useCases} />}

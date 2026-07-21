@@ -21,6 +21,7 @@ function summarize(p: Proposal): string {
   if (p.kind === "revoke-credential") return `revoke a credential — ${String(pl.reason ?? "no reason given")}`;
   if (p.kind === "onboard-user") return `onboard ${String(pl.role ?? "user")} ${String(pl.email ?? "")}${(pl.kyc as Record<string, unknown> | null)?.country ? ` (KYC: ${String((pl.kyc as Record<string, unknown>).country)})` : ""}`;
   if (p.kind === "revoke-user-identity") return `revoke a user's identity — ${String(pl.reason ?? "no reason given")}`;
+  if (p.kind === "create-use-case") return `configure use case ${String(pl.name ?? pl.key ?? "")} (${String(pl.symbol ?? "")})`;
   if (p.kind === "issue") {
     const supply = pl.initialSupply as string | undefined;
     return supply ? `mint ${Number(supply).toLocaleString()} tokens to treasury on activation` : "activate the asset";

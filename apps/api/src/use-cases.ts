@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { normalizeUseCaseDefinition, type UseCaseContract, type UseCaseDefinition } from "@tokenlayer/core";
+import { coded } from "./executors.js";
 import type { UseCaseRepository } from "./persistence/types.js";
 
 /** Absolute path to the repo's declarative use-case config directory. */
@@ -41,6 +42,28 @@ export async function deployUseCaseContracts(
     }
   }
   return contracts;
+}
+
+/**
+ * Deploys a use case's contract on every allowed+available chain and persists it,
+ * returning the created record. Throws `NO_DEPLOYABLE_CHAIN` (400) if not a single
+ * allowed chain is available — the shared behaviour behind both the PlatformAdmin
+ * direct-create path and the create-use-case proposal's execute step, so their
+ * error surface can never drift. The caller must have already validated the
+ * definition (normalise) and checked the key does not exist.
+ */
+export async function deployAndCreateUseCase(
+  repo: UseCaseRepository,
+  def: UseCaseDefinition,
+  availableChainIds: ReadonlySet<string>,
+  deploy: (def: UseCaseDefinition, chainId: string) => Promise<UseCaseContract>,
+  log?: (msg: string) => void,
+): Promise<UseCaseDefinition> {
+  const contracts = await deployUseCaseContracts(def, availableChainIds, deploy, log);
+  if (Object.keys(contracts).length === 0) {
+    throw coded(400, "NO_DEPLOYABLE_CHAIN", `no allowed chain is available to deploy '${def.key}'; configure at least one of: ${def.allowedChainIds.join(", ")}`);
+  }
+  return repo.create({ ...def, contracts });
 }
 
 /**

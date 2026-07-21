@@ -719,6 +719,9 @@ export class PrismaOrganizationRepository implements OrganizationRepository {
   async setStatus(id: string, status: OrgStatus): Promise<OrganizationRecord> {
     return toOrg(await prisma.organization.update({ where: { id }, data: { status } }));
   }
+  async remove(id: string): Promise<void> {
+    await prisma.organization.delete({ where: { id } });
+  }
 }
 
 const toCredential = (r: {

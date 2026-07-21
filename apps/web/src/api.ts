@@ -45,6 +45,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ email, password }),
     }),
+  // Public: an unauthenticated visitor self-registers their company. 202 → the org
+  // (and its admin) are pending until a PlatformAdmin approves.
+  registerOrg: (body: { company: { name: string; orgType: OrgType; registrationId?: string; jurisdiction?: string }; admin: { name: string; email: string; password: string } }) =>
+    request<{ organizationId: string; status: string }>("/orgs/register", null, { method: "POST", body: JSON.stringify(body) }),
   chains: (token: string) => request<ChainInfo[]>("/chains", token),
   chainStatus: (token: string, id: string) =>
     request<ChainStatus>(`/chains/${encodeURIComponent(id)}/status`, token),
@@ -61,8 +65,9 @@ export const api = {
     return request<AnalyticsSummary>(`/analytics${qs ? `?${qs}` : ""}`, token);
   },
   accounts: (token: string) => request<{ address: string; label: string }[]>("/accounts", token),
+  // 201 → the UseCase; 202 (gated: an OrgAdmin proposes) → { proposal } pending platform approval.
   createUseCase: (token: string, def: UseCase) =>
-    request<UseCase>("/use-cases", token, { method: "POST", body: JSON.stringify(def) }),
+    request<UseCase | { proposal: Proposal }>("/use-cases", token, { method: "POST", body: JSON.stringify(def) }),
   deployUseCase: (token: string, key: string, chainId: string) =>
     request<UseCase>(`/use-cases/${encodeURIComponent(key)}/deploy`, token, { method: "POST", body: JSON.stringify({ chainId }) }),
   assets: (token: string, useCaseKey?: string) =>
@@ -134,6 +139,12 @@ export const api = {
   mePortfolio: (token: string) => request<Portfolio>("/me/portfolio", token),
   meActivity: (token: string) => request<ActivityEvent[]>("/me/activity", token),
   orgs: (token: string) => request<Organization[]>("/orgs", token),
+  // PlatformAdmin: the self-service registration queue and its decisions.
+  pendingOrgs: (token: string) => request<Organization[]>("/orgs?status=pending", token),
+  approveOrg: (token: string, id: string) =>
+    request<Organization>(`/orgs/${encodeURIComponent(id)}/approve`, token, { method: "POST", body: JSON.stringify({}) }),
+  rejectOrg: (token: string, id: string, reason: string) =>
+    request<Organization>(`/orgs/${encodeURIComponent(id)}/reject`, token, { method: "POST", body: JSON.stringify({ reason }) }),
   createOrg: (token: string, body: { name: string; orgType: OrgType; registrationId?: string; jurisdiction?: string }) =>
     request<Organization>("/orgs", token, { method: "POST", body: JSON.stringify(body) }),
   org: (token: string, id: string) => request<Organization>(`/orgs/${encodeURIComponent(id)}`, token),

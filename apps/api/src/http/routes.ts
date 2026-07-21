@@ -7,7 +7,7 @@ import { auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, comp
 import type { AppDeps } from "../context.js";
 import { isSupportedCurrency } from "../currencies.js";
 import { renderContractCode } from "../contract-code.js";
-import { deployUseCaseContracts } from "../use-cases.js";
+import { deployAndCreateUseCase } from "../use-cases.js";
 import { computeAnalytics } from "../analytics.js";
 import { computeActivity, computePortfolio } from "../investor.js";
 import { assetBalancesOf, coded, CodedError, dropPayerShare, executeCashflowCore, executeIssueActivation, runGatedAction } from "../executors.js";
@@ -161,7 +161,12 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return deps.useCases.get(key);
   });
   app.post("/use-cases", { schema: S.createUseCase, ...auth }, async (request, reply) => {
-    if ((request.user as TokenClaims).role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only the Platform Admin may create use cases" });
+    const claims = request.user as TokenClaims;
+    // A PlatformAdmin creates directly (201); an active OrgAdmin proposes an
+    // org-owned use case for a PlatformAdmin to approve (maker-checker, 202).
+    if (claims.role !== "PlatformAdmin" && !(claims.role === "OrgAdmin" && claims.orgId)) {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "only the Platform Admin or an Org Admin may create use cases" });
+    }
     // Normalise (validates shape + fills tokenType) before deploying so an invalid
     // definition fails fast without deploying any contract.
     let definition: UseCaseDefinition;
@@ -171,23 +176,33 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       if (err instanceof PolicyError) return reply.code(400).send({ error: err.code, message: err.message });
       throw err;
     }
-    // Deploy the use case's contract on each allowed chain that is available in the
-    // registry (fabric is always available in the simulated stack). Best-effort per
-    // chain: a failure leaves that chain pending; we require at least one success.
+    // OrgAdmin: gated. Stamp ownerOrgId from the caller's own claims (never the
+    // client body) AFTER normalising, and park a create-use-case proposal for a
+    // PlatformAdmin to approve — the deploy happens on approval, not here.
+    if (claims.role === "OrgAdmin") {
+      if (await deps.useCases.has(definition.key)) return reply.code(409).send({ error: "USECASE_EXISTS", message: `use case '${definition.key}' already exists` });
+      const owned = { ...definition, ownerOrgId: claims.orgId as string };
+      const proposal = await deps.proposals.create({
+        useCaseKey: null, orgId: claims.orgId as string, assetId: null, kind: "create-use-case",
+        payload: owned as unknown as Record<string, unknown>,
+        proposerId: claims.id, proposerLabel: claims.email, required: 1,
+      });
+      return reply.code(202).send({ proposal });
+    }
+    // PlatformAdmin: deploy the use case's contract on each allowed chain that is
+    // available in the registry (fabric is always available in the simulated stack)
+    // and persist it. Best-effort per chain: a failure leaves that chain pending;
+    // at least one success is required (NO_DEPLOYABLE_CHAIN via the shared helper,
+    // mapped to 400 by the global error handler). Same path the proposal executes.
     const available = new Set(deps.chains.list().map((c) => c.id));
-    const contracts = await deployUseCaseContracts(
+    const created = await deployAndCreateUseCase(
+      deps.useCases,
       definition,
       available,
       (def, chainId) => deps.engine.deployUseCaseContract(def, chainId),
       (m) => request.log.warn(m),
     );
-    if (Object.keys(contracts).length === 0) {
-      return reply.code(400).send({
-        error: "NO_DEPLOYABLE_CHAIN",
-        message: `no allowed chain is available to deploy '${definition.key}'; configure at least one of: ${definition.allowedChainIds.join(", ")}`,
-      });
-    }
-    return reply.code(201).send(await deps.useCases.create({ ...definition, contracts }));
+    return reply.code(201).send(created);
   });
 
   // The contract code that backs a use case on one allowed chain — the real
@@ -1211,6 +1226,38 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   });
 
   // --- organizations -------------------------------------------------------
+  app.post("/orgs/register", { schema: S.registerOrg }, async (request, reply) => {
+    if (loginThrottled(request.ip)) return reply.code(429).send({ error: "TOO_MANY_REQUESTS", message: "too many attempts; try again later" });
+    if (!deps.didMasterConfigured && deps.isProduction) return reply.code(503).send({ error: "DID_KEYSTORE_UNCONFIGURED", message: "DID_MASTER_KEY must be set" });
+    const b = request.body as { company: { name: string; orgType: "bank" | "corporate" | "msme" | "government"; registrationId?: string; jurisdiction?: string }; admin: { name: string; email: string; password: string } };
+    if (await deps.organizations.findByName(b.company.name)) return reply.code(409).send({ error: "NAME_TAKEN", message: "an organization with that name already exists" });
+    if (b.company.registrationId && (await deps.organizations.findByRegistrationId(b.company.registrationId))) return reply.code(409).send({ error: "REGISTRATION_TAKEN", message: "an organization with that registration id already exists" });
+    if (await deps.users.findByEmail(b.admin.email)) return reply.code(409).send({ error: "EMAIL_TAKEN", message: "email already registered" });
+
+    // Mint the org DID now, but DO NOT register it on-chain and DO NOT activate —
+    // a pending org's DID is trusted nowhere (verifier trust keys off the registry).
+    const seed = deps.keystore.newSeed();
+    const didSeedEncrypted = deps.keystore.encryptSeed(seed);
+    const did = deps.keystore.keyOf(didSeedEncrypted).did;
+    const org = await deps.organizations.create({
+      name: b.company.name, orgType: b.company.orgType, registrationId: b.company.registrationId ?? null,
+      jurisdiction: b.company.jurisdiction ?? null, did, didSeedEncrypted,
+      status: "pending", verified: false, verifiedAt: null,
+    });
+    try {
+      await deps.users.create({
+        email: b.admin.email, passwordHash: await bcrypt.hash(b.admin.password, BCRYPT_ROUNDS),
+        role: "OrgAdmin", useCaseKey: null, accountId: null, active: false,
+        kycStatus: "pending", kyc: { legalName: b.admin.name }, orgId: org.id,
+      });
+    } catch (err) {
+      await deps.organizations.remove(org.id).catch(() => undefined); // roll back the orphaned pending org
+      throw err;
+    }
+    await deps.audit.append({ actorId: "self-registration", action: "org-registered" as LifecycleAction, payload: { orgId: org.id, name: org.name } });
+    return reply.code(202).send({ organizationId: org.id, status: org.status });
+  });
+
   app.post("/orgs", { schema: S.createOrg, ...auth }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     if (claims.role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only the Platform Admin may create organizations" });
@@ -1243,7 +1290,10 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   app.get("/orgs", { schema: S.listOrgs, ...auth }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     let rows;
-    if (claims.role === "PlatformAdmin") rows = await deps.organizations.list();
+    if (claims.role === "PlatformAdmin") {
+      const status = (request.query as { status?: string }).status;
+      rows = (await deps.organizations.list()).filter((o) => !status || o.status === status);
+    }
     else if (claims.role === "OrgAdmin" && claims.orgId) { const o = await deps.organizations.get(claims.orgId); rows = o ? [o] : []; }
     else return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to list organizations" });
     return rows.map(orgView);
@@ -1256,6 +1306,62 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const org = await deps.organizations.get(id);
     if (!org) return notFound(reply, "organization not found");
     return orgView(org);
+  });
+
+  app.post("/orgs/:id/approve", { schema: S.approveOrg, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    if (claims.role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only the Platform Admin may approve organizations" });
+    const { id } = request.params as { id: string };
+    const org = await deps.organizations.get(id);
+    if (!org) return notFound(reply, "organization not found");
+    if (org.status !== "pending") return reply.code(409).send({ error: "NOT_PENDING", message: `organization is ${org.status}` });
+    if (deps.registry) {
+      try {
+        await deps.registry.anchor.registerDid(deps.registry.didRegistry, org.did);
+      } catch (err) {
+        request.log.error({ err }, "org DID registration failed");
+        return reply.code(502).send({ error: "REGISTRY_UNAVAILABLE", message: "could not register the organization's DID on-chain — nothing was changed" });
+      }
+    }
+    const active = await deps.organizations.setStatus(org.id, "active");
+    await deps.organizations.setVerified(org.id, true, new Date().toISOString());
+    const admin = (await deps.users.listByOrg(org.id)).find((u) => u.role === "OrgAdmin");
+    if (admin) {
+      // Snapshot the pre-mint identity BEFORE mintMembership runs — the in-memory
+      // repo mutates the same object in place, so reading admin.did in the catch
+      // would otherwise see the freshly-minted DID instead of the original.
+      const priorDid = admin.did;
+      const priorSeed = admin.didSeedEncrypted;
+      try {
+        await mintMembership(active, admin, "OrgAdmin");
+        await deps.users.update(admin.id, { active: true });
+      } catch (err) {
+        // Roll back to pending AND undo any sub-DID mintMembership stamped on the
+        // admin row before it threw — a dangling did on an inactive admin is
+        // otherwise reachable via POST /credentials/requests. Restore the row to
+        // its pre-approval state (no sub-DID, still inactive).
+        await deps.users.update(admin.id, { did: priorDid, didSeedEncrypted: priorSeed, active: false });
+        await deps.organizations.setStatus(org.id, "pending");
+        await deps.organizations.setVerified(org.id, false, null);
+        request.log.error({ err }, "org admin activation failed");
+        return reply.code(502).send({ error: "ADMIN_ACTIVATION_FAILED", message: "could not activate the organization admin — reverted to pending" });
+      }
+    }
+    await deps.audit.append({ actorId: claims.id, action: "org-approved" as LifecycleAction, payload: { orgId: org.id, did: org.did } });
+    return reply.code(200).send({ id: active.id, name: active.name, did: active.did, orgType: active.orgType, status: "active", verified: true });
+  });
+
+  app.post("/orgs/:id/reject", { schema: S.rejectOrg, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    if (claims.role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only the Platform Admin may reject organizations" });
+    const { id } = request.params as { id: string };
+    const { reason } = request.body as { reason: string };
+    const org = await deps.organizations.get(id);
+    if (!org) return notFound(reply, "organization not found");
+    if (org.status !== "pending") return reply.code(409).send({ error: "NOT_PENDING", message: `organization is ${org.status}` });
+    const rejected = await deps.organizations.setStatus(org.id, "rejected");
+    await deps.audit.append({ actorId: claims.id, action: "org-rejected" as LifecycleAction, payload: { orgId: org.id, reason } });
+    return reply.code(200).send({ id: rejected.id, status: "rejected" });
   });
 
   // Mint a sub-DID + OrganizationMembership VC for `user` under `org`, persisting
