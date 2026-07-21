@@ -27,6 +27,7 @@ export function Organizations(): JSX.Element {
   const { token, user } = useAuth();
   const isPlatform = user?.role === "PlatformAdmin";
   const [orgs, setOrgs] = useState<Organization[]>([]);
+  const [pending, setPending] = useState<Organization[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,6 +40,12 @@ export function Organizations(): JSX.Element {
     }).catch((err) => setError(errMessage(err, "Failed to load organizations")));
   };
   useEffect(reload, [token]);
+
+  // PlatformAdmin only: the self-service registration queue awaiting a decision.
+  const reloadPending = (): void => {
+    if (token && isPlatform) void api.pendingOrgs(token).then(setPending).catch(() => setPending([]));
+  };
+  useEffect(reloadPending, [token]);
 
   const selectedOrg = orgs.find((o) => o.id === selected) ?? null;
 
@@ -60,6 +67,14 @@ export function Organizations(): JSX.Element {
         description={isPlatform ? "Provision organizations and their members. Each gets a DID; members receive a membership credential." : "Your organization and its members."}
       />
       {error && <p className="text-sm text-red-600">{error}</p>}
+
+      {isPlatform && pending.length > 0 && (
+        <PendingOrgs
+          pending={pending}
+          onApproved={() => { reloadPending(); reload(); }}
+          onRejected={reloadPending}
+        />
+      )}
 
       {isPlatform && <CreateOrg onCreated={reload} />}
 
@@ -119,6 +134,86 @@ function OrgCard({ org, selected, registration, onSelect }: {
         )}
       </div>
     </button>
+  );
+}
+
+/**
+ * The corporate self-service approval queue: organizations that self-registered
+ * and are pending a PlatformAdmin decision. Approving activates the org (and its
+ * pending admin); rejecting records a reason.
+ */
+function PendingOrgs({ pending, onApproved, onRejected }: {
+  pending: Organization[];
+  onApproved: () => void;
+  onRejected: () => void;
+}): JSX.Element {
+  const { token } = useAuth();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function approve(id: string): Promise<void> {
+    if (!token) return;
+    setBusy(id);
+    setError(null);
+    try {
+      await api.approveOrg(token, id);
+      onApproved();
+    } catch (err) {
+      setError(errMessage(err, "Approve failed"));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function reject(id: string): Promise<void> {
+    if (!token) return;
+    const reason = window.prompt("Reason for rejecting this registration?")?.trim();
+    if (!reason) return;
+    setBusy(id);
+    setError(null);
+    try {
+      await api.rejectOrg(token, id, reason);
+      onRejected();
+    } catch (err) {
+      setError(errMessage(err, "Reject failed"));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <Card title="Pending corporate registrations" description="Self-service sign-ups awaiting a platform decision.">
+      {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
+      <div className="space-y-2">
+        {pending.map((o) => (
+          <div key={o.id} className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 px-4 py-3">
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-slate-900 truncate">{o.name}</div>
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                <Pill tone="info">{o.orgType}</Pill>
+                {o.jurisdiction && <Pill tone="muted">{o.jurisdiction}</Pill>}
+              </div>
+            </div>
+            <div className="flex gap-2 shrink-0">
+              <button
+                onClick={() => void approve(o.id)}
+                disabled={busy === o.id}
+                className="text-xs rounded bg-brand-600 text-white px-3 py-1.5 font-medium hover:bg-brand-700 disabled:opacity-40"
+              >
+                Approve
+              </button>
+              <button
+                onClick={() => void reject(o.id)}
+                disabled={busy === o.id}
+                className="text-xs rounded border border-slate-300 text-slate-600 px-3 py-1.5 font-medium hover:bg-slate-50 disabled:opacity-40"
+              >
+                Reject
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
   );
 }
 
