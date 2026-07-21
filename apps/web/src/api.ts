@@ -45,6 +45,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ email, password }),
     }),
+  // Public: an unauthenticated visitor self-registers their company. 202 → the org
+  // (and its admin) are pending until a PlatformAdmin approves.
+  registerOrg: (body: { company: { name: string; orgType: OrgType; registrationId?: string; jurisdiction?: string }; admin: { name: string; email: string; password: string } }) =>
+    request<{ organizationId: string; status: string }>("/orgs/register", null, { method: "POST", body: JSON.stringify(body) }),
   chains: (token: string) => request<ChainInfo[]>("/chains", token),
   chainStatus: (token: string, id: string) =>
     request<ChainStatus>(`/chains/${encodeURIComponent(id)}/status`, token),

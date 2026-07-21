@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ApiError } from "../api.js";
 import { useAuth } from "../auth.js";
+import { useRoute } from "../router.js";
 import { Logo, LogoMark } from "./Logo.js";
 import { Icon, type IconName } from "./ui.js";
 
@@ -12,6 +13,7 @@ const HIGHLIGHTS: { icon: IconName; title: string; text: string }[] = [
 
 export function Login(): JSX.Element {
   const { login } = useAuth();
+  const { navigate } = useRoute();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -118,6 +120,16 @@ export function Login(): JSX.Element {
                   {busy ? "Signing in…" : "Sign in"}
                 </button>
               </form>
+              <p className="mt-5 text-center text-sm text-slate-500">
+                New enterprise?{" "}
+                <button
+                  type="button"
+                  onClick={() => navigate("/signup")}
+                  className="font-medium text-brand-700 hover:text-brand-600"
+                >
+                  Register your company
+                </button>
+              </p>
             </div>
           </div>
         </div>
