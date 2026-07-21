@@ -25,6 +25,9 @@ export class FakeAnchor implements CredentialAnchor {
   }
   async registerDid(_registry: string, did: string) {
     this.boom("registerDid");
+    // Faithful to DidRegistry.sol: a duplicate registration REVERTS. Callers
+    // must check didRegistration first (check-then-register), or retries brick.
+    if (this.dids.has(did)) throw new Error("fake anchor: AlreadyRegistered");
     this.dids.set(did, true);
     return this.receipt();
   }

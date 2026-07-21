@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { AssetRecord, CashflowRecord, CompanyProfile, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord } from "../persistence/types.js";
+import type { AssetRecord, CashflowRecord, CompanyProfile, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
 import { auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TYPES, credentialTypeDef, decodeJwt, didKeyFromSeed, generateDidKey, invoiceFingerprint, issueCredential, normalizeUseCaseDefinition, PolicyError, presentCredential, presentCredentials, publicKeyFromDidKey, splitProRata, validateMetadata, verifyChain, verifyPresentation, verifyPresentationCredentials, type Actor, type ChainEntry, type LifecycleAction, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
@@ -9,6 +9,8 @@ import { isSupportedCurrency } from "../currencies.js";
 import { renderContractCode } from "../contract-code.js";
 import { deployAndCreateUseCase } from "../use-cases.js";
 import { computeAnalytics } from "../analytics.js";
+import { issueCredentialFor } from "../credential-issuance.js";
+import { ensurePlatformIssuerOrg } from "../platform-org.js";
 import { computeActivity, computePortfolio } from "../investor.js";
 import { assetBalancesOf, coded, CodedError, dropPayerShare, executeCashflowCore, executeIssueActivation, runGatedAction } from "../executors.js";
 import { proposalKind } from "../proposal-kinds.js";
@@ -19,6 +21,32 @@ const NO_USE_CASE = "__none__"; // sentinel: a use-case key that matches no real
 
 const BCRYPT_ROUNDS = 12;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+
+const MAX_DOC_BYTES = 5 * 1024 * 1024;
+// A 5MB document is ~6.8MB as base64 JSON — upload routes override the app-global
+// 256KB bodyLimit with this (the decoded bytes are still capped at MAX_DOC_BYTES).
+const DOC_UPLOAD_BODY_LIMIT = 8 * 1024 * 1024;
+// Allowlisted document content types — stored bytes are served back later, so an
+// arbitrary type (e.g. text/html) would enable stored XSS on the API origin.
+const ALLOWED_DOC_TYPES = new Set(["application/pdf", "image/png", "image/jpeg", "image/webp", "text/plain"]);
+
+/**
+ * Validate and store one base64 document upload. Shared by the authenticated
+ * store and the public KYB route so their error surface cannot drift. Throws
+ * coded 415/400/413 (mapped by the global error handler).
+ */
+async function storeUploadedDocument(
+  documents: AppDeps["documents"],
+  body: { contentType: string; dataBase64: string },
+): Promise<{ id: string; sha256: string; size: number }> {
+  if (!ALLOWED_DOC_TYPES.has(body.contentType)) {
+    throw coded(415, "UNSUPPORTED_DOCUMENT_TYPE", `contentType must be one of: ${[...ALLOWED_DOC_TYPES].join(", ")}`);
+  }
+  const bytes = Buffer.from(body.dataBase64, "base64");
+  if (bytes.length === 0) throw coded(400, "BAD_DOCUMENT", "empty document");
+  if (bytes.length > MAX_DOC_BYTES) throw coded(413, "DOCUMENT_TOO_LARGE", `max ${MAX_DOC_BYTES} bytes`);
+  return documents.create({ contentType: body.contentType, bytes });
+}
 
 // Extract the inner VC's `jti` (credential id) from a VP-JWT, or null on any
 // malformed input. Used to record the verified credential's id on the user.
@@ -1226,6 +1254,15 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   });
 
   // --- organizations -------------------------------------------------------
+  // Public: a registrant uploads a statutory certificate BEFORE registering. Same
+  // limits as the authenticated store; throttled like /orgs/register. The caller
+  // cannot read the document back — only authenticated reviewers can.
+  app.post("/orgs/register/documents", { schema: S.uploadKybDocument, bodyLimit: DOC_UPLOAD_BODY_LIMIT }, async (request, reply) => {
+    if (loginThrottled(request.ip)) return reply.code(429).send({ error: "TOO_MANY_REQUESTS", message: "too many attempts; try again later" });
+    const doc = await storeUploadedDocument(deps.documents, request.body as { contentType: string; dataBase64: string });
+    return reply.code(201).send({ id: doc.id, sha256: doc.sha256, size: doc.size });
+  });
+
   app.post("/orgs/register", { schema: S.registerOrg }, async (request, reply) => {
     if (loginThrottled(request.ip)) return reply.code(429).send({ error: "TOO_MANY_REQUESTS", message: "too many attempts; try again later" });
     if (!deps.didMasterConfigured && deps.isProduction) return reply.code(503).send({ error: "DID_KEYSTORE_UNCONFIGURED", message: "DID_MASTER_KEY must be set" });
@@ -1234,6 +1271,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         name: string; orgType: "bank" | "corporate" | "msme" | "government";
         cin: string; pan: string; gstin?: string; state: string; pincode: string;
         dateOfIncorporation: string; category: CompanyProfile["category"]; companyStatus: "active" | "inactive";
+        documents: { cinCertificate: { id: string }; gstinCertificate?: { id: string } };
       };
       admin: { name: string; email: string; password: string };
     };
@@ -1242,10 +1280,22 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (await deps.organizations.findByRegistrationId(b.company.cin)) return reply.code(409).send({ error: "REGISTRATION_TAKEN", message: "an organization with that CIN already exists" });
     if (await deps.users.findByEmail(b.admin.email)) return reply.code(409).send({ error: "EMAIL_TAKEN", message: "email already registered" });
 
+    // Resolve document refs SERVER-side: the persisted sha256 comes from OUR
+    // stored record, never from the client's claim.
+    const cinDoc = await deps.documents.get(b.company.documents.cinCertificate.id);
+    if (!cinDoc) return reply.code(400).send({ error: "DOCUMENT_NOT_FOUND", message: "CIN certificate upload not found" });
+    let gstinRef: KybDocumentRef | null = null;
+    if (b.company.documents.gstinCertificate) {
+      const g = await deps.documents.get(b.company.documents.gstinCertificate.id);
+      if (!g) return reply.code(400).send({ error: "DOCUMENT_NOT_FOUND", message: "GSTIN certificate upload not found" });
+      gstinRef = { id: g.id, sha256: g.sha256 };
+    }
+
     const companyProfile: CompanyProfile = {
       cin: b.company.cin, pan: b.company.pan, gstin: b.company.gstin?.trim() || null,
       state: b.company.state, pincode: b.company.pincode, dateOfIncorporation: b.company.dateOfIncorporation,
       category: b.company.category, companyStatus: b.company.companyStatus,
+      documents: { cinCertificate: { id: cinDoc.id, sha256: cinDoc.sha256 }, gstinCertificate: gstinRef },
     };
     // Mint the org DID now, but DO NOT register it on-chain and DO NOT activate —
     // a pending org's DID is trusted nowhere (verifier trust keys off the registry).
@@ -1300,6 +1350,12 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return reply.code(201).send({ id: org.id, name: org.name, did: org.did, orgType: org.orgType, registrationId: org.registrationId, jurisdiction: org.jurisdiction, verified: org.verified, status: org.status });
   });
 
+  /** orgView + the credentials HELD by the org's parent DID (issuance attribution). */
+  async function orgViewWithCreds(o: OrganizationRecord) {
+    const held = await deps.credentials.listByHolder(o.did);
+    return { ...orgView(o), credentials: held.map((c) => ({ id: c.id, type: c.type, issuerDid: c.issuerDid, issuedAt: c.issuedAt, revoked: c.revoked })) };
+  }
+
   app.get("/orgs", { schema: S.listOrgs, ...auth }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     let rows;
@@ -1309,7 +1365,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     }
     else if (claims.role === "OrgAdmin" && claims.orgId) { const o = await deps.organizations.get(claims.orgId); rows = o ? [o] : []; }
     else return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to list organizations" });
-    return rows.map(orgView);
+    return Promise.all(rows.map(orgViewWithCreds));
   });
 
   app.get("/orgs/:id", { schema: S.getOrg, ...auth }, async (request, reply) => {
@@ -1318,7 +1374,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (!orgScoped(claims, id)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to view that organization" });
     const org = await deps.organizations.get(id);
     if (!org) return notFound(reply, "organization not found");
-    return orgView(org);
+    return orgViewWithCreds(org);
   });
 
   app.post("/orgs/:id/approve", { schema: S.approveOrg, ...auth }, async (request, reply) => {
@@ -1330,7 +1386,11 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (org.status !== "pending") return reply.code(409).send({ error: "NOT_PENDING", message: `organization is ${org.status}` });
     if (deps.registry) {
       try {
-        await deps.registry.anchor.registerDid(deps.registry.didRegistry, org.did);
+        // Check-then-register: a RETRIED approve (after a post-registration
+        // rollback, e.g. a transient anchor failure) finds the DID already on
+        // the DidRegistry, whose registerDid reverts AlreadyRegistered.
+        const { registered } = await deps.registry.anchor.didRegistration(deps.registry.didRegistry, org.did);
+        if (!registered) await deps.registry.anchor.registerDid(deps.registry.didRegistry, org.did);
       } catch (err) {
         request.log.error({ err }, "org DID registration failed");
         return reply.code(502).send({ error: "REGISTRY_UNAVAILABLE", message: "could not register the organization's DID on-chain — nothing was changed" });
@@ -1339,6 +1399,8 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const active = await deps.organizations.setStatus(org.id, "active");
     await deps.organizations.setVerified(org.id, true, new Date().toISOString());
     const admin = (await deps.users.listByOrg(org.id)).find((u) => u.role === "OrgAdmin");
+    let issuerDid: string | null = null;
+    let orgCredentialId: string | null = null;
     if (admin) {
       // Snapshot the pre-mint identity BEFORE mintMembership runs — the in-memory
       // repo mutates the same object in place, so reading admin.did in the catch
@@ -1348,6 +1410,25 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       try {
         await mintMembership(active, admin, "OrgAdmin");
         await deps.users.update(admin.id, { active: true });
+        // The issuance ceremony: the PLATFORM org attests the corporate's KYB
+        // facts with a signed, anchored OrganizationCredential. Deliberately
+        // LAST: issueCredentialFor persists nothing on a throw, so a failure
+        // here needs only the rollback below — no credential compensation.
+        const platformOrg = await ensurePlatformIssuerOrg(deps);
+        const p = org.companyProfile;
+        // Named kybClaims (not `claims`) — the handler's `claims` is the caller's
+        // TokenClaims, and shadowing it here would be a trap for future edits.
+        const kybClaims: Record<string, unknown> = {
+          name: org.name, orgType: org.orgType,
+          ...(p ? {
+            cin: p.cin, pan: p.pan, state: p.state, pincode: p.pincode,
+            dateOfIncorporation: p.dateOfIncorporation, category: p.category,
+            ...(p.gstin ? { gstin: p.gstin } : {}),
+          } : {}),
+        };
+        const cred = await issueCredentialFor(deps, { issuerOrg: platformOrg, subjectDid: org.did, type: "OrganizationCredential", claims: kybClaims, proposalId: null });
+        issuerDid = platformOrg.did;
+        orgCredentialId = cred.id;
       } catch (err) {
         // Roll back to pending AND undo any sub-DID mintMembership stamped on the
         // admin row before it threw — a dangling did on an inactive admin is
@@ -1357,11 +1438,11 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         await deps.organizations.setStatus(org.id, "pending");
         await deps.organizations.setVerified(org.id, false, null);
         request.log.error({ err }, "org admin activation failed");
-        return reply.code(502).send({ error: "ADMIN_ACTIVATION_FAILED", message: "could not activate the organization admin — reverted to pending" });
+        return reply.code(502).send({ error: "ADMIN_ACTIVATION_FAILED", message: "could not complete the issuance ceremony — reverted to pending" });
       }
     }
-    await deps.audit.append({ actorId: claims.id, action: "org-approved" as LifecycleAction, payload: { orgId: org.id, did: org.did } });
-    return reply.code(200).send({ id: active.id, name: active.name, did: active.did, orgType: active.orgType, status: "active", verified: true });
+    await deps.audit.append({ actorId: claims.id, action: "org-approved" as LifecycleAction, payload: { orgId: org.id, did: org.did, orgCredentialId, issuerDid } });
+    return reply.code(200).send({ id: active.id, name: active.name, did: active.did, orgType: active.orgType, status: "active", verified: true, issuerDid, orgCredentialId });
   });
 
   app.post("/orgs/:id/reject", { schema: S.rejectOrg, ...auth }, async (request, reply) => {
@@ -2057,27 +2138,13 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   // --- documents ----------------------------------------------------------
   // A small document store so the dashboard can upload a file (e.g. an invoice
   // PDF) and reference it from asset metadata by URL + sha256.
-  const MAX_DOC_BYTES = 5 * 1024 * 1024;
-  // Allowlisted document content types — stored bytes are served back later, so an
-  // arbitrary type (e.g. text/html) would enable stored XSS on the API origin.
-  const ALLOWED_DOC_TYPES = new Set(["application/pdf", "image/png", "image/jpeg", "image/webp", "text/plain"]);
   // Only desk operators (issue-capable) and auditors may read stored documents —
   // these hold sensitive off-ledger invoice evidence, not public assets.
   const canReadDoc = (role: Role): boolean => deps.rbac.can(role, "issue") || role === "Auditor";
-  // Override the app-global 256KB bodyLimit for uploads: a 5MB document is ~6.8MB
-  // as base64 JSON, so allow 8MB here (the route still enforces MAX_DOC_BYTES on
-  // the decoded bytes).
-  app.post("/documents", { schema: S.uploadDocument, bodyLimit: 8 * 1024 * 1024, ...auth }, async (request, reply) => {
+  app.post("/documents", { schema: S.uploadDocument, bodyLimit: DOC_UPLOAD_BODY_LIMIT, ...auth }, async (request, reply) => {
     const actor = actorOf(request);
     if (!deps.rbac.can(actor.role, "issue")) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to upload documents" });
-    const { contentType, dataBase64 } = request.body as { contentType: string; dataBase64: string };
-    if (!ALLOWED_DOC_TYPES.has(contentType)) {
-      return reply.code(415).send({ error: "UNSUPPORTED_DOCUMENT_TYPE", message: `contentType must be one of: ${[...ALLOWED_DOC_TYPES].join(", ")}` });
-    }
-    const bytes = Buffer.from(dataBase64, "base64");
-    if (bytes.length === 0) return reply.code(400).send({ error: "BAD_DOCUMENT", message: "empty document" });
-    if (bytes.length > MAX_DOC_BYTES) return reply.code(413).send({ error: "DOCUMENT_TOO_LARGE", message: `max ${MAX_DOC_BYTES} bytes` });
-    const doc = await deps.documents.create({ contentType, bytes });
+    const doc = await storeUploadedDocument(deps.documents, request.body as { contentType: string; dataBase64: string });
     return reply.code(201).send({ id: doc.id, url: `/api/v1/documents/${doc.id}`, sha256: doc.sha256, size: doc.size });
   });
   app.get("/documents/:id", { schema: S.getDocument, ...auth }, async (request, reply) => {

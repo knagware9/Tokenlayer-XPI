@@ -324,10 +324,18 @@ export type OrgStatus = "pending" | "active" | "suspended" | "rejected";
 /** Legal structure of an Indian company — the KYB "category". */
 export type CompanyCategory = "private-limited" | "public-limited" | "llp" | "opc" | "section-8";
 
+/** A stored KYB document reference — sha256 comes from the SERVER's document record. */
+export interface KybDocumentRef {
+  id: string;
+  sha256: string;
+}
+
 /**
  * India-specific KYB details captured at corporate self-registration and shown to
  * the Platform Admin at approval. Statutory identifiers (CIN/PAN/GSTIN) are stored
- * as reference numbers only — no document files are held here.
+ * as reference numbers plus REFERENCES to uploaded certificates in the document
+ * store (id + sha256) — the file bytes themselves live in the store, gated behind
+ * the authenticated document read route.
  */
 export interface CompanyProfile {
   cin: string;
@@ -338,6 +346,11 @@ export interface CompanyProfile {
   dateOfIncorporation: string; // ISO calendar date, yyyy-mm-dd
   category: CompanyCategory;
   companyStatus: "active" | "inactive";
+  /** Statutory certificates uploaded at registration. CIN required, GSTIN optional. */
+  documents: {
+    cinCertificate: KybDocumentRef;
+    gstinCertificate: KybDocumentRef | null;
+  };
 }
 
 export interface OrganizationRecord {

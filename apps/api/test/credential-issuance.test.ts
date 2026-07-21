@@ -70,7 +70,12 @@ describe("GET /credential-types", () => {
       type: string; requiredApprovals: number; selfIssuedOnly: boolean;
       allowedIssuerOrgTypes: string[]; claimSchema: { required?: string[] };
     }>;
-    expect(types.map((t) => t.type).sort()).toEqual(["AccreditedInvestor", "AuthorizedSignatory", "KycCredential"]);
+    expect(types.map((t) => t.type).sort()).toEqual([
+      "AccreditedInvestor",
+      "AuthorizedSignatory",
+      "KycCredential",
+      "OrganizationCredential",
+    ]);
 
     const byType = Object.fromEntries(types.map((t) => [t.type, t]));
     expect(byType.KycCredential.requiredApprovals).toBe(1);

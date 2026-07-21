@@ -52,9 +52,24 @@ export const api = {
       name: string; orgType: OrgType; cin: string; pan: string; gstin?: string;
       state: string; pincode: string; dateOfIncorporation: string;
       category: CompanyCategory; companyStatus: "active" | "inactive";
+      documents: { cinCertificate: { id: string }; gstinCertificate?: { id: string } };
     };
     admin: { name: string; email: string; password: string };
   }) => request<{ organizationId: string; status: string }>("/orgs/register", null, { method: "POST", body: JSON.stringify(body) }),
+  // Public: upload a KYB certificate before registering (no auth, throttled).
+  uploadKybDocument: (contentType: string, dataBase64: string) =>
+    request<{ id: string; sha256: string; size: number }>("/orgs/register/documents", null, { method: "POST", body: JSON.stringify({ contentType, dataBase64 }) }),
+  // Authenticated raw download for the reviewer (returns a Blob, not JSON).
+  downloadDocument: async (token: string, id: string): Promise<Blob> => {
+    const res = await fetch(`${BASE}/documents/${encodeURIComponent(id)}`, { headers: { authorization: `Bearer ${token}` } });
+    if (!res.ok) {
+      const text = await res.text();
+      let body: { message?: string; error?: string } | null = null;
+      try { body = text ? (JSON.parse(text) as { message?: string; error?: string }) : null; } catch { /* non-JSON error body */ }
+      throw new ApiError(body?.message ?? body?.error ?? res.statusText, res.status, body?.error);
+    }
+    return res.blob();
+  },
   chains: (token: string) => request<ChainInfo[]>("/chains", token),
   chainStatus: (token: string, id: string) =>
     request<ChainStatus>(`/chains/${encodeURIComponent(id)}/status`, token),
@@ -148,7 +163,7 @@ export const api = {
   // PlatformAdmin: the self-service registration queue and its decisions.
   pendingOrgs: (token: string) => request<Organization[]>("/orgs?status=pending", token),
   approveOrg: (token: string, id: string) =>
-    request<Organization>(`/orgs/${encodeURIComponent(id)}/approve`, token, { method: "POST", body: JSON.stringify({}) }),
+    request<Organization & { issuerDid: string | null; orgCredentialId: string | null }>(`/orgs/${encodeURIComponent(id)}/approve`, token, { method: "POST", body: JSON.stringify({}) }),
   rejectOrg: (token: string, id: string, reason: string) =>
     request<Organization>(`/orgs/${encodeURIComponent(id)}/reject`, token, { method: "POST", body: JSON.stringify({ reason }) }),
   createOrg: (token: string, body: { name: string; orgType: OrgType; registrationId?: string; jurisdiction?: string }) =>

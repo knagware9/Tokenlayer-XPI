@@ -2,8 +2,13 @@ import { describe, expect, it } from "vitest";
 import { CREDENTIAL_TYPES, credentialTypeDef, validateMetadata, PolicyError } from "../src/index.js";
 
 describe("credential type registry", () => {
-  it("declares the three compliance types", () => {
-    expect(Object.keys(CREDENTIAL_TYPES).sort()).toEqual(["AccreditedInvestor", "AuthorizedSignatory", "KycCredential"]);
+  it("declares the four compliance types", () => {
+    expect(Object.keys(CREDENTIAL_TYPES).sort()).toEqual([
+      "AccreditedInvestor",
+      "AuthorizedSignatory",
+      "KycCredential",
+      "OrganizationCredential",
+    ]);
   });
 
   it("every type has a usable schema, >=1 approvals, and at least one permitted issuer", () => {
@@ -48,5 +53,19 @@ describe("per-type claim validation (reuses validateMetadata)", () => {
 
   it("accepts a good AccreditedInvestor claim set", () => {
     expect(() => validateMetadata({ basis: "net-worth", jurisdiction: "IN" }, credentialTypeDef("AccreditedInvestor").claimSchema)).not.toThrow();
+  });
+});
+
+describe("OrganizationCredential", () => {
+  it("is in the catalog: verifier-issued, 1 approval, KYB claim schema", () => {
+    const def = credentialTypeDef("OrganizationCredential");
+    expect(def.allowedIssuerOrgTypes).toEqual(["verifier"]);
+    expect(def.requiredApprovals).toBe(1);
+    expect(def.validityDays).toBe(365);
+    expect(def.claimSchema.required).toEqual(["name", "cin", "pan"]);
+    expect(Object.keys(def.claimSchema.properties)).toEqual(
+      expect.arrayContaining(["name", "cin", "pan", "gstin", "state", "pincode", "dateOfIncorporation", "category", "orgType"]),
+    );
+    expect(def.selfIssuedOnly).toBeUndefined();
   });
 });
