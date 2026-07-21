@@ -9,7 +9,7 @@
 import { PolicyError } from "./errors.js";
 import type { MetadataSchema, OrgType } from "./types.js";
 
-export type CredentialType = "KycCredential" | "AccreditedInvestor" | "AuthorizedSignatory";
+export type CredentialType = "KycCredential" | "AccreditedInvestor" | "AuthorizedSignatory" | "OrganizationCredential";
 
 export interface CredentialTypeDefinition {
   type: CredentialType;
@@ -74,6 +74,30 @@ export const CREDENTIAL_TYPES: Record<CredentialType, CredentialTypeDefinition> 
       properties: {
         role: { type: "string", description: "Title the signatory holds" },
         scope: { type: "string", description: "What they may authorize", enum: ["issuance", "treasury", "all"] },
+      },
+    },
+  },
+  OrganizationCredential: {
+    type: "OrganizationCredential",
+    description: "Attests a legal entity's verified registration (KYB) and binds it to its organization DID.",
+    // Issued by the platform (a verifier org) at corporate approval; also
+    // requestable through the standard maker-checker path by verifier orgs.
+    allowedIssuerOrgTypes: ["verifier"],
+    requiredApprovals: 1,
+    validityDays: 365,
+    claimSchema: {
+      type: "object",
+      required: ["name", "cin", "pan"],
+      properties: {
+        name: { type: "string", description: "Registered legal name" },
+        cin: { type: "string", description: "Corporate Identity Number" },
+        pan: { type: "string", description: "Permanent Account Number" },
+        gstin: { type: "string", description: "GST identification number" },
+        state: { type: "string", description: "State of registration" },
+        pincode: { type: "string", description: "Registered-office pincode" },
+        dateOfIncorporation: { type: "string", description: "ISO date of incorporation" },
+        category: { type: "string", description: "Legal structure (private-limited, llp, …)" },
+        orgType: { type: "string", description: "Platform organization type" },
       },
     },
   },
