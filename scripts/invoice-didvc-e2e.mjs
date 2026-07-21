@@ -114,11 +114,35 @@ console.log("\n== 7) Duplicate invoice (same fingerprint) is blocked ==");
 const dup = await call("POST", "/assets", { useCaseKey: "invoice-tokenization", name: "dupe", chainId: CHAIN, initialSupply: "1", treasuryAccount: SUP, metadata: meta, sale: { unitPrice: "900", currency: CUR, treasuryAccount: SUP } }, issuer);
 ok(dup.status === 409, `re-tokenizing the same invoice blocked → ${dup.json?.error}`, dup.json);
 
-console.log(`\n== 8) Tamper-evident audit on ${CHAIN} ==`);
+console.log("\n== 8) Secondary market — the financier SELLS part of the tokenized invoice ==");
+// A second investor is onboarded, proves identity by DID/VC, and is allowlisted —
+// the same gate applies to secondary buyers.
+const INV2 = addr("2e57" + runId);
+const inv2U = await mkUser(`didvc.investor2.${runId}@tokenlayer.dev`, INV2);
+const inv2VC = await verifyIdentity(uca, inv2U.id, "Meridian Yield Partners");
+ok(inv2VC.ok, `second investor VP verified → KYC approved (holder ${inv2VC.holderDid?.slice(0, 22)}…)`, inv2VC.detail);
+await call("POST", `/assets/${assetId}/actions/allow`, { account: INV2 }, uca);
+// The financier lists 600 units near par (the receivable is closer to maturity).
+const sellQty = 600, sellPrice = 970;
+const listing = await call("POST", `/assets/${assetId}/listings`, { quantity: String(sellQty), unitPrice: String(sellPrice), currency: CUR }, fin);
+ok(listing.status === 201 && listing.json?.status === "open", `financier listed ${sellQty} INVT at ${inr(sellPrice)}/unit (units moved to escrow)`, listing.json);
+// The second investor funds and takes the listing (escrowed DvP).
+await call("POST", "/cash/credit", { account: INV2, currency: CUR, amount: String(sellQty * sellPrice) }, platform);
+const inv2 = await login(`didvc.investor2.${runId}@tokenlayer.dev`, "didvc123");
+const take = await call("POST", `/listings/${listing.json.id}/take`, { quantity: String(sellQty) }, inv2);
+ok(take.status === 200, `second investor bought the listing — ${sellQty} units for ${inr(sellQty * sellPrice)} (DvP via escrow)`, take.json);
+const accounts = (await call("GET", `/assets/${assetId}/accounts`, null, uca)).json ?? [];
+const finBal = accounts.find((a) => a.address === FIN)?.balance;
+const inv2Bal = accounts.find((a) => a.address === INV2)?.balance;
+ok(finBal === String(supply - sellQty) && inv2Bal === String(sellQty), `on-ledger balances settled: financier ${finBal}, investor2 ${inv2Bal}`, { finBal, inv2Bal });
+const finCash = ((await call("GET", `/cash/balances?address=${FIN}`, null, platform)).json ?? []).find((b) => b.currency === CUR)?.amount;
+ok(BigInt(finCash ?? "0") >= BigInt(sellQty * sellPrice), `seller received the sale proceeds (${inr(sellQty * sellPrice)}) in ${CUR}`, { finCash });
+
+console.log(`\n== 9) Tamper-evident audit on ${CHAIN} ==`);
 const summary = (await call("GET", "/audit/verify", null, uca)).json;
 ok((summary?.tampered?.length ?? 1) === 0 && (summary?.verified ?? 0) >= 1, `audit chains verified: ${summary?.verified}/${summary?.assets}, 0 tampered`, summary);
 const anchor = (await call("POST", "/audit/anchor", {}, uca)).json;
 ok((anchor?.anchored?.length ?? 0) >= 1, `anchored ${anchor?.anchored?.length} chain head(s) on-ledger`, anchor);
 
-console.log(`\n${fails ? `❌ ${fails} CHECK(S) FAILED` : `✅ DID/VC → INVOICE TOKENIZATION END-TO-END PASSED — identity proven by VP, KYC gate enforced, receivable tokenized + financed (DvP) on real ${CHAIN}, duplicate blocked, audit verified`}`);
+console.log(`\n${fails ? `❌ ${fails} CHECK(S) FAILED` : `✅ DID/VC → INVOICE TOKENIZATION END-TO-END PASSED — identity proven by VP, KYC gate enforced, receivable tokenized + financed (primary DvP) + re-sold on the secondary market (escrowed DvP) on real ${CHAIN}, duplicate blocked, audit verified`}`);
 process.exit(fails ? 1 : 0);
