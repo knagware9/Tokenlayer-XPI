@@ -9,6 +9,8 @@ import { isSupportedCurrency } from "../currencies.js";
 import { renderContractCode } from "../contract-code.js";
 import { deployAndCreateUseCase } from "../use-cases.js";
 import { computeAnalytics } from "../analytics.js";
+import { issueCredentialFor } from "../credential-issuance.js";
+import { ensurePlatformIssuerOrg } from "../platform-org.js";
 import { computeActivity, computePortfolio } from "../investor.js";
 import { assetBalancesOf, coded, CodedError, dropPayerShare, executeCashflowCore, executeIssueActivation, runGatedAction } from "../executors.js";
 import { proposalKind } from "../proposal-kinds.js";
@@ -1348,6 +1350,12 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return reply.code(201).send({ id: org.id, name: org.name, did: org.did, orgType: org.orgType, registrationId: org.registrationId, jurisdiction: org.jurisdiction, verified: org.verified, status: org.status });
   });
 
+  /** orgView + the credentials HELD by the org's parent DID (issuance attribution). */
+  async function orgViewWithCreds(o: OrganizationRecord) {
+    const held = await deps.credentials.listByHolder(o.did);
+    return { ...orgView(o), credentials: held.map((c) => ({ id: c.id, type: c.type, issuerDid: c.issuerDid, issuedAt: c.issuedAt, revoked: c.revoked })) };
+  }
+
   app.get("/orgs", { schema: S.listOrgs, ...auth }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     let rows;
@@ -1357,7 +1365,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     }
     else if (claims.role === "OrgAdmin" && claims.orgId) { const o = await deps.organizations.get(claims.orgId); rows = o ? [o] : []; }
     else return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to list organizations" });
-    return rows.map(orgView);
+    return Promise.all(rows.map(orgViewWithCreds));
   });
 
   app.get("/orgs/:id", { schema: S.getOrg, ...auth }, async (request, reply) => {
@@ -1366,7 +1374,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (!orgScoped(claims, id)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to view that organization" });
     const org = await deps.organizations.get(id);
     if (!org) return notFound(reply, "organization not found");
-    return orgView(org);
+    return orgViewWithCreds(org);
   });
 
   app.post("/orgs/:id/approve", { schema: S.approveOrg, ...auth }, async (request, reply) => {
@@ -1387,6 +1395,8 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const active = await deps.organizations.setStatus(org.id, "active");
     await deps.organizations.setVerified(org.id, true, new Date().toISOString());
     const admin = (await deps.users.listByOrg(org.id)).find((u) => u.role === "OrgAdmin");
+    let issuerDid: string | null = null;
+    let orgCredentialId: string | null = null;
     if (admin) {
       // Snapshot the pre-mint identity BEFORE mintMembership runs — the in-memory
       // repo mutates the same object in place, so reading admin.did in the catch
@@ -1396,6 +1406,23 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       try {
         await mintMembership(active, admin, "OrgAdmin");
         await deps.users.update(admin.id, { active: true });
+        // The issuance ceremony: the PLATFORM org attests the corporate's KYB
+        // facts with a signed, anchored OrganizationCredential. Deliberately
+        // LAST: issueCredentialFor persists nothing on a throw, so a failure
+        // here needs only the rollback below — no credential compensation.
+        const platformOrg = await ensurePlatformIssuerOrg(deps);
+        const p = org.companyProfile;
+        const claims: Record<string, unknown> = {
+          name: org.name, orgType: org.orgType,
+          ...(p ? {
+            cin: p.cin, pan: p.pan, state: p.state, pincode: p.pincode,
+            dateOfIncorporation: p.dateOfIncorporation, category: p.category,
+            ...(p.gstin ? { gstin: p.gstin } : {}),
+          } : {}),
+        };
+        const cred = await issueCredentialFor(deps, { issuerOrg: platformOrg, subjectDid: org.did, type: "OrganizationCredential", claims, proposalId: null });
+        issuerDid = platformOrg.did;
+        orgCredentialId = cred.id;
       } catch (err) {
         // Roll back to pending AND undo any sub-DID mintMembership stamped on the
         // admin row before it threw — a dangling did on an inactive admin is
@@ -1405,11 +1432,11 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         await deps.organizations.setStatus(org.id, "pending");
         await deps.organizations.setVerified(org.id, false, null);
         request.log.error({ err }, "org admin activation failed");
-        return reply.code(502).send({ error: "ADMIN_ACTIVATION_FAILED", message: "could not activate the organization admin — reverted to pending" });
+        return reply.code(502).send({ error: "ADMIN_ACTIVATION_FAILED", message: "could not complete the issuance ceremony — reverted to pending" });
       }
     }
-    await deps.audit.append({ actorId: claims.id, action: "org-approved" as LifecycleAction, payload: { orgId: org.id, did: org.did } });
-    return reply.code(200).send({ id: active.id, name: active.name, did: active.did, orgType: active.orgType, status: "active", verified: true });
+    await deps.audit.append({ actorId: claims.id, action: "org-approved" as LifecycleAction, payload: { orgId: org.id, did: org.did, orgCredentialId, issuerDid } });
+    return reply.code(200).send({ id: active.id, name: active.name, did: active.did, orgType: active.orgType, status: "active", verified: true, issuerDid, orgCredentialId });
   });
 
   app.post("/orgs/:id/reject", { schema: S.rejectOrg, ...auth }, async (request, reply) => {

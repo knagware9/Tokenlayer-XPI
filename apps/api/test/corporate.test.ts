@@ -207,3 +207,39 @@ describe("gated use-case config", () => {
     expect(matches.length).toBe(1);
   });
 });
+
+describe("DID issuance ceremony", () => {
+  it("approve → platform org issues an anchored OrganizationCredential to the org DID", async () => {
+    const anchor = new FakeAnchor();
+    const app = await buildTestApp({ registry: fakeRegistry(anchor) });
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const orgId = ((await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: (await registerPayload(app)).body })).json()).organizationId;
+    const appr = await app.inject({ method: "POST", url: `${V1}/orgs/${orgId}/approve`, headers: { authorization: `Bearer ${platform}` }, payload: {} });
+    expect(appr.statusCode).toBe(200);
+    const { issuerDid, orgCredentialId, did } = appr.json();
+    const platformOrg = (await app.inject({ method: "GET", url: `${V1}/orgs`, headers: { authorization: `Bearer ${platform}` } })).json()
+      .find((o: { name: string }) => o.name === "TokenLayer Platform");
+    expect(issuerDid).toBe(platformOrg.did);
+    expect(anchor.credentials.has(orgCredentialId)).toBe(true); // genuinely anchored
+    const view = (await app.inject({ method: "GET", url: `${V1}/orgs/${orgId}`, headers: { authorization: `Bearer ${platform}` } })).json();
+    const oc = view.credentials.find((c: { type: string }) => c.type === "OrganizationCredential");
+    expect(oc).toMatchObject({ id: orgCredentialId, issuerDid: platformOrg.did, revoked: false });
+    expect(view.did).toBe(did);
+  });
+
+  it("anchor failure rolls EVERYTHING back — org pending, admin locked, no credential", async () => {
+    const anchor = new FakeAnchor();
+    const app = await buildTestApp({ registry: fakeRegistry(anchor) });
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const orgId = ((await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: (await registerPayload(app)).body })).json()).organizationId;
+    anchor.failNext = "anchorCredential"; // armed post-boot; consumed only by the org-credential issuance
+    const appr = await app.inject({ method: "POST", url: `${V1}/orgs/${orgId}/approve`, headers: { authorization: `Bearer ${platform}` }, payload: {} });
+    expect(appr.statusCode).toBe(502);
+    const pending = (await app.inject({ method: "GET", url: `${V1}/orgs?status=pending`, headers: { authorization: `Bearer ${platform}` } })).json();
+    expect(pending.some((o: { id: string }) => o.id === orgId)).toBe(true);
+    const login = await app.inject({ method: "POST", url: `${V1}/auth/login`, payload: { email: registerBody.admin.email, password: registerBody.admin.password } });
+    expect(login.statusCode).toBe(401);
+    const view = (await app.inject({ method: "GET", url: `${V1}/orgs/${orgId}`, headers: { authorization: `Bearer ${platform}` } })).json();
+    expect(view.credentials.filter((c: { type: string }) => c.type === "OrganizationCredential")).toHaveLength(0);
+  });
+});
