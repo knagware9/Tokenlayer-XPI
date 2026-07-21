@@ -189,7 +189,9 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
   const [busy, setBusy] = useState(false);
 
   const tokenType = standard === "ERC-721" ? "nonfungible" : "fungible";
-  const isAdmin = user?.role === "PlatformAdmin";
+  // A PlatformAdmin creates+deploys directly; an OrgAdmin submits a gated proposal
+  // (POST /use-cases returns 202). Both may drive the wizard.
+  const canConfigure = user?.role === "PlatformAdmin" || user?.role === "OrgAdmin";
   const chainOf = (id: string): ChainInfo | undefined => chains.find((c) => c.id === id);
 
   // ---------- derived per-step validation ----------
@@ -388,10 +390,10 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
     setPreviewTab("");
   }
 
-  if (!isAdmin) {
+  if (!canConfigure) {
     return (
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 text-sm text-slate-500">
-        Only a <span className="font-medium text-slate-700">Platform Admin</span> can create use cases.
+        Only a <span className="font-medium text-slate-700">Platform Admin</span> or an <span className="font-medium text-slate-700">Org Admin</span> can configure use cases.
       </div>
     );
   }

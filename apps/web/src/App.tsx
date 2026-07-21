@@ -13,8 +13,10 @@ import { MyIdentity } from "./components/MyIdentity.js";
 import { Organizations } from "./components/Organizations.js";
 import { PlatformHome } from "./components/PlatformHome.js";
 import { Signup } from "./components/Signup.js";
+import { UseCaseBuilder } from "./components/UseCaseBuilder.js";
 import { UserManagement } from "./components/UserManagement.js";
 import { VerificationRequests } from "./components/VerificationRequests.js";
+import { SectionHeader } from "./components/ui.js";
 import { canManageUsers } from "./rbac.js";
 import type { ChainInfo, UseCase } from "./types.js";
 
@@ -121,7 +123,14 @@ export function App(): JSX.Element {
             </button>
           ))}
         </div>
-        {section === "overview" && <Dashboard useCaseKey={activeUseCase} />}
+        {section === "overview" && (user.role === "OrgAdmin" ? (
+          <div>
+            <SectionHeader title="Configure a use case" description="Design your tokenization use case low-code; it is submitted to the platform for approval, then deploys automatically." />
+            <UseCaseBuilder chains={chains} existing={useCases} onCreated={reloadUseCases} />
+          </div>
+        ) : (
+          <Dashboard useCaseKey={activeUseCase} />
+        ))}
         {section === "assets" && <AssetManagement useCaseKey={activeUseCase} useCases={useCases} chains={chains} />}
         {section === "approvals" && <ApprovalsPanel />}
         {section === "users" && <UserManagement useCaseKey={activeUseCase} useCases={useCases} />}
