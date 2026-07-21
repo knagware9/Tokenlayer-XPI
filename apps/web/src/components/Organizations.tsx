@@ -48,6 +48,9 @@ export function Organizations(): JSX.Element {
   const [pending, setPending] = useState<Organization[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Lives HERE, not in PendingOrgs: the queue card unmounts when the last
+  // pending org is approved, and the issuance notice must survive that.
+  const [issued, setIssued] = useState<{ name: string; did: string } | null>(null);
 
   const reload = (): void => {
     if (!token) return;
@@ -86,9 +89,16 @@ export function Organizations(): JSX.Element {
       />
       {error && <p className="text-sm text-red-600">{error}</p>}
 
+      {isPlatform && issued && (
+        <p className="text-sm rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-2">
+          <span className="font-semibold">{issued.name}</span> approved — DID issued by TokenLayer Platform
+          <span className="font-mono text-xs"> {issued.did.slice(0, 24)}…</span> · registered on-chain · OrganizationCredential anchored.
+        </p>
+      )}
       {isPlatform && pending.length > 0 && (
         <PendingOrgs
           pending={pending}
+          onIssued={setIssued}
           onApproved={() => { reloadPending(); reload(); }}
           onRejected={reloadPending}
         />
@@ -175,8 +185,9 @@ function OrgCard({ org, selected, registration, onSelect }: {
  * and are pending a PlatformAdmin decision. Approving activates the org (and its
  * pending admin); rejecting records a reason.
  */
-function PendingOrgs({ pending, onApproved, onRejected }: {
+function PendingOrgs({ pending, onIssued, onApproved, onRejected }: {
   pending: Organization[];
+  onIssued: (issued: { name: string; did: string }) => void;
   onApproved: () => void;
   onRejected: () => void;
 }): JSX.Element {
@@ -184,7 +195,6 @@ function PendingOrgs({ pending, onApproved, onRejected }: {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
-  const [issued, setIssued] = useState<{ name: string; did: string } | null>(null);
 
   async function approve(id: string): Promise<void> {
     if (!token) return;
@@ -192,7 +202,7 @@ function PendingOrgs({ pending, onApproved, onRejected }: {
     setError(null);
     try {
       const res = await api.approveOrg(token, id);
-      setIssued({ name: res.name, did: res.did });
+      onIssued({ name: res.name, did: res.did });
       onApproved();
     } catch (err) {
       setError(errMessage(err, "Approve failed"));
@@ -220,12 +230,6 @@ function PendingOrgs({ pending, onApproved, onRejected }: {
   return (
     <Card title="Pending corporate registrations" description="Self-service sign-ups awaiting a platform decision.">
       {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
-      {issued && (
-        <p className="mb-3 text-sm rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-2">
-          <span className="font-semibold">{issued.name}</span> approved — DID issued by TokenLayer Platform
-          <span className="font-mono text-xs"> {issued.did.slice(0, 24)}…</span> · registered on-chain · OrganizationCredential anchored.
-        </p>
-      )}
       <div className="space-y-2">
         {pending.map((o) => {
           const p = o.companyProfile;
