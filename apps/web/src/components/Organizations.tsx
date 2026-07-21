@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ApiError, api } from "../api.js";
 import { useAuth } from "../auth.js";
-import type { CompanyCategory, DidDocument, OrgMember, OrgType, Organization, Role } from "../types.js";
+import type { CompanyCategory, CredentialStatusInfo, DidDocument, KybDocumentRef, OrgMember, OrgType, Organization, Role } from "../types.js";
 import { CredentialsPanel } from "./CredentialsPanel.js";
 import { Card, EmptyState, Pill, SectionHeader } from "./ui.js";
 
@@ -143,14 +143,29 @@ function OrgCard({ org, selected, registration, onSelect }: {
         <Pill tone="info">{org.orgType}</Pill>
         {org.jurisdiction && <Pill tone="muted">{org.jurisdiction}</Pill>}
       </div>
-      <div className="flex items-center gap-2 min-w-0">
-        <span className="text-[11px] font-mono text-slate-500 truncate" title={org.did}>
-          {truncateDid(org.did)}
-        </span>
-        {registration?.registered && (
-          <Pill tone={registration.active ? "ok" : "muted"}>{registration.active ? "on-chain" : "deactivated"}</Pill>
-        )}
-      </div>
+      {org.status !== "active" ? (
+        <Pill tone="warn">DID pending issuance</Pill>
+      ) : (
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-[11px] font-mono text-slate-500 truncate" title={org.did}>
+              {truncateDid(org.did)}
+            </span>
+            {registration?.registered && (
+              <Pill tone={registration.active ? "ok" : "muted"}>{registration.active ? "on-chain" : "deactivated"}</Pill>
+            )}
+          </div>
+          {(() => {
+            const oc = org.credentials?.find((c) => c.type === "OrganizationCredential" && !c.revoked);
+            return oc ? (
+              <span className="flex items-center gap-1.5">
+                <span className="text-xs text-slate-500">Issued by <span className="font-medium text-slate-700">TokenLayer Platform</span></span>
+                <CredStatusPill id={oc.id} />
+              </span>
+            ) : null;
+          })()}
+        </div>
+      )}
     </button>
   );
 }
@@ -168,13 +183,16 @@ function PendingOrgs({ pending, onApproved, onRejected }: {
   const { token } = useAuth();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
+  const [issued, setIssued] = useState<{ name: string; did: string } | null>(null);
 
   async function approve(id: string): Promise<void> {
     if (!token) return;
     setBusy(id);
     setError(null);
     try {
-      await api.approveOrg(token, id);
+      const res = await api.approveOrg(token, id);
+      setIssued({ name: res.name, did: res.did });
       onApproved();
     } catch (err) {
       setError(errMessage(err, "Approve failed"));
@@ -202,6 +220,12 @@ function PendingOrgs({ pending, onApproved, onRejected }: {
   return (
     <Card title="Pending corporate registrations" description="Self-service sign-ups awaiting a platform decision.">
       {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
+      {issued && (
+        <p className="mb-3 text-sm rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-2">
+          <span className="font-semibold">{issued.name}</span> approved — DID issued by TokenLayer Platform
+          <span className="font-mono text-xs"> {issued.did.slice(0, 24)}…</span> · registered on-chain · OrganizationCredential anchored.
+        </p>
+      )}
       <div className="space-y-2">
         {pending.map((o) => {
           const p = o.companyProfile;
@@ -219,6 +243,12 @@ function PendingOrgs({ pending, onApproved, onRejected }: {
                 </div>
                 <div className="flex gap-2 shrink-0">
                   <button
+                    onClick={() => setOpen((cur) => (cur === o.id ? null : o.id))}
+                    className="text-xs rounded border border-slate-300 text-slate-600 px-3 py-1.5 font-medium hover:bg-slate-50"
+                  >
+                    {open === o.id ? "Hide" : "Review"}
+                  </button>
+                  <button
                     onClick={() => void approve(o.id)}
                     disabled={busy === o.id}
                     className="text-xs rounded bg-brand-600 text-white px-3 py-1.5 font-medium hover:bg-brand-700 disabled:opacity-40"
@@ -234,15 +264,25 @@ function PendingOrgs({ pending, onApproved, onRejected }: {
                   </button>
                 </div>
               </div>
-              {p && (
-                <dl className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5 border-t border-slate-100 pt-3 text-xs">
-                  <Kv label="CIN" value={p.cin} />
-                  <Kv label="PAN" value={p.pan} />
-                  <Kv label="GSTIN" value={p.gstin || "—"} />
-                  <Kv label="Incorporated" value={p.dateOfIncorporation} />
-                  <Kv label="State" value={p.state} />
-                  <Kv label="Pincode" value={p.pincode} />
-                </dl>
+              {open === o.id && (
+                <>
+                  {p && (
+                    <dl className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5 border-t border-slate-100 pt-3 text-xs">
+                      <Kv label="CIN" value={p.cin} />
+                      <Kv label="PAN" value={p.pan} />
+                      <Kv label="GSTIN" value={p.gstin || "—"} />
+                      <Kv label="Incorporated" value={p.dateOfIncorporation} />
+                      <Kv label="State" value={p.state} />
+                      <Kv label="Pincode" value={p.pincode} />
+                    </dl>
+                  )}
+                  {p?.documents && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <DocLink token={token!} label="CIN certificate" doc={p.documents.cinCertificate} />
+                      {p.documents.gstinCertificate && <DocLink token={token!} label="GSTIN certificate" doc={p.documents.gstinCertificate} />}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           );
@@ -250,6 +290,47 @@ function PendingOrgs({ pending, onApproved, onRejected }: {
       </div>
     </Card>
   );
+}
+
+/** Authenticated download of a stored KYB certificate (blob → save). */
+function DocLink({ token, label, doc }: { token: string; label: string; doc: KybDocumentRef }): JSX.Element {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(false);
+  async function download(): Promise<void> {
+    setBusy(true);
+    setError(false);
+    try {
+      const blob = await api.downloadDocument(token, doc.id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = label.toLowerCase().replace(/\s+/g, "-");
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError(true);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <button
+      onClick={() => void download()}
+      disabled={busy}
+      className="text-xs rounded border border-slate-300 text-slate-600 px-2.5 py-1 font-medium hover:bg-slate-50 disabled:opacity-40"
+    >
+      ⬇ {label} <span className="text-slate-400 font-normal">{doc.sha256.slice(0, 10)}…</span>
+      {error && <span className="text-red-500"> — failed</span>}
+    </button>
+  );
+}
+
+/** Live status pill for one credential via the public status endpoint. */
+function CredStatusPill({ id }: { id: string }): JSX.Element | null {
+  const [status, setStatus] = useState<CredentialStatusInfo | null>(null);
+  useEffect(() => { void api.credentialStatus(id).then(setStatus).catch(() => setStatus(null)); }, [id]);
+  if (!status) return null;
+  return <Pill tone={status.revoked ? "danger" : "ok"}>{status.revoked ? "revoked" : status.source === "chain" ? "anchored on-chain" : "issued"}</Pill>;
 }
 
 function CreateOrg({ onCreated }: { onCreated: () => void }): JSX.Element {
