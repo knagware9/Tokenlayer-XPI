@@ -899,12 +899,19 @@ export const S: Record<string, FastifySchema> = {
       type: "object", additionalProperties: false, required: ["company", "admin"],
       properties: {
         company: {
-          type: "object", additionalProperties: false, required: ["name", "orgType"],
+          type: "object", additionalProperties: false,
+          required: ["name", "orgType", "cin", "pan", "state", "pincode", "dateOfIncorporation", "category", "companyStatus"],
           properties: {
             name: { type: "string", minLength: 1 },
             orgType: { type: "string", enum: ["bank", "corporate", "msme", "government"] },
-            registrationId: { type: "string" },
-            jurisdiction: { type: "string" },
+            cin: { type: "string", minLength: 1 },
+            pan: { type: "string", minLength: 1 },
+            gstin: { type: "string" },
+            state: { type: "string", minLength: 1 },
+            pincode: { type: "string", minLength: 1 },
+            dateOfIncorporation: { type: "string", minLength: 1 },
+            category: { type: "string", enum: ["private-limited", "public-limited", "llp", "opc", "section-8"] },
+            companyStatus: { type: "string", enum: ["active", "inactive"] },
           },
         },
         admin: {

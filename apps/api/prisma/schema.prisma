@@ -205,6 +205,7 @@ model Organization {
   status           String   @default("active") // active | suspended
   verified         Boolean  @default(false)
   verifiedAt       DateTime?
+  companyProfile   String? // JSON-encoded CompanyProfile (India KYB details), self-registered corporates only
   createdAt        DateTime @default(now())
 
   @@index([status])

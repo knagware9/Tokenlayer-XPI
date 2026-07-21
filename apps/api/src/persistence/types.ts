@@ -321,6 +321,25 @@ export interface CashRepository {
 
 export type OrgStatus = "pending" | "active" | "suspended" | "rejected";
 
+/** Legal structure of an Indian company — the KYB "category". */
+export type CompanyCategory = "private-limited" | "public-limited" | "llp" | "opc" | "section-8";
+
+/**
+ * India-specific KYB details captured at corporate self-registration and shown to
+ * the Platform Admin at approval. Statutory identifiers (CIN/PAN/GSTIN) are stored
+ * as reference numbers only — no document files are held here.
+ */
+export interface CompanyProfile {
+  cin: string;
+  pan: string;
+  gstin: string | null;
+  state: string;
+  pincode: string;
+  dateOfIncorporation: string; // ISO calendar date, yyyy-mm-dd
+  category: CompanyCategory;
+  companyStatus: "active" | "inactive";
+}
+
 export interface OrganizationRecord {
   id: string;
   name: string;
@@ -332,6 +351,8 @@ export interface OrganizationRecord {
   status: OrgStatus;
   verified: boolean;
   verifiedAt: string | null;
+  /** Present for self-registered corporates; null for platform-created orgs. */
+  companyProfile: CompanyProfile | null;
   createdAt: string;
 }
 

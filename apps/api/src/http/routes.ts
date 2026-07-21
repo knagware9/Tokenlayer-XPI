@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { AssetRecord, CashflowRecord, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord } from "../persistence/types.js";
+import type { AssetRecord, CashflowRecord, CompanyProfile, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
 import { auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TYPES, credentialTypeDef, decodeJwt, didKeyFromSeed, generateDidKey, invoiceFingerprint, issueCredential, normalizeUseCaseDefinition, PolicyError, presentCredential, presentCredentials, publicKeyFromDidKey, splitProRata, validateMetadata, verifyChain, verifyPresentation, verifyPresentationCredentials, type Actor, type ChainEntry, type LifecycleAction, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
@@ -42,7 +42,7 @@ function devKeyFromSeed(seed: string) {
 
 // Public projection of an org — NEVER includes didSeedEncrypted.
 function orgView(o: OrganizationRecord) {
-  return { id: o.id, name: o.name, orgType: o.orgType, registrationId: o.registrationId, jurisdiction: o.jurisdiction, did: o.did, verified: o.verified, status: o.status, createdAt: o.createdAt };
+  return { id: o.id, name: o.name, orgType: o.orgType, registrationId: o.registrationId, jurisdiction: o.jurisdiction, did: o.did, verified: o.verified, status: o.status, companyProfile: o.companyProfile, createdAt: o.createdAt };
 }
 
 /** Registers every /api/v1 route on the given (prefixed) instance. */
@@ -1229,20 +1229,33 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   app.post("/orgs/register", { schema: S.registerOrg }, async (request, reply) => {
     if (loginThrottled(request.ip)) return reply.code(429).send({ error: "TOO_MANY_REQUESTS", message: "too many attempts; try again later" });
     if (!deps.didMasterConfigured && deps.isProduction) return reply.code(503).send({ error: "DID_KEYSTORE_UNCONFIGURED", message: "DID_MASTER_KEY must be set" });
-    const b = request.body as { company: { name: string; orgType: "bank" | "corporate" | "msme" | "government"; registrationId?: string; jurisdiction?: string }; admin: { name: string; email: string; password: string } };
+    const b = request.body as {
+      company: {
+        name: string; orgType: "bank" | "corporate" | "msme" | "government";
+        cin: string; pan: string; gstin?: string; state: string; pincode: string;
+        dateOfIncorporation: string; category: CompanyProfile["category"]; companyStatus: "active" | "inactive";
+      };
+      admin: { name: string; email: string; password: string };
+    };
     if (await deps.organizations.findByName(b.company.name)) return reply.code(409).send({ error: "NAME_TAKEN", message: "an organization with that name already exists" });
-    if (b.company.registrationId && (await deps.organizations.findByRegistrationId(b.company.registrationId))) return reply.code(409).send({ error: "REGISTRATION_TAKEN", message: "an organization with that registration id already exists" });
+    // The CIN is the statutory registration number — dedupe on it.
+    if (await deps.organizations.findByRegistrationId(b.company.cin)) return reply.code(409).send({ error: "REGISTRATION_TAKEN", message: "an organization with that CIN already exists" });
     if (await deps.users.findByEmail(b.admin.email)) return reply.code(409).send({ error: "EMAIL_TAKEN", message: "email already registered" });
 
+    const companyProfile: CompanyProfile = {
+      cin: b.company.cin, pan: b.company.pan, gstin: b.company.gstin?.trim() || null,
+      state: b.company.state, pincode: b.company.pincode, dateOfIncorporation: b.company.dateOfIncorporation,
+      category: b.company.category, companyStatus: b.company.companyStatus,
+    };
     // Mint the org DID now, but DO NOT register it on-chain and DO NOT activate —
     // a pending org's DID is trusted nowhere (verifier trust keys off the registry).
     const seed = deps.keystore.newSeed();
     const didSeedEncrypted = deps.keystore.encryptSeed(seed);
     const did = deps.keystore.keyOf(didSeedEncrypted).did;
     const org = await deps.organizations.create({
-      name: b.company.name, orgType: b.company.orgType, registrationId: b.company.registrationId ?? null,
-      jurisdiction: b.company.jurisdiction ?? null, did, didSeedEncrypted,
-      status: "pending", verified: false, verifiedAt: null,
+      name: b.company.name, orgType: b.company.orgType, registrationId: b.company.cin,
+      jurisdiction: "IN", did, didSeedEncrypted,
+      status: "pending", verified: false, verifiedAt: null, companyProfile,
     });
     try {
       await deps.users.create({
@@ -1281,7 +1294,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     }
     const org = await deps.organizations.create({
       name: b.name, orgType: b.orgType, registrationId: b.registrationId ?? null, jurisdiction: b.jurisdiction ?? null,
-      did, didSeedEncrypted, status: "active", verified: true, verifiedAt: new Date().toISOString(),
+      did, didSeedEncrypted, status: "active", verified: true, verifiedAt: new Date().toISOString(), companyProfile: null,
     });
     await deps.audit.append({ actorId: claims.id, action: "org-created" as LifecycleAction, payload: { orgId: org.id, name: org.name, did: org.did } });
     return reply.code(201).send({ id: org.id, name: org.name, did: org.did, orgType: org.orgType, registrationId: org.registrationId, jurisdiction: org.jurisdiction, verified: org.verified, status: org.status });

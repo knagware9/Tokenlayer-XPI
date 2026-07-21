@@ -34,6 +34,7 @@ export async function ensurePlatformIssuerOrg(deps: PlatformOrgDeps): Promise<Or
     status: "active",
     verified: true,
     verifiedAt: new Date().toISOString(),
+    companyProfile: null,
   });
   if (deps.registry) await ensureDidRegistered(deps.registry, did);
   return org;
