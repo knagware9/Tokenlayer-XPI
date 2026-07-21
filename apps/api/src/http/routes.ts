@@ -1412,7 +1412,9 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         // here needs only the rollback below — no credential compensation.
         const platformOrg = await ensurePlatformIssuerOrg(deps);
         const p = org.companyProfile;
-        const claims: Record<string, unknown> = {
+        // Named kybClaims (not `claims`) — the handler's `claims` is the caller's
+        // TokenClaims, and shadowing it here would be a trap for future edits.
+        const kybClaims: Record<string, unknown> = {
           name: org.name, orgType: org.orgType,
           ...(p ? {
             cin: p.cin, pan: p.pan, state: p.state, pincode: p.pincode,
@@ -1420,7 +1422,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
             ...(p.gstin ? { gstin: p.gstin } : {}),
           } : {}),
         };
-        const cred = await issueCredentialFor(deps, { issuerOrg: platformOrg, subjectDid: org.did, type: "OrganizationCredential", claims, proposalId: null });
+        const cred = await issueCredentialFor(deps, { issuerOrg: platformOrg, subjectDid: org.did, type: "OrganizationCredential", claims: kybClaims, proposalId: null });
         issuerDid = platformOrg.did;
         orgCredentialId = cred.id;
       } catch (err) {
