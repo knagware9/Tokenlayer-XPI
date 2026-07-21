@@ -126,4 +126,19 @@ describe("gated use-case config", () => {
     const res = await app.inject({ method: "POST", url: `${V1}/use-cases`, headers: { authorization: `Bearer ${platform}` }, payload: { ...def, key: "pa-direct" } });
     expect(res.statusCode).toBe(201);
   });
+
+  it("execute re-checks the key: if it is taken after propose, approval fails (not crash) and does not overwrite", async () => {
+    const app = await buildTestApp();
+    const { platform, adminTok } = await activeOrgAdmin(app);
+    // OrgAdmin proposes globex-notes.
+    const pid = (await app.inject({ method: "POST", url: `${V1}/use-cases`, headers: { authorization: `Bearer ${adminTok}` }, payload: def })).json().proposal.id;
+    // The key is taken before approval (a PlatformAdmin creates it directly).
+    const direct = await app.inject({ method: "POST", url: `${V1}/use-cases`, headers: { authorization: `Bearer ${platform}` }, payload: def });
+    expect(direct.statusCode).toBe(201);
+    // Approving the now-stale proposal fails gracefully (no crash), leaving the existing use case intact.
+    const appr = await app.inject({ method: "POST", url: `${V1}/proposals/${pid}/approve`, headers: { authorization: `Bearer ${platform}` }, payload: {} });
+    expect(appr.json().proposal.status).toBe("failed");
+    const matches = (await app.inject({ method: "GET", url: `${V1}/use-cases`, headers: { authorization: `Bearer ${platform}` } })).json().filter((u: { key: string }) => u.key === "globex-notes");
+    expect(matches.length).toBe(1);
+  });
 });

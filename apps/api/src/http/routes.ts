@@ -7,7 +7,7 @@ import { auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, comp
 import type { AppDeps } from "../context.js";
 import { isSupportedCurrency } from "../currencies.js";
 import { renderContractCode } from "../contract-code.js";
-import { deployUseCaseContracts } from "../use-cases.js";
+import { deployAndCreateUseCase } from "../use-cases.js";
 import { computeAnalytics } from "../analytics.js";
 import { computeActivity, computePortfolio } from "../investor.js";
 import { assetBalancesOf, coded, CodedError, dropPayerShare, executeCashflowCore, executeIssueActivation, runGatedAction } from "../executors.js";
@@ -189,23 +189,20 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       });
       return reply.code(202).send({ proposal });
     }
-    // Deploy the use case's contract on each allowed chain that is available in the
-    // registry (fabric is always available in the simulated stack). Best-effort per
-    // chain: a failure leaves that chain pending; we require at least one success.
+    // PlatformAdmin: deploy the use case's contract on each allowed chain that is
+    // available in the registry (fabric is always available in the simulated stack)
+    // and persist it. Best-effort per chain: a failure leaves that chain pending;
+    // at least one success is required (NO_DEPLOYABLE_CHAIN via the shared helper,
+    // mapped to 400 by the global error handler). Same path the proposal executes.
     const available = new Set(deps.chains.list().map((c) => c.id));
-    const contracts = await deployUseCaseContracts(
+    const created = await deployAndCreateUseCase(
+      deps.useCases,
       definition,
       available,
       (def, chainId) => deps.engine.deployUseCaseContract(def, chainId),
       (m) => request.log.warn(m),
     );
-    if (Object.keys(contracts).length === 0) {
-      return reply.code(400).send({
-        error: "NO_DEPLOYABLE_CHAIN",
-        message: `no allowed chain is available to deploy '${definition.key}'; configure at least one of: ${definition.allowedChainIds.join(", ")}`,
-      });
-    }
-    return reply.code(201).send(await deps.useCases.create({ ...definition, contracts }));
+    return reply.code(201).send(created);
   });
 
   // The contract code that backs a use case on one allowed chain — the real
