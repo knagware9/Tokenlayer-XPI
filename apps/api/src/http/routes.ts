@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { AssetRecord, CashflowRecord, CompanyProfile, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord } from "../persistence/types.js";
+import type { AssetRecord, CashflowRecord, CompanyProfile, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
 import { auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TYPES, credentialTypeDef, decodeJwt, didKeyFromSeed, generateDidKey, invoiceFingerprint, issueCredential, normalizeUseCaseDefinition, PolicyError, presentCredential, presentCredentials, publicKeyFromDidKey, splitProRata, validateMetadata, verifyChain, verifyPresentation, verifyPresentationCredentials, type Actor, type ChainEntry, type LifecycleAction, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
@@ -19,6 +19,11 @@ const NO_USE_CASE = "__none__"; // sentinel: a use-case key that matches no real
 
 const BCRYPT_ROUNDS = 12;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+
+const MAX_DOC_BYTES = 5 * 1024 * 1024;
+// Allowlisted document content types — stored bytes are served back later, so an
+// arbitrary type (e.g. text/html) would enable stored XSS on the API origin.
+const ALLOWED_DOC_TYPES = new Set(["application/pdf", "image/png", "image/jpeg", "image/webp", "text/plain"]);
 
 // Extract the inner VC's `jti` (credential id) from a VP-JWT, or null on any
 // malformed input. Used to record the verified credential's id on the user.
@@ -1226,6 +1231,22 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   });
 
   // --- organizations -------------------------------------------------------
+  // Public: a registrant uploads a statutory certificate BEFORE registering. Same
+  // limits as the authenticated store; throttled like /orgs/register. The caller
+  // cannot read the document back — only authenticated reviewers can.
+  app.post("/orgs/register/documents", { schema: S.uploadKybDocument, bodyLimit: 8 * 1024 * 1024 }, async (request, reply) => {
+    if (loginThrottled(request.ip)) return reply.code(429).send({ error: "TOO_MANY_REQUESTS", message: "too many attempts; try again later" });
+    const { contentType, dataBase64 } = request.body as { contentType: string; dataBase64: string };
+    if (!ALLOWED_DOC_TYPES.has(contentType)) {
+      return reply.code(415).send({ error: "UNSUPPORTED_DOCUMENT_TYPE", message: `contentType must be one of: ${[...ALLOWED_DOC_TYPES].join(", ")}` });
+    }
+    const bytes = Buffer.from(dataBase64, "base64");
+    if (bytes.length === 0) return reply.code(400).send({ error: "BAD_DOCUMENT", message: "empty document" });
+    if (bytes.length > MAX_DOC_BYTES) return reply.code(413).send({ error: "DOCUMENT_TOO_LARGE", message: `max ${MAX_DOC_BYTES} bytes` });
+    const doc = await deps.documents.create({ contentType, bytes });
+    return reply.code(201).send({ id: doc.id, sha256: doc.sha256, size: doc.size });
+  });
+
   app.post("/orgs/register", { schema: S.registerOrg }, async (request, reply) => {
     if (loginThrottled(request.ip)) return reply.code(429).send({ error: "TOO_MANY_REQUESTS", message: "too many attempts; try again later" });
     if (!deps.didMasterConfigured && deps.isProduction) return reply.code(503).send({ error: "DID_KEYSTORE_UNCONFIGURED", message: "DID_MASTER_KEY must be set" });
@@ -1234,6 +1255,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         name: string; orgType: "bank" | "corporate" | "msme" | "government";
         cin: string; pan: string; gstin?: string; state: string; pincode: string;
         dateOfIncorporation: string; category: CompanyProfile["category"]; companyStatus: "active" | "inactive";
+        documents: { cinCertificate: { id: string }; gstinCertificate?: { id: string } };
       };
       admin: { name: string; email: string; password: string };
     };
@@ -1242,10 +1264,22 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (await deps.organizations.findByRegistrationId(b.company.cin)) return reply.code(409).send({ error: "REGISTRATION_TAKEN", message: "an organization with that CIN already exists" });
     if (await deps.users.findByEmail(b.admin.email)) return reply.code(409).send({ error: "EMAIL_TAKEN", message: "email already registered" });
 
+    // Resolve document refs SERVER-side: the persisted sha256 comes from OUR
+    // stored record, never from the client's claim.
+    const cinDoc = await deps.documents.get(b.company.documents.cinCertificate.id);
+    if (!cinDoc) return reply.code(400).send({ error: "DOCUMENT_NOT_FOUND", message: "CIN certificate upload not found" });
+    let gstinRef: KybDocumentRef | null = null;
+    if (b.company.documents.gstinCertificate) {
+      const g = await deps.documents.get(b.company.documents.gstinCertificate.id);
+      if (!g) return reply.code(400).send({ error: "DOCUMENT_NOT_FOUND", message: "GSTIN certificate upload not found" });
+      gstinRef = { id: g.id, sha256: g.sha256 };
+    }
+
     const companyProfile: CompanyProfile = {
       cin: b.company.cin, pan: b.company.pan, gstin: b.company.gstin?.trim() || null,
       state: b.company.state, pincode: b.company.pincode, dateOfIncorporation: b.company.dateOfIncorporation,
       category: b.company.category, companyStatus: b.company.companyStatus,
+      documents: { cinCertificate: { id: cinDoc.id, sha256: cinDoc.sha256 }, gstinCertificate: gstinRef },
     };
     // Mint the org DID now, but DO NOT register it on-chain and DO NOT activate —
     // a pending org's DID is trusted nowhere (verifier trust keys off the registry).
@@ -2057,10 +2091,6 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   // --- documents ----------------------------------------------------------
   // A small document store so the dashboard can upload a file (e.g. an invoice
   // PDF) and reference it from asset metadata by URL + sha256.
-  const MAX_DOC_BYTES = 5 * 1024 * 1024;
-  // Allowlisted document content types — stored bytes are served back later, so an
-  // arbitrary type (e.g. text/html) would enable stored XSS on the API origin.
-  const ALLOWED_DOC_TYPES = new Set(["application/pdf", "image/png", "image/jpeg", "image/webp", "text/plain"]);
   // Only desk operators (issue-capable) and auditors may read stored documents —
   // these hold sensitive off-ledger invoice evidence, not public assets.
   const canReadDoc = (role: Role): boolean => deps.rbac.can(role, "issue") || role === "Auditor";

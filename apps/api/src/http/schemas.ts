@@ -900,7 +900,7 @@ export const S: Record<string, FastifySchema> = {
       properties: {
         company: {
           type: "object", additionalProperties: false,
-          required: ["name", "orgType", "cin", "pan", "state", "pincode", "dateOfIncorporation", "category", "companyStatus"],
+          required: ["name", "orgType", "cin", "pan", "state", "pincode", "dateOfIncorporation", "category", "companyStatus", "documents"],
           properties: {
             name: { type: "string", minLength: 1 },
             orgType: { type: "string", enum: ["bank", "corporate", "msme", "government"] },
@@ -912,6 +912,13 @@ export const S: Record<string, FastifySchema> = {
             dateOfIncorporation: { type: "string", minLength: 1 },
             category: { type: "string", enum: ["private-limited", "public-limited", "llp", "opc", "section-8"] },
             companyStatus: { type: "string", enum: ["active", "inactive"] },
+            documents: {
+              type: "object", additionalProperties: false, required: ["cinCertificate"],
+              properties: {
+                cinCertificate: { type: "object", additionalProperties: false, required: ["id"], properties: { id: { type: "string", minLength: 1 } } },
+                gstinCertificate: { type: "object", additionalProperties: false, required: ["id"], properties: { id: { type: "string", minLength: 1 } } },
+              },
+            },
           },
         },
         admin: {
@@ -1082,6 +1089,22 @@ export const S: Record<string, FastifySchema> = {
         required: ["id", "url", "sha256", "size"],
       },
       ...errs(400, 401, 403, 413),
+    },
+  },
+  uploadKybDocument: {
+    tags: ["Documents"], summary: "Public: upload a KYB certificate (base64) before registering; returns id + sha256",
+    body: {
+      type: "object",
+      required: ["contentType", "dataBase64"],
+      properties: { contentType: { type: "string" }, dataBase64: { type: "string" } },
+    },
+    response: {
+      201: {
+        type: "object",
+        properties: { id: { type: "string" }, sha256: { type: "string" }, size: { type: "integer" } },
+        required: ["id", "sha256", "size"],
+      },
+      ...errs(400, 413, 415, 429),
     },
   },
   getDocument: {

@@ -12,10 +12,58 @@ const registerBody = {
   admin: { name: "Rhea Kapoor", email: "rhea@globex.dev", password: "corp-secret-1" },
 };
 
+const pdfBase64 = (label: string): string => Buffer.from(`%PDF-1.4 fake ${label}`).toString("base64");
+
+/** Upload a CIN certificate to the public endpoint and return a register payload referencing it. */
+async function registerPayload(app: import("fastify").FastifyInstance, overrides?: { gstinToo?: boolean }) {
+  const up = await app.inject({ method: "POST", url: `${V1}/orgs/register/documents`, payload: { contentType: "application/pdf", dataBase64: pdfBase64("cin") } });
+  expect(up.statusCode).toBe(201);
+  const cin = up.json() as { id: string; sha256: string };
+  let gstin: { id: string; sha256: string } | undefined;
+  if (overrides?.gstinToo) {
+    const up2 = await app.inject({ method: "POST", url: `${V1}/orgs/register/documents`, payload: { contentType: "image/png", dataBase64: pdfBase64("gstin") } });
+    gstin = up2.json();
+  }
+  return {
+    body: { ...registerBody, company: { ...registerBody.company, documents: { cinCertificate: { id: cin.id }, ...(gstin ? { gstinCertificate: { id: gstin.id } } : {}) } } },
+    cin, gstin,
+  };
+}
+
+describe("KYB document upload (public)", () => {
+  it("uploads → 201 with sha256; register persists SERVER-side refs; reviewer can download", async () => {
+    const app = await buildTestApp();
+    const { body, cin, gstin } = await registerPayload(app, { gstinToo: true });
+    const res = await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: body });
+    expect(res.statusCode).toBe(202);
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const mine = (await app.inject({ method: "GET", url: `${V1}/orgs?status=pending`, headers: { authorization: `Bearer ${platform}` } })).json()
+      .find((o: { id: string }) => o.id === res.json().organizationId);
+    expect(mine.companyProfile.documents.cinCertificate).toEqual({ id: cin.id, sha256: cin.sha256 });
+    expect(mine.companyProfile.documents.gstinCertificate).toEqual({ id: gstin!.id, sha256: gstin!.sha256 });
+    const dl = await app.inject({ method: "GET", url: `${V1}/documents/${cin.id}`, headers: { authorization: `Bearer ${platform}` } });
+    expect(dl.statusCode).toBe(200);
+    const anon = await app.inject({ method: "GET", url: `${V1}/documents/${cin.id}` });
+    expect(anon.statusCode).toBe(401);
+  });
+  it("refuses bad uploads and bad references", async () => {
+    const app = await buildTestApp();
+    const badType = await app.inject({ method: "POST", url: `${V1}/orgs/register/documents`, payload: { contentType: "application/zip", dataBase64: pdfBase64("x") } });
+    expect(badType.statusCode).toBe(415);
+    const tooBig = await app.inject({ method: "POST", url: `${V1}/orgs/register/documents`, payload: { contentType: "application/pdf", dataBase64: Buffer.alloc(5 * 1024 * 1024 + 1).toString("base64") } });
+    expect(tooBig.statusCode).toBe(413);
+    const noDocs = await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: registerBody });
+    expect(noDocs.statusCode).toBe(400); // schema: documents.cinCertificate required
+    const badRef = await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: { ...registerBody, company: { ...registerBody.company, documents: { cinCertificate: { id: "nope" } } } } });
+    expect(badRef.statusCode).toBe(400);
+    expect(badRef.json().error).toBe("DOCUMENT_NOT_FOUND");
+  });
+});
+
 describe("corporate self-registration", () => {
   it("creates a pending org (DID minted, not on-chain) + a pending admin who cannot log in", async () => {
     const app = await buildTestApp();
-    const res = await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: registerBody });
+    const res = await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: (await registerPayload(app)).body });
     expect(res.statusCode).toBe(202);
     expect(res.json().status).toBe("pending");
     const orgId = res.json().organizationId;
@@ -34,22 +82,23 @@ describe("corporate self-registration", () => {
   });
   it("rejects a verifier orgType, an invalid category, and duplicate name/CIN/email", async () => {
     const app = await buildTestApp();
-    const verifier = await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: { ...registerBody, company: { ...registerBody.company, orgType: "verifier" } } });
+    const p = await registerPayload(app); // one upload; every variant may reuse the same doc id (the store doesn't dedupe)
+    const verifier = await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: { ...p.body, company: { ...p.body.company, orgType: "verifier" } } });
     expect(verifier.statusCode).toBe(400);
-    const badCategory = await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: { ...registerBody, company: { ...registerBody.company, category: "sole-prop" } } });
+    const badCategory = await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: { ...p.body, company: { ...p.body.company, category: "sole-prop" } } });
     expect(badCategory.statusCode).toBe(400);
-    await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: registerBody });
-    const dupName = await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: { ...registerBody, admin: { ...registerBody.admin, email: "other@x.dev" } } });
+    await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: p.body });
+    const dupName = await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: { ...p.body, admin: { ...p.body.admin, email: "other@x.dev" } } });
     expect(dupName.statusCode).toBe(409);
-    const dupEmail = await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: { ...registerBody, company: { ...registerBody.company, name: "Different Co", cin: "U99999MH2021PTC999999" } } });
+    const dupEmail = await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: { ...p.body, company: { ...p.body.company, name: "Different Co", cin: "U99999MH2021PTC999999" } } });
     expect(dupEmail.statusCode).toBe(409);
-    const dupCin = await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: { ...registerBody, company: { ...registerBody.company, name: "Yet Another Co" }, admin: { ...registerBody.admin, email: "third@x.dev" } } });
+    const dupCin = await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: { ...p.body, company: { ...p.body.company, name: "Yet Another Co" }, admin: { ...p.body.admin, email: "third@x.dev" } } });
     expect(dupCin.statusCode).toBe(409);
   });
 });
 
 async function registerAndId(app: import("fastify").FastifyInstance) {
-  const res = await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: registerBody });
+  const res = await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: (await registerPayload(app)).body });
   return res.json().organizationId as string;
 }
 
@@ -104,7 +153,7 @@ describe("org approval", () => {
 describe("gated use-case config", () => {
   async function activeOrgAdmin(app: import("fastify").FastifyInstance) {
     const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
-    const orgId = (await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: registerBody })).json().organizationId as string;
+    const orgId = (await app.inject({ method: "POST", url: `${V1}/orgs/register`, payload: (await registerPayload(app)).body })).json().organizationId as string;
     await app.inject({ method: "POST", url: `${V1}/orgs/${orgId}/approve`, headers: { authorization: `Bearer ${platform}` }, payload: {} });
     const adminTok = (await app.inject({ method: "POST", url: `${V1}/auth/login`, payload: { email: registerBody.admin.email, password: registerBody.admin.password } })).json().token as string;
     return { platform, adminTok, orgId };
