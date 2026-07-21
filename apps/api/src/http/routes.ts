@@ -1275,7 +1275,10 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   app.get("/orgs", { schema: S.listOrgs, ...auth }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     let rows;
-    if (claims.role === "PlatformAdmin") rows = await deps.organizations.list();
+    if (claims.role === "PlatformAdmin") {
+      const status = (request.query as { status?: string }).status;
+      rows = (await deps.organizations.list()).filter((o) => !status || o.status === status);
+    }
     else if (claims.role === "OrgAdmin" && claims.orgId) { const o = await deps.organizations.get(claims.orgId); rows = o ? [o] : []; }
     else return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to list organizations" });
     return rows.map(orgView);
@@ -1288,6 +1291,52 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const org = await deps.organizations.get(id);
     if (!org) return notFound(reply, "organization not found");
     return orgView(org);
+  });
+
+  app.post("/orgs/:id/approve", { schema: S.approveOrg, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    if (claims.role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only the Platform Admin may approve organizations" });
+    const { id } = request.params as { id: string };
+    const org = await deps.organizations.get(id);
+    if (!org) return notFound(reply, "organization not found");
+    if (org.status !== "pending") return reply.code(409).send({ error: "NOT_PENDING", message: `organization is ${org.status}` });
+    if (deps.registry) {
+      try {
+        await deps.registry.anchor.registerDid(deps.registry.didRegistry, org.did);
+      } catch (err) {
+        request.log.error({ err }, "org DID registration failed");
+        return reply.code(502).send({ error: "REGISTRY_UNAVAILABLE", message: "could not register the organization's DID on-chain — nothing was changed" });
+      }
+    }
+    const active = await deps.organizations.setStatus(org.id, "active");
+    await deps.organizations.setVerified(org.id, true, new Date().toISOString());
+    const admin = (await deps.users.list()).find((u) => u.orgId === org.id && u.role === "OrgAdmin");
+    if (admin) {
+      try {
+        await mintMembership(active, admin, "OrgAdmin");
+        await deps.users.update(admin.id, { active: true });
+      } catch (err) {
+        await deps.organizations.setStatus(org.id, "pending");
+        await deps.organizations.setVerified(org.id, false, null);
+        request.log.error({ err }, "org admin activation failed");
+        return reply.code(502).send({ error: "ADMIN_ACTIVATION_FAILED", message: "could not activate the organization admin — reverted to pending" });
+      }
+    }
+    await deps.audit.append({ actorId: claims.id, action: "org-approved" as LifecycleAction, payload: { orgId: org.id, did: org.did } });
+    return reply.code(200).send({ id: active.id, name: active.name, did: active.did, orgType: active.orgType, status: "active", verified: true });
+  });
+
+  app.post("/orgs/:id/reject", { schema: S.rejectOrg, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    if (claims.role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only the Platform Admin may reject organizations" });
+    const { id } = request.params as { id: string };
+    const { reason } = request.body as { reason: string };
+    const org = await deps.organizations.get(id);
+    if (!org) return notFound(reply, "organization not found");
+    if (org.status !== "pending") return reply.code(409).send({ error: "NOT_PENDING", message: `organization is ${org.status}` });
+    const rejected = await deps.organizations.setStatus(org.id, "rejected");
+    await deps.audit.append({ actorId: claims.id, action: "org-rejected" as LifecycleAction, payload: { orgId: org.id, reason } });
+    return reply.code(200).send({ id: rejected.id, status: "rejected" });
   });
 
   // Mint a sub-DID + OrganizationMembership VC for `user` under `org`, persisting

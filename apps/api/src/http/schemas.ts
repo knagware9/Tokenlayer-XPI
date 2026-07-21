@@ -915,7 +915,19 @@ export const S: Record<string, FastifySchema> = {
     },
     response: { 202: { type: "object", additionalProperties: true }, ...errs(400, 409, 429) },
   },
-  listOrgs: { tags: ["Organizations"], summary: "List organizations in scope", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403) } },
+  listOrgs: { tags: ["Organizations"], summary: "List organizations in scope", security: bearer, querystring: { type: "object", properties: { status: { type: "string" } } }, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403) } },
+  approveOrg: {
+    tags: ["Organizations"], summary: "Approve a pending org (registers its DID on-chain, activates the admin)", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    body: { type: "object", additionalProperties: false, properties: {} },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404, 409, 502) },
+  },
+  rejectOrg: {
+    tags: ["Organizations"], summary: "Reject a pending org", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    body: { type: "object", additionalProperties: false, required: ["reason"], properties: { reason: { type: "string", minLength: 1 } } },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404, 409) },
+  },
   getOrg: {
     tags: ["Organizations"], summary: "Get an organization by id", security: bearer,
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
