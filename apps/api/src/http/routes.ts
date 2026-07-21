@@ -1310,12 +1310,17 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     }
     const active = await deps.organizations.setStatus(org.id, "active");
     await deps.organizations.setVerified(org.id, true, new Date().toISOString());
-    const admin = (await deps.users.list()).find((u) => u.orgId === org.id && u.role === "OrgAdmin");
+    const admin = (await deps.users.listByOrg(org.id)).find((u) => u.role === "OrgAdmin");
     if (admin) {
       try {
         await mintMembership(active, admin, "OrgAdmin");
         await deps.users.update(admin.id, { active: true });
       } catch (err) {
+        // Roll back to pending AND undo any sub-DID mintMembership stamped on the
+        // admin row before it threw — a dangling did on an inactive admin is
+        // otherwise reachable via POST /credentials/requests. Restore the row to
+        // its pre-approval state (no sub-DID, still inactive).
+        await deps.users.update(admin.id, { did: admin.did, didSeedEncrypted: admin.didSeedEncrypted, active: false });
         await deps.organizations.setStatus(org.id, "pending");
         await deps.organizations.setVerified(org.id, false, null);
         request.log.error({ err }, "org admin activation failed");
