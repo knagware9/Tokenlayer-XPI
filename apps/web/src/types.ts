@@ -293,6 +293,9 @@ export type OrgType = "bank" | "corporate" | "msme" | "government" | "verifier";
 
 export type CompanyCategory = "private-limited" | "public-limited" | "llp" | "opc" | "section-8";
 
+/** Reference to an uploaded KYB certificate (stored server-side, fetched by id). */
+export interface KybDocumentRef { id: string; sha256: string }
+
 /** India KYB details captured at corporate self-registration. */
 export interface CompanyProfile {
   cin: string;
@@ -303,6 +306,8 @@ export interface CompanyProfile {
   dateOfIncorporation: string;
   category: CompanyCategory;
   companyStatus: "active" | "inactive";
+  /** Absent on legacy rows registered before certificate uploads were required. */
+  documents?: { cinCertificate: KybDocumentRef; gstinCertificate: KybDocumentRef | null };
 }
 
 export interface Organization {
@@ -315,6 +320,7 @@ export interface Organization {
   verified: boolean;
   status: string;
   companyProfile?: CompanyProfile | null;
+  credentials?: { id: string; type: string; issuerDid: string; issuedAt: string; revoked: boolean }[];
   createdAt?: string;
 }
 
