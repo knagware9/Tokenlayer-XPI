@@ -1327,6 +1327,11 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     await deps.organizations.setVerified(org.id, true, new Date().toISOString());
     const admin = (await deps.users.listByOrg(org.id)).find((u) => u.role === "OrgAdmin");
     if (admin) {
+      // Snapshot the pre-mint identity BEFORE mintMembership runs — the in-memory
+      // repo mutates the same object in place, so reading admin.did in the catch
+      // would otherwise see the freshly-minted DID instead of the original.
+      const priorDid = admin.did;
+      const priorSeed = admin.didSeedEncrypted;
       try {
         await mintMembership(active, admin, "OrgAdmin");
         await deps.users.update(admin.id, { active: true });
@@ -1335,7 +1340,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         // admin row before it threw — a dangling did on an inactive admin is
         // otherwise reachable via POST /credentials/requests. Restore the row to
         // its pre-approval state (no sub-DID, still inactive).
-        await deps.users.update(admin.id, { did: admin.did, didSeedEncrypted: admin.didSeedEncrypted, active: false });
+        await deps.users.update(admin.id, { did: priorDid, didSeedEncrypted: priorSeed, active: false });
         await deps.organizations.setStatus(org.id, "pending");
         await deps.organizations.setVerified(org.id, false, null);
         request.log.error({ err }, "org admin activation failed");
