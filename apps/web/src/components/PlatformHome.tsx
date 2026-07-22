@@ -12,10 +12,12 @@ import { ChainDeployBadge, UseCaseBuilder } from "./UseCaseBuilder.js";
 import { VerificationRequests } from "./VerificationRequests.js";
 import { Card, EmptyState, Pill, SectionHeader, Skeleton } from "./ui.js";
 
-type Tab = "overview" | "organizations" | "approvals" | "verify" | "use-cases" | "networks" | "create";
+export type PlatformTab = "overview" | "organizations" | "approvals" | "verify" | "use-cases" | "networks" | "create";
+type Tab = PlatformTab;
 
-export function PlatformHome({ useCases, chains, onReloadUseCases }: { useCases: UseCase[]; chains: ChainInfo[]; onReloadUseCases: () => void }): JSX.Element {
-  const [tab, setTab] = useState<Tab>("overview");
+export function PlatformHome({ useCases, chains, onReloadUseCases, view }: { useCases: UseCase[]; chains: ChainInfo[]; onReloadUseCases: () => void; view?: PlatformTab }): JSX.Element {
+  const [internalTab, setInternalTab] = useState<Tab>("overview");
+  const tab = view ?? internalTab;
   // Organizations sits beside Overview: an org is the top tenant that OWNS use
   // cases, so onboarding one must not require picking a use case first.
   const tabs: { id: Tab; label: string }[] = [
@@ -31,17 +33,19 @@ export function PlatformHome({ useCases, chains, onReloadUseCases }: { useCases:
 
   return (
     <div>
-      <div className="flex gap-1 mb-5 flex-wrap">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium ${tab === t.id ? "bg-white text-brand-700 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-800"}`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      {view === undefined && (
+        <div className="flex gap-1 mb-5 flex-wrap">
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setInternalTab(t.id)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium ${tab === t.id ? "bg-white text-brand-700 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-800"}`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {tab === "overview" && (
         <div>

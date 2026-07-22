@@ -15,9 +15,12 @@ function ago(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
-/** Investor experience for role Buyer: Offerings · Portfolio · Activity. */
-export function InvestorPortal({ useCases }: { useCases: UseCase[] }): JSX.Element {
-  const [tab, setTab] = useState<Tab>("offerings");
+/** Investor experience for role Buyer: Offerings · Portfolio · Activity.
+ * When `tab` is supplied the tab is driven by the shell (its centered tab row
+ * is hidden); otherwise it self-manages the tab with an internal row. */
+export function InvestorPortal({ useCases, tab: controlledTab }: { useCases: UseCase[]; tab?: Tab }): JSX.Element {
+  const [internalTab, setInternalTab] = useState<Tab>("offerings");
+  const tab = controlledTab ?? internalTab;
   const tabs: { id: Tab; label: string }[] = [
     { id: "offerings", label: "Offerings" },
     { id: "portfolio", label: "Portfolio" },
@@ -25,12 +28,14 @@ export function InvestorPortal({ useCases }: { useCases: UseCase[] }): JSX.Eleme
   ];
   return (
     <div>
-      <div className="flex gap-1 mb-5">
-        {tabs.map((t) => (
-          <button key={t.id} onClick={() => setTab(t.id)} className={`px-4 py-2 rounded-lg text-sm font-medium ${tab === t.id ? "bg-white text-brand-700 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-800"}`}>{t.label}</button>
-        ))}
-      </div>
-      {tab === "offerings" && <InvestorOfferings useCases={useCases} onSubscribed={() => setTab("portfolio")} />}
+      {controlledTab === undefined && (
+        <div className="flex gap-1 mb-5">
+          {tabs.map((t) => (
+            <button key={t.id} onClick={() => setInternalTab(t.id)} className={`px-4 py-2 rounded-lg text-sm font-medium ${tab === t.id ? "bg-white text-brand-700 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-800"}`}>{t.label}</button>
+          ))}
+        </div>
+      )}
+      {tab === "offerings" && <InvestorOfferings useCases={useCases} onSubscribed={() => setInternalTab("portfolio")} />}
       {tab === "portfolio" && <InvestorPortfolio />}
       {tab === "activity" && <InvestorActivity />}
     </div>
