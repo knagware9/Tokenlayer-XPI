@@ -1139,4 +1139,58 @@ export const S: Record<string, FastifySchema> = {
     body: { type: "object", additionalProperties: true },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
   },
+
+  importInvoices: {
+    tags: ["Invoice Register"], summary: "Stage a batch of invoice rows (upload)", security: bearer,
+    params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
+    body: {
+      type: "object", required: ["rows"],
+      properties: { rows: { type: "array", items: { type: "object", additionalProperties: true } } },
+    },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404, 409) },
+  },
+  pullErp: {
+    tags: ["Invoice Register"], summary: "Stage invoices pulled from the bundled ERP export", security: bearer,
+    params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
+    body: { type: "object", additionalProperties: true },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404, 409) },
+  },
+  addInvoice: {
+    tags: ["Invoice Register"], summary: "Stage a single manually-keyed invoice", security: bearer,
+    params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
+    body: {
+      type: "object", required: ["metadata"],
+      properties: { metadata: { type: "object", additionalProperties: true }, documentId: { type: "string" } },
+    },
+    response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404, 409) },
+  },
+  listInvoices: {
+    tags: ["Invoice Register"], summary: "List staged/tokenized invoices for a use case", security: bearer,
+    params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
+    querystring: { type: "object", additionalProperties: false, properties: { status: { type: "string", enum: ["staged", "tokenized"] } } },
+    response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(400, 401, 403, 404) },
+  },
+  deleteInvoice: {
+    tags: ["Invoice Register"], summary: "Delete a staged invoice (tokenized ones are guarded)", security: bearer,
+    params: { type: "object", required: ["key", "id"], properties: { key: { type: "string" }, id: { type: "string" } } },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404, 409) },
+  },
+  tokenizeInvoices: {
+    tags: ["Invoice Register"], summary: "Selectively tokenize staged invoices into assets", security: bearer,
+    params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
+    body: {
+      type: "object", required: ["ids", "chainId", "treasuryAccount"],
+      properties: {
+        ids: { type: "array", items: { type: "string" } },
+        chainId: { type: "string" },
+        treasuryAccount: { type: "string" },
+        parValue: { type: "number" },
+        sale: {
+          type: "object", additionalProperties: false, required: ["unitPrice", "currency"],
+          properties: { unitPrice: { type: "string" }, currency: { type: "string" } },
+        },
+      },
+    },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404, 409) },
+  },
 };

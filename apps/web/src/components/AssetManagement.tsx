@@ -4,13 +4,12 @@ import { can } from "../rbac.js";
 import type { ChainInfo, UseCase } from "../types.js";
 import { AssetDetail } from "./AssetDetail.js";
 import { AssetList } from "./AssetList.js";
-import { InvoiceImport } from "./InvoiceImport.js";
 import { IssuePanel } from "./IssuePanel.js";
 import { MyHoldings } from "./MyHoldings.js";
 
-type Sub = "issuance" | "marketplace" | "import" | "holdings";
+type Sub = "issuance" | "marketplace" | "holdings";
 
-/** The Import tab targets any use case whose schema carries the canonical invoice fields. */
+/** Identifies any use case whose schema carries the canonical invoice fields. */
 const INVOICE_FIELDS = ["invoiceHash", "invoiceNumber", "buyerName", "currency", "amount", "dueDate"];
 export function isInvoiceUseCase(u: UseCase | undefined): u is UseCase {
   return !!u && INVOICE_FIELDS.every((f) => f in (u.metadataSchema?.properties ?? {}));
@@ -22,13 +21,9 @@ export function AssetManagement({ useCaseKey, useCases, chains }: { useCaseKey: 
   const canIssue = user ? can(user.role, "issue") : false;
   const hasWallet = !!user?.walletAddress;
 
-  const activeUseCase = useCases.find((u) => u.key === useCaseKey);
-  const canImport = canIssue && isInvoiceUseCase(activeUseCase);
-
   const subs: { id: Sub; label: string }[] = [
     ...(canIssue ? [{ id: "issuance" as Sub, label: "Token Issuance" }] : []),
     { id: "marketplace" as Sub, label: "Marketplace" },
-    ...(canImport ? [{ id: "import" as Sub, label: "Import" }] : []),
     ...(hasWallet ? [{ id: "holdings" as Sub, label: "My Holdings" }] : []),
   ];
   const [selectedSub, setSub] = useState<Sub>(subs[0]?.id ?? "marketplace");
@@ -60,9 +55,6 @@ export function AssetManagement({ useCaseKey, useCases, chains }: { useCaseKey: 
       </div>
       {sub === "issuance" && <IssuePanel useCases={issueUseCases} chains={chains} onIssued={(id) => { setRefreshKey((k) => k + 1); setSelected(id); }} />}
       {sub === "marketplace" && <AssetList chains={chains} useCaseKey={listKey} refreshKey={refreshKey} onSelect={setSelected} />}
-      {sub === "import" && isInvoiceUseCase(activeUseCase) && (
-        <InvoiceImport useCase={activeUseCase} chains={chains} onTokenized={() => setRefreshKey((k) => k + 1)} />
-      )}
       {sub === "holdings" && <MyHoldings onSelect={setSelected} />}
     </div>
   );

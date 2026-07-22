@@ -31,6 +31,9 @@ import type {
   RegistryDeploymentRecord,
   RegistryDeploymentRepository,
   SaleTerms,
+  StagedInvoiceRecord,
+  StagedInvoiceRepository,
+  StagedInvoiceStatus,
   UseCaseRepository,
   UserRecord,
   UserRepository,
@@ -548,5 +551,36 @@ export class MemoryVerificationRequestRepository implements VerificationRequestR
     if (!rec) throw new Error(`unknown verification request '${reqId}'`);
     rec.verifierResult = input.result; rec.verifiedAt = input.at;
     return rec;
+  }
+}
+
+export class MemoryStagedInvoiceRepository implements StagedInvoiceRepository {
+  private readonly byId = new Map<string, StagedInvoiceRecord>();
+  async create(input: Omit<StagedInvoiceRecord, "id" | "createdAt">): Promise<StagedInvoiceRecord> {
+    const rec: StagedInvoiceRecord = { ...input, id: id("inv"), createdAt: now() };
+    this.byId.set(rec.id, rec);
+    return rec;
+  }
+  async get(invId: string): Promise<StagedInvoiceRecord | null> {
+    return this.byId.get(invId) ?? null;
+  }
+  async listByUseCase(useCaseKey: string, status?: StagedInvoiceStatus): Promise<StagedInvoiceRecord[]> {
+    return [...this.byId.values()]
+      .filter((r) => r.useCaseKey === useCaseKey && (!status || r.status === status))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+  async findByHash(useCaseKey: string, invoiceHash: string): Promise<StagedInvoiceRecord | null> {
+    return [...this.byId.values()].find((r) => r.useCaseKey === useCaseKey && r.invoiceHash === invoiceHash) ?? null;
+  }
+  async markTokenized(invId: string, assetId: string, at: string): Promise<StagedInvoiceRecord> {
+    const rec = this.byId.get(invId);
+    if (!rec) throw new Error(`unknown staged invoice '${invId}'`);
+    rec.status = "tokenized";
+    rec.assetId = assetId;
+    rec.tokenizedAt = at;
+    return rec;
+  }
+  async remove(invId: string): Promise<void> {
+    this.byId.delete(invId);
   }
 }

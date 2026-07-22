@@ -263,3 +263,23 @@ model VerificationRequest {
   @@index([holderDid, status])
   @@index([verifierOrgId, status])
 }
+
+// An invoice staged (uploaded/ERP-imported/manually entered) before selective
+// tokenization into an Asset via the invoice register.
+model StagedInvoice {
+  id             String    @id @default(cuid())
+  useCaseKey     String
+  source         String    // upload | erp | manual
+  metadata       String    // JSON-encoded
+  invoiceHash    String
+  documentId     String?
+  documentSha256 String?
+  status         String    @default("staged") // staged | tokenized
+  assetId        String?
+  createdBy      String
+  createdAt      DateTime  @default(now())
+  tokenizedAt    DateTime?
+
+  @@index([useCaseKey, status])
+  @@index([useCaseKey, invoiceHash])
+}

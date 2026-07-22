@@ -17,6 +17,7 @@ import type {
   ListingRepository,
   OrganizationRepository,
   ProposalRepository,
+  StagedInvoiceRepository,
   UseCaseRepository,
   UserRepository,
   VerificationRequestRepository,
@@ -41,6 +42,7 @@ export interface AppDeps {
   organizations: OrganizationRepository;
   credentials: CredentialRepository;
   verificationRequests: VerificationRequestRepository;
+  stagedInvoices: StagedInvoiceRepository;
   keystore: Keystore;
   /** True iff DID_MASTER_KEY was explicitly configured (production must set it). */
   didMasterConfigured: boolean;

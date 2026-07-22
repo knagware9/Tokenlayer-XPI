@@ -3,31 +3,31 @@ import { api } from "./api.js";
 import { useAuth } from "./auth.js";
 import { useRoute } from "./router.js";
 import { ApprovalsPanel } from "./components/ApprovalsPanel.js";
-import { AssetManagement } from "./components/AssetManagement.js";
+import { AppShell, type NavItem } from "./components/AppShell.js";
+import { AssetManagement, isInvoiceUseCase } from "./components/AssetManagement.js";
 import { Dashboard } from "./components/Dashboard.js";
-import { Header } from "./components/Header.js";
 import { Home } from "./components/Home.js";
 import { InvestorPortal } from "./components/InvestorPortal.js";
+import { InvoiceRegister } from "./components/InvoiceRegister.js";
 import { Login } from "./components/Login.js";
 import { MyIdentity } from "./components/MyIdentity.js";
+import { MyProfile } from "./components/MyProfile.js";
 import { Organizations } from "./components/Organizations.js";
-import { PlatformHome } from "./components/PlatformHome.js";
+import { PlatformHome, type PlatformTab } from "./components/PlatformHome.js";
 import { Signup } from "./components/Signup.js";
 import { UseCaseBuilder } from "./components/UseCaseBuilder.js";
 import { UserManagement } from "./components/UserManagement.js";
 import { VerificationRequests } from "./components/VerificationRequests.js";
 import { SectionHeader } from "./components/ui.js";
-import { canManageUsers } from "./rbac.js";
+import { can, canManageUsers } from "./rbac.js";
 import type { ChainInfo, UseCase } from "./types.js";
 
-type Section = "overview" | "assets" | "approvals" | "users" | "organizations" | "verify" | "identity";
-
 export function App(): JSX.Element {
-  const { token, user } = useAuth();
+  const { token, user, logout } = useAuth();
   const { useCaseKey: routeKey, navigate } = useRoute();
   const [chains, setChains] = useState<ChainInfo[]>([]);
   const [useCases, setUseCases] = useState<UseCase[]>([]);
-  const [section, setSection] = useState<Section>("assets");
+  const [view, setView] = useState<string>("dashboard");
 
   const reloadUseCases = (): void => { if (token) void api.useCases(token).then(setUseCases); };
 
@@ -41,13 +41,12 @@ export function App(): JSX.Element {
     if (user && user.useCaseKey && routeKey !== user.useCaseKey) navigate(`/${user.useCaseKey}`);
   }, [user, routeKey, navigate]);
 
-  // Reset to the Overview section whenever the active use case changes.
-  // Reset the section when the active use case changes — honouring a one-shot
-  // intent (e.g. "Start tokenizing" lands on Asset Management) set before navigating.
+  // Reset the active view when the active use case changes — honouring a one-shot
+  // intent (e.g. "Start tokenizing" lands on the Asset Ledger) set before navigating.
   useEffect(() => {
     const want = sessionStorage.getItem("tl:section");
     if (want) sessionStorage.removeItem("tl:section");
-    setSection(want === "assets" ? "assets" : "overview");
+    setView(want === "assets" ? "assets" : "dashboard");
   }, [user?.role === "PlatformAdmin" ? routeKey : user?.useCaseKey]);
 
   // Public (unauthenticated) surface: a marketing homepage plus the corporate
@@ -59,85 +58,118 @@ export function App(): JSX.Element {
   }
 
   const isPlatform = user.role === "PlatformAdmin";
+  const isOrgAdmin = user.role === "OrgAdmin";
   const activeUseCase = isPlatform ? routeKey : user.useCaseKey ?? "";
 
+  const handleSelect = (id: string): void => {
+    if (id === "logout") { navigate("/"); logout(); return; }
+    if (id === "back") { navigate("/"); return; }
+    setView(id);
+  };
+
+  const pinned: NavItem[] = [
+    { id: "profile", label: "My Profile", icon: "users", pinned: true },
+    { id: "credentials", label: "My Credentials", icon: "shield", pinned: true },
+    { id: "logout", label: "Logout", icon: "arrow", pinned: true },
+  ];
+
   // Investors get the dedicated portal experience instead of the operator console —
-  // plus a My-identity tab, so a Buyer holder can reach their credentials and their
-  // verification-request inbox (otherwise the holder side of verification is unreachable).
+  // plus My Profile and My Credentials, so a Buyer holder can reach their credentials
+  // and their verification-request inbox (otherwise the holder side is unreachable).
   if (user.role === "Buyer") {
-    const buyerTab: "portfolio" | "identity" = section === "identity" ? "identity" : "portfolio";
-    return (
-      <div className="min-h-screen">
-        <Header />
-        <main className="max-w-6xl mx-auto px-6 py-6">
-          <div className="flex gap-1 mb-5">
-            {([{ id: "portfolio", label: "Portfolio" }, { id: "identity", label: "My identity" }] as const).map((t) => (
-              <button
-                key={t.id}
-                onClick={() => setSection(t.id === "identity" ? "identity" : "overview")}
-                className={`px-4 py-2 rounded-lg text-sm font-medium ${buyerTab === t.id ? "bg-white text-brand-700 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-800"}`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-          {buyerTab === "portfolio" ? <InvestorPortal useCases={useCases} /> : <MyIdentity />}
-        </main>
-      </div>
-    );
+    const items: NavItem[] = [
+      { id: "portfolio", label: "Portfolio", icon: "coins" },
+      { id: "offerings", label: "Offerings", icon: "spark" },
+      { id: "transactions", label: "Recent Transactions", icon: "arrow" },
+      ...pinned,
+    ];
+    const buyerTab: "offerings" | "portfolio" | "activity" =
+      view === "offerings" ? "offerings" : view === "transactions" ? "activity" : "portfolio";
+    const activeId = ["portfolio", "offerings", "transactions", "profile", "credentials"].includes(view) ? view : "portfolio";
+    const panel =
+      view === "profile" ? <MyProfile onSelect={setView} />
+      : view === "credentials" ? <MyIdentity />
+      : <InvestorPortal useCases={useCases} tab={buyerTab} onTabChange={(t) => setView(t === "activity" ? "transactions" : t)} />;
+    return <AppShell items={items} active={activeId} onSelect={handleSelect}>{panel}</AppShell>;
   }
 
   if (isPlatform && !activeUseCase) {
-    return (
-      <div className="min-h-screen">
-        <Header />
-        <main className="max-w-6xl mx-auto px-6 py-6">
-          <PlatformHome useCases={useCases} chains={chains} onReloadUseCases={reloadUseCases} />
-        </main>
-      </div>
-    );
+    const items: NavItem[] = [
+      { id: "dashboard", label: "Dashboard", icon: "spark" },
+      { id: "use-cases", label: "Use Cases", icon: "doc" },
+      { id: "create", label: "Create Use Case", icon: "code" },
+      { id: "organizations", label: "Organizations", icon: "users" },
+      { id: "approvals", label: "Approvals", icon: "check" },
+      { id: "verify", label: "Verification", icon: "shield" },
+      { id: "networks", label: "Networks", icon: "chain" },
+      ...pinned,
+    ];
+    const platViews: Record<string, PlatformTab> = {
+      dashboard: "overview", "use-cases": "use-cases", create: "create",
+      organizations: "organizations", approvals: "approvals", verify: "verify", networks: "networks",
+    };
+    const knownIds = [...Object.keys(platViews), "profile", "credentials"];
+    const activeId = knownIds.includes(view) ? view : "dashboard";
+    const panel =
+      view === "profile" ? <MyProfile onSelect={setView} />
+      : view === "credentials" ? <MyIdentity />
+      : <PlatformHome useCases={useCases} chains={chains} onReloadUseCases={reloadUseCases} view={platViews[view] ?? "overview"} />;
+    return <AppShell items={items} active={activeId} onSelect={handleSelect}>{panel}</AppShell>;
   }
 
-  const sections: { id: Section; label: string }[] = [
-    { id: "overview", label: "Overview" },
-    { id: "assets", label: "Asset Management" },
-    { id: "approvals", label: "Approvals" },
-    ...(canManageUsers(user.role) ? [{ id: "users" as Section, label: "User Management" }] : []),
-    ...(isPlatform || user.role === "OrgAdmin" ? [{ id: "organizations" as Section, label: "Organizations" }] : []),
-    ...(isPlatform || user.role === "OrgAdmin" ? [{ id: "verify" as Section, label: "Verification" }] : []),
-    { id: "identity" as Section, label: "My identity" },
+  // Operator console: desk roles (UseCaseAdmin/Issuer/Auditor), OrgAdmin, and a
+  // PlatformAdmin scoped into a specific use case.
+  const activeUseCaseObj = useCases.find((u) => u.key === activeUseCase);
+  const showInvoices = isInvoiceUseCase(activeUseCaseObj) && can(user.role, "issue");
+
+  const items: NavItem[] = [
+    ...(isPlatform ? [{ id: "back", label: "← All use cases", icon: "arrow" as const }] : []),
+    { id: "dashboard", label: isOrgAdmin ? "Configure Use Case" : "Dashboard", icon: isOrgAdmin ? "code" : "spark" },
+    { id: "assets", label: "Asset Ledger", icon: "coins" },
+    ...(showInvoices ? [{ id: "invoices", label: "Invoices", icon: "doc" as const }] : []),
+    { id: "approvals", label: "Approvals", icon: "check" },
+    ...(canManageUsers(user.role) ? [{ id: "users", label: "User Management", icon: "users" as const }] : []),
+    ...(isPlatform || isOrgAdmin ? [{ id: "organizations", label: "Organizations", icon: "users" as const }] : []),
+    ...(isPlatform || isOrgAdmin ? [{ id: "verify", label: "Verification", icon: "shield" as const }] : []),
+    ...pinned,
   ];
 
-  return (
-    <div className="min-h-screen">
-      <Header />
-      <main className="max-w-6xl mx-auto px-6 py-6">
-        <div className="flex gap-1 mb-5">
-          {sections.map((s) => (
-            <button
-              key={s.id}
-              onClick={() => setSection(s.id)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium ${section === s.id ? "bg-white text-brand-700 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-800"}`}
-            >
-              {s.label}
-            </button>
-          ))}
+  let panel: JSX.Element;
+  if (view === "assets") {
+    panel = <AssetManagement useCaseKey={activeUseCase} useCases={useCases} chains={chains} />;
+  } else if (view === "invoices") {
+    panel = activeUseCaseObj
+      ? <InvoiceRegister useCase={activeUseCaseObj} chains={chains} />
+      : (
+        <div>
+          <SectionHeader title="Invoices" description="Select an invoice use case to view its register." />
         </div>
-        {section === "overview" && (user.role === "OrgAdmin" ? (
-          <div>
-            <SectionHeader title="Configure a use case" description="Design your tokenization use case low-code; it is submitted to the platform for approval, then deploys automatically." />
-            <UseCaseBuilder chains={chains} existing={useCases} onCreated={reloadUseCases} />
-          </div>
-        ) : (
-          <Dashboard useCaseKey={activeUseCase} />
-        ))}
-        {section === "assets" && <AssetManagement useCaseKey={activeUseCase} useCases={useCases} chains={chains} />}
-        {section === "approvals" && <ApprovalsPanel />}
-        {section === "users" && <UserManagement useCaseKey={activeUseCase} useCases={useCases} />}
-        {section === "organizations" && <Organizations />}
-        {section === "verify" && <VerificationRequests />}
-        {section === "identity" && <MyIdentity />}
-      </main>
-    </div>
-  );
+      );
+  } else if (view === "approvals") {
+    panel = <ApprovalsPanel />;
+  } else if (view === "users") {
+    panel = <UserManagement useCaseKey={activeUseCase} useCases={useCases} />;
+  } else if (view === "organizations") {
+    panel = <Organizations />;
+  } else if (view === "verify") {
+    panel = <VerificationRequests />;
+  } else if (view === "profile") {
+    panel = <MyProfile onSelect={setView} />;
+  } else if (view === "credentials") {
+    panel = <MyIdentity />;
+  } else if (isOrgAdmin) {
+    // Dashboard slot for OrgAdmin is the low-code use-case configurator.
+    panel = (
+      <div>
+        <SectionHeader title="Configure a use case" description="Design your tokenization use case low-code; it is submitted to the platform for approval, then deploys automatically." />
+        <UseCaseBuilder chains={chains} existing={useCases} onCreated={reloadUseCases} />
+      </div>
+    );
+  } else {
+    panel = <Dashboard useCaseKey={activeUseCase} />;
+  }
+
+  const deskIds = items.map((i) => i.id).filter((id) => id !== "back" && id !== "logout");
+  const activeId = deskIds.includes(view) ? view : "dashboard";
+  return <AppShell items={items} active={activeId} onSelect={handleSelect}>{panel}</AppShell>;
 }

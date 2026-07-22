@@ -1,4 +1,4 @@
-import type { AccountState, ActivityEvent, AnalyticsSummary, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, ChainInfo, ChainStatus, CompanyCategory, ContractCode, CredentialStatusInfo, CredentialTypeInfo, DidDocument, HeldCredential, IdentityRegistryInfo, IdentityResult, IssuedCredential, Listing, OrgMember, OrgType, Organization, Portfolio, Proposal, Role, SessionUser, TokenInfo, TokenStandard, Trade, UseCase, VerificationRequest, VerificationResult } from "./types.js";
+import type { AccountState, ActivityEvent, AnalyticsSummary, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, ChainInfo, ChainStatus, CompanyCategory, ContractCode, CredentialStatusInfo, CredentialTypeInfo, DidDocument, HeldCredential, IdentityRegistryInfo, IdentityResult, InvoiceRowResult, IssuedCredential, Listing, OrgMember, OrgType, Organization, Portfolio, Proposal, Role, SessionUser, StagedInvoice, TokenInfo, TokenStandard, TokenizeResult, Trade, UseCase, VerificationRequest, VerificationResult } from "./types.js";
 
 export interface Currency { code: string; label: string; }
 export interface CashBalance { currency: string; address: string; amount: string; }
@@ -194,4 +194,16 @@ export const api = {
   rejectVerification: (token: string, id: string) =>
     request<VerificationRequest>(`/verification-requests/${encodeURIComponent(id)}/reject`, token, { method: "POST", body: JSON.stringify({}) }),
   verifyVerification: (token: string, id: string) => request<VerificationResult>(`/verification-requests/${encodeURIComponent(id)}/verify`, token),
+  invoices: (token: string, key: string, status?: "staged" | "tokenized") =>
+    request<StagedInvoice[]>(`/use-cases/${encodeURIComponent(key)}/invoices${status ? `?status=${status}` : ""}`, token),
+  importInvoices: (token: string, key: string, rows: Record<string, unknown>[]) =>
+    request<{ staged: number; results: InvoiceRowResult[] }>(`/use-cases/${encodeURIComponent(key)}/invoices/import`, token, { method: "POST", body: JSON.stringify({ rows }) }),
+  pullErpInvoices: (token: string, key: string) =>
+    request<{ staged: number; results: InvoiceRowResult[] }>(`/use-cases/${encodeURIComponent(key)}/invoices/pull-erp`, token, { method: "POST", body: JSON.stringify({}) }),
+  addInvoice: (token: string, key: string, metadata: Record<string, unknown>, documentId?: string) =>
+    request<StagedInvoice>(`/use-cases/${encodeURIComponent(key)}/invoices`, token, { method: "POST", body: JSON.stringify({ metadata, documentId }) }),
+  deleteInvoice: (token: string, key: string, id: string) =>
+    request<{ id: string; deleted: boolean }>(`/use-cases/${encodeURIComponent(key)}/invoices/${encodeURIComponent(id)}`, token, { method: "DELETE" }),
+  tokenizeInvoices: (token: string, key: string, body: { ids: string[]; chainId: string; treasuryAccount: string; parValue?: number; sale?: { unitPrice: string; currency: string } }) =>
+    request<{ results: TokenizeResult[] }>(`/use-cases/${encodeURIComponent(key)}/invoices/tokenize`, token, { method: "POST", body: JSON.stringify(body) }),
 };
