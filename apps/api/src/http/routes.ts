@@ -320,20 +320,31 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   });
 
   // --- assets -------------------------------------------------------------
-  app.post("/assets", { schema: S.issueAsset, ...auth }, async (request, reply) => {
-    const { useCaseKey: bUseCaseKey, name, chainId, metadata, treasuryAccount, initialSupply, sale } =
-      request.body as { useCaseKey: string; name: string; chainId: string; metadata?: Record<string, unknown>; treasuryAccount?: string; initialSupply?: string; sale?: { unitPrice: string; currency: string; treasuryAccount: string } };
-    const claims = request.user as TokenClaims;
+  // Core issuance logic shared by POST /assets and the invoice-register tokenize
+  // endpoint: validation → derive invoiceFingerprint → unique guard → cashflow
+  // schedule → issuance fee → engine mint → persist asset + sale terms + cashflows
+  // → gated-proposal path → audit. Returns a discriminated result the route maps
+  // to reply codes; `input.request` is threaded through solely for proposeIfGated.
+  async function issueAssetCore(input: {
+    claims: TokenClaims;
+    actor: Actor;
+    request: FastifyRequest;
+    useCaseKey: string; name: string; chainId: string;
+    metadata?: Record<string, unknown>; treasuryAccount?: string; initialSupply?: string;
+    sale?: { unitPrice: string; currency: string; treasuryAccount: string };
+  }): Promise<{ ok: true; status: number; body: unknown } | { ok: false; status: number; error: string; message: string }> {
+    const { useCaseKey: bUseCaseKey, name, chainId, metadata, treasuryAccount, initialSupply, sale } = input;
+    const claims = input.claims;
     if (claims.role !== "PlatformAdmin" && bUseCaseKey !== claims.useCaseKey) {
-      return reply.code(403).send({ error: "WRONG_USE_CASE", message: "cannot issue into another use case" });
+      return { ok: false, status: 403, error: "WRONG_USE_CASE", message: "cannot issue into another use case" };
     }
     // Validate sale terms if provided
     if (sale) {
       if (!isSupportedCurrency(sale.currency)) {
-        return reply.code(400).send({ error: "UNSUPPORTED_CURRENCY", message: `currency '${sale.currency}' is not supported` });
+        return { ok: false, status: 400, error: "UNSUPPORTED_CURRENCY", message: `currency '${sale.currency}' is not supported` };
       }
       if (!isPositiveIntString(sale.unitPrice)) {
-        return reply.code(400).send({ error: "INVALID_PRICE", message: "unitPrice must be a positive integer" });
+        return { ok: false, status: 400, error: "INVALID_PRICE", message: "unitPrice must be a positive integer" };
       }
     }
     // The treasury holds the initial supply and is the seller for the marketplace.
@@ -341,17 +352,17 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const wantsSupply = initialSupply !== undefined && initialSupply !== "" && initialSupply !== "0";
     if (wantsSupply) {
       if (!/^\d+$/.test(initialSupply!)) {
-        return reply.code(400).send({ error: "INVALID_SUPPLY", message: "initialSupply must be a whole number" });
+        return { ok: false, status: 400, error: "INVALID_SUPPLY", message: "initialSupply must be a whole number" };
       }
       if (!treasury) {
-        return reply.code(400).send({ error: "MISSING_TREASURY", message: "a treasury account is required to mint initial supply" });
+        return { ok: false, status: 400, error: "MISSING_TREASURY", message: "a treasury account is required to mint initial supply" };
       }
     }
-    const actor = actorOf(request);
+    const actor = input.actor;
     const useCase = await deps.useCases.get(bUseCaseKey);
     // Initial supply is fungible-only — reject up front, before charging any fee.
     if (wantsSupply && useCase.tokenType !== "fungible") {
-      return reply.code(400).send({ error: "SUPPLY_UNSUPPORTED", message: "initial supply is only supported for fungible assets" });
+      return { ok: false, status: 400, error: "SUPPLY_UNSUPPORTED", message: "initial supply is only supported for fungible assets" };
     }
     // Gated issuance: the asset is created `pending_approval` (frozen to actions/
     // buy/listings) and its supply mint + sale terms are deferred to approval.
@@ -372,7 +383,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const uniqueKey = useCase.uniqueBy ? String(meta[useCase.uniqueBy]) : null;
     if (useCase.uniqueBy) {
       const existing = await deps.assets.findByMetadata(useCase.key, useCase.uniqueBy, meta[useCase.uniqueBy]);
-      if (existing) return reply.code(409).send({ error: "DUPLICATE_ASSET", message: `an asset with this ${useCase.uniqueBy} is already tokenized` });
+      if (existing) return { ok: false, status: 409, error: "DUPLICATE_ASSET", message: `an asset with this ${useCase.uniqueBy} is already tokenized` };
     }
 
     // Compute the financial-terms schedule (coupons + redemption) BEFORE the fee
@@ -384,7 +395,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       try {
         schedule = computeCashflowSchedule(useCase.terms, meta, new Date().toISOString());
       } catch (err) {
-        if (err instanceof PolicyError) return reply.code(400).send({ error: err.code, message: err.message });
+        if (err instanceof PolicyError) return { ok: false, status: 400, error: err.code, message: err.message };
         throw err;
       }
     }
@@ -404,10 +415,10 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         const me = await deps.users.findById(claims.id);
         feePayer = me?.accountId ? (await deps.accounts.findById(me.accountId))?.address : undefined;
         if (!feePayer) {
-          return reply.code(400).send({ error: "NO_WALLET", message: "your account has no linked wallet to pay the issuance fee" });
+          return { ok: false, status: 400, error: "NO_WALLET", message: "your account has no linked wallet to pay the issuance fee" };
         }
         if (BigInt(await deps.cash.balanceOf(feeCurrency, feePayer)) < BigInt(issuanceFlat)) {
-          return reply.code(400).send({ error: "INSUFFICIENT_FUNDS", message: `you need ${issuanceFlat} ${feeCurrency} to cover the issuance fee` });
+          return { ok: false, status: 400, error: "INSUFFICIENT_FUNDS", message: `you need ${issuanceFlat} ${feeCurrency} to cover the issuance fee` };
         }
         await deps.cash.transfer(feeCurrency, feePayer, feeAccount, issuanceFlat);
         issuanceFeeCharged = { amount: issuanceFlat, currency: feeCurrency };
@@ -441,12 +452,12 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
 
       if (gatedIssue) {
         // Defer supply mint + sale terms to approval; capture them in the proposal.
-        const proposal = await proposeIfGated(request, useCase, "issue", id, {
+        const proposal = await proposeIfGated(input.request, useCase, "issue", id, {
           ...(wantsSupply ? { initialSupply, treasury } : {}),
           ...(sale ? { sale } : {}),
           ...(issuanceFeeCharged ? { issuanceFee: { ...issuanceFeeCharged, payer: feePayer } } : {}),
         });
-        return reply.code(202).send({ proposal, asset: await deps.assets.get(id) });
+        return { ok: true, status: 202, body: { proposal, asset: await deps.assets.get(id) } };
       }
       // Ungated: activate immediately — sale terms + allowlist treasury + mint supply.
       const created = await deps.assets.get(id);
@@ -465,12 +476,18 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       // race: the DB constraint rejected it (Prisma P2002 / memory-repo mirror).
       // Surface the same 409 as the pre-check rather than a generic 500.
       if ((err as { code?: string }).code === "P2002") {
-        return reply.code(409).send({ error: "DUPLICATE_ASSET", message: `an asset with this ${useCase.uniqueBy} is already tokenized` });
+        return { ok: false, status: 409, error: "DUPLICATE_ASSET", message: `an asset with this ${useCase.uniqueBy} is already tokenized` };
       }
       throw err;
     }
     const finalAsset = await deps.assets.get(id);
-    return reply.code(201).send({ asset: finalAsset, txHash: result.txHash, ...(issuanceFeeCharged ? { issuanceFee: issuanceFeeCharged } : {}) });
+    return { ok: true, status: 201, body: { asset: finalAsset, txHash: result.txHash, ...(issuanceFeeCharged ? { issuanceFee: issuanceFeeCharged } : {}) } };
+  }
+
+  app.post("/assets", { schema: S.issueAsset, ...auth }, async (request, reply) => {
+    const b = request.body as { useCaseKey: string; name: string; chainId: string; metadata?: Record<string, unknown>; treasuryAccount?: string; initialSupply?: string; sale?: { unitPrice: string; currency: string; treasuryAccount: string } };
+    const r = await issueAssetCore({ claims: request.user as TokenClaims, actor: actorOf(request), request, ...b });
+    return r.ok ? reply.code(r.status).send(r.body) : reply.code(r.status).send({ error: r.error, message: r.message });
   });
 
   app.get("/assets", { schema: S.listAssets, ...auth }, async (request) => {
