@@ -18,7 +18,7 @@ function ago(iso: string): string {
 /** Investor experience for role Buyer: Offerings · Portfolio · Activity.
  * When `tab` is supplied the tab is driven by the shell (its centered tab row
  * is hidden); otherwise it self-manages the tab with an internal row. */
-export function InvestorPortal({ useCases, tab: controlledTab }: { useCases: UseCase[]; tab?: Tab }): JSX.Element {
+export function InvestorPortal({ useCases, tab: controlledTab, onTabChange }: { useCases: UseCase[]; tab?: Tab; onTabChange?: (tab: Tab) => void }): JSX.Element {
   const [internalTab, setInternalTab] = useState<Tab>("offerings");
   const tab = controlledTab ?? internalTab;
   const tabs: { id: Tab; label: string }[] = [
@@ -35,7 +35,7 @@ export function InvestorPortal({ useCases, tab: controlledTab }: { useCases: Use
           ))}
         </div>
       )}
-      {tab === "offerings" && <InvestorOfferings useCases={useCases} onSubscribed={() => setInternalTab("portfolio")} />}
+      {tab === "offerings" && <InvestorOfferings useCases={useCases} onSubscribed={() => { setInternalTab("portfolio"); onTabChange?.("portfolio"); }} />}
       {tab === "portfolio" && <InvestorPortfolio />}
       {tab === "activity" && <InvestorActivity />}
     </div>

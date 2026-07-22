@@ -88,7 +88,7 @@ export function App(): JSX.Element {
     const panel =
       view === "profile" ? <MyProfile onSelect={setView} />
       : view === "credentials" ? <MyIdentity />
-      : <InvestorPortal useCases={useCases} tab={buyerTab} />;
+      : <InvestorPortal useCases={useCases} tab={buyerTab} onTabChange={(t) => setView(t === "activity" ? "transactions" : t)} />;
     return <AppShell items={items} active={activeId} onSelect={handleSelect}>{panel}</AppShell>;
   }
 
