@@ -1,4 +1,4 @@
-import { RbacPolicy } from "@tokenlayer/core";
+import { RbacPolicy, type OrgType } from "@tokenlayer/core";
 import { buildApp } from "./app.js";
 import { buildChainRegistry } from "./chains.js";
 import type { AppDeps } from "./context.js";
@@ -106,14 +106,23 @@ async function main(): Promise<void> {
   if (env.nodeEnv !== "production") {
     // Platform Admins → the TokenLayer Platform org.
     await provisionPlatformOperatorIdentities(deps, platformOrg);
-    // Invoice-tokenization desk (the M1xchange TReDS POC): its operators are
-    // members of the M1xchange organization, each holding a DID + membership VC.
-    const m1xchange = await ensureNamedOrg(deps, { name: "M1xchange", orgType: "corporate", jurisdiction: "IN" });
-    await provisionOrgMemberIdentities(deps, m1xchange, [
-      "m1.admin@tokenlayer.dev", "m1.issuer@tokenlayer.dev", "m1.buyer@tokenlayer.dev", "m1.auditor@tokenlayer.dev",
-    ]);
-    // Link the invoice issuer to a demo desk wallet so its profile shows one.
-    await ensureUserWallet(deps, "m1.issuer@tokenlayer.dev", "0xBcd4042DE499D14e55001CcbB24a551F3b954096", "M1xchange Desk");
+    // Each demo use-case desk is an organization; its seeded roster (admin,
+    // issuer, buyer, auditor) holds a DID + OrganizationMembership credential so
+    // their profile/credentials pages are populated. Tenancy orgId stays null.
+    const desks: { name: string; orgType: OrgType; jurisdiction: string | null; prefix: string; issuerWallet?: string }[] = [
+      { name: "M1xchange", orgType: "corporate", jurisdiction: "IN", prefix: "m1", issuerWallet: "0xBcd4042DE499D14e55001CcbB24a551F3b954096" },
+      { name: "Verra Carbon Registry", orgType: "verifier", jurisdiction: null, prefix: "carbon" },
+      { name: "Muthoot Finance", orgType: "bank", jurisdiction: "IN", prefix: "gold" },
+      { name: "ACME Capital", orgType: "corporate", jurisdiction: "IN", prefix: "bond" },
+    ];
+    for (const d of desks) {
+      const org = await ensureNamedOrg(deps, { name: d.name, orgType: d.orgType, jurisdiction: d.jurisdiction });
+      await provisionOrgMemberIdentities(deps, org, [
+        `${d.prefix}.admin@tokenlayer.dev`, `${d.prefix}.issuer@tokenlayer.dev`,
+        `${d.prefix}.buyer@tokenlayer.dev`, `${d.prefix}.auditor@tokenlayer.dev`,
+      ]);
+      if (d.issuerWallet) await ensureUserWallet(deps, `${d.prefix}.issuer@tokenlayer.dev`, d.issuerWallet, `${d.name} Desk`);
+    }
   }
   const app = await buildApp(deps);
 
