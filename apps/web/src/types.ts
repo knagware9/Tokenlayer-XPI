@@ -418,6 +418,16 @@ export interface VerificationRequest {
   expiresAt: string;
   eligibleCredentials?: { id: string; type: string; issuerDid: string; issuedAt: string }[];
 }
+export interface StagedInvoice {
+  id: string; useCaseKey: string; source: "upload" | "erp" | "manual";
+  metadata: Record<string, unknown>; invoiceHash: string;
+  documentId: string | null; documentSha256: string | null;
+  status: "staged" | "tokenized"; assetId: string | null;
+  createdBy: string; createdAt: string; tokenizedAt: string | null;
+}
+export interface InvoiceRowResult { index: number; status: "staged" | "duplicate" | "invalid"; id?: string; error?: string }
+export interface TokenizeResult { id: string; status: "tokenized" | "skipped" | "failed"; assetId?: string; error?: string }
+
 export interface VerificationResult {
   valid: boolean;
   holderDid: string | null;

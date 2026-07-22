@@ -4,7 +4,7 @@ import type { Currency } from "../api.js";
 import { useAuth } from "../auth.js";
 import { can } from "../rbac.js";
 import type { ChainInfo, UseCase } from "../types.js";
-import { computeFingerprint } from "./InvoiceImport.js";
+import { computeFingerprint } from "./InvoiceRegister.js";
 
 interface Props {
   useCases: UseCase[];

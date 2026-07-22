@@ -8,6 +8,7 @@ import { AssetManagement, isInvoiceUseCase } from "./components/AssetManagement.
 import { Dashboard } from "./components/Dashboard.js";
 import { Home } from "./components/Home.js";
 import { InvestorPortal } from "./components/InvestorPortal.js";
+import { InvoiceRegister } from "./components/InvoiceRegister.js";
 import { Login } from "./components/Login.js";
 import { MyIdentity } from "./components/MyIdentity.js";
 import { MyProfile } from "./components/MyProfile.js";
@@ -137,12 +138,13 @@ export function App(): JSX.Element {
   if (view === "assets") {
     panel = <AssetManagement useCaseKey={activeUseCase} useCases={useCases} chains={chains} />;
   } else if (view === "invoices") {
-    panel = (
-      <div>
-        <SectionHeader title="Invoices" description="Invoice register — coming in the next step." />
-        <div className="text-sm text-slate-500">Invoice register — coming in the next step.</div>
-      </div>
-    );
+    panel = activeUseCaseObj
+      ? <InvoiceRegister useCase={activeUseCaseObj} chains={chains} />
+      : (
+        <div>
+          <SectionHeader title="Invoices" description="Select an invoice use case to view its register." />
+        </div>
+      );
   } else if (view === "approvals") {
     panel = <ApprovalsPanel />;
   } else if (view === "users") {
