@@ -21,6 +21,7 @@ import {
   PrismaDocumentRepository,
   PrismaListingRepository,
   PrismaRegistryDeploymentRepository,
+  PrismaStagedInvoiceRepository,
   PrismaUseCaseRepository,
   PrismaUserRepository,
   PrismaVerificationRequestRepository,
@@ -48,6 +49,7 @@ async function main(): Promise<void> {
   const organizations = new PrismaOrganizationRepository();
   const credentials = new PrismaCredentialRepository();
   const verificationRequests = new PrismaVerificationRequestRepository();
+  const stagedInvoices = new PrismaStagedInvoiceRepository();
   const keystore = createKeystore(env.didMasterKey);
   // Demo users/accounts (with predictable passwords) are seeded only outside production.
   if (env.nodeEnv !== "production") await seedDefaults(users, accounts);
@@ -82,6 +84,7 @@ async function main(): Promise<void> {
     organizations,
     credentials,
     verificationRequests,
+    stagedInvoices,
     keystore,
     didMasterConfigured: env.didMasterConfigured,
     challenges: createMemoryChallengeStore(),

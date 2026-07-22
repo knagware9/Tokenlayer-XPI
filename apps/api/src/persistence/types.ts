@@ -449,3 +449,31 @@ export interface VerificationRequestRepository {
   setStatus(id: string, status: VerificationStatus): Promise<VerificationRequestRecord>;
   setVerifierResult(id: string, input: { result: Record<string, unknown>; at: string }): Promise<VerificationRequestRecord>;
 }
+
+export type InvoiceSource = "upload" | "erp" | "manual";
+export type StagedInvoiceStatus = "staged" | "tokenized";
+
+/** An invoice staged (uploaded/ERP-imported/manually entered) before selective tokenization. */
+export interface StagedInvoiceRecord {
+  id: string;
+  useCaseKey: string;
+  source: InvoiceSource;
+  metadata: Record<string, unknown>;
+  invoiceHash: string;
+  documentId: string | null;
+  documentSha256: string | null;
+  status: StagedInvoiceStatus;
+  assetId: string | null;
+  createdBy: string;
+  createdAt: string;
+  tokenizedAt: string | null;
+}
+
+export interface StagedInvoiceRepository {
+  create(input: Omit<StagedInvoiceRecord, "id" | "createdAt">): Promise<StagedInvoiceRecord>;
+  get(id: string): Promise<StagedInvoiceRecord | null>;
+  listByUseCase(useCaseKey: string, status?: StagedInvoiceStatus): Promise<StagedInvoiceRecord[]>;
+  findByHash(useCaseKey: string, invoiceHash: string): Promise<StagedInvoiceRecord | null>;
+  markTokenized(id: string, assetId: string, at: string): Promise<StagedInvoiceRecord>;
+  remove(id: string): Promise<void>;
+}

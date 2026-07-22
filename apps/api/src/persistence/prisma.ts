@@ -47,6 +47,9 @@ import type {
   RegistryDeploymentRecord,
   RegistryDeploymentRepository,
   SaleTerms,
+  StagedInvoiceRecord,
+  StagedInvoiceRepository,
+  StagedInvoiceStatus,
   UseCaseRepository,
   UserRecord,
   UserRepository,
@@ -844,5 +847,46 @@ export class PrismaVerificationRequestRepository implements VerificationRequestR
   }
   async setVerifierResult(id: string, input: { result: Record<string, unknown>; at: string }): Promise<VerificationRequestRecord> {
     return toVerificationRequest(await prisma.verificationRequest.update({ where: { id }, data: { verifierResult: JSON.stringify(input.result), verifiedAt: new Date(input.at) } }));
+  }
+}
+
+const toStagedInvoice = (r: {
+  id: string; useCaseKey: string; source: string; metadata: string; invoiceHash: string;
+  documentId: string | null; documentSha256: string | null; status: string; assetId: string | null;
+  createdBy: string; createdAt: Date; tokenizedAt: Date | null;
+}): StagedInvoiceRecord => ({
+  id: r.id, useCaseKey: r.useCaseKey, source: r.source as StagedInvoiceRecord["source"],
+  metadata: JSON.parse(r.metadata) as Record<string, unknown>, invoiceHash: r.invoiceHash,
+  documentId: r.documentId, documentSha256: r.documentSha256, status: r.status as StagedInvoiceStatus,
+  assetId: r.assetId, createdBy: r.createdBy, createdAt: r.createdAt.toISOString(),
+  tokenizedAt: r.tokenizedAt ? r.tokenizedAt.toISOString() : null,
+});
+
+export class PrismaStagedInvoiceRepository implements StagedInvoiceRepository {
+  async create(input: Omit<StagedInvoiceRecord, "id" | "createdAt">): Promise<StagedInvoiceRecord> {
+    return toStagedInvoice(await prisma.stagedInvoice.create({
+      data: {
+        ...input,
+        metadata: JSON.stringify(input.metadata),
+        tokenizedAt: input.tokenizedAt ? new Date(input.tokenizedAt) : null,
+      },
+    }));
+  }
+  async get(id: string): Promise<StagedInvoiceRecord | null> {
+    const r = await prisma.stagedInvoice.findUnique({ where: { id } });
+    return r ? toStagedInvoice(r) : null;
+  }
+  async listByUseCase(useCaseKey: string, status?: StagedInvoiceStatus): Promise<StagedInvoiceRecord[]> {
+    return (await prisma.stagedInvoice.findMany({ where: { useCaseKey, ...(status ? { status } : {}) }, orderBy: { createdAt: "desc" } })).map(toStagedInvoice);
+  }
+  async findByHash(useCaseKey: string, invoiceHash: string): Promise<StagedInvoiceRecord | null> {
+    const r = await prisma.stagedInvoice.findFirst({ where: { useCaseKey, invoiceHash } });
+    return r ? toStagedInvoice(r) : null;
+  }
+  async markTokenized(id: string, assetId: string, at: string): Promise<StagedInvoiceRecord> {
+    return toStagedInvoice(await prisma.stagedInvoice.update({ where: { id }, data: { status: "tokenized", assetId, tokenizedAt: new Date(at) } }));
+  }
+  async remove(id: string): Promise<void> {
+    await prisma.stagedInvoice.delete({ where: { id } });
   }
 }

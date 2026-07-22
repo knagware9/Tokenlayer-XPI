@@ -19,6 +19,7 @@ import {
   MemoryCashRepository,
   MemoryDocumentRepository,
   MemoryListingRepository,
+  MemoryStagedInvoiceRepository,
   MemoryUseCaseRepository,
   MemoryUserRepository,
   MemoryVerificationRequestRepository,
@@ -51,6 +52,7 @@ export async function buildTestApp(opts: { loginRateLimitMax?: number; platformF
   const organizations = new MemoryOrganizationRepository();
   const credentials = new MemoryCredentialRepository();
   const verificationRequests = new MemoryVerificationRequestRepository();
+  const stagedInvoices = new MemoryStagedInvoiceRepository();
   const keystore = createKeystore("11".repeat(32));
   // seedDefaults now creates the second PlatformAdmin (admin2@tokenlayer.dev) so
   // gated onboarding of a brand-new use case's FIRST UseCaseAdmin (and any
@@ -65,7 +67,7 @@ export async function buildTestApp(opts: { loginRateLimitMax?: number; platformF
   // The suite makes many logins from one IP; raise the throttle unless a test opts into it.
   const deps: AppDeps = {
     useCases, rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents, cashflows, proposals,
-    organizations, credentials, verificationRequests, keystore, didMasterConfigured: opts.didMasterConfigured ?? true,
+    organizations, credentials, verificationRequests, stagedInvoices, keystore, didMasterConfigured: opts.didMasterConfigured ?? true,
     challenges: createMemoryChallengeStore(), trustedKycIssuers: opts.trustedKycIssuers,
     devIssuerSeed: opts.devIssuerSeed, isProduction: opts.isProduction,
     currencies: loadCurrencies(), jwtSecret: "test-secret", publicApiUrl: "http://test.local/api/v1",
