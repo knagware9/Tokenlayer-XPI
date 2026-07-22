@@ -4,7 +4,7 @@
  * roster of buyers who may then hold/trade the credits.
  *
  * Run against a live API:  API=http://localhost:4000 tsx src/seed-carbon-projects.ts
- * Optionally set CHAIN=local-evm to tokenize on the live EVM (default: fabric, simulated).
+ * Optionally set CHAIN=besu to tokenize on the live EVM (default: fabric, simulated).
  */
 const API = process.env.API ?? "http://localhost:4000";
 const BASE = `${API}/api/v1`;

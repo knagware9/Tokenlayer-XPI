@@ -19,11 +19,10 @@ describe("chain registry", () => {
     expect(() => reg.resolveAdapter("besu")).toThrow(/not configured/);
   });
 
-  it("surfaces optional EVM chains (mst, local-evm) as available:false when their env is unset", () => {
+  it("surfaces optional EVM chains (mst) as available:false when their env is unset", () => {
     const reg = buildChainRegistry({ CHAIN_STRICT: "0" });
     const byId = new Map(reg.list().map((c) => [c.id, c] as const));
     expect(byId.get("mst")?.available).toBe(false);
-    expect(byId.get("local-evm")?.available).toBe(false);
     // Still no adapter — they cannot be resolved until brought online.
     expect(() => reg.resolveAdapter("mst")).toThrow(/not configured/);
   });

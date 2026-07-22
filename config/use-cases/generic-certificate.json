@@ -8,8 +8,7 @@
     "besu",
     "mst",
     "fabric",
-    "canton",
-    "local-evm"
+    "canton"
   ],
   "defaultChainId": "besu",
   "metadataSchema": {

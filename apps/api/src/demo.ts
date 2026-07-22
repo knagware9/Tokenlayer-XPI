@@ -89,9 +89,9 @@ async function main(): Promise<void> {
 
   // 3b. Real T-REX (ERC-3643) on a live EVM, if configured — deploys the full
   // ONCHAINID + registries + modular-compliance suite through the platform.
-  if (chains.list().some((c) => c.id === "local-evm")) {
-    console.log(`\n=== ERC-3643 real T-REX on Local EVM (deploys ONCHAINID + registries) ===`);
-    const trex = (await issue(app, token, "corporate-bond", "Onchain Bond", "OBND", "local-evm", { issuer: "ACME", isin: "INE000A01002", faceValue: 1000 })).id;
+  if (chains.list().some((c) => c.id === "besu")) {
+    console.log(`\n=== ERC-3643 real T-REX on Besu (deploys ONCHAINID + registries) ===`);
+    const trex = (await issue(app, token, "corporate-bond", "Onchain Bond", "OBND", "besu", { issuer: "ACME", isin: "INE000A01002", faceValue: 1000 })).id;
     const unregistered = await post(app, `/assets/${trex}/actions/mint`, token, { to: ALICE, amount: "100" });
     check("mint to non-identity holder rejected on-chain", unregistered.status === 400);
     await post(app, `/assets/${trex}/actions/allow`, token, { account: ALICE }); // registers an ONCHAINID identity
