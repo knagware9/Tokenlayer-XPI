@@ -1,14 +1,27 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { api } from "../api.js";
 import { useAuth } from "../auth.js";
 import { Card, SectionHeader } from "./ui.js";
 
 /** A read-only snapshot of the signed-in user's account and identity. */
 export function MyProfile({ onSelect }: { onSelect: (id: string) => void }): JSX.Element {
-  const { user } = useAuth();
+  const { token, user } = useAuth();
   const [copied, setCopied] = useState(false);
+  // The organization name comes from the user's OrganizationMembership credential
+  // (operators hold one without a tenancy orgId), falling back to any orgId.
+  const [orgName, setOrgName] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!token || !user?.did) return;
+    void api.myCredentials(token).then((creds) => {
+      const membership = creds.find((c) => c.type.includes("OrganizationMembership"));
+      const org = membership?.claims.organization;
+      if (typeof org === "string" && org) setOrgName(org);
+    }).catch(() => { /* profile still renders without the org name */ });
+  }, [token, user?.did]);
 
   const did = user?.did ?? null;
-  const didShort = did ? `${did.slice(0, 18)}…${did.slice(-6)}` : "—";
+  const didShort = did ? `${did.slice(0, 18)}…${did.slice(-6)}` : "Not issued yet";
   const copyDid = (): void => {
     if (!did) return;
     void navigator.clipboard.writeText(did).then(() => {
@@ -20,9 +33,9 @@ export function MyProfile({ onSelect }: { onSelect: (id: string) => void }): JSX
   const rows: { label: string; value: string; mono?: boolean }[] = [
     { label: "Email", value: user?.email ?? "—" },
     { label: "Role", value: user?.role ?? "—" },
-    { label: "Use case", value: user?.useCaseKey ?? "—" },
-    { label: "Organization", value: user?.orgId ?? "—", mono: true },
-    { label: "Wallet", value: user?.walletAddress ?? "—", mono: true },
+    { label: "Use case", value: user?.useCaseKey ?? "Platform-wide" },
+    { label: "Organization", value: orgName ?? user?.orgId ?? "Not affiliated", mono: !orgName && !!user?.orgId },
+    { label: "Wallet", value: user?.walletAddress ?? "Not linked", mono: !!user?.walletAddress },
   ];
 
   return (

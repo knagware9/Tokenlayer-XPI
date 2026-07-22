@@ -6,6 +6,7 @@
  */
 import { didKeyFromSeed } from "@tokenlayer/core";
 import type { AppDeps } from "./context.js";
+import { mintOrgMembership } from "./membership.js";
 import type { OrganizationRecord } from "./persistence/types.js";
 
 export const PLATFORM_ORG_NAME = "TokenLayer Platform";
@@ -38,6 +39,28 @@ export async function ensurePlatformIssuerOrg(deps: PlatformOrgDeps): Promise<Or
   });
   if (deps.registry) await ensureDidRegistered(deps.registry, did);
   return org;
+}
+
+/**
+ * Give the seeded Platform Admins a real identity: a custodial sub-DID plus an
+ * OrganizationMembership credential issued by the platform org, so their
+ * profile and credentials pages are populated like any other member. Idempotent
+ * (skips a user who already holds a DID) and best-effort (a failure is logged,
+ * never blocks boot). Leaves each admin's tenancy orgId null so global RBAC and
+ * maker-checker onboarding stay exactly as before.
+ */
+export async function provisionPlatformOperatorIdentities(
+  deps: Pick<AppDeps, "keystore" | "users" | "credentials">,
+  org: OrganizationRecord,
+): Promise<void> {
+  const all = await deps.users.list();
+  for (const user of all.filter((u) => u.role === "PlatformAdmin" && !u.did)) {
+    try {
+      await mintOrgMembership(deps, org, user, "PlatformAdmin", { linkOrgId: false });
+    } catch (err) {
+      console.warn(`[platform-org] identity provisioning for ${user.email} failed (skipped): ${(err as Error).message}`);
+    }
+  }
 }
 
 /**

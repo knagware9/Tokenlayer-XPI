@@ -11,11 +11,11 @@ export interface SeedUser {
   walletLabel?: string; // links a Buyer/Issuer to a DEFAULT_ACCOUNTS label
 }
 
-/** The primary global Platform Admin. */
-export const PLATFORM_ADMIN: SeedUser = { email: "admin@tokenlayer.dev", password: "admin123", role: "PlatformAdmin", useCaseKey: null };
+/** The primary global Platform Admin. Linked to an operational demo wallet. */
+export const PLATFORM_ADMIN: SeedUser = { email: "admin@tokenlayer.dev", password: "admin123", role: "PlatformAdmin", useCaseKey: null, walletLabel: "Nordic Pension Fund" };
 
 // A second platform admin so onboarding proposals have an eligible approver (SoD).
-export const PLATFORM_ADMIN_2: SeedUser = { email: "admin2@tokenlayer.dev", password: "admin123", role: "PlatformAdmin", useCaseKey: null };
+export const PLATFORM_ADMIN_2: SeedUser = { email: "admin2@tokenlayer.dev", password: "admin123", role: "PlatformAdmin", useCaseKey: null, walletLabel: "TerraNova Trading" };
 
 /** Generates a full demo roster for one use case. */
 function rosterFor(useCaseKey: string, prefix: string, buyerWalletLabel: string, treasuryWalletLabel: string): SeedUser[] {
