@@ -81,8 +81,8 @@ async function main(): Promise<void> {
   const buyer = await login(app, "carbon.buyer@tokenlayer.dev", "carbon123");
   const auditor = await login(app, "carbon.auditor@tokenlayer.dev", "carbon123");
 
-  const evmAvailable = chains.list().some((c) => c.id === "local-evm");
-  const chain = evmAvailable ? "local-evm" : "fabric";
+  const evmAvailable = chains.list().some((c) => c.id === "besu");
+  const chain = evmAvailable ? "besu" : "fabric";
   console.log(`Chains available: ${chains.list().map((c) => c.id).join(", ")}`);
 
   section("CARBON CREDIT TOKENIZATION (ERC-20, KYC allowlist + retire-by-burn)");

@@ -75,7 +75,7 @@ async function main(): Promise<void> {
   const app = await buildApp({ useCases, rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents: new MemoryDocumentRepository(), cashflows: new MemoryCashflowRepository(), proposals: new MemoryProposalRepository(), organizations: new MemoryOrganizationRepository(), credentials: new MemoryCredentialRepository(), verificationRequests: new MemoryVerificationRequestRepository(), stagedInvoices: new MemoryStagedInvoiceRepository(), keystore: createKeystore("11".repeat(32)), didMasterConfigured: true, challenges: createMemoryChallengeStore(), currencies: loadCurrencies(), jwtSecret: "e2e", publicApiUrl: "http://localhost:4000/api/v1" });
 
   const admin = await login(app, "admin");
-  const evmAvailable = chains.list().some((c) => c.id === "local-evm");
+  const evmAvailable = chains.list().some((c) => c.id === "mst" && c.available);
   console.log(`Chains available: ${chains.list().map((c) => c.id).join(", ")}`);
 
   // ============================================================
@@ -83,7 +83,7 @@ async function main(): Promise<void> {
   // ============================================================
   section("USE CASE 1 — Gold Loan Tokenization (ERC-20, KYC allowlist + freeze)");
 
-  const goldChain = evmAvailable ? "local-evm" : "fabric";
+  const goldChain = evmAvailable ? "mst" : "fabric";
   check(
     "Admin creates the 'gold-loan' use case (low-code, no deploy)",
     created(
@@ -92,7 +92,7 @@ async function main(): Promise<void> {
         name: "Gold Loan",
         description: "A gold-collateral-backed loan token. KYC allowlist for lenders/investors; freeze on default; burn on repayment.",
         tokenStandard: "ERC-20",
-        allowedChainIds: ["besu", "mst", "fabric", "canton", "local-evm"],
+        allowedChainIds: ["besu", "mst", "fabric", "canton"],
         defaultChainId: "besu",
         metadataSchema: {
           type: "object",
@@ -164,7 +164,7 @@ async function main(): Promise<void> {
   // ============================================================
   section("USE CASE 2 — Corporate Bond Tokenization (ERC-3643 / T-REX, identity-gated)");
 
-  const bondChain = evmAvailable ? "local-evm" : "canton";
+  const bondChain = evmAvailable ? "mst" : "canton";
   check(
     "Admin creates the 'corporate-bond' use case (low-code)",
     created(
@@ -173,7 +173,7 @@ async function main(): Promise<void> {
         name: "Corporate Bond",
         description: "A regulated corporate bond as an ERC-3643 security token. Every holder is identity-registered (ONCHAINID); identity-gated transfers; freeze + recovery; burn on redemption.",
         tokenStandard: "ERC-3643",
-        allowedChainIds: ["besu", "mst", "fabric", "canton", "local-evm"],
+        allowedChainIds: ["besu", "mst", "fabric", "canton"],
         defaultChainId: "canton",
         metadataSchema: {
           type: "object",
@@ -195,7 +195,7 @@ async function main(): Promise<void> {
     ),
   );
 
-  console.log(`\n   Issuing on chain: ${bondChain}${bondChain === "local-evm" ? " (deploys real ONCHAINID + T-REX registries + modular compliance)" : " (simulated ERC-3643)"}`);
+  console.log(`\n   Issuing on chain: ${bondChain}${bondChain === "mst" ? " (deploys real ONCHAINID + T-REX registries + modular compliance)" : " (simulated ERC-3643)"}`);
   const bondIssue = await post(app, "/assets", admin, {
     useCaseKey: "corporate-bond",
     name: "Acme Industries 8.5% 2031",

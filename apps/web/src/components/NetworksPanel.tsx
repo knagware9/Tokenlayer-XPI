@@ -8,7 +8,6 @@ import { Card, EmptyState, Icon, Pill, Skeleton, type IconName } from "./ui.js";
 const ENV_VARS: Record<string, string[]> = {
   besu: ["BESU_RPC_URL", "BESU_OPERATOR_KEY"],
   mst: ["MST_RPC_URL", "MST_OPERATOR_KEY"],
-  "local-evm": ["EVM_RPC_URL", "EVM_OPERATOR_KEY"],
 };
 
 export function familyIcon(family: ChainInfo["family"]): IconName {

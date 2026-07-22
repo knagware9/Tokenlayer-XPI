@@ -9,7 +9,7 @@ import { Donut, type DonutSlice } from "./charts/Donut.js";
 import { Card, EmptyState, Skeleton, StatCard, type IconName } from "./ui.js";
 
 /** A small fixed palette so a given ledger keeps the same colour across charts. */
-const LEDGER_COLORS: Record<string, string> = { besu: "#10b981", mst: "#6366f1", fabric: "#f59e0b", canton: "#8b5cf6", "local-evm": "#0ea5e9" };
+const LEDGER_COLORS: Record<string, string> = { besu: "#10b981", mst: "#6366f1", fabric: "#f59e0b", canton: "#8b5cf6" };
 const colorFor = (chainId: string): string => LEDGER_COLORS[chainId] ?? "#64748b";
 
 function fmtInt(s: string | number): string {

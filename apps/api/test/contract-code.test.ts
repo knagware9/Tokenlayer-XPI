@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { auth, buildTestApp, loginAs, V1 } from "./helpers.js";
 
 // buildTestApp runs CHAIN_STRICT=0 with no EVM env: fabric/canton are simulated
-// and present; besu/mst/local-evm are known catalog chains but ABSENT (configured:false).
+// and present; besu/mst are known catalog chains but ABSENT (configured:false).
 
 describe("use-case contract code endpoints", () => {
   it("returns the simulated Fabric contract model for an ERC-20 use case on fabric, with the deployed contract merged in", async () => {
