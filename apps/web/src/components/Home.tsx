@@ -336,7 +336,6 @@ export function Home(): JSX.Element {
           <Logo size={26} />
           <div className="text-xs text-slate-500 text-center sm:text-right">
             <div>A product by XPI Quantum Technologies Pvt Ltd · 2026</div>
-            <div className="mt-0.5">GIFT City · IFSCA Regulatory Sandbox</div>
           </div>
         </div>
       </footer>
