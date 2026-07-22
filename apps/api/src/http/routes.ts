@@ -12,6 +12,7 @@ import { computeAnalytics } from "../analytics.js";
 import { issueCredentialFor } from "../credential-issuance.js";
 import { ensurePlatformIssuerOrg } from "../platform-org.js";
 import { computeActivity, computePortfolio } from "../investor.js";
+import { readErpInvoices, stageInvoice } from "../invoice-register.js";
 import { assetBalancesOf, coded, CodedError, dropPayerShare, executeCashflowCore, executeIssueActivation, runGatedAction } from "../executors.js";
 import { proposalKind } from "../proposal-kinds.js";
 import { S } from "./schemas.js";
@@ -488,6 +489,112 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const b = request.body as { useCaseKey: string; name: string; chainId: string; metadata?: Record<string, unknown>; treasuryAccount?: string; initialSupply?: string; sale?: { unitPrice: string; currency: string; treasuryAccount: string } };
     const r = await issueAssetCore({ claims: request.user as TokenClaims, actor: actorOf(request), request, ...b });
     return r.ok ? reply.code(r.status).send(r.body) : reply.code(r.status).send({ error: r.error, message: r.message });
+  });
+
+  // --- invoice register ---------------------------------------------------
+  // Staging area in front of the shared issuance path: rows (uploaded / pulled
+  // from the ERP / keyed in) are validated + fingerprinted + de-duped, held as
+  // StagedInvoice rows, then selectively tokenized through issueAssetCore.
+  // Every route is gated on: use-case scope (403 WRONG_USE_CASE), issue
+  // capability (403 FORBIDDEN), a known use case (404), and its being an invoice
+  // use case (400 NOT_INVOICE_USECASE).
+  async function invoiceGate(request: FastifyRequest, reply: FastifyReply): Promise<{ useCase: UseCaseDefinition; claims: TokenClaims; actor: Actor; actorId: string } | null> {
+    const claims = request.user as TokenClaims;
+    const actor = actorOf(request);
+    const { key } = request.params as { key: string };
+    if (claims.role !== "PlatformAdmin" && key !== claims.useCaseKey) {
+      reply.code(403).send({ error: "WRONG_USE_CASE", message: "cannot manage invoices in another use case" });
+      return null;
+    }
+    if (!deps.rbac.can(actor.role, "issue")) {
+      reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to manage invoices" });
+      return null;
+    }
+    const useCase = await deps.useCases.get(key).catch(() => null);
+    if (!useCase) { notFound(reply, "use case not found"); return null; }
+    if (useCase.derivedFields?.invoiceHash !== "invoiceFingerprint") {
+      reply.code(400).send({ error: "NOT_INVOICE_USECASE", message: "this use case does not tokenize invoices" });
+      return null;
+    }
+    return { useCase, claims, actor, actorId: actor.id };
+  }
+
+  app.post("/use-cases/:key/invoices/import", { schema: S.importInvoices, ...auth }, async (request, reply) => {
+    const gate = await invoiceGate(request, reply); if (!gate) return reply;
+    const { rows } = request.body as { rows: Record<string, unknown>[] };
+    const results: { index: number; status: string; id?: string; error?: string }[] = [];
+    for (const [i, meta] of rows.entries()) {
+      const r = await stageInvoice(deps, gate.useCase, gate.actorId, "upload", meta, null);
+      results.push(r.status === "staged" ? { index: i, status: "staged", id: r.record.id } : { index: i, status: r.status, error: r.error });
+    }
+    return reply.code(200).send({ staged: results.filter((r) => r.status === "staged").length, results });
+  });
+
+  app.post("/use-cases/:key/invoices/pull-erp", { schema: S.pullErp, ...auth }, async (request, reply) => {
+    const gate = await invoiceGate(request, reply); if (!gate) return reply;
+    const rows = readErpInvoices();
+    const results: { index: number; status: string; id?: string; error?: string }[] = [];
+    for (const [i, meta] of rows.entries()) {
+      const r = await stageInvoice(deps, gate.useCase, gate.actorId, "erp", meta, null);
+      results.push(r.status === "staged" ? { index: i, status: "staged", id: r.record.id } : { index: i, status: r.status, error: r.error });
+    }
+    return reply.code(200).send({ staged: results.filter((r) => r.status === "staged").length, results });
+  });
+
+  app.post("/use-cases/:key/invoices", { schema: S.addInvoice, ...auth }, async (request, reply) => {
+    const gate = await invoiceGate(request, reply); if (!gate) return reply;
+    const { metadata, documentId } = request.body as { metadata: Record<string, unknown>; documentId?: string };
+    let doc: { id: string; sha256: string } | null = null;
+    if (documentId) {
+      const d = await deps.documents.get(documentId);
+      if (!d) return reply.code(400).send({ error: "DOCUMENT_NOT_FOUND", message: "document upload not found" });
+      doc = { id: d.id, sha256: d.sha256 };
+    }
+    const r = await stageInvoice(deps, gate.useCase, gate.actorId, "manual", metadata, doc);
+    if (r.status === "staged") return reply.code(201).send(r.record);
+    if (r.status === "invalid") return reply.code(400).send({ error: "INVALID_INVOICE", message: r.error });
+    return reply.code(409).send({ error: "DUPLICATE_INVOICE", message: r.error });
+  });
+
+  app.get("/use-cases/:key/invoices", { schema: S.listInvoices, ...auth }, async (request, reply) => {
+    const gate = await invoiceGate(request, reply); if (!gate) return reply;
+    const { status } = request.query as { status?: "staged" | "tokenized" };
+    return deps.stagedInvoices.listByUseCase(gate.useCase.key, status);
+  });
+
+  app.delete("/use-cases/:key/invoices/:id", { schema: S.deleteInvoice, ...auth }, async (request, reply) => {
+    const gate = await invoiceGate(request, reply); if (!gate) return reply;
+    const { id } = request.params as { key: string; id: string };
+    const rec = await deps.stagedInvoices.get(id);
+    if (!rec || rec.useCaseKey !== gate.useCase.key) return notFound(reply, "invoice not found");
+    if (rec.status !== "staged") return reply.code(409).send({ error: "ALREADY_TOKENIZED", message: "cannot delete a tokenized invoice" });
+    await deps.stagedInvoices.remove(id);
+    return reply.code(200).send({ id, deleted: true });
+  });
+
+  app.post("/use-cases/:key/invoices/tokenize", { schema: S.tokenizeInvoices, ...auth }, async (request, reply) => {
+    const gate = await invoiceGate(request, reply); if (!gate) return reply;
+    const { ids, chainId, treasuryAccount, parValue = 1000, sale } = request.body as { ids: string[]; chainId: string; treasuryAccount: string; parValue?: number; sale?: { unitPrice: string; currency: string } };
+    const results: { id: string; status: string; assetId?: string; error?: string }[] = [];
+    for (const id of ids) {
+      const rec = await deps.stagedInvoices.get(id);
+      if (!rec || rec.useCaseKey !== gate.useCase.key || rec.status !== "staged") { results.push({ id, status: "skipped" }); continue; }
+      const supply = Math.max(1, Math.round(Number(rec.metadata.amount) / parValue));
+      const r = await issueAssetCore({
+        claims: gate.claims, actor: gate.actor, request, useCaseKey: gate.useCase.key,
+        name: `${rec.metadata.invoiceNumber} · ${rec.metadata.buyerName}`, chainId,
+        metadata: rec.metadata, initialSupply: String(supply), treasuryAccount,
+        sale: sale ? { unitPrice: sale.unitPrice, currency: sale.currency, treasuryAccount } : undefined,
+      });
+      if (r.ok) {
+        const assetId = (r.body as { asset: { id: string } }).asset.id;
+        await deps.stagedInvoices.markTokenized(id, assetId, new Date().toISOString());
+        results.push({ id, status: "tokenized", assetId });
+      } else {
+        results.push({ id, status: "failed", error: r.error });
+      }
+    }
+    return reply.code(200).send({ results });
   });
 
   app.get("/assets", { schema: S.listAssets, ...auth }, async (request) => {
