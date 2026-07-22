@@ -7,7 +7,7 @@ import { loadCurrencies } from "./currencies.js";
 import { env } from "./env.js";
 import { createMemoryChallengeStore } from "./identity-challenges.js";
 import { createKeystore } from "./keystore.js";
-import { ensurePlatformIssuerOrg } from "./platform-org.js";
+import { ensurePlatformIssuerOrg, provisionPlatformOperatorIdentities } from "./platform-org.js";
 import {
   PrismaAccountRepository,
   PrismaAssetRepository,
@@ -100,7 +100,10 @@ async function main(): Promise<void> {
     loginRateLimitMax: env.loginRateLimitMax,
     registry,
   };
-  await ensurePlatformIssuerOrg(deps);
+  const platformOrg = await ensurePlatformIssuerOrg(deps);
+  // Demo Platform Admins get a DID + membership credential from the platform org
+  // so their identity pages are populated (outside production only).
+  if (env.nodeEnv !== "production") await provisionPlatformOperatorIdentities(deps, platformOrg);
   const app = await buildApp(deps);
 
   await app.listen({ port: env.port, host: "0.0.0.0" });

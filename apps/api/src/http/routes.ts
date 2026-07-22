@@ -10,6 +10,7 @@ import { renderContractCode } from "../contract-code.js";
 import { deployAndCreateUseCase } from "../use-cases.js";
 import { computeAnalytics } from "../analytics.js";
 import { issueCredentialFor } from "../credential-issuance.js";
+import { mintOrgMembership } from "../membership.js";
 import { ensurePlatformIssuerOrg } from "../platform-org.js";
 import { computeActivity, computePortfolio } from "../investor.js";
 import { readErpInvoices, stageInvoice } from "../invoice-register.js";
@@ -1582,28 +1583,10 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return reply.code(200).send({ id: rejected.id, status: "rejected" });
   });
 
-  // Mint a sub-DID + OrganizationMembership VC for `user` under `org`, persisting
-  // the encrypted seed on the user and the VC in the credential store. Returns the
-  // minted DID. Throws on any failure so the caller can roll back the user row.
+  // Mint a sub-DID + OrganizationMembership VC for `user` under `org` (links the
+  // user's tenancy orgId). Shared logic lives in mintOrgMembership.
   async function mintMembership(org: OrganizationRecord, user: UserRecord, role: Role): Promise<string> {
-    const now = Math.floor(Date.now() / 1000);
-    const seed = deps.keystore.newSeed();
-    const didSeedEncrypted = deps.keystore.encryptSeed(seed);
-    const did = deps.keystore.keyOf(didSeedEncrypted).did;
-    const memberSince = new Date(now * 1000).toISOString().slice(0, 10);
-    const { vcJwt, expiresAt } = deps.keystore.issueMembershipCredential({
-      orgEncSeed: org.didSeedEncrypted, orgDid: org.did, userDid: did,
-      claims: { organization: org.name, orgId: org.id, role, memberSince }, now,
-    });
-    await deps.users.update(user.id, { did, didSeedEncrypted, orgId: org.id });
-    await deps.credentials.create({
-      id: randomUUID(),
-      holderDid: did, issuerDid: org.did, type: "OrganizationMembership", vcJwt,
-      subjectClaims: { id: did, organization: org.name, orgId: org.id, role, memberSince },
-      issuedAt: new Date(now * 1000).toISOString(), expiresAt: new Date(expiresAt * 1000).toISOString(),
-      revoked: false, revokedAt: null, revokedReason: null, revokedBy: null, proposalId: null,
-    });
-    return did;
+    return mintOrgMembership(deps, org, user, role, { linkOrgId: true });
   }
 
   app.post("/orgs/:id/users", { schema: S.createMember, ...auth }, async (request, reply) => {
