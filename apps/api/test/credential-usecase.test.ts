@@ -35,6 +35,24 @@ describe("credential use-case config API", () => {
     const bad = await app.inject({ method: "POST", url: `${V1}/credential-use-cases`, headers: auth(admin), payload: { ...DEF, key: "no-types", credentialTypes: [] } });
     expect(bad.statusCode).toBe(400);
   });
+  it("reserves the slug across BOTH domains: a token use case cannot reuse a credential key", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const made = await app.inject({ method: "POST", url: `${V1}/credential-use-cases`, headers: auth(admin), payload: DEF });
+    expect(made.statusCode).toBe(201);
+    // A token use case that reuses the credential use case's key must be rejected.
+    const tokenDef = {
+      key: "kyc-onboarding", name: "KYC (token)", tokenStandard: "ERC-20", symbol: "KYC",
+      allowedChainIds: ["fabric"], defaultChainId: "fabric",
+      metadataSchema: { type: "object", properties: { faceValue: { type: "number" } }, required: ["faceValue"] },
+      lifecycle: { mint: true, transfer: true, burn: true, freeze: true },
+      compliance: { allowlist: false, transferRestrictions: false },
+      roles: ["UseCaseAdmin", "Issuer", "Buyer", "Auditor"],
+    };
+    const clash = await app.inject({ method: "POST", url: `${V1}/use-cases`, headers: auth(admin), payload: tokenDef });
+    expect(clash.statusCode).toBe(409);
+    expect(clash.json().error).toBe("KEY_TAKEN");
+  });
   it("is PlatformAdmin-only to author; templates + reads are open to authed users", async () => {
     const app = await buildTestApp();
     const issuer = await loginAs(app, "m1.issuer@tokenlayer.dev", "m1issuer123");

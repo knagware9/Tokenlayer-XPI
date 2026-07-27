@@ -24,8 +24,11 @@ export const createUseCaseKind: ProposalKindHandler = {
   canApprove: orgScopedView,
   async execute(ctx, _proposer, p) {
     const def = p.payload as unknown as UseCaseDefinition;
-    // Re-check the key — it may have been taken since propose (race ⇒ failed proposal).
+    // Re-check the key — it may have been taken since propose (race ⇒ failed
+    // proposal), in EITHER domain (a slug is unique across use cases and
+    // credential use cases alike).
     if (await ctx.deps.useCases.has(def.key)) throw coded(409, "USECASE_EXISTS", `use case '${def.key}' already exists`);
+    if (await ctx.deps.credentialUseCases.has(def.key)) throw coded(409, "KEY_TAKEN", `use-case key '${def.key}' already exists`);
     const available = new Set(ctx.deps.chains.list().map((c) => c.id));
     // Deploy + persist via the shared helper so the NO_DEPLOYABLE_CHAIN surface
     // stays identical to the PlatformAdmin direct-create path.

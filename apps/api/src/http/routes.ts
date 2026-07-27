@@ -206,6 +206,12 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       if (err instanceof PolicyError) return reply.code(400).send({ error: err.code, message: err.message });
       throw err;
     }
+    // A slug is unique across BOTH domains: reject a key already taken by a
+    // credential use case (the credential-side route symmetrically checks this
+    // repo too). Applies to both the OrgAdmin proposal and PlatformAdmin paths.
+    if (await deps.credentialUseCases.has(definition.key)) {
+      return reply.code(409).send({ error: "KEY_TAKEN", message: `use-case key '${definition.key}' already exists` });
+    }
     // OrgAdmin: gated. Stamp ownerOrgId from the caller's own claims (never the
     // client body) AFTER normalising, and park a create-use-case proposal for a
     // PlatformAdmin to approve — the deploy happens on approval, not here.
