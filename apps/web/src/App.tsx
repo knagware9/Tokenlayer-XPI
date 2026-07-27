@@ -101,12 +101,13 @@ export function App(): JSX.Element {
       { id: "organizations", label: "Organizations", icon: "users" },
       { id: "approvals", label: "Approvals", icon: "check" },
       { id: "verify", label: "Verification", icon: "shield" },
+      { id: "identity", label: "Identity", icon: "shield" },
       { id: "networks", label: "Networks", icon: "chain" },
       ...pinned,
     ];
     const platViews: Record<string, PlatformTab> = {
       dashboard: "overview", "use-cases": "use-cases", create: "create",
-      organizations: "organizations", approvals: "approvals", verify: "verify", networks: "networks",
+      organizations: "organizations", approvals: "approvals", verify: "verify", networks: "networks", identity: "identity",
     };
     const knownIds = [...Object.keys(platViews), "profile", "credentials"];
     const activeId = knownIds.includes(view) ? view : "dashboard";

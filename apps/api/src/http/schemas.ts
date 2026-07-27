@@ -178,6 +178,24 @@ export const components: Record<string, unknown>[] = [
     required: ["key", "name", "tokenStandard", "symbol", "allowedChainIds", "defaultChainId", "metadataSchema", "lifecycle", "compliance", "roles"],
   },
   {
+    $id: "CredentialUseCase",
+    type: "object",
+    additionalProperties: true,
+    description: "A configured credential (DID/VC) use case — the Identity-domain parallel of a tokenization UseCase.",
+    properties: {
+      key: { type: "string" },
+      name: { type: "string" },
+      description: { type: "string" },
+      credentialTypes: { type: "array" },
+      issuer: { type: "object", additionalProperties: true },
+      holderPolicy: { type: "object", additionalProperties: true },
+      verifier: { type: "object", additionalProperties: true },
+      ownerOrgId: { type: "string", nullable: true },
+      status: { type: "string" },
+    },
+    required: ["key", "name", "credentialTypes", "issuer", "holderPolicy", "verifier"],
+  },
+  {
     $id: "Asset",
     type: "object",
     additionalProperties: true,
@@ -517,6 +535,25 @@ export const S: Record<string, FastifySchema> = {
       },
     },
     response: { 200: { $ref: "ContractCode#" }, ...errs(400, 401) },
+  },
+
+  credentialTemplates: { tags: ["Credential Use Cases"], summary: "Editable starter credential-type templates", security: bearer, response: { 200: { type: "object", additionalProperties: true }, ...errs(401) } },
+  listCredentialUseCases: { tags: ["Credential Use Cases"], summary: "List credential use cases", security: bearer, response: { 200: { type: "array", items: { $ref: "CredentialUseCase#" } }, ...errs(401) } },
+  getCredentialUseCase: {
+    tags: ["Credential Use Cases"], summary: "Get a credential use case by key", security: bearer,
+    params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
+    response: { 200: { $ref: "CredentialUseCase#" }, ...errs(401, 404) },
+  },
+  createCredentialUseCase: {
+    tags: ["Credential Use Cases"], summary: "Create a credential use case (PlatformAdmin)", security: bearer,
+    body: { type: "object", additionalProperties: true, required: ["key", "name", "credentialTypes", "issuer", "holderPolicy", "verifier"] },
+    response: { 201: { $ref: "CredentialUseCase#" }, ...errs(400, 401, 403, 409) },
+  },
+  updateCredentialUseCase: {
+    tags: ["Credential Use Cases"], summary: "Update a credential use case (PlatformAdmin)", security: bearer,
+    params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
+    body: { type: "object", additionalProperties: true },
+    response: { 200: { $ref: "CredentialUseCase#" }, ...errs(400, 401, 403, 404) },
   },
 
   issueAsset: {

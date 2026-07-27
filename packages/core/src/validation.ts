@@ -89,7 +89,7 @@ export function validateUseCaseDefinition(def: unknown): asserts def is UseCaseD
   }
 }
 
-function validateMetadataSchema(
+export function validateMetadataSchema(
   schema: unknown,
   key: string,
   fail: (msg: string) => never,
