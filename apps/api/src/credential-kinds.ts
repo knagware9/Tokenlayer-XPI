@@ -3,6 +3,7 @@
  * gated by the credential type's own maker-checker depth. These are ORG scoped —
  * unlike token kinds, which are use-case scoped.
  */
+import { credentialTypeDef } from "@tokenlayer/core";
 import type { AppDeps } from "./context.js";
 import { coded } from "./executors.js";
 import { issueCredentialFor, revokeCredentialById } from "./credential-issuance.js";
@@ -34,7 +35,8 @@ export const issueCredentialKind: ProposalKindHandler = {
     const org = await ctx.deps.organizations.get(pl.issuerOrgId);
     if (!org) throw coded(404, "NOT_FOUND", "issuing organization missing");
     await issueCredentialFor(ctx.deps, {
-      issuerOrg: org, subjectDid: pl.subjectDid, type: pl.type, claims: pl.claims, proposalId: p.id,
+      issuerOrg: org, subjectDid: pl.subjectDid, type: pl.type, claims: pl.claims,
+      validityDays: credentialTypeDef(pl.type).validityDays, proposalId: p.id,
     });
   },
 };

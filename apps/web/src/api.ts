@@ -1,4 +1,4 @@
-import type { AccountState, ActivityEvent, AnalyticsSummary, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, ChainInfo, ChainStatus, CompanyCategory, ContractCode, CredentialStatusInfo, CredentialTypeInfo, CredentialTypeSpec, CredentialUseCase, DidDocument, HeldCredential, IdentityRegistryInfo, IdentityResult, InvoiceRowResult, IssuedCredential, Listing, OrgMember, OrgType, Organization, Portfolio, Proposal, Role, SessionUser, StagedInvoice, TokenInfo, TokenStandard, TokenizeResult, Trade, UseCase, VerificationRequest, VerificationResult } from "./types.js";
+import type { AccountState, ActivityEvent, AnalyticsSummary, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, ChainInfo, ChainStatus, CompanyCategory, ContractCode, CredentialStatusInfo, CredentialTypeInfo, CredentialTypeSpec, CredentialUseCase, DidDocument, EligibleHolder, HeldCredential, IdentityRegistryInfo, IdentityResult, InvoiceRowResult, IssuedCredential, Listing, OrgMember, OrgType, Organization, Portfolio, Proposal, Role, SessionUser, StagedInvoice, TokenInfo, TokenStandard, TokenizeResult, Trade, UseCase, VerificationRequest, VerificationResult } from "./types.js";
 
 export interface Currency { code: string; label: string; }
 export interface CashBalance { currency: string; address: string; amount: string; }
@@ -186,7 +186,7 @@ export const api = {
   identityRegistry: (token: string) => request<IdentityRegistryInfo | null>("/registry", token),
   // Public: a verifier must be able to check a credential without an account.
   credentialStatus: (id: string) => request<CredentialStatusInfo>(`/credentials/${encodeURIComponent(id)}/status`, null),
-  createVerificationRequest: (token: string, body: { holderDid: string; requestedTypes: string[]; purpose: string }) =>
+  createVerificationRequest: (token: string, body: { holderDid: string; requestedTypes: string[]; purpose: string; credentialUseCaseKey?: string }) =>
     request<VerificationRequest>("/verification-requests", token, { method: "POST", body: JSON.stringify(body) }),
   myVerificationRequests: (token: string) => request<VerificationRequest[]>("/me/verification-requests", token),
   consentVerification: (token: string, id: string, credentialIds: string[]) =>
@@ -211,4 +211,8 @@ export const api = {
   credentialUseCase: (token: string, key: string) => request<CredentialUseCase>(`/credential-use-cases/${encodeURIComponent(key)}`, token),
   createCredentialUseCase: (token: string, def: CredentialUseCase) => request<CredentialUseCase>("/credential-use-cases", token, { method: "POST", body: JSON.stringify(def) }),
   updateCredentialUseCase: (token: string, key: string, def: CredentialUseCase) => request<CredentialUseCase>(`/credential-use-cases/${encodeURIComponent(key)}`, token, { method: "PATCH", body: JSON.stringify(def) }),
+  eligibleHolders: (token: string, key: string) =>
+    request<EligibleHolder[]>(`/credential-use-cases/${encodeURIComponent(key)}/eligible-holders`, token),
+  issueUsecaseCredential: (token: string, key: string, body: { credentialType: string; subjectUserId: string; claims: Record<string, unknown> }) =>
+    request<{ proposal: Proposal }>(`/credential-use-cases/${encodeURIComponent(key)}/credentials`, token, { method: "POST", body: JSON.stringify(body) }),
 };

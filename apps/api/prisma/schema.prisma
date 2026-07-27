@@ -243,6 +243,7 @@ model Credential {
   revokedReason String?
   revokedBy     String? // user id that proposed the revocation
   proposalId    String? // the approved request that produced this credential
+  credentialUseCaseKey String? // the CredentialUseCase this VC was issued under, if any
 
   @@index([holderDid])
 }
@@ -266,6 +267,7 @@ model VerificationRequest {
   holderDid              String
   requestedTypes         String // JSON array of credential-type strings
   purpose                String
+  credentialUseCaseKey   String? // the CredentialUseCase scoping this request, if any
   challenge              String
   status                 String    @default("pending") // pending | consented | rejected | expired
   presentationVpJwt      String? // the holder-signed VP, set at consent

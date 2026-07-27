@@ -1029,6 +1029,27 @@ export const S: Record<string, FastifySchema> = {
     },
     response: { 202: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
   },
+  issueUsecaseCredential: {
+    tags: ["Credentials"], summary: "Issue a configured credential type (gated by the type's approval depth)", security: bearer,
+    params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
+    body: {
+      type: "object", additionalProperties: false, required: ["credentialType", "subjectUserId", "claims"],
+      properties: {
+        credentialType: { type: "string" },
+        subjectUserId: { type: "string" },
+        claims: { type: "object", additionalProperties: true },
+      },
+    },
+    response: { 202: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
+  },
+  eligibleHolders: {
+    tags: ["Credentials"], summary: "Users eligible to hold a credential of this use case", security: bearer,
+    params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
+    response: {
+      200: { type: "array", items: { type: "object", additionalProperties: true } },
+      ...errs(401, 403, 404),
+    },
+  },
   revokeCredential: {
     tags: ["Credentials"], summary: "Revoke a credential (gated; reason required)", security: bearer,
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
@@ -1058,6 +1079,7 @@ export const S: Record<string, FastifySchema> = {
         holderDid: { type: "string", minLength: 1 },
         requestedTypes: { type: "array", items: { type: "string" }, minItems: 1 },
         purpose: { type: "string", minLength: 1 },
+        credentialUseCaseKey: { type: "string" },
       },
     },
     response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403) },

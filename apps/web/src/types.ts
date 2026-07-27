@@ -410,6 +410,7 @@ export interface VerificationRequest {
   holderDid: string;
   requestedTypes: string[];
   purpose: string;
+  credentialUseCaseKey?: string | null;
   status: "pending" | "consented" | "rejected" | "expired";
   consentedCredentialIds: string[] | null;
   consentedAt: string | null;
@@ -428,7 +429,8 @@ export interface StagedInvoice {
 export interface InvoiceRowResult { index: number; status: "staged" | "duplicate" | "invalid"; id?: string; error?: string }
 export interface TokenizeResult { id: string; status: "tokenized" | "skipped" | "failed"; assetId?: string; error?: string }
 
-export interface CredentialTypeSpec { name: string; title: string; claimSchema: { type: "object"; required?: string[]; properties: Record<string, { type: string; pattern?: string; enum?: string[] }> }; validityDays: number; }
+export interface CredentialTypeSpec { name: string; title: string; claimSchema: { type: "object"; required?: string[]; properties: Record<string, { type: string; pattern?: string; enum?: string[] }> }; validityDays: number; requiredApprovals: number; }
+export interface EligibleHolder { id: string; email: string; did: string; orgName: string | null; }
 export type IssuerBinding = { kind: "platform" } | { kind: "org"; orgId: string };
 export type HolderPolicy = { who: "any-onboarded" } | { who: "orgType"; orgTypes: string[] } | { who: "specific"; orgIds: string[] };
 export type VerifierBinding = { kind: "any" } | { kind: "orgs"; orgIds: string[] };

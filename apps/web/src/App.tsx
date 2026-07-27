@@ -7,6 +7,7 @@ import { AppShell, type NavItem } from "./components/AppShell.js";
 import { AssetManagement, isInvoiceUseCase } from "./components/AssetManagement.js";
 import { Dashboard } from "./components/Dashboard.js";
 import { Home } from "./components/Home.js";
+import { IdentityHome } from "./components/IdentityHome.js";
 import { InvestorPortal } from "./components/InvestorPortal.js";
 import { InvoiceRegister } from "./components/InvoiceRegister.js";
 import { Login } from "./components/Login.js";
@@ -132,6 +133,7 @@ export function App(): JSX.Element {
     ...(canManageUsers(user.role) ? [{ id: "users", label: "User Management", icon: "users" as const }] : []),
     ...(isPlatform || isOrgAdmin ? [{ id: "organizations", label: "Organizations", icon: "users" as const }] : []),
     ...(isPlatform || isOrgAdmin ? [{ id: "verify", label: "Verification", icon: "shield" as const }] : []),
+    ...(isPlatform || isOrgAdmin ? [{ id: "identity", label: "Identity", icon: "shield" as const }] : []),
     ...pinned,
   ];
 
@@ -154,6 +156,8 @@ export function App(): JSX.Element {
     panel = <Organizations />;
   } else if (view === "verify") {
     panel = <VerificationRequests />;
+  } else if (view === "identity") {
+    panel = <IdentityHome />;
   } else if (view === "profile") {
     panel = <MyProfile onSelect={setView} />;
   } else if (view === "credentials") {

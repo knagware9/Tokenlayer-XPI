@@ -4,7 +4,6 @@
  * identity-revoke kinds so the invariants live in exactly one place.
  */
 import { randomUUID } from "node:crypto";
-import { credentialTypeDef } from "@tokenlayer/core";
 import type { AppDeps } from "./context.js";
 import { coded } from "./executors.js";
 import type { CredentialRecord, OrganizationRecord } from "./persistence/types.js";
@@ -14,19 +13,20 @@ export interface IssueCredentialArgs {
   subjectDid: string;
   type: string;
   claims: Record<string, unknown>;
+  validityDays: number;
+  credentialUseCaseKey?: string | null;
   proposalId: string | null;
 }
 
 /** Sign → anchor (when a registry is present) → persist. Throws ⇒ nothing persisted. */
 export async function issueCredentialFor(deps: AppDeps, a: IssueCredentialArgs): Promise<CredentialRecord> {
-  const def = credentialTypeDef(a.type);
   // The id is generated BEFORE signing: the VC embeds it in jti + credentialStatus.
   const credentialId = randomUUID();
   const now = Math.floor(Date.now() / 1000);
   const statusUrl = `${deps.publicApiUrl}/credentials/${credentialId}/status`;
   const { vcJwt, expiresAt } = deps.keystore.issueOrgCredential({
     orgEncSeed: a.issuerOrg.didSeedEncrypted, orgDid: a.issuerOrg.did, subjectDid: a.subjectDid,
-    type: a.type, claims: a.claims, credentialId, statusUrl, validityDays: def.validityDays, now,
+    type: a.type, claims: a.claims, credentialId, statusUrl, validityDays: a.validityDays, now,
   });
   // Anchor BEFORE persisting: a throw here fails the caller and no row exists.
   if (deps.registry) {
@@ -43,6 +43,7 @@ export async function issueCredentialFor(deps: AppDeps, a: IssueCredentialArgs):
     expiresAt: new Date(expiresAt * 1000).toISOString(),
     revoked: false, revokedAt: null, revokedReason: null, revokedBy: null,
     proposalId: a.proposalId,
+    credentialUseCaseKey: a.credentialUseCaseKey ?? null,
   });
 }
 

@@ -404,6 +404,7 @@ export interface CredentialRecord {
   revokedReason: string | null;
   revokedBy: string | null;
   proposalId: string | null;
+  credentialUseCaseKey: string | null;
 }
 
 export interface CredentialRepository {
@@ -437,6 +438,7 @@ export interface VerificationRequestRecord {
   holderDid: string;
   requestedTypes: string[];
   purpose: string;
+  credentialUseCaseKey: string | null;
   challenge: string;
   status: VerificationStatus;
   presentationVpJwt: string | null;

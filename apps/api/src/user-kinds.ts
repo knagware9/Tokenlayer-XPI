@@ -3,7 +3,7 @@
  * + KycCredential) and gated identity revocation (chain-first). USE-CASE scoped:
  * PlatformAdmin always; a UseCaseAdmin of the same use case otherwise.
  */
-import { didKeyFromSeed, type LifecycleAction, type Role } from "@tokenlayer/core";
+import { credentialTypeDef, didKeyFromSeed, type LifecycleAction, type Role } from "@tokenlayer/core";
 import type { AppDeps } from "./context.js";
 import { issueCredentialFor, revokeCredentialById } from "./credential-issuance.js";
 import { coded } from "./executors.js";
@@ -67,7 +67,7 @@ export const onboardUserKind: ProposalKindHandler = {
         const cred = await issueCredentialFor(deps, {
           issuerOrg, subjectDid: did, type: "KycCredential",
           claims: { legalName: pl.kyc.legalName, country: pl.kyc.country },
-          proposalId: p.id,
+          validityDays: credentialTypeDef("KycCredential").validityDays, proposalId: p.id,
         });
         issuedCredentialId = cred.id;
         await deps.users.update(created.id, {
