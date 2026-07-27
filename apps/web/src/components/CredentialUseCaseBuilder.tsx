@@ -1,0 +1,484 @@
+import { useEffect, useState } from "react";
+import { api, ApiError } from "../api.js";
+import { useAuth } from "../auth.js";
+import type { CredentialTypeSpec, CredentialUseCase, HolderPolicy, IssuerBinding, Organization, OrgType, VerifierBinding } from "../types.js";
+import { SchemaFieldEditor, fieldsToSchema, type FieldKind, type FieldRow } from "./SchemaFieldEditor.js";
+import { Icon } from "./ui.js";
+
+interface Props {
+  onCreated: () => void;
+}
+
+/** A credential type being authored — its machine name, label, validity and the
+ * editable claim fields (seeded from a starter template or built by hand). */
+interface CredTypeDraft {
+  name: string;
+  title: string;
+  validityDays: number;
+  fields: FieldRow[];
+  templateKey: string;
+}
+
+const ORG_TYPES: OrgType[] = ["bank", "corporate", "msme", "government", "verifier"];
+const STEPS = ["Basics", "Credential types", "Roles", "Review"] as const;
+
+const slugify = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+
+/** Turn a starter template's claim schema into editable field rows. */
+function templateToFields(spec: CredentialTypeSpec): FieldRow[] {
+  const required = new Set(spec.claimSchema.required ?? []);
+  return Object.entries(spec.claimSchema.properties).map(([name, p]) => {
+    const kind: FieldKind = p.enum
+      ? "enum"
+      : p.type === "number"
+        ? "number"
+        : p.type === "boolean"
+          ? "boolean"
+          : p.type === "document"
+            ? "document"
+            : "string";
+    return {
+      name,
+      kind,
+      required: required.has(name),
+      enumValues: p.enum ? p.enum.join(", ") : undefined,
+      pattern: p.pattern,
+    };
+  });
+}
+
+const emptyCredType = (): CredTypeDraft => ({ name: "", title: "", validityDays: 365, fields: [], templateKey: "" });
+
+/** Guided 4-step wizard that authors a CredentialUseCase (POST /credential-use-cases). */
+export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
+  const { token } = useAuth();
+  const [step, setStep] = useState(0);
+
+  const [templates, setTemplates] = useState<Record<string, CredentialTypeSpec>>({});
+  const [orgs, setOrgs] = useState<Organization[]>([]);
+
+  // Step 1 — Basics
+  const [name, setName] = useState("");
+  const [key, setKey] = useState("");
+  const [keyTouched, setKeyTouched] = useState(false);
+  const [description, setDescription] = useState("");
+
+  // Step 2 — Credential types
+  const [credTypes, setCredTypes] = useState<CredTypeDraft[]>([emptyCredType()]);
+
+  // Step 3 — Roles
+  const [issuerKind, setIssuerKind] = useState<IssuerBinding["kind"]>("platform");
+  const [issuerOrgId, setIssuerOrgId] = useState("");
+  const [holderWho, setHolderWho] = useState<HolderPolicy["who"]>("any-onboarded");
+  const [holderOrgTypes, setHolderOrgTypes] = useState<OrgType[]>([]);
+  const [holderOrgIds, setHolderOrgIds] = useState<string[]>([]);
+  const [verifierKind, setVerifierKind] = useState<VerifierBinding["kind"]>("any");
+  const [verifierOrgIds, setVerifierOrgIds] = useState<string[]>([]);
+
+  // Step 4 — create
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!token) return;
+    void api.credentialTemplates(token).then(setTemplates).catch(() => setTemplates({}));
+    void api.orgs(token).then(setOrgs).catch(() => setOrgs([]));
+  }, [token]);
+
+  // ---------- derived validation ----------
+  const keyValid = /^[a-z0-9]+(-[a-z0-9]+)*$/.test(key);
+  const step1Valid = name.trim().length > 0 && keyValid;
+
+  const namedCredTypes = credTypes.filter((c) => c.name.trim());
+  const dupCredName = new Set(namedCredTypes.map((c) => c.name.trim())).size !== namedCredTypes.length;
+  const step2Valid = namedCredTypes.length > 0 && !dupCredName && credTypes.every((c) => c.validityDays > 0);
+
+  const step3Valid =
+    (issuerKind === "platform" || (issuerKind === "org" && !!issuerOrgId)) &&
+    (holderWho === "any-onboarded" ||
+      (holderWho === "orgType" && holderOrgTypes.length > 0) ||
+      (holderWho === "specific" && holderOrgIds.length > 0)) &&
+    (verifierKind === "any" || (verifierKind === "orgs" && verifierOrgIds.length > 0));
+
+  const stepValid = [step1Valid, step2Valid, step3Valid, step1Valid && step2Valid && step3Valid];
+  const canCreate = step1Valid && step2Valid && step3Valid;
+
+  function onNameChange(v: string): void {
+    setName(v);
+    if (!keyTouched) setKey(slugify(v));
+  }
+
+  // ---------- credential type helpers ----------
+  const patchCredType = (i: number, patch: Partial<CredTypeDraft>): void =>
+    setCredTypes((arr) => arr.map((c, j) => (j === i ? { ...c, ...patch } : c)));
+
+  function applyTemplate(i: number, templateKey: string): void {
+    const spec = templates[templateKey];
+    if (!spec) {
+      patchCredType(i, { templateKey: "" });
+      return;
+    }
+    patchCredType(i, {
+      templateKey,
+      name: spec.name,
+      title: spec.title,
+      validityDays: spec.validityDays,
+      fields: templateToFields(spec),
+    });
+  }
+
+  // ---------- multi-select toggles ----------
+  const toggle = <T,>(list: T[], v: T): T[] => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
+
+  function buildDefinition(): CredentialUseCase {
+    const issuer: IssuerBinding = issuerKind === "org" ? { kind: "org", orgId: issuerOrgId } : { kind: "platform" };
+    const holderPolicy: HolderPolicy =
+      holderWho === "orgType"
+        ? { who: "orgType", orgTypes: holderOrgTypes }
+        : holderWho === "specific"
+          ? { who: "specific", orgIds: holderOrgIds }
+          : { who: "any-onboarded" };
+    const verifier: VerifierBinding = verifierKind === "orgs" ? { kind: "orgs", orgIds: verifierOrgIds } : { kind: "any" };
+    return {
+      key: key.trim(),
+      name: name.trim(),
+      description: description.trim() || undefined,
+      credentialTypes: credTypes
+        .filter((c) => c.name.trim())
+        .map((c) => ({ name: c.name.trim(), title: c.title.trim() || c.name.trim(), validityDays: c.validityDays, claimSchema: fieldsToSchema(c.fields) })),
+      issuer,
+      holderPolicy,
+      verifier,
+    };
+  }
+
+  async function create(): Promise<void> {
+    if (!token) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.createCredentialUseCase(token, buildDefinition());
+      onCreated();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not create credential use case");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const orgLabel = (id: string): string => orgs.find((o) => o.id === id)?.name ?? id;
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm">
+      <div className="flex flex-col md:flex-row">
+        {/* progress rail */}
+        <nav className="md:w-56 shrink-0 border-b md:border-b-0 md:border-r border-slate-100 p-4 md:p-5">
+          <ol className="flex md:flex-col gap-1 md:gap-0.5 overflow-x-auto">
+            {STEPS.map((label, i) => {
+              const reachable = i <= step || STEPS.slice(0, i).every((_, j) => stepValid[j]);
+              const current = i === step;
+              const done = stepValid[i] && i < step;
+              return (
+                <li key={label}>
+                  <button
+                    type="button"
+                    disabled={!reachable}
+                    onClick={() => reachable && setStep(i)}
+                    className={`w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm whitespace-nowrap ${
+                      current ? "bg-brand-50 text-brand-700 font-semibold" : "text-slate-600 hover:bg-slate-50"
+                    } disabled:opacity-40 disabled:cursor-not-allowed`}
+                  >
+                    <span
+                      className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-semibold shrink-0 ${
+                        done ? "bg-emerald-100 text-emerald-700" : current ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-500"
+                      }`}
+                    >
+                      {done ? <Icon name="check" className="w-3.5 h-3.5" /> : i + 1}
+                    </span>
+                    {label}
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+        </nav>
+
+        {/* step pane */}
+        <div className="flex-1 p-5 md:p-6 min-w-0">
+          {step === 0 && (
+            <div className="space-y-5">
+              <StepIntro title="Basics" hint="Name the credential use case — the key identifies it in the API." />
+              <div className="grid sm:grid-cols-2 gap-4">
+                <L label="Name">
+                  <input className="input" value={name} onChange={(e) => onNameChange(e.target.value)} placeholder="e.g. Corporate Trade Credentials" />
+                </L>
+                <L label="Key (unique id)" hint="Lowercase, hyphen-separated — used in the API">
+                  <input
+                    className="input"
+                    value={key}
+                    onChange={(e) => {
+                      setKeyTouched(true);
+                      setKey(slugify(e.target.value));
+                    }}
+                    placeholder="e.g. corp-trade-credentials"
+                  />
+                  {key && !keyValid && <span className="block text-[11px] text-red-600 mt-1">Lowercase letters, digits and hyphens only.</span>}
+                </L>
+              </div>
+              <L label="Description">
+                <textarea
+                  className="input resize-y min-h-[72px]"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="What these credentials represent and who they are for"
+                />
+              </L>
+            </div>
+          )}
+
+          {step === 1 && (
+            <div className="space-y-4">
+              <StepIntro title="Credential types" hint="Each type is a claim schema. Start from a template or build fields by hand." />
+              <div className="space-y-5">
+                {credTypes.map((ct, i) => (
+                  <section key={i} className="rounded-xl border border-slate-200 p-4 space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Credential type {i + 1}</span>
+                      {credTypes.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setCredTypes((arr) => arr.filter((_, j) => j !== i))}
+                          className="text-slate-400 hover:text-red-500 text-xs font-medium"
+                        >
+                          remove
+                        </button>
+                      )}
+                    </div>
+                    <L label="Start from template" hint="Prefills name, title, validity and fields — everything stays editable">
+                      <select className="select" value={ct.templateKey} onChange={(e) => applyTemplate(i, e.target.value)}>
+                        <option value="">— none —</option>
+                        {Object.entries(templates).map(([tk, spec]) => (
+                          <option key={tk} value={tk}>
+                            {spec.title} ({spec.name})
+                          </option>
+                        ))}
+                      </select>
+                    </L>
+                    <div className="grid sm:grid-cols-3 gap-4">
+                      <L label="Name" hint="Machine name, e.g. MCACredential">
+                        <input className="input" value={ct.name} onChange={(e) => patchCredType(i, { name: e.target.value })} placeholder="KycCredential" />
+                      </L>
+                      <L label="Title">
+                        <input className="input" value={ct.title} onChange={(e) => patchCredType(i, { title: e.target.value })} placeholder="KYC Verification" />
+                      </L>
+                      <L label="Validity (days)">
+                        <input
+                          className="input"
+                          type="number"
+                          min="1"
+                          value={ct.validityDays}
+                          onChange={(e) => patchCredType(i, { validityDays: Number(e.target.value) })}
+                        />
+                      </L>
+                    </div>
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Claim fields</div>
+                      <SchemaFieldEditor fields={ct.fields} onChange={(f) => patchCredType(i, { fields: f })} />
+                    </div>
+                  </section>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => setCredTypes((arr) => [...arr, emptyCredType()])}
+                className="text-xs text-brand-600 hover:text-brand-700 font-medium"
+              >
+                + add credential type
+              </button>
+              {dupCredName && <p className="text-xs text-red-600">Two credential types share the same name — names must be unique.</p>}
+            </div>
+          )}
+
+          {step === 2 && (
+            <div className="space-y-5">
+              <StepIntro title="Roles" hint="Who issues these credentials, who may hold them, and who may verify them." />
+
+              <section className="rounded-lg border border-slate-200 p-4 space-y-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Issuer</div>
+                <div className="flex flex-wrap gap-4 text-sm">
+                  <Radio checked={issuerKind === "platform"} onChange={() => setIssuerKind("platform")}>The platform</Radio>
+                  <Radio checked={issuerKind === "org"} onChange={() => setIssuerKind("org")}>A specific organization</Radio>
+                </div>
+                {issuerKind === "org" && (
+                  <L label="Issuer organization">
+                    <select className="select" value={issuerOrgId} onChange={(e) => setIssuerOrgId(e.target.value)}>
+                      <option value="">— select —</option>
+                      {orgs.map((o) => (
+                        <option key={o.id} value={o.id}>{o.name}</option>
+                      ))}
+                    </select>
+                  </L>
+                )}
+              </section>
+
+              <section className="rounded-lg border border-slate-200 p-4 space-y-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Holders</div>
+                <div className="flex flex-wrap gap-4 text-sm">
+                  <Radio checked={holderWho === "any-onboarded"} onChange={() => setHolderWho("any-onboarded")}>Any onboarded org</Radio>
+                  <Radio checked={holderWho === "orgType"} onChange={() => setHolderWho("orgType")}>By org type</Radio>
+                  <Radio checked={holderWho === "specific"} onChange={() => setHolderWho("specific")}>Specific orgs</Radio>
+                </div>
+                {holderWho === "orgType" && (
+                  <div className="flex flex-wrap gap-2">
+                    {ORG_TYPES.map((t) => (
+                      <Chip key={t} active={holderOrgTypes.includes(t)} onClick={() => setHolderOrgTypes((s) => toggle(s, t))}>{t}</Chip>
+                    ))}
+                  </div>
+                )}
+                {holderWho === "specific" && (
+                  <div className="flex flex-wrap gap-2">
+                    {orgs.length === 0 && <span className="text-xs text-slate-400">No organizations available.</span>}
+                    {orgs.map((o) => (
+                      <Chip key={o.id} active={holderOrgIds.includes(o.id)} onClick={() => setHolderOrgIds((s) => toggle(s, o.id))}>{o.name}</Chip>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section className="rounded-lg border border-slate-200 p-4 space-y-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Verifiers</div>
+                <div className="flex flex-wrap gap-4 text-sm">
+                  <Radio checked={verifierKind === "any"} onChange={() => setVerifierKind("any")}>Anyone</Radio>
+                  <Radio checked={verifierKind === "orgs"} onChange={() => setVerifierKind("orgs")}>Specific orgs</Radio>
+                </div>
+                {verifierKind === "orgs" && (
+                  <div className="flex flex-wrap gap-2">
+                    {orgs.length === 0 && <span className="text-xs text-slate-400">No organizations available.</span>}
+                    {orgs.map((o) => (
+                      <Chip key={o.id} active={verifierOrgIds.includes(o.id)} onClick={() => setVerifierOrgIds((s) => toggle(s, o.id))}>{o.name}</Chip>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="space-y-5">
+              <StepIntro title="Review & create" hint="Confirm the credential use case before it is authored." />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <SummaryTile label="Basics">
+                  <div className="text-sm font-semibold text-slate-800">{name || "—"}</div>
+                  <div className="text-xs text-slate-500">{key}</div>
+                  {description && <div className="text-xs text-slate-500 mt-1">{description}</div>}
+                </SummaryTile>
+                <SummaryTile label="Credential types">
+                  <div className="text-sm font-semibold text-slate-800">{namedCredTypes.length}</div>
+                  <div className="text-xs text-slate-500">{namedCredTypes.map((c) => c.name.trim()).join(", ") || "—"}</div>
+                </SummaryTile>
+                <SummaryTile label="Issuer">
+                  <div className="text-sm text-slate-700">{issuerKind === "platform" ? "The platform" : `Org: ${orgLabel(issuerOrgId)}`}</div>
+                </SummaryTile>
+                <SummaryTile label="Holders">
+                  <div className="text-sm text-slate-700">
+                    {holderWho === "any-onboarded"
+                      ? "Any onboarded org"
+                      : holderWho === "orgType"
+                        ? `Org types: ${holderOrgTypes.join(", ") || "—"}`
+                        : `Orgs: ${holderOrgIds.map(orgLabel).join(", ") || "—"}`}
+                  </div>
+                </SummaryTile>
+                <SummaryTile label="Verifiers">
+                  <div className="text-sm text-slate-700">{verifierKind === "any" ? "Anyone" : `Orgs: ${verifierOrgIds.map(orgLabel).join(", ") || "—"}`}</div>
+                </SummaryTile>
+              </div>
+              {error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2">{error}</div>}
+            </div>
+          )}
+
+          {/* footer nav */}
+          <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() => setStep((s) => Math.max(0, s - 1))}
+              disabled={step === 0}
+              className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+            >
+              ← Back
+            </button>
+            {step < 3 ? (
+              <button
+                type="button"
+                onClick={() => setStep((s) => Math.min(3, s + 1))}
+                disabled={!stepValid[step]}
+                className="rounded-lg bg-brand-600 text-white px-5 py-2 text-sm font-semibold hover:bg-brand-700 disabled:opacity-50"
+              >
+                Next →
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void create()}
+                disabled={busy || !canCreate}
+                className="rounded-lg bg-brand-600 text-white px-5 py-2 text-sm font-semibold hover:bg-brand-700 disabled:opacity-50"
+              >
+                {busy ? "Creating…" : "Create credential use case"}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StepIntro({ title, hint }: { title: string; hint: string }): JSX.Element {
+  return (
+    <div>
+      <h3 className="text-base font-semibold text-slate-900">{title}</h3>
+      <p className="text-xs text-slate-500 mt-0.5">{hint}</p>
+    </div>
+  );
+}
+
+function SummaryTile({ label, children }: { label: string; children: React.ReactNode }): JSX.Element {
+  return (
+    <div className="rounded-xl border border-slate-200 p-3">
+      <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400 mb-1.5">{label}</div>
+      {children}
+    </div>
+  );
+}
+
+function L({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }): JSX.Element {
+  return (
+    <label className="block">
+      <span className="block text-xs font-medium text-slate-600 mb-1">{label}</span>
+      {children}
+      {hint && <span className="block text-[11px] text-slate-400 mt-1">{hint}</span>}
+    </label>
+  );
+}
+
+function Radio({ checked, onChange, children }: { checked: boolean; onChange: () => void; children: React.ReactNode }): JSX.Element {
+  return (
+    <label className="flex items-center gap-2 cursor-pointer">
+      <input type="radio" checked={checked} onChange={onChange} />
+      <span className="text-slate-700">{children}</span>
+    </label>
+  );
+}
+
+function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`px-2.5 py-1 rounded-full text-xs font-medium border ${
+        active ? "bg-brand-600 text-white border-brand-600" : "bg-white text-slate-500 border-slate-200 hover:border-brand-400"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}

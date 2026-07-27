@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "../api.js";
 import { useAuth } from "../auth.js";
-import type { ChainInfo, ContractCode, PropertySchema, Role, TokenStandard, UseCase } from "../types.js";
+import type { ChainInfo, ContractCode, Role, TokenStandard, UseCase } from "../types.js";
 import { ContractCodeView } from "./ContractCodeView.js";
 import { familyIcon } from "./NetworksPanel.js";
+import { SchemaFieldEditor, fieldsToSchema, type FieldRow } from "./SchemaFieldEditor.js";
 import { Icon, Pill, Skeleton } from "./ui.js";
 
 interface Props {
@@ -13,17 +14,6 @@ interface Props {
 }
 
 const ALL_ROLES: Role[] = ["UseCaseAdmin", "Issuer", "Buyer", "Auditor"];
-type FieldKind = "string" | "number" | "boolean" | "enum" | "document";
-interface FieldRow {
-  name: string;
-  kind: FieldKind;
-  required: boolean;
-  description?: string;
-  enumValues?: string;
-  min?: string;
-  max?: string;
-  pattern?: string;
-}
 
 const STANDARD_CARDS: { id: TokenStandard; title: string; blurb: string }[] = [
   { id: "ERC-20", title: "ERC-20 · fungible", blurb: "Interchangeable units — receivables, credits, grams of gold." },
@@ -282,30 +272,6 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
     setOk(null);
     setNotice(null);
     try {
-      const properties: Record<string, PropertySchema> = {};
-      for (const f of fields) {
-        const nm = f.name.trim();
-        if (!nm) continue;
-        let prop: PropertySchema;
-        if (f.kind === "enum") {
-          const values = (f.enumValues ?? "").split(",").map((v) => v.trim()).filter(Boolean);
-          prop = { type: "string", enum: values };
-        } else if (f.kind === "document") {
-          prop = { type: "document" };
-        } else if (f.kind === "number") {
-          prop = { type: "number" };
-          if (f.min?.trim()) prop.min = Number(f.min);
-          if (f.max?.trim()) prop.max = Number(f.max);
-        } else if (f.kind === "string") {
-          prop = { type: "string" };
-          if (f.pattern?.trim()) prop.pattern = f.pattern.trim();
-        } else {
-          prop = { type: "boolean" };
-        }
-        if (f.description?.trim()) prop.description = f.description.trim();
-        properties[nm] = prop;
-      }
-
       const complianceOut: UseCase["compliance"] = { allowlist, transferRestrictions };
       if (maxHolders.trim()) complianceOut.maxHolders = Number(maxHolders);
       if (lockupDays.trim()) complianceOut.lockupDays = Number(lockupDays);
@@ -330,11 +296,7 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
         tokenType,
         allowedChainIds,
         defaultChainId,
-        metadataSchema: {
-          type: "object",
-          properties,
-          required: fields.filter((f) => f.required && f.name.trim()).map((f) => f.name.trim()),
-        },
+        metadataSchema: fieldsToSchema(fields),
         lifecycle,
         compliance: complianceOut,
         fees: Object.keys(fees).length ? fees : undefined,
@@ -397,9 +359,6 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
       </div>
     );
   }
-
-  const setField = (i: number, patch: Partial<FieldRow>): void =>
-    setFields((arr) => arr.map((x, j) => (j === i ? { ...x, ...patch } : x)));
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm">
@@ -551,57 +510,7 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
               </div>
 
               <div className="grid gap-5 lg:grid-cols-2">
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Fields</span>
-                    <button
-                      type="button"
-                      onClick={() => setFields((f) => [...f, { name: "", kind: "string", required: false }])}
-                      className="text-xs text-brand-600 hover:text-brand-700 font-medium"
-                    >
-                      + add field
-                    </button>
-                  </div>
-                  <div className="space-y-3">
-                    {fields.map((f, i) => (
-                      <div key={i} className="rounded-lg border border-slate-200 p-3 space-y-2">
-                        <div className="flex items-center gap-2">
-                          <input className="input flex-1" placeholder="field name" value={f.name} onChange={(e) => setField(i, { name: e.target.value })} />
-                          <select className="select w-36" value={f.kind} onChange={(e) => setField(i, { kind: e.target.value as FieldKind })}>
-                            <option value="string">string</option>
-                            <option value="number">number</option>
-                            <option value="boolean">boolean</option>
-                            <option value="enum">enum</option>
-                            <option value="document">document</option>
-                          </select>
-                          <label className="flex items-center gap-1 text-xs text-slate-500 whitespace-nowrap">
-                            <input type="checkbox" checked={f.required} onChange={() => setField(i, { required: !f.required })} />
-                            req
-                          </label>
-                          <button type="button" onClick={() => setFields((arr) => arr.filter((_, j) => j !== i))} className="text-slate-400 hover:text-red-500 text-sm px-1">
-                            ×
-                          </button>
-                        </div>
-                        {f.kind === "enum" && (
-                          <input
-                            className="input text-xs"
-                            placeholder="values (comma-separated)"
-                            value={f.enumValues ?? ""}
-                            onChange={(e) => setField(i, { enumValues: e.target.value })}
-                          />
-                        )}
-                        <input
-                          className="input text-xs"
-                          placeholder="description (optional)"
-                          value={f.description ?? ""}
-                          onChange={(e) => setField(i, { description: e.target.value })}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                  {hasDuplicateField && <p className="text-xs text-red-600 mt-2">Two fields share the same name — field names must be unique.</p>}
-                  {hasEmptyEnum && <p className="text-xs text-red-600 mt-2">Every enum field needs at least one value.</p>}
-                </div>
+                <SchemaFieldEditor fields={fields} onChange={setFields} />
 
                 <div>
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Issue form preview</div>

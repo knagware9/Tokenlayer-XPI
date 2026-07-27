@@ -6,13 +6,14 @@ import type { ChainInfo, ContractCode, UseCase } from "../types.js";
 import { ApprovalsPanel } from "./ApprovalsPanel.js";
 import { ContractCodeView } from "./ContractCodeView.js";
 import { Dashboard } from "./Dashboard.js";
+import { IdentityHome } from "./IdentityHome.js";
 import { NetworksPanel } from "./NetworksPanel.js";
 import { Organizations } from "./Organizations.js";
 import { ChainDeployBadge, UseCaseBuilder } from "./UseCaseBuilder.js";
 import { VerificationRequests } from "./VerificationRequests.js";
 import { Card, EmptyState, Pill, SectionHeader, Skeleton } from "./ui.js";
 
-export type PlatformTab = "overview" | "organizations" | "approvals" | "verify" | "use-cases" | "networks" | "create";
+export type PlatformTab = "overview" | "organizations" | "approvals" | "verify" | "use-cases" | "networks" | "create" | "identity";
 type Tab = PlatformTab;
 
 export function PlatformHome({ useCases, chains, onReloadUseCases, view }: { useCases: UseCase[]; chains: ChainInfo[]; onReloadUseCases: () => void; view?: PlatformTab }): JSX.Element {
@@ -26,6 +27,7 @@ export function PlatformHome({ useCases, chains, onReloadUseCases, view }: { use
     // Credential issuance is org-scoped and gated, so its inbox lives beside Organizations.
     { id: "approvals", label: "Approvals" },
     { id: "verify", label: "Verification" },
+    { id: "identity", label: "Identity" },
     { id: "use-cases", label: "Use cases" },
     { id: "networks", label: "Networks" },
     { id: "create", label: "Create use case" },
@@ -69,6 +71,8 @@ export function PlatformHome({ useCases, chains, onReloadUseCases, view }: { use
           <VerificationRequests />
         </div>
       )}
+
+      {tab === "identity" && <IdentityHome />}
 
       {tab === "use-cases" && <UseCasesTab useCases={useCases} chains={chains} onChanged={onReloadUseCases} />}
 
