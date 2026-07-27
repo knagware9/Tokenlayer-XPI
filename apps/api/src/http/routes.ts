@@ -1618,7 +1618,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
             ...(p.gstin ? { gstin: p.gstin } : {}),
           } : {}),
         };
-        const cred = await issueCredentialFor(deps, { issuerOrg: platformOrg, subjectDid: org.did, type: "OrganizationCredential", claims: kybClaims, proposalId: null });
+        const cred = await issueCredentialFor(deps, { issuerOrg: platformOrg, subjectDid: org.did, type: "OrganizationCredential", claims: kybClaims, validityDays: credentialTypeDef("OrganizationCredential").validityDays, proposalId: null });
         issuerDid = platformOrg.did;
         orgCredentialId = cred.id;
       } catch (err) {
@@ -1875,6 +1875,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     }
     const rec = await deps.verificationRequests.create({
       verifierOrgId: org.id, holderDid: b.holderDid, requestedTypes: b.requestedTypes, purpose: b.purpose,
+      credentialUseCaseKey: null,
       challenge: randomUUID(), status: "pending", presentationVpJwt: null, consentedAt: null,
       consentedCredentialIds: null, verifierResult: null, verifiedAt: null,
       expiresAt: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),

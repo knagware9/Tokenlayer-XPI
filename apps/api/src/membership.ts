@@ -43,6 +43,7 @@ export async function mintOrgMembership(
     subjectClaims: { id: did, organization: org.name, orgId: org.id, role, memberSince },
     issuedAt: new Date(now * 1000).toISOString(), expiresAt: new Date(expiresAt * 1000).toISOString(),
     revoked: false, revokedAt: null, revokedReason: null, revokedBy: null, proposalId: null,
+    credentialUseCaseKey: null,
   });
   return did;
 }

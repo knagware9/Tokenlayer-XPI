@@ -781,12 +781,13 @@ const toCredential = (r: {
   id: string; holderDid: string; issuerDid: string; type: string; vcJwt: string;
   subjectClaims: string; issuedAt: Date; expiresAt: Date | null; revoked: boolean;
   revokedAt: Date | null; revokedReason: string | null; revokedBy: string | null; proposalId: string | null;
+  credentialUseCaseKey: string | null;
 }): CredentialRecord => ({
   id: r.id, holderDid: r.holderDid, issuerDid: r.issuerDid, type: r.type, vcJwt: r.vcJwt,
   subjectClaims: JSON.parse(r.subjectClaims) as Record<string, unknown>,
   issuedAt: r.issuedAt.toISOString(), expiresAt: r.expiresAt ? r.expiresAt.toISOString() : null, revoked: r.revoked,
   revokedAt: r.revokedAt ? r.revokedAt.toISOString() : null, revokedReason: r.revokedReason,
-  revokedBy: r.revokedBy, proposalId: r.proposalId,
+  revokedBy: r.revokedBy, proposalId: r.proposalId, credentialUseCaseKey: r.credentialUseCaseKey,
 });
 
 export class PrismaCredentialRepository implements CredentialRepository {
@@ -797,7 +798,7 @@ export class PrismaCredentialRepository implements CredentialRepository {
         holderDid: input.holderDid, issuerDid: input.issuerDid, type: input.type, vcJwt: input.vcJwt,
         subjectClaims: JSON.stringify(input.subjectClaims),
         issuedAt: new Date(input.issuedAt), expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
-        revoked: input.revoked, proposalId: input.proposalId,
+        revoked: input.revoked, proposalId: input.proposalId, credentialUseCaseKey: input.credentialUseCaseKey,
       },
     }));
   }
@@ -843,6 +844,7 @@ const toVerificationRequest = (r: {
   id: string; verifierOrgId: string; holderDid: string; requestedTypes: string; purpose: string; challenge: string;
   status: string; presentationVpJwt: string | null; consentedAt: Date | null; consentedCredentialIds: string | null;
   verifierResult: string | null; verifiedAt: Date | null; createdAt: Date; expiresAt: Date;
+  credentialUseCaseKey: string | null;
 }): VerificationRequestRecord => ({
   id: r.id, verifierOrgId: r.verifierOrgId, holderDid: r.holderDid,
   requestedTypes: JSON.parse(r.requestedTypes) as string[], purpose: r.purpose, challenge: r.challenge,
@@ -852,6 +854,7 @@ const toVerificationRequest = (r: {
   verifierResult: r.verifierResult ? (JSON.parse(r.verifierResult) as Record<string, unknown>) : null,
   verifiedAt: r.verifiedAt ? r.verifiedAt.toISOString() : null,
   createdAt: r.createdAt.toISOString(), expiresAt: r.expiresAt.toISOString(),
+  credentialUseCaseKey: r.credentialUseCaseKey,
 });
 
 export class PrismaVerificationRequestRepository implements VerificationRequestRepository {
@@ -866,6 +869,7 @@ export class PrismaVerificationRequestRepository implements VerificationRequestR
         verifierResult: input.verifierResult ? JSON.stringify(input.verifierResult) : null,
         verifiedAt: input.verifiedAt ? new Date(input.verifiedAt) : null,
         expiresAt: new Date(input.expiresAt),
+        credentialUseCaseKey: input.credentialUseCaseKey,
       },
     }));
   }
