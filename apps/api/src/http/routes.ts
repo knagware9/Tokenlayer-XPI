@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AssetRecord, CashflowRecord, CompanyProfile, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TYPES, credentialTypeDef, decodeJwt, didKeyFromSeed, generateDidKey, invoiceFingerprint, issueCredential, normalizeUseCaseDefinition, PolicyError, presentCredential, presentCredentials, publicKeyFromDidKey, splitProRata, validateMetadata, verifyChain, verifyPresentation, verifyPresentationCredentials, type Actor, type ChainEntry, type LifecycleAction, type Role, type UseCaseDefinition } from "@tokenlayer/core";
+import { auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, decodeJwt, didKeyFromSeed, generateDidKey, invoiceFingerprint, issueCredential, normalizeUseCaseDefinition, PolicyError, presentCredential, presentCredentials, publicKeyFromDidKey, splitProRata, validateCredentialUseCase, validateMetadata, verifyChain, verifyPresentation, verifyPresentationCredentials, type Actor, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { isSupportedCurrency } from "../currencies.js";
 import { renderContractCode } from "../contract-code.js";
@@ -319,6 +319,67 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       }
     }
     return deps.useCases.update(key, incoming);
+  });
+
+  // --- credential use cases (Identity domain) -----------------------------
+  // The DID/VC parallel of token use cases: configurable custom credential types
+  // + Issuer/Holder/Verifier bindings. Reads are open to authed users; authoring
+  // is PlatformAdmin-only. A slug is either a token or a credential use case.
+  app.get("/credential-templates", { schema: S.credentialTemplates, ...auth }, async () => CREDENTIAL_TEMPLATES);
+
+  app.get("/credential-use-cases", { schema: S.listCredentialUseCases, ...auth }, async () => deps.credentialUseCases.list());
+
+  app.get("/credential-use-cases/:key", { schema: S.getCredentialUseCase, ...auth }, async (request, reply) => {
+    const cuc = await deps.credentialUseCases.get((request.params as { key: string }).key);
+    if (!cuc) return notFound(reply, "credential use case not found");
+    return cuc;
+  });
+
+  app.post("/credential-use-cases", { schema: S.createCredentialUseCase, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    if (claims.role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only a platform admin may author credential use cases" });
+    const def = request.body as CredentialUseCaseDefinition;
+    if (await deps.credentialUseCases.has(def.key) || await deps.useCases.has(def.key)) {
+      return reply.code(409).send({ error: "KEY_TAKEN", message: `use-case key '${def.key}' already exists` });
+    }
+    // Resolve org existence up-front (validator is sync): collect referenced ids.
+    const ids = new Set<string>();
+    if (def.issuer.kind === "org") ids.add(def.issuer.orgId);
+    if (def.holderPolicy.who === "specific") def.holderPolicy.orgIds.forEach((i) => ids.add(i));
+    if (def.verifier.kind === "orgs") def.verifier.orgIds.forEach((i) => ids.add(i));
+    const known = new Set<string>();
+    for (const id of ids) if (await deps.organizations.get(id).catch(() => null)) known.add(id);
+    try {
+      validateCredentialUseCase(def, { orgExists: (id) => known.has(id) });
+    } catch (err) {
+      return reply.code(400).send({ error: "INVALID_CREDENTIAL_USECASE", message: (err as Error).message });
+    }
+    const created = await deps.credentialUseCases.create({ ...def, ownerOrgId: def.ownerOrgId ?? null });
+    await deps.audit.append({ actorId: claims.id, action: "credential-usecase-created" as LifecycleAction, payload: { key: def.key } });
+    return reply.code(201).send(created);
+  });
+
+  app.patch("/credential-use-cases/:key", { schema: S.updateCredentialUseCase, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    if (claims.role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only a platform admin may edit credential use cases" });
+    const key = (request.params as { key: string }).key;
+    const existing = await deps.credentialUseCases.get(key);
+    if (!existing) return notFound(reply, "credential use case not found");
+    const def = { ...(request.body as CredentialUseCaseDefinition), key };
+    const ids = new Set<string>();
+    if (def.issuer.kind === "org") ids.add(def.issuer.orgId);
+    if (def.holderPolicy.who === "specific") def.holderPolicy.orgIds.forEach((i) => ids.add(i));
+    if (def.verifier.kind === "orgs") def.verifier.orgIds.forEach((i) => ids.add(i));
+    const known = new Set<string>();
+    for (const id of ids) if (await deps.organizations.get(id).catch(() => null)) known.add(id);
+    try {
+      validateCredentialUseCase(def, { orgExists: (id) => known.has(id) });
+    } catch (err) {
+      return reply.code(400).send({ error: "INVALID_CREDENTIAL_USECASE", message: (err as Error).message });
+    }
+    const updated = await deps.credentialUseCases.update(key, { ...def, ownerOrgId: def.ownerOrgId ?? existing.ownerOrgId ?? null });
+    await deps.audit.append({ actorId: claims.id, action: "credential-usecase-updated" as LifecycleAction, payload: { key } });
+    return reply.code(200).send(updated);
   });
 
   // --- assets -------------------------------------------------------------

@@ -1,4 +1,4 @@
-import { RbacPolicy, type OrgType } from "@tokenlayer/core";
+import { CREDENTIAL_TEMPLATES, RbacPolicy, type OrgType } from "@tokenlayer/core";
 import { buildApp } from "./app.js";
 import { buildChainRegistry } from "./chains.js";
 import type { AppDeps } from "./context.js";
@@ -125,6 +125,17 @@ async function main(): Promise<void> {
         `${d.prefix}.buyer@tokenlayer.dev`, `${d.prefix}.auditor@tokenlayer.dev`,
       ]);
       if (d.issuerWallet) await ensureUserWallet(deps, `${d.prefix}.issuer@tokenlayer.dev`, d.issuerWallet, `${d.name} Desk`);
+    }
+    // Seed one example credential use case (Identity domain) so the Identity
+    // section is populated on a fresh boot. Idempotent.
+    if (!(await credentialUseCases.has("corp-trade-credentials"))) {
+      await credentialUseCases.create({
+        key: "corp-trade-credentials", name: "Corporate Trade Credentials",
+        description: "Government-issued trade credentials (MCA, GSTIN) for registered corporates.",
+        credentialTypes: [CREDENTIAL_TEMPLATES.MCACredential!, CREDENTIAL_TEMPLATES.GSTINCredential!],
+        issuer: { kind: "platform" }, holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
+        ownerOrgId: null,
+      });
     }
   }
   const app = await buildApp(deps);
