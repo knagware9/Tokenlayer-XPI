@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AssetRecord, CashflowRecord, CompanyProfile, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, invoiceFingerprint, issueCredential, issuerBindingAllows, normalizeUseCaseDefinition, PolicyError, presentCredential, presentCredentials, publicKeyFromDidKey, splitProRata, validateCredentialUseCase, validateMetadata, verifyChain, verifyPresentation, verifyPresentationCredentials, type Actor, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type Role, type UseCaseDefinition } from "@tokenlayer/core";
+import { auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, invoiceFingerprint, issueCredential, issuerBindingAllows, normalizeUseCaseDefinition, PolicyError, presentCredential, presentCredentials, publicKeyFromDidKey, splitProRata, validateCredentialUseCase, validateMetadata, verifierBindingAllows, verifyChain, verifyPresentation, verifyPresentationCredentials, type Actor, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { isSupportedCurrency } from "../currencies.js";
 import { renderContractCode } from "../contract-code.js";
@@ -1941,27 +1941,44 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       id: r.id, verifierOrgId: r.verifierOrgId, holderDid: r.holderDid, requestedTypes: r.requestedTypes,
       purpose: r.purpose, status: r.status, consentedCredentialIds: r.consentedCredentialIds,
       consentedAt: r.consentedAt, verifiedAt: r.verifiedAt, createdAt: r.createdAt, expiresAt: r.expiresAt,
+      credentialUseCaseKey: r.credentialUseCaseKey,
     };
   }
 
   app.post("/verification-requests", { schema: S.createVerificationRequest, ...auth }, async (request, reply) => {
     const claims = request.user as TokenClaims;
-    const b = request.body as { holderDid: string; requestedTypes: string[]; purpose: string };
+    const b = request.body as { holderDid: string; requestedTypes: string[]; purpose: string; credentialUseCaseKey?: string };
     if (claims.role !== "OrgAdmin" || !claims.orgId) {
-      return reply.code(403).send({ error: "NOT_A_VERIFIER", message: "only a verifier organization may request a presentation" });
+      return reply.code(403).send({ error: "NOT_A_VERIFIER", message: "only an organization admin may request a presentation" });
     }
     const org = await deps.organizations.get(claims.orgId);
-    if (!org || org.orgType !== "verifier") {
+    if (!org) return reply.code(403).send({ error: "NOT_A_VERIFIER", message: "your organization is not found" });
+
+    if (b.credentialUseCaseKey) {
+      // Use-case-aware: gate by the Verifier binding (replaces the org-type gate)
+      // and require every requested type to belong to the use case.
+      const def = await deps.credentialUseCases.get(b.credentialUseCaseKey);
+      if (!def) return notFound(reply, `credential use case '${b.credentialUseCaseKey}' not found`);
+      if (!verifierBindingAllows(def.verifier, org.id)) {
+        return reply.code(403).send({ error: "VERIFIER_NOT_PERMITTED", message: "your organization may not verify this use case" });
+      }
+      const names = new Set(def.credentialTypes.map((t) => t.name));
+      if (!b.requestedTypes.every((t) => names.has(t))) {
+        return reply.code(400).send({ error: "TYPES_NOT_IN_USECASE", message: "a requested type is not part of this use case" });
+      }
+    } else if (org.orgType !== "verifier") {
+      // Legacy generic flow: still requires a verifier org-type.
       return reply.code(403).send({ error: "NOT_A_VERIFIER", message: "your organization is not a verifier" });
     }
+
     const rec = await deps.verificationRequests.create({
       verifierOrgId: org.id, holderDid: b.holderDid, requestedTypes: b.requestedTypes, purpose: b.purpose,
-      credentialUseCaseKey: null,
+      credentialUseCaseKey: b.credentialUseCaseKey ?? null,
       challenge: randomUUID(), status: "pending", presentationVpJwt: null, consentedAt: null,
       consentedCredentialIds: null, verifierResult: null, verifiedAt: null,
       expiresAt: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
     });
-    await deps.audit.append({ actorId: claims.id, action: "verification-requested" as LifecycleAction, payload: { requestId: rec.id, verifierOrgId: org.id, holderDid: b.holderDid, types: b.requestedTypes } });
+    await deps.audit.append({ actorId: claims.id, action: "verification-requested" as LifecycleAction, payload: { requestId: rec.id, verifierOrgId: org.id, holderDid: b.holderDid, types: b.requestedTypes, credentialUseCaseKey: rec.credentialUseCaseKey } });
     return reply.code(201).send(vreqView(rec));
   });
 
