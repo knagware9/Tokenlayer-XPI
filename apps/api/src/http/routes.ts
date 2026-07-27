@@ -1860,7 +1860,9 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     let required = 1;
     if (cred.credentialUseCaseKey) {
       const uc = await deps.credentialUseCases.get(cred.credentialUseCaseKey);
-      required = uc ? credentialUseCaseType(uc, cred.type).requiredApprovals : 1;
+      try {
+        required = uc ? credentialUseCaseType(uc, cred.type).requiredApprovals : 1;
+      } catch { required = 1; } // config drift (type removed/renamed) must not block revocation
     } else {
       required = credentialTypeDef(cred.type).requiredApprovals;
     }

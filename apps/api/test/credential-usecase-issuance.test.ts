@@ -69,17 +69,38 @@ describe("config-driven credential issuance", () => {
     expect(badType.json().error).toBe("UNKNOWN_CREDENTIAL_TYPE");
   });
 
-  it("an OrgAdmin cannot issue for a platform-bound use case (ISSUER_NOT_PERMITTED)", async () => {
+  it("a non-issuer role (UseCaseAdmin) cannot issue at all (FORBIDDEN)", async () => {
     const app = await buildTestApp();
     const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     await seedUseCase(app, admin);
     const subject = await subjectWithDid(app);
-    // m1.admin is a non-PlatformAdmin (UseCaseAdmin) who is not the bound issuer:
-    // the platform-binding gate must forbid the issuance (403).
-    const orgAdmin = await loginAs(app, "m1.admin@tokenlayer.dev", "m1admin123");
+    // m1.admin is a UseCaseAdmin — neither PlatformAdmin nor OrgAdmin — so the
+    // role gate rejects it before any binding check.
+    const useCaseAdmin = await loginAs(app, "m1.admin@tokenlayer.dev", "m1admin123");
+    const res = await app.inject({ method: "POST", url: `${V1}/credential-use-cases/corp-kyc/credentials`, headers: auth(useCaseAdmin),
+      payload: { credentialType: "KycCredential", subjectUserId: subject.id, claims: { legalName: "Acme Ltd", country: "IN" } } });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("FORBIDDEN");
+  });
+
+  it("an OrgAdmin bound to a DIFFERENT org cannot issue (ISSUER_NOT_PERMITTED)", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    // Org A is the OrgAdmin's own org; org B is the use case's configured issuer.
+    const orgA = (await app.inject({ method: "POST", url: `${V1}/orgs`, headers: auth(admin), payload: { name: "Issuer Org A", orgType: "corporate" } })).json();
+    const orgB = (await app.inject({ method: "POST", url: `${V1}/orgs`, headers: auth(admin), payload: { name: "Issuer Org B", orgType: "corporate" } })).json();
+    // Mint a genuine OrgAdmin login inside org A.
+    const mk = await app.inject({ method: "POST", url: `${V1}/orgs/${orgA.id}/users`, headers: auth(admin),
+      payload: { email: `orgadmin.${orgA.id}@x.io`, password: "secret1", role: "OrgAdmin" } });
+    expect(mk.statusCode).toBe(201);
+    const orgAdmin = await loginAs(app, `orgadmin.${orgA.id}@x.io`, "secret1");
+    // A use case whose issuer binding points at org B (NOT org A).
+    await seedUseCase(app, admin, { issuer: { kind: "org", orgId: orgB.id } });
+    const subject = await subjectWithDid(app);
     const res = await app.inject({ method: "POST", url: `${V1}/credential-use-cases/corp-kyc/credentials`, headers: auth(orgAdmin),
       payload: { credentialType: "KycCredential", subjectUserId: subject.id, claims: { legalName: "Acme Ltd", country: "IN" } } });
-    expect([403]).toContain(res.statusCode);
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("ISSUER_NOT_PERMITTED");
   });
 
   it("honors requiredApprovals: 2 (one approval is not enough)", async () => {
