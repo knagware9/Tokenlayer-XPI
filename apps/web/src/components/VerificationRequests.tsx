@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ApiError, api } from "../api.js";
 import { useAuth } from "../auth.js";
-import type { CredentialTypeInfo, VerificationResult } from "../types.js";
+import type { CredentialTypeInfo, CredentialUseCase, VerificationResult } from "../types.js";
 import { Card, Pill } from "./ui.js";
 
 function errMessage(err: unknown, fallback: string): string {
@@ -16,6 +16,8 @@ function errMessage(err: unknown, fallback: string): string {
 export function VerificationRequests(): JSX.Element {
   const { token } = useAuth();
   const [types, setTypes] = useState<CredentialTypeInfo[]>([]);
+  const [useCases, setUseCases] = useState<CredentialUseCase[]>([]);
+  const [selectedKey, setSelectedKey] = useState("");
   const [holderDid, setHolderDid] = useState("");
   const [picked, setPicked] = useState<Record<string, boolean>>({});
   const [purpose, setPurpose] = useState("");
@@ -25,6 +27,11 @@ export function VerificationRequests(): JSX.Element {
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => { if (token) void api.credentialTypes(token).then(setTypes).catch(() => setTypes([])); }, [token]);
+  useEffect(() => { if (token) void api.credentialUseCases(token).then(setUseCases).catch(() => setUseCases([])); }, [token]);
+
+  const selectedUseCase = useCases.find((u) => u.key === selectedKey);
+  // The requestable types come from the selected use case, or the closed catalog when none.
+  const typeNames = selectedUseCase ? selectedUseCase.credentialTypes.map((t) => t.name) : types.map((t) => t.type);
 
   async function submit(): Promise<void> {
     if (!token) return;
@@ -32,7 +39,10 @@ export function VerificationRequests(): JSX.Element {
     if (!holderDid || requestedTypes.length === 0 || !purpose) { setErr("holder DID, at least one type, and a purpose are required"); return; }
     setErr(null); setResult(null);
     try {
-      const r = await api.createVerificationRequest(token, { holderDid: holderDid.trim(), requestedTypes, purpose: purpose.trim() });
+      const r = await api.createVerificationRequest(token, {
+        holderDid: holderDid.trim(), requestedTypes, purpose: purpose.trim(),
+        ...(selectedKey ? { credentialUseCaseKey: selectedKey } : {}),
+      });
       setReqId(r.id); setMsg(`Requested — waiting for the holder to consent (request ${r.id.slice(0, 8)}…).`);
     } catch (e) { setErr(errMessage(e, "Request failed")); }
   }
@@ -53,10 +63,15 @@ export function VerificationRequests(): JSX.Element {
         {err && <div className="text-sm text-rose-600 mb-2">{err}</div>}
         {msg && <div className="text-sm text-emerald-600 mb-2">{msg}</div>}
         <input className="input w-full mb-2" placeholder="Holder DID (did:key:…)" value={holderDid} onChange={(e) => setHolderDid(e.target.value)} />
+        <label className="block text-xs text-slate-500 mb-1">Credential use case (optional)</label>
+        <select className="input w-full mb-2" value={selectedKey} onChange={(e) => { setSelectedKey(e.target.value); setPicked({}); }}>
+          <option value="">— none (generic) —</option>
+          {useCases.map((u) => <option key={u.key} value={u.key}>{u.name} ({u.key})</option>)}
+        </select>
         <div className="flex flex-wrap gap-3 mb-2">
-          {types.map((t) => (
-            <label key={t.type} className="text-sm flex items-center gap-1">
-              <input type="checkbox" checked={!!picked[t.type]} onChange={(e) => setPicked({ ...picked, [t.type]: e.target.checked })} /> {t.type}
+          {typeNames.map((t) => (
+            <label key={t} className="text-sm flex items-center gap-1">
+              <input type="checkbox" checked={!!picked[t]} onChange={(e) => setPicked({ ...picked, [t]: e.target.checked })} /> {t}
             </label>
           ))}
         </div>

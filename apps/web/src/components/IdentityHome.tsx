@@ -3,6 +3,7 @@ import { api } from "../api.js";
 import { useAuth } from "../auth.js";
 import type { CredentialUseCase } from "../types.js";
 import { CredentialUseCaseBuilder } from "./CredentialUseCaseBuilder.js";
+import { IssueUsecaseCredential } from "./IssueUsecaseCredential.js";
 import { Card, EmptyState, Pill, SectionHeader, Skeleton } from "./ui.js";
 
 /** One-line summary of the Issuer / Holder / Verifier bindings. */
@@ -22,6 +23,7 @@ export function IdentityHome(): JSX.Element {
   const { token, user } = useAuth();
   const [useCases, setUseCases] = useState<CredentialUseCase[] | null>(null);
   const [showBuilder, setShowBuilder] = useState(false);
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const isPlatformAdmin = user?.role === "PlatformAdmin";
 
   const reload = useCallback((): void => {
@@ -102,6 +104,13 @@ export function IdentityHome(): JSX.Element {
                 ))}
               </div>
               <div className="mt-3 pt-3 border-t border-slate-100 text-[11px] text-slate-500">{bindingSummary(u)}</div>
+              <button
+                onClick={() => setExpandedKey((k) => (k === u.key ? null : u.key))}
+                className="mt-3 self-start rounded-lg border border-slate-200 text-slate-600 px-3 py-1.5 text-xs font-medium hover:border-brand-400 hover:text-brand-700"
+              >
+                {expandedKey === u.key ? "Close" : "Issue credential"}
+              </button>
+              {expandedKey === u.key && <IssueUsecaseCredential useCase={u} onIssued={reload} />}
             </Card>
           ))}
         </div>

@@ -15,6 +15,7 @@ interface CredTypeDraft {
   name: string;
   title: string;
   validityDays: number;
+  requiredApprovals: number;
   fields: FieldRow[];
   templateKey: string;
 }
@@ -47,7 +48,7 @@ function templateToFields(spec: CredentialTypeSpec): FieldRow[] {
   });
 }
 
-const emptyCredType = (): CredTypeDraft => ({ name: "", title: "", validityDays: 365, fields: [], templateKey: "" });
+const emptyCredType = (): CredTypeDraft => ({ name: "", title: "", validityDays: 365, requiredApprovals: 1, fields: [], templateKey: "" });
 
 /** Guided 4-step wizard that authors a CredentialUseCase (POST /credential-use-cases). */
 export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
@@ -123,6 +124,7 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
       name: spec.name,
       title: spec.title,
       validityDays: spec.validityDays,
+      requiredApprovals: spec.requiredApprovals,
       fields: templateToFields(spec),
     });
   }
@@ -145,7 +147,7 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
       description: description.trim() || undefined,
       credentialTypes: credTypes
         .filter((c) => c.name.trim())
-        .map((c) => ({ name: c.name.trim(), title: c.title.trim() || c.name.trim(), validityDays: c.validityDays, claimSchema: fieldsToSchema(c.fields) })),
+        .map((c) => ({ name: c.name.trim(), title: c.title.trim() || c.name.trim(), validityDays: c.validityDays, requiredApprovals: c.requiredApprovals, claimSchema: fieldsToSchema(c.fields) })),
       issuer,
       holderPolicy,
       verifier,
@@ -264,7 +266,7 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
                         ))}
                       </select>
                     </L>
-                    <div className="grid sm:grid-cols-3 gap-4">
+                    <div className="grid sm:grid-cols-4 gap-4">
                       <L label="Name" hint="Machine name, e.g. MCACredential">
                         <input className="input" value={ct.name} onChange={(e) => patchCredType(i, { name: e.target.value })} placeholder="KycCredential" />
                       </L>
@@ -278,6 +280,15 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
                           min="1"
                           value={ct.validityDays}
                           onChange={(e) => patchCredType(i, { validityDays: Number(e.target.value) })}
+                        />
+                      </L>
+                      <L label="Approvals" hint="Maker-checker approvals to issue">
+                        <input
+                          className="input"
+                          type="number"
+                          min="1"
+                          value={ct.requiredApprovals}
+                          onChange={(e) => patchCredType(i, { requiredApprovals: Number(e.target.value) })}
                         />
                       </L>
                     </div>
