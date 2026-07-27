@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AssetRecord, CashflowRecord, CompanyProfile, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, decodeJwt, didKeyFromSeed, generateDidKey, invoiceFingerprint, issueCredential, normalizeUseCaseDefinition, PolicyError, presentCredential, presentCredentials, publicKeyFromDidKey, splitProRata, validateCredentialUseCase, validateMetadata, verifyChain, verifyPresentation, verifyPresentationCredentials, type Actor, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type Role, type UseCaseDefinition } from "@tokenlayer/core";
+import { auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, invoiceFingerprint, issueCredential, issuerBindingAllows, normalizeUseCaseDefinition, PolicyError, presentCredential, presentCredentials, publicKeyFromDidKey, splitProRata, validateCredentialUseCase, validateMetadata, verifyChain, verifyPresentation, verifyPresentationCredentials, type Actor, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { isSupportedCurrency } from "../currencies.js";
 import { renderContractCode } from "../contract-code.js";
@@ -11,7 +11,7 @@ import { deployAndCreateUseCase } from "../use-cases.js";
 import { computeAnalytics } from "../analytics.js";
 import { issueCredentialFor } from "../credential-issuance.js";
 import { mintOrgMembership } from "../membership.js";
-import { ensurePlatformIssuerOrg } from "../platform-org.js";
+import { ensurePlatformIssuerOrg, PLATFORM_ORG_NAME } from "../platform-org.js";
 import { computeActivity, computePortfolio } from "../investor.js";
 import { readErpInvoices, stageInvoice } from "../invoice-register.js";
 import { assetBalancesOf, coded, CodedError, dropPayerShare, executeCashflowCore, executeIssueActivation, runGatedAction } from "../executors.js";
@@ -386,6 +386,78 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const updated = await deps.credentialUseCases.update(key, { ...def, ownerOrgId: def.ownerOrgId ?? existing.ownerOrgId ?? null });
     await deps.audit.append({ actorId: claims.id, action: "credential-usecase-updated" as LifecycleAction, payload: { key } });
     return reply.code(200).send(updated);
+  });
+
+  // A shared issuer-authorization helper: resolve the bound issuer org + confirm
+  // the caller may act as it. Returns { issuerOrg } or sends an error + null.
+  async function resolveIssuer(reply: FastifyReply, claims: TokenClaims, def: Awaited<ReturnType<typeof deps.credentialUseCases.get>>) {
+    const isPlatformAdmin = claims.role === "PlatformAdmin";
+    if (claims.role !== "PlatformAdmin" && claims.role !== "OrgAdmin") {
+      reply.code(403).send({ error: "FORBIDDEN", message: "only a Platform Admin or an Org Admin may issue credentials" });
+      return null;
+    }
+    if (!issuerBindingAllows(def!.issuer, { callerOrgId: claims.orgId ?? null, isPlatformAdmin })) {
+      reply.code(403).send({ error: "ISSUER_NOT_PERMITTED", message: "you may not issue for this use case's configured issuer" });
+      return null;
+    }
+    const issuerOrg = def!.issuer.kind === "platform"
+      ? await deps.organizations.findByName(PLATFORM_ORG_NAME)
+      : await deps.organizations.get(def!.issuer.orgId);
+    if (!issuerOrg) {
+      reply.code(400).send({ error: "ISSUER_ORG_MISSING", message: "the configured issuer organization does not exist" });
+      return null;
+    }
+    return { issuerOrg };
+  }
+
+  app.get("/credential-use-cases/:key/eligible-holders", { schema: S.eligibleHolders, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { key } = request.params as { key: string };
+    const def = await deps.credentialUseCases.get(key);
+    if (!def) return notFound(reply, `credential use case '${key}' not found`);
+    const resolved = await resolveIssuer(reply, claims, def); // same gate as issuing
+    if (!resolved) return;
+    const users = await deps.users.list();
+    const out: { id: string; email: string; did: string; orgName: string | null }[] = [];
+    for (const u of users) {
+      if (!u.did) continue;
+      const org = u.orgId ? await deps.organizations.get(u.orgId) : null;
+      if (holderPolicyAllows(def.holderPolicy, org ? { id: org.id, orgType: org.orgType } : null)) {
+        out.push({ id: u.id, email: u.email, did: u.did, orgName: org?.name ?? null });
+      }
+    }
+    return out;
+  });
+
+  app.post("/credential-use-cases/:key/credentials", { schema: S.issueUsecaseCredential, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { key } = request.params as { key: string };
+    const b = request.body as { credentialType: string; subjectUserId: string; claims: Record<string, unknown> };
+    const def = await deps.credentialUseCases.get(key);
+    if (!def) return notFound(reply, `credential use case '${key}' not found`);
+    const resolved = await resolveIssuer(reply, claims, def);
+    if (!resolved) return;
+    const { issuerOrg } = resolved;
+
+    let spec;
+    try { spec = credentialUseCaseType(def, b.credentialType); }
+    catch (err) { return reply.code(400).send({ error: "UNKNOWN_CREDENTIAL_TYPE", message: (err as Error).message }); }
+
+    const subject = await deps.users.findById(b.subjectUserId);
+    if (!subject) return notFound(reply, "subject user not found");
+    if (!subject.did) return reply.code(400).send({ error: "SUBJECT_HAS_NO_DID", message: "the subject has no decentralized identifier" });
+    const holderOrg = subject.orgId ? await deps.organizations.get(subject.orgId) : null;
+    if (!holderPolicyAllows(def.holderPolicy, holderOrg ? { id: holderOrg.id, orgType: holderOrg.orgType } : null)) {
+      return reply.code(403).send({ error: "HOLDER_NOT_ELIGIBLE", message: "the subject is not an eligible holder for this use case" });
+    }
+    validateMetadata(b.claims, spec.claimSchema); // throws INVALID_METADATA → 400
+
+    const proposal = await deps.proposals.create({
+      useCaseKey: null, orgId: issuerOrg.id, assetId: null, kind: "issue-usecase-credential",
+      payload: { credentialUseCaseKey: key, credentialType: spec.name, subjectDid: subject.did, subjectUserId: subject.id, claims: b.claims, issuerOrgId: issuerOrg.id },
+      proposerId: claims.id, proposerLabel: claims.email, required: spec.requiredApprovals,
+    });
+    return reply.code(202).send({ proposal });
   });
 
   // --- assets -------------------------------------------------------------
@@ -1783,12 +1855,19 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       return reply.code(403).send({ error: "FORBIDDEN", message: "only the issuing organization may revoke this credential" });
     }
     // Depth comes from the credential's OWN type — revoking an AuthorizedSignatory
-    // costs the same approvals that issuing it did.
-    const def = credentialTypeDef(cred.type);
+    // costs the same approvals that issuing it did. A use-case credential resolves
+    // against its use case; a closed-catalog credential against the catalog.
+    let required = 1;
+    if (cred.credentialUseCaseKey) {
+      const uc = await deps.credentialUseCases.get(cred.credentialUseCaseKey);
+      required = uc ? credentialUseCaseType(uc, cred.type).requiredApprovals : 1;
+    } else {
+      required = credentialTypeDef(cred.type).requiredApprovals;
+    }
     const proposal = await deps.proposals.create({
       useCaseKey: null, orgId: issuer.id, assetId: null, kind: "revoke-credential",
       payload: { credentialId: cred.id, reason },
-      proposerId: claims.id, proposerLabel: claims.email, required: def.requiredApprovals,
+      proposerId: claims.id, proposerLabel: claims.email, required,
     });
     return reply.code(202).send({ proposal });
   });
