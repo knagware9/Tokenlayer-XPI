@@ -26,6 +26,12 @@ export function IdentityHome(): JSX.Element {
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const isPlatformAdmin = user?.role === "PlatformAdmin";
 
+  // Mirror the server's issuer binding: a PlatformAdmin may issue for any use
+  // case; an OrgAdmin only when their own org is the bound issuer. Anyone else
+  // never sees the action (the server would 403 with an empty holder list).
+  const canIssue = (u: CredentialUseCase): boolean =>
+    isPlatformAdmin || (user?.role === "OrgAdmin" && u.issuer.kind === "org" && !!user.orgId && u.issuer.orgId === user.orgId);
+
   const reload = useCallback((): void => {
     if (!token) return;
     void api.credentialUseCases(token).then(setUseCases).catch(() => setUseCases([]));
@@ -104,13 +110,15 @@ export function IdentityHome(): JSX.Element {
                 ))}
               </div>
               <div className="mt-3 pt-3 border-t border-slate-100 text-[11px] text-slate-500">{bindingSummary(u)}</div>
-              <button
-                onClick={() => setExpandedKey((k) => (k === u.key ? null : u.key))}
-                className="mt-3 self-start rounded-lg border border-slate-200 text-slate-600 px-3 py-1.5 text-xs font-medium hover:border-brand-400 hover:text-brand-700"
-              >
-                {expandedKey === u.key ? "Close" : "Issue credential"}
-              </button>
-              {expandedKey === u.key && <IssueUsecaseCredential useCase={u} onIssued={reload} />}
+              {canIssue(u) && (
+                <button
+                  onClick={() => setExpandedKey((k) => (k === u.key ? null : u.key))}
+                  className="mt-3 self-start rounded-lg border border-slate-200 text-slate-600 px-3 py-1.5 text-xs font-medium hover:border-brand-400 hover:text-brand-700"
+                >
+                  {expandedKey === u.key ? "Close" : "Issue credential"}
+                </button>
+              )}
+              {canIssue(u) && expandedKey === u.key && <IssueUsecaseCredential useCase={u} onIssued={reload} />}
             </Card>
           ))}
         </div>
