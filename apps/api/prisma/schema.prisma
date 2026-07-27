@@ -75,6 +75,22 @@ model UseCase {
   updatedAt       DateTime @updatedAt
 }
 
+// A configured credential (DID/VC) use case — the Identity-domain parallel of
+// the tokenization UseCase. JSON columns hold the structured config.
+model CredentialUseCase {
+  key             String   @id
+  name            String
+  description     String?
+  credentialTypes String   // JSON: CredentialTypeSpec[]
+  issuer          String   // JSON: IssuerBinding
+  holderPolicy    String   // JSON: HolderPolicy
+  verifier        String   // JSON: VerifierBinding
+  ownerOrgId      String?
+  status          String   @default("active")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
 // Append-only audit stream. assetId is an unconstrained reference (not a FK) so
 // entries can be written before/after an asset row exists and survive its removal.
 model AuditLog {

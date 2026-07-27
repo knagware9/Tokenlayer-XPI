@@ -1,4 +1,4 @@
-import type { Role, TokenStandard, TokenType, LifecycleAction, OrgType, UseCaseDefinition, UseCaseSource } from "@tokenlayer/core";
+import type { Role, TokenStandard, TokenType, LifecycleAction, OrgType, UseCaseDefinition, UseCaseSource, CredentialUseCaseDefinition } from "@tokenlayer/core";
 
 export type { OrgType };
 
@@ -149,6 +149,14 @@ export interface AuditAnchorRepository {
 export interface UseCaseRepository extends UseCaseSource {
   create(def: UseCaseDefinition): Promise<UseCaseDefinition>;
   update(key: string, def: UseCaseDefinition): Promise<UseCaseDefinition>;
+}
+
+export interface CredentialUseCaseRepository {
+  create(def: CredentialUseCaseDefinition): Promise<CredentialUseCaseDefinition>;
+  get(key: string): Promise<CredentialUseCaseDefinition | null>;
+  has(key: string): Promise<boolean>;
+  list(): Promise<CredentialUseCaseDefinition[]>;
+  update(key: string, def: CredentialUseCaseDefinition): Promise<CredentialUseCaseDefinition>;
 }
 
 /** A secondary-market sell listing. `quantity` is the REMAINING quantity. */

@@ -22,6 +22,7 @@ import {
   PrismaListingRepository,
   PrismaRegistryDeploymentRepository,
   PrismaStagedInvoiceRepository,
+  PrismaCredentialUseCaseRepository,
   PrismaUseCaseRepository,
   PrismaUserRepository,
   PrismaVerificationRequestRepository,
@@ -41,6 +42,7 @@ async function main(): Promise<void> {
   const auditAnchors = new PrismaAuditAnchorRepository();
   const accounts = new PrismaAccountRepository();
   const useCases = new PrismaUseCaseRepository();
+  const credentialUseCases = new PrismaCredentialUseCaseRepository();
   const cash = new PrismaCashRepository();
   const listings = new PrismaListingRepository();
   const documents = new PrismaDocumentRepository();
@@ -68,6 +70,7 @@ async function main(): Promise<void> {
   });
   const deps: AppDeps = {
     useCases,
+    credentialUseCases,
     rbac,
     engine,
     users,

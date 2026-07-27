@@ -11,6 +11,7 @@ import {
   type TokenStandard,
   type TokenType,
   type UseCaseDefinition,
+  type CredentialUseCaseDefinition,
 } from "@tokenlayer/core";
 import type {
   AccountRecord,
@@ -50,6 +51,7 @@ import type {
   StagedInvoiceRecord,
   StagedInvoiceRepository,
   StagedInvoiceStatus,
+  CredentialUseCaseRepository,
   UseCaseRepository,
   UserRecord,
   UserRepository,
@@ -440,6 +442,44 @@ export class PrismaUseCaseRepository implements UseCaseRepository {
     const { key: _omit, ...data } = useCaseToData(def);
     await prisma.useCase.update({ where: { key }, data });
     return def;
+  }
+}
+
+function toCredentialUseCase(r: {
+  key: string; name: string; description: string | null;
+  credentialTypes: string; issuer: string; holderPolicy: string; verifier: string; ownerOrgId: string | null;
+}): CredentialUseCaseDefinition {
+  return {
+    key: r.key, name: r.name, description: r.description ?? undefined,
+    credentialTypes: JSON.parse(r.credentialTypes), issuer: JSON.parse(r.issuer),
+    holderPolicy: JSON.parse(r.holderPolicy), verifier: JSON.parse(r.verifier),
+    ownerOrgId: r.ownerOrgId,
+  };
+}
+export class PrismaCredentialUseCaseRepository implements CredentialUseCaseRepository {
+  async create(def: CredentialUseCaseDefinition): Promise<CredentialUseCaseDefinition> {
+    const r = await prisma.credentialUseCase.create({ data: {
+      key: def.key, name: def.name, description: def.description ?? null,
+      credentialTypes: JSON.stringify(def.credentialTypes), issuer: JSON.stringify(def.issuer),
+      holderPolicy: JSON.stringify(def.holderPolicy), verifier: JSON.stringify(def.verifier),
+      ownerOrgId: def.ownerOrgId ?? null } });
+    return toCredentialUseCase(r);
+  }
+  async get(key: string): Promise<CredentialUseCaseDefinition | null> {
+    const r = await prisma.credentialUseCase.findUnique({ where: { key } });
+    return r ? toCredentialUseCase(r) : null;
+  }
+  async has(key: string): Promise<boolean> { return (await prisma.credentialUseCase.count({ where: { key } })) > 0; }
+  async list(): Promise<CredentialUseCaseDefinition[]> {
+    return (await prisma.credentialUseCase.findMany({ orderBy: { createdAt: "asc" } })).map(toCredentialUseCase);
+  }
+  async update(key: string, def: CredentialUseCaseDefinition): Promise<CredentialUseCaseDefinition> {
+    const r = await prisma.credentialUseCase.update({ where: { key }, data: {
+      name: def.name, description: def.description ?? null,
+      credentialTypes: JSON.stringify(def.credentialTypes), issuer: JSON.stringify(def.issuer),
+      holderPolicy: JSON.stringify(def.holderPolicy), verifier: JSON.stringify(def.verifier),
+      ownerOrgId: def.ownerOrgId ?? null } });
+    return toCredentialUseCase(r);
   }
 }
 

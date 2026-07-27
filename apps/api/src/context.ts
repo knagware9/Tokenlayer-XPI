@@ -18,6 +18,7 @@ import type {
   OrganizationRepository,
   ProposalRepository,
   StagedInvoiceRepository,
+  CredentialUseCaseRepository,
   UseCaseRepository,
   UserRepository,
   VerificationRequestRepository,
@@ -26,6 +27,7 @@ import type { IdentityRegistry } from "./registry.js";
 
 export interface AppDeps {
   useCases: UseCaseRepository;
+  credentialUseCases: CredentialUseCaseRepository;
   rbac: RbacPolicy;
   engine: LifecycleEngine;
   users: UserRepository;
