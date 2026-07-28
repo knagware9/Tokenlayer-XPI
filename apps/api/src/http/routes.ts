@@ -1639,10 +1639,10 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   /** Enriched held-credential projection: adds the use case + the issuer org's
    *  name (memoised per call), shared by /me/credentials and the org wallet. */
   async function mapHeld(rows: CredentialRecord[]) {
-    const names = new Map<string, string | null>();
-    const nameOf = async (did: string): Promise<string | null> => {
-      if (!names.has(did)) names.set(did, (await deps.organizations.findByDid(did))?.name ?? null);
-      return names.get(did) ?? null;
+    const names = new Map<string, Promise<string | null>>();
+    const nameOf = (did: string): Promise<string | null> => {
+      if (!names.has(did)) names.set(did, deps.organizations.findByDid(did).then((o) => o?.name ?? null));
+      return names.get(did)!;
     };
     return Promise.all(rows.map(async (c) => ({
       id: c.id, type: c.type.split(","), credentialUseCaseKey: c.credentialUseCaseKey,
