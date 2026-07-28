@@ -6,6 +6,7 @@ export * from "./use-case-source.js";
 export * from "./rbac.js";
 export * from "./lifecycle-engine.js";
 export * from "./user-policy.js";
+export { useCaseDomainOf, type UseCaseDomain } from "./use-case-domain.js";
 export * from "./credential-types.js";
 export * from "./credential-use-cases.js";
 export { invoiceFingerprint, type InvoiceFingerprintInput } from "./invoice-fingerprint.js";

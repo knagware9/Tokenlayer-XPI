@@ -1,16 +1,13 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { ApiError, api } from "../api.js";
 import { useAuth } from "../auth.js";
-import type { IdentityResult, Role, UseCase } from "../types.js";
+import { assignableRoles } from "../rbac.js";
+import type { CredentialUseCase, IdentityResult, Role, UseCase } from "../types.js";
+import type { DomainKey } from "../domains.js";
 import { Pill } from "./ui.js";
 
 type Summary = { id: string; email: string; role: Role; useCaseKey: string | null; accountId: string | null; active: boolean; kycStatus: "pending" | "approved" | "rejected"; kyc: { legalName?: string; country?: string; idType?: string; idNumber?: string; documentRef?: string } | null };
 type Sub = "add" | "manage";
-
-const ROLE_OPTIONS: Record<string, Role[]> = {
-  PlatformAdmin: ["UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"],
-  UseCaseAdmin: ["Issuer", "Buyer", "Auditor"],
-};
 
 export function UserManagement({ useCaseKey, useCases }: { useCaseKey: string; useCases: UseCase[] }): JSX.Element {
   const { token, user } = useAuth();
@@ -44,11 +41,38 @@ export function UserManagement({ useCaseKey, useCases }: { useCaseKey: string; u
 function AddUser({ useCaseKey, useCases }: { useCaseKey: string; useCases: UseCase[] }): JSX.Element {
   const { token, user } = useAuth();
   const isPlatform = user?.role === "PlatformAdmin";
-  const roleOptions = ROLE_OPTIONS[user?.role ?? ""] ?? [];
+  // A PlatformAdmin picks from EVERY use case, across both domains — so credential
+  // use cases must be loaded too (scoped managers are locked to their own).
+  const [credUseCases, setCredUseCases] = useState<CredentialUseCase[]>([]);
+  useEffect(() => {
+    if (token && isPlatform) void api.credentialUseCases(token).then(setCredUseCases).catch(() => setCredUseCases([]));
+  }, [token, isPlatform]);
+
+  // The combined pick list: tokenization + credential use cases, each tagged with
+  // the domain it belongs to (drives both the label and the assignable roles).
+  const options = useMemo(
+    () => [
+      ...useCases.map((u) => ({ key: u.key, label: `${u.name} (Tokenization)`, domain: "tokenization" as DomainKey })),
+      ...credUseCases.map((u) => ({ key: u.key, label: `${u.name} (Identity)`, domain: "identity" as DomainKey })),
+    ],
+    [useCases, credUseCases],
+  );
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<Role>(roleOptions[0] ?? "Issuer");
   const [selUseCase, setSelUseCase] = useState(useCaseKey || useCases[0]?.key || "");
+  // The domain that gates the role menu. A scoped manager is locked to their own
+  // use case's domain; a PlatformAdmin derives it from the currently-picked one.
+  const pickedDomain: DomainKey = isPlatform
+    ? (options.find((o) => o.key === selUseCase)?.domain ?? "tokenization")
+    : (user?.useCaseDomain ?? "tokenization");
+  const roleOptions = assignableRoles(user?.role ?? "Auditor", pickedDomain);
+  const [role, setRole] = useState<Role>(roleOptions[0] ?? "Issuer");
+  // Keep the selected role valid as the picked domain (hence the menu) changes.
+  useEffect(() => {
+    setRole((cur) => (roleOptions.includes(cur) ? cur : (roleOptions[0] ?? cur)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pickedDomain]);
   const [walletAddress, setWalletAddress] = useState("");
   const [legalName, setLegalName] = useState("");
   const [country, setCountry] = useState("");
@@ -84,7 +108,7 @@ function AddUser({ useCaseKey, useCases }: { useCaseKey: string; useCases: UseCa
         </select>
         {isPlatform && (
           <select className="select" value={selUseCase} onChange={(e) => setSelUseCase(e.target.value)}>
-            {useCases.map((u) => <option key={u.key} value={u.key}>{u.name}</option>)}
+            {options.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
           </select>
         )}
         <input className="input" placeholder="wallet address 0x… (optional)" value={walletAddress} onChange={(e) => setWalletAddress(e.target.value)} />

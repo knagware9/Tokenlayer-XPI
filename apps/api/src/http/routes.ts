@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AssetRecord, CashflowRecord, CompanyProfile, CredentialRecord, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, invoiceFingerprint, issueCredential, issuerBindingAllows, normalizeUseCaseDefinition, PolicyError, presentCredential, presentCredentials, publicKeyFromDidKey, splitProRata, validateCredentialUseCase, validateMetadata, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type OrgType, type Role, type UseCaseDefinition } from "@tokenlayer/core";
+import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, invoiceFingerprint, issueCredential, issuerBindingAllows, normalizeUseCaseDefinition, PolicyError, presentCredential, presentCredentials, publicKeyFromDidKey, splitProRata, useCaseDomainOf, validateCredentialUseCase, validateMetadata, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type OrgType, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import qrcode from "qrcode";
 import type { AppDeps } from "../context.js";
 import { isSupportedCurrency } from "../currencies.js";
@@ -143,6 +143,29 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return claims.role === "PlatformAdmin" || (claims.role === "OrgAdmin" && claims.orgId === orgId);
   }
 
+  // A verification request is driveable by its verifier ORG (the existing path)
+  // OR by a use-case-scoped Verifier desk user whose useCaseKey matches the
+  // request's credential use case (the additive F5 path). The scoped verifier
+  // owns no org, so a request they raised carries verifierOrgId "" and is bound
+  // to the use case via credentialUseCaseKey.
+  function verifierScoped(claims: TokenClaims, r: VerificationRequestRecord): boolean {
+    return orgScoped(claims, r.verifierOrgId)
+      || (claims.role === "Verifier" && !!r.credentialUseCaseKey && claims.useCaseKey === r.credentialUseCaseKey);
+  }
+
+  // Resolve a use-case key to its product domain the SAME way GET /me does —
+  // shared by the login + QR-poll responses (which populate the web SessionUser)
+  // and the /me handler, so the domain a session carries never drifts. Null when
+  // the user has no use-case key (e.g. a PlatformAdmin) or the key names neither.
+  async function resolveUseCaseDomain(useCaseKey: string | null): Promise<"tokenization" | "identity" | null> {
+    if (!useCaseKey) return null;
+    const [tks, cks] = await Promise.all([deps.useCases.list(), deps.credentialUseCases.list()]);
+    return useCaseDomainOf(useCaseKey, {
+      tokenizationKeys: tks.map((u) => u.key),
+      credentialKeys: cks.map((u) => u.key),
+    }) ?? null;
+  }
+
   // --- auth ---------------------------------------------------------------
   app.post("/auth/login", { schema: S.login }, async (request, reply) => {
     if (loginThrottled(request.ip)) {
@@ -158,10 +181,16 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     }
     const claims: TokenClaims = { id: user.id, email: user.email, role: user.role, useCaseKey: user.useCaseKey, orgId: user.orgId ?? null, did: user.did ?? null };
     const wallet = user.accountId ? await deps.accounts.findById(user.accountId) : null;
-    return { token: app.jwt.sign(claims), user: { ...claims, walletAddress: wallet?.address ?? null } };
+    const useCaseDomain = await resolveUseCaseDomain(user.useCaseKey);
+    return { token: app.jwt.sign(claims), user: { ...claims, walletAddress: wallet?.address ?? null, useCaseDomain } };
   });
 
-  app.get("/me", { schema: S.me, ...auth }, async (request) => actorOf(request));
+  app.get("/me", { schema: S.me, ...auth }, async (request) => {
+    const base = actorOf(request);
+    const claims = request.user as TokenClaims;
+    const useCaseDomain = await resolveUseCaseDomain(claims.useCaseKey);
+    return { ...base, useCaseDomain };
+  });
 
   app.get("/config", { schema: S.config, ...auth }, async () => ({ domains: deps.enabledDomains }));
 
@@ -207,7 +236,8 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         const user = await deps.users.findById(done.userId);
         const wallet = user?.accountId ? await deps.accounts.findById(user.accountId) : null;
         const claims = user ? { id: user.id, email: user.email, role: user.role, useCaseKey: user.useCaseKey, orgId: user.orgId ?? null, did: user.did ?? null } : null;
-        return { status: "authenticated", token: done.token, user: claims ? { ...claims, walletAddress: wallet?.address ?? null } : null };
+        const useCaseDomain = user ? await resolveUseCaseDomain(user.useCaseKey) : null;
+        return { status: "authenticated", token: done.token, user: claims ? { ...claims, walletAddress: wallet?.address ?? null, useCaseDomain } : null };
       }
     }
     return { status: sess.status };
@@ -462,15 +492,25 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
 
   // A shared issuer-authorization helper: resolve the bound issuer org + confirm
   // the caller may act as it. Returns { issuerOrg } or sends an error + null.
-  async function resolveIssuer(reply: FastifyReply, claims: TokenClaims, def: Awaited<ReturnType<typeof deps.credentialUseCases.get>>) {
+  //
+  // Two independent ways in: (1) the classic org/platform path — PlatformAdmin,
+  // or the OrgAdmin of the use case's bound issuer org, via issuerBindingAllows;
+  // (2) a credential-use-case-SCOPED desk operator (UseCaseAdmin/Issuer whose
+  // claims.useCaseKey matches this use case's key) — they operate issuance for
+  // the use case WITHOUT being the cryptographic issuer; the VC is still signed
+  // by the use case's bound issuer org (issuerOrg resolution below is unchanged).
+  async function resolveIssuer(reply: FastifyReply, claims: TokenClaims, def: Awaited<ReturnType<typeof deps.credentialUseCases.get>>, key: string) {
     const isPlatformAdmin = claims.role === "PlatformAdmin";
-    if (claims.role !== "PlatformAdmin" && claims.role !== "OrgAdmin") {
-      reply.code(403).send({ error: "FORBIDDEN", message: "only a Platform Admin or an Org Admin may issue credentials" });
-      return null;
-    }
-    if (!issuerBindingAllows(def!.issuer, { callerOrgId: claims.orgId ?? null, isPlatformAdmin })) {
-      reply.code(403).send({ error: "ISSUER_NOT_PERMITTED", message: "you may not issue for this use case's configured issuer" });
-      return null;
+    const scopedOperator = (claims.role === "UseCaseAdmin" || claims.role === "Issuer") && claims.useCaseKey === key;
+    if (!scopedOperator) {
+      if (claims.role !== "PlatformAdmin" && claims.role !== "OrgAdmin") {
+        reply.code(403).send({ error: "FORBIDDEN", message: "only a Platform Admin or an Org Admin may issue credentials" });
+        return null;
+      }
+      if (!issuerBindingAllows(def!.issuer, { callerOrgId: claims.orgId ?? null, isPlatformAdmin })) {
+        reply.code(403).send({ error: "ISSUER_NOT_PERMITTED", message: "you may not issue for this use case's configured issuer" });
+        return null;
+      }
     }
     const issuerOrg = def!.issuer.kind === "platform"
       ? await deps.organizations.findByName(PLATFORM_ORG_NAME)
@@ -487,7 +527,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const { key } = request.params as { key: string };
     const def = await deps.credentialUseCases.get(key);
     if (!def) return notFound(reply, `credential use case '${key}' not found`);
-    const resolved = await resolveIssuer(reply, claims, def); // same gate as issuing
+    const resolved = await resolveIssuer(reply, claims, def, key); // same gate as issuing
     if (!resolved) return;
     const out: { kind: "user" | "org"; id: string; label: string; did: string; subLabel: string | null }[] = [];
     const users = await deps.users.list();
@@ -514,7 +554,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const b = request.body as { credentialType: string; subjectUserId?: string; subjectOrgId?: string; claims: Record<string, unknown> };
     const def = await deps.credentialUseCases.get(key);
     if (!def) return notFound(reply, `credential use case '${key}' not found`);
-    const resolved = await resolveIssuer(reply, claims, def);
+    const resolved = await resolveIssuer(reply, claims, def, key);
     if (!resolved) return;
     const { issuerOrg } = resolved;
 
@@ -1514,7 +1554,25 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const claims = request.user as TokenClaims;
     const b = request.body as { email: string; password: string; role: Role; useCaseKey?: string; walletAddress?: string; kyc?: KycDetails };
     const targetUseCaseKey = claims.role === "PlatformAdmin" ? (b.useCaseKey ?? null) : claims.useCaseKey;
-    if (!canCreateUser({ role: claims.role, useCaseKey: claims.useCaseKey }, b.role, targetUseCaseKey)) {
+    const targetDomain = targetUseCaseKey
+      ? useCaseDomainOf(targetUseCaseKey, {
+          tokenizationKeys: (await deps.useCases.list()).map((u) => u.key),
+          credentialKeys: (await deps.credentialUseCases.list()).map((u) => u.key),
+        })
+      : undefined;
+    if (targetUseCaseKey && !targetDomain) {
+      return reply.code(404).send({ error: "USE_CASE_NOT_FOUND", message: `no use case '${targetUseCaseKey}'` });
+    }
+    // Domain mismatch means the role doesn't exist in this domain AT ALL (e.g. a
+    // tokenization-only "Buyer" targeting an identity use case) — use the broadest
+    // (PlatformAdmin) roster for the domain so this check stays independent of the
+    // CALLER's own rank. A role that exists in the domain but is above the caller's
+    // rank (e.g. a UseCaseAdmin trying to mint another UseCaseAdmin) is an
+    // escalation, not a domain mismatch, and falls through to canCreateUser's 403.
+    if (targetDomain && !assignableRoles("PlatformAdmin", targetDomain).includes(b.role)) {
+      return reply.code(400).send({ error: "ROLE_DOMAIN_MISMATCH", message: `role '${b.role}' is not valid for a ${targetDomain} use case` });
+    }
+    if (!canCreateUser({ role: claims.role, useCaseKey: claims.useCaseKey }, b.role, targetUseCaseKey, targetDomain ?? "tokenization")) {
       return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to create that user" });
     }
     if (await deps.users.findByEmail(b.email)) return reply.code(400).send({ error: "EMAIL_TAKEN", message: "email already registered" });
@@ -1960,7 +2018,12 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     // Only the ISSUING org may revoke: find the org whose parent DID signed it.
     const issuer = await deps.organizations.findByDid(cred.issuerDid);
     if (!issuer) return notFound(reply, "issuing organization not found");
-    if (!orgScoped(claims, issuer.id)) {
+    // A credential-use-case-SCOPED desk operator (UseCaseAdmin/Issuer whose
+    // claims.useCaseKey matches the credential's own use case) may also revoke,
+    // without being the signing org — mirrors the issue-side scopedOperator gate.
+    const scopedOperator = (claims.role === "UseCaseAdmin" || claims.role === "Issuer")
+      && cred.credentialUseCaseKey !== null && claims.useCaseKey === cred.credentialUseCaseKey;
+    if (!scopedOperator && !orgScoped(claims, issuer.id)) {
       return reply.code(403).send({ error: "FORBIDDEN", message: "only the issuing organization may revoke this credential" });
     }
     // Depth comes from the credential's OWN type — revoking an AuthorizedSignatory
@@ -2066,6 +2129,34 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   app.post("/verification-requests", { schema: S.createVerificationRequest, ...auth }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const b = request.body as { holderDid: string; requestedTypes: string[]; purpose: string; credentialUseCaseKey?: string };
+
+    // F5 — a use-case-scoped Verifier desk user (no org). Authorized purely by
+    // role + useCaseKey: they may only verify their OWN credential use case, and
+    // the request is bound to it (credentialUseCaseKey) so verify() only ever
+    // accepts that use case's credential types. Additive — the org path below is
+    // untouched.
+    if (claims.role === "Verifier") {
+      const key = b.credentialUseCaseKey ?? claims.useCaseKey ?? undefined;
+      if (!key || key !== claims.useCaseKey) {
+        return reply.code(403).send({ error: "VERIFIER_NOT_PERMITTED", message: "you may only verify your own credential use case" });
+      }
+      const def = await deps.credentialUseCases.get(key);
+      if (!def) return notFound(reply, `credential use case '${key}' not found`);
+      const names = new Set(def.credentialTypes.map((t) => t.name));
+      if (!b.requestedTypes.every((t) => names.has(t))) {
+        return reply.code(400).send({ error: "TYPES_NOT_IN_USECASE", message: "a requested type is not part of this use case" });
+      }
+      const rec = await deps.verificationRequests.create({
+        verifierOrgId: "", holderDid: b.holderDid, requestedTypes: b.requestedTypes, purpose: b.purpose,
+        credentialUseCaseKey: key,
+        challenge: randomUUID(), status: "pending", presentationVpJwt: null, consentedAt: null,
+        consentedCredentialIds: null, verifierResult: null, verifiedAt: null,
+        expiresAt: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+      });
+      await deps.audit.append({ actorId: claims.id, action: "verification-requested" as LifecycleAction, payload: { requestId: rec.id, verifierUserId: claims.id, holderDid: b.holderDid, types: b.requestedTypes, credentialUseCaseKey: rec.credentialUseCaseKey } });
+      return reply.code(201).send(vreqView(rec));
+    }
+
     if (claims.role !== "OrgAdmin" || !claims.orgId) {
       return reply.code(403).send({ error: "NOT_A_VERIFIER", message: "only an organization admin may request a presentation" });
     }
@@ -2118,7 +2209,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const { id } = request.params as { id: string };
     const r = await deps.verificationRequests.get(id);
     const isHolder = !!claims.did && claims.did === r?.holderDid;
-    const isVerifier = !!r && orgScoped(claims, r.verifierOrgId);
+    const isVerifier = !!r && verifierScoped(claims, r);
     if (!r || (!isHolder && !isVerifier)) return notFound(reply, "verification request not found");
     return vreqView(r);
   });
@@ -2181,7 +2272,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const claims = request.user as TokenClaims;
     const { id } = request.params as { id: string };
     const r = await deps.verificationRequests.get(id);
-    if (!r || !orgScoped(claims, r.verifierOrgId)) return notFound(reply, "verification request not found");
+    if (!r || !verifierScoped(claims, r)) return notFound(reply, "verification request not found");
     if (r.status !== "consented" || !r.presentationVpJwt) {
       return reply.code(409).send({ error: "NOT_CONSENTED", message: `request is ${r.status}; nothing to verify` });
     }

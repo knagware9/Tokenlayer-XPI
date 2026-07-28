@@ -15,7 +15,7 @@ export const DOMAINS: DomainDef[] = [
 export const NAV_DOMAIN: Record<string, DomainKey | "shared"> = {
   dashboard: "tokenization", "use-cases": "tokenization", create: "tokenization",
   assets: "tokenization", invoices: "tokenization", networks: "tokenization",
-  identity: "identity", verify: "identity", organizations: "identity", "org-wallet": "identity",
+  identity: "identity", verify: "identity", organizations: "identity", "org-wallet": "identity", "issue-credentials": "identity",
   approvals: "shared", users: "shared", profile: "shared", credentials: "shared", back: "shared", logout: "shared",
 };
 

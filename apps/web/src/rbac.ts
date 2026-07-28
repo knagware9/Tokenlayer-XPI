@@ -24,6 +24,8 @@ const MATRIX: Record<Role, Action[]> = {
   Trader: ["transfer", "burn", "buy", "list", "cancel-listing", "read"],
   Buyer: ["read", "buy", "list", "cancel-listing"],
   Auditor: ["read"],
+  Holder: ["read"],
+  Verifier: ["read"],
 };
 
 export function can(role: Role, action: Action): boolean {
@@ -36,9 +38,10 @@ export function canManageUsers(role: Role): boolean {
 }
 
 /** Which roles a given manager may assign to a new user. Mirrors core's user-policy. */
-export function assignableRoles(role: Role): Role[] {
-  if (role === "PlatformAdmin") return ["UseCaseAdmin"];
-  if (role === "OrgAdmin") return ["UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"];
-  if (role === "UseCaseAdmin") return ["Issuer", "Buyer", "Auditor"];
+export function assignableRoles(role: Role, domain: "tokenization" | "identity" = "tokenization"): Role[] {
+  const adminRoster: Role[] = domain === "identity" ? ["Issuer", "Holder", "Verifier"] : ["Issuer", "Trader", "Buyer", "Auditor"];
+  const ucaRoster: Role[] = domain === "identity" ? ["Issuer", "Holder", "Verifier"] : ["Issuer", "Buyer", "Auditor"];
+  if (role === "PlatformAdmin" || role === "OrgAdmin") return ["UseCaseAdmin", ...adminRoster];
+  if (role === "UseCaseAdmin") return ucaRoster;
   return [];
 }
