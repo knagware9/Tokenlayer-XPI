@@ -1,5 +1,8 @@
 export type Role = "PlatformAdmin" | "OrgAdmin" | "UseCaseAdmin" | "Issuer" | "Trader" | "Buyer" | "Auditor";
 
+/** Deployment configuration (GET /config): which domains this install has enabled. */
+export interface AppConfig { domains: import("./domains.js").DomainKey[]; }
+
 export interface SessionUser {
   id: string;
   email: string;

@@ -224,4 +224,5 @@ export const api = {
   qrPoll: (id: string) => request<QrLoginPoll>(`/auth/qr/${encodeURIComponent(id)}`, null),
   qrAuthenticate: (id: string, body: { did: string; signature: string }) =>
     request<{ ok: boolean }>(`/auth/qr/${encodeURIComponent(id)}/authenticate`, null, { method: "POST", body: JSON.stringify(body) }),
+  config: (token: string) => request<{ domains: string[] }>("/config", token),
 };

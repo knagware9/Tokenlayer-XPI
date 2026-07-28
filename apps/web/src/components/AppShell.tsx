@@ -1,4 +1,5 @@
 import { useAuth } from "../auth.js";
+import type { DomainDef, DomainKey } from "../domains.js";
 import { Logo } from "./Logo.js";
 import { Icon, type IconName } from "./ui.js";
 
@@ -14,11 +15,17 @@ export function AppShell({
   active,
   onSelect,
   children,
+  domains,
+  activeDomain,
+  onDomainChange,
 }: {
   items: NavItem[];
   active: string;
   onSelect: (id: string) => void;
   children: React.ReactNode;
+  domains?: DomainDef[];
+  activeDomain?: DomainKey;
+  onDomainChange?: (d: DomainKey) => void;
 }): JSX.Element {
   const { user } = useAuth();
 
@@ -48,6 +55,24 @@ export function AppShell({
         <div className="px-5 h-16 flex items-center shrink-0">
           <Logo onDark size={30} />
         </div>
+        {domains && domains.length > 1 && activeDomain && onDomainChange && (
+          <div className="px-3 pt-1 pb-2">
+            <div className="flex gap-1 rounded-lg bg-white/5 p-1">
+              {domains.map((d) => (
+                <button
+                  key={d.key}
+                  onClick={() => onDomainChange(d.key)}
+                  className={`flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors ${
+                    activeDomain === d.key ? "bg-white/10 text-white" : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  <Icon name={d.icon} className="w-4 h-4 shrink-0" />
+                  <span className="truncate">{d.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <nav className="flex-1 overflow-y-auto px-3 py-2 space-y-1">
           {main.map(navButton)}
         </nav>
