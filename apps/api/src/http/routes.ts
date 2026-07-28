@@ -3,7 +3,8 @@ import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AssetRecord, CashflowRecord, CompanyProfile, CredentialRecord, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, invoiceFingerprint, issueCredential, issuerBindingAllows, normalizeUseCaseDefinition, PolicyError, presentCredential, presentCredentials, publicKeyFromDidKey, splitProRata, validateCredentialUseCase, validateMetadata, verifierBindingAllows, verifyChain, verifyPresentation, verifyPresentationCredentials, type Actor, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type OrgType, type Role, type UseCaseDefinition } from "@tokenlayer/core";
+import { auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, invoiceFingerprint, issueCredential, issuerBindingAllows, normalizeUseCaseDefinition, PolicyError, presentCredential, presentCredentials, publicKeyFromDidKey, splitProRata, validateCredentialUseCase, validateMetadata, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type OrgType, type Role, type UseCaseDefinition } from "@tokenlayer/core";
+import qrcode from "qrcode";
 import type { AppDeps } from "../context.js";
 import { isSupportedCurrency } from "../currencies.js";
 import { renderContractCode } from "../contract-code.js";
@@ -161,6 +162,75 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   });
 
   app.get("/me", { schema: S.me, ...auth }, async (request) => actorOf(request));
+
+  // --- passwordless device login keys -------------------------------------
+  app.post("/me/login-keys", { schema: S.enrollLoginKey, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const b = request.body as { did: string; label: string };
+    if (!/^did:key:z[1-9A-HJ-NP-Za-km-z]+$/.test(b.did)) return reply.code(400).send({ error: "BAD_DID", message: "expected a did:key ed25519" });
+    if (await deps.loginKeys.getByDid(b.did)) return reply.code(409).send({ error: "KEY_ENROLLED", message: "this device key is already enrolled" });
+    const rec = await deps.loginKeys.create({ userId: claims.id, did: b.did, label: b.label });
+    return reply.code(201).send({ id: rec.id, did: rec.did, label: rec.label, createdAt: rec.createdAt });
+  });
+
+  app.get("/me/login-keys", { schema: S.listLoginKeys, ...auth }, async (request) => {
+    const claims = request.user as TokenClaims;
+    return (await deps.loginKeys.listByUser(claims.id)).map((k) => ({ id: k.id, did: k.did, label: k.label, createdAt: k.createdAt, lastUsedAt: k.lastUsedAt }));
+  });
+
+  app.delete("/me/login-keys/:id", { schema: S.removeLoginKey, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    const rec = await deps.loginKeys.get(id);
+    if (!rec || rec.userId !== claims.id) return notFound(reply, "login key not found");
+    await deps.loginKeys.remove(id);
+    return reply.code(204).send();
+  });
+
+  // --- passwordless QR login (public) -------------------------------------
+  app.post("/auth/qr/start", { schema: S.qrStart }, async () => {
+    const sess = deps.qrLogin.start();
+    const signUrl = `${deps.publicWebUrl}/qr-sign?session=${sess.id}&challenge=${encodeURIComponent(sess.challenge)}`;
+    const qrSvg = await qrcode.toString(signUrl, { type: "svg", margin: 1, width: 240 });
+    return { sessionId: sess.id, challenge: sess.challenge, signUrl, qrSvg, expiresAt: sess.expiresAt };
+  });
+
+  app.get("/auth/qr/:id", { schema: S.qrPoll }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const sess = deps.qrLogin.get(id);
+    if (!sess) return notFound(reply, "login session not found");
+    if (sess.status === "authenticated") {
+      const done = deps.qrLogin.consume(id); // release the token exactly once
+      if (done?.token && done.userId) {
+        const user = await deps.users.findById(done.userId);
+        const wallet = user?.accountId ? await deps.accounts.findById(user.accountId) : null;
+        const claims = user ? { id: user.id, email: user.email, role: user.role, useCaseKey: user.useCaseKey, orgId: user.orgId ?? null, did: user.did ?? null } : null;
+        return { status: "authenticated", token: done.token, user: claims ? { ...claims, walletAddress: wallet?.address ?? null } : null };
+      }
+    }
+    return { status: sess.status };
+  });
+
+  app.post("/auth/qr/:id/authenticate", { schema: S.qrAuthenticate }, async (request, reply) => {
+    if (loginThrottled(request.ip)) return reply.code(429).send({ error: "TOO_MANY_REQUESTS", message: "too many attempts; try again later" });
+    const { id } = request.params as { id: string };
+    const b = request.body as { did: string; signature: string };
+    const sess = deps.qrLogin.get(id);
+    if (!sess) return notFound(reply, "login session not found");
+    if (sess.status !== "pending") return reply.code(410).send({ error: "SESSION_EXPIRED", message: `session is ${sess.status}` });
+    const key = await deps.loginKeys.getByDid(b.did);
+    if (!key) return reply.code(401).send({ error: "UNKNOWN_KEY", message: "device key is not enrolled" });
+    if (!verifyDidSignature(b.did, `qr-login:${sess.id}:${sess.challenge}`, b.signature)) {
+      return reply.code(401).send({ error: "BAD_SIGNATURE", message: "signature does not verify" });
+    }
+    const user = await deps.users.findById(key.userId);
+    if (!user || !user.active) return reply.code(401).send({ error: "ACCOUNT_SUSPENDED", message: "account unavailable" });
+    const claims: TokenClaims = { id: user.id, email: user.email, role: user.role, useCaseKey: user.useCaseKey, orgId: user.orgId ?? null, did: user.did ?? null };
+    const token = app.jwt.sign(claims);
+    if (!deps.qrLogin.authenticate(id, { userId: user.id, token })) return reply.code(410).send({ error: "SESSION_EXPIRED", message: "session no longer pending" });
+    await deps.loginKeys.touch(key.id, new Date().toISOString());
+    return { ok: true };
+  });
 
   // --- catalog ------------------------------------------------------------
   app.get("/chains", { schema: S.chains, ...auth }, async () => deps.chains.list());
