@@ -24,10 +24,19 @@ export function IssueUsecaseCredential({ useCase, onIssued }: { useCase: Credent
     if (!token || !subjectId) { setErr("pick a holder"); return; }
     const picked = holders.find((h) => h.id === subjectId);
     if (!picked) { setErr("pick a holder"); return; }
+    // Coerce each claim to its declared type — a number field must be sent as a
+    // JSON number, not the raw string the text input holds, or metadata
+    // validation rejects it. Empty optional fields are omitted entirely.
+    const typedClaims: Record<string, unknown> = {};
+    for (const [field, p] of Object.entries(spec?.claimSchema.properties ?? {})) {
+      const raw = claims[field];
+      if (raw === undefined || raw === "") continue;
+      typedClaims[field] = p.type === "number" ? Number(raw) : p.type === "boolean" ? raw === "true" : raw;
+    }
     try {
       await api.issueUsecaseCredential(token, useCase.key, picked.kind === "org"
-        ? { credentialType: typeName, subjectOrgId: picked.id, claims }
-        : { credentialType: typeName, subjectUserId: picked.id, claims });
+        ? { credentialType: typeName, subjectOrgId: picked.id, claims: typedClaims }
+        : { credentialType: typeName, subjectUserId: picked.id, claims: typedClaims });
       setMsg("Issuance submitted — pending approval."); setClaims({}); onIssued();
     } catch (e) { setErr(e instanceof ApiError ? e.message : String(e)); }
   }
@@ -54,6 +63,8 @@ export function IssueUsecaseCredential({ useCase, onIssued }: { useCase: Credent
               <option value="">—</option>
               {p.enum.map((o) => <option key={o} value={o}>{o}</option>)}
             </select>
+          ) : p.type === "number" ? (
+            <input className="input w-full" type="number" value={claims[field] ?? ""} onChange={(e) => setClaims({ ...claims, [field]: e.target.value })} />
           ) : (
             <input className="input w-full" value={claims[field] ?? ""} onChange={(e) => setClaims({ ...claims, [field]: e.target.value })} />
           )}
