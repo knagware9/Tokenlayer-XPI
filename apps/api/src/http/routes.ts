@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AssetRecord, CashflowRecord, CompanyProfile, CredentialRecord, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, invoiceFingerprint, issueCredential, issuerBindingAllows, normalizeUseCaseDefinition, PolicyError, presentCredential, presentCredentials, publicKeyFromDidKey, splitProRata, validateCredentialUseCase, validateMetadata, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type OrgType, type Role, type UseCaseDefinition } from "@tokenlayer/core";
+import { auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, invoiceFingerprint, issueCredential, issuerBindingAllows, normalizeUseCaseDefinition, PolicyError, presentCredential, presentCredentials, publicKeyFromDidKey, splitProRata, useCaseDomainOf, validateCredentialUseCase, validateMetadata, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type OrgType, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import qrcode from "qrcode";
 import type { AppDeps } from "../context.js";
 import { isSupportedCurrency } from "../currencies.js";
@@ -161,7 +161,19 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return { token: app.jwt.sign(claims), user: { ...claims, walletAddress: wallet?.address ?? null } };
   });
 
-  app.get("/me", { schema: S.me, ...auth }, async (request) => actorOf(request));
+  app.get("/me", { schema: S.me, ...auth }, async (request) => {
+    const base = actorOf(request);
+    const claims = request.user as TokenClaims;
+    let useCaseDomain: "tokenization" | "identity" | null = null;
+    if (claims.useCaseKey) {
+      const [tks, cks] = await Promise.all([deps.useCases.list(), deps.credentialUseCases.list()]);
+      useCaseDomain = useCaseDomainOf(claims.useCaseKey, {
+        tokenizationKeys: tks.map((u) => u.key),
+        credentialKeys: cks.map((u) => u.key),
+      }) ?? null;
+    }
+    return { ...base, useCaseDomain };
+  });
 
   app.get("/config", { schema: S.config, ...auth }, async () => ({ domains: deps.enabledDomains }));
 
