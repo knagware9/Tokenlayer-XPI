@@ -163,6 +163,8 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
 
   app.get("/me", { schema: S.me, ...auth }, async (request) => actorOf(request));
 
+  app.get("/config", { schema: S.config, ...auth }, async () => ({ domains: deps.enabledDomains }));
+
   // --- passwordless device login keys -------------------------------------
   app.post("/me/login-keys", { schema: S.enrollLoginKey, ...auth }, async (request, reply) => {
     const claims = request.user as TokenClaims;
