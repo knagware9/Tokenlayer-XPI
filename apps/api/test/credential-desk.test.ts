@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { describe, expect, it } from "vitest";
+import { FakeAnchor, fakeRegistry } from "./fake-anchor.js";
 import { auth, buildTestApp, loginAs, onboardUser, V1 } from "./helpers.js";
 
 /** Create a fresh credential use case (unique key) and return its key. */
@@ -137,6 +138,85 @@ describe("onboarding credential-desk users", () => {
       payload: { email: "desk.issuer@x.dev", password: "secret1", role: "Issuer", useCaseKey: key },
     });
     expect(res.statusCode).toBe(202);
+  });
+});
+
+describe("scoped verifier", () => {
+  // A registry is required so the platform issuer's DID resolves as
+  // registered+active on-chain (the trust path the verify route feeds), exactly
+  // as in verification.test.ts / credential-usecase-verify.test.ts. Without it,
+  // trust falls back to the empty trustedKycIssuers allowlist and no verify can
+  // ever be positive.
+  async function loginWithDid(app: FastifyInstance, email: string, password: string): Promise<{ token: string; did: string }> {
+    const res = await app.inject({ method: "POST", url: `${V1}/auth/login`, payload: { email, password } });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { token: string; user: { did: string | null } };
+    return { token: body.token, did: body.user.did! };
+  }
+
+  it("a Verifier scoped to a credential use case drives request→consent→verify to a positive result", async () => {
+    const anchor = new FakeAnchor();
+    const app = await buildTestApp({ registry: fakeRegistry(anchor) });
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const admin2 = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    const keyA = await createCredUC(app, admin, "verif-uc-a");
+
+    // A Verifier scoped to uc-a (authorized purely by role + useCaseKey).
+    await onboardUser(app, admin, admin2, { email: "verif.a@x.dev", password: "secret1", role: "Verifier", useCaseKey: keyA });
+    const verifierA = await loginAs(app, "verif.a@x.dev", "secret1");
+
+    // A Holder scoped to uc-a — onboarding mints a custodial DID so they can sign a VP.
+    const holderSummary = await onboardUser(app, admin, admin2, { email: "verif.holder@x.dev", password: "secret1", role: "Holder", useCaseKey: keyA });
+    const holder = await loginWithDid(app, "verif.holder@x.dev", "secret1");
+
+    // Issue+approve a uc-a credential to the holder (platform issuer; PlatformAdmin issues, second approves).
+    const issued = await app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/${keyA}/credentials`, headers: auth(admin),
+      payload: { credentialType: "T", subjectUserId: holderSummary.id, claims: { a: "x" } },
+    });
+    expect(issued.statusCode).toBe(202);
+    expect((await app.inject({ method: "POST", url: `${V1}/proposals/${issued.json().proposal.id}/approve`, headers: auth(admin2), payload: {} })).statusCode).toBe(200);
+    const held = (await app.inject({ method: "GET", url: `${V1}/me/credentials`, headers: auth(holder.token) })).json() as { id: string; type: string[] }[];
+    const credentialId = held.find((c) => c.type.includes("T"))!.id;
+
+    // The scoped Verifier requests a presentation of the use case's type.
+    const created = await app.inject({
+      method: "POST", url: `${V1}/verification-requests`, headers: auth(verifierA),
+      payload: { holderDid: holder.did, requestedTypes: ["T"], purpose: "desk check", credentialUseCaseKey: keyA },
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().credentialUseCaseKey).toBe(keyA);
+    const requestId = created.json().id as string;
+
+    // Holder consents (signs their own VP).
+    const consented = await app.inject({ method: "POST", url: `${V1}/verification-requests/${requestId}/consent`, headers: auth(holder.token), payload: { credentialIds: [credentialId] } });
+    expect(consented.statusCode).toBe(200);
+
+    // The scoped Verifier runs verify → positive.
+    const verified = await app.inject({ method: "GET", url: `${V1}/verification-requests/${requestId}/verify`, headers: auth(verifierA) });
+    expect(verified.statusCode).toBe(200);
+    expect(verified.json().valid).toBe(true);
+    expect(verified.json().credentials[0].type).toBe("T");
+    expect(verified.json().credentials[0].valid).toBe(true);
+  });
+
+  it("a Verifier scoped to a DIFFERENT use case may not request against another use case", async () => {
+    const anchor = new FakeAnchor();
+    const app = await buildTestApp({ registry: fakeRegistry(anchor) });
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const admin2 = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    const keyA = await createCredUC(app, admin, "verif-uc-a2");
+    const keyB = await createCredUC(app, admin, "verif-uc-b2");
+
+    // A Verifier scoped to uc-b tries to request against uc-a.
+    await onboardUser(app, admin, admin2, { email: "verif.b@x.dev", password: "secret1", role: "Verifier", useCaseKey: keyB });
+    const verifierB = await loginAs(app, "verif.b@x.dev", "secret1");
+
+    const denied = await app.inject({
+      method: "POST", url: `${V1}/verification-requests`, headers: auth(verifierB),
+      payload: { holderDid: "did:key:zHolder", requestedTypes: ["T"], purpose: "desk check", credentialUseCaseKey: keyA },
+    });
+    expect([403, 404]).toContain(denied.statusCode);
   });
 });
 

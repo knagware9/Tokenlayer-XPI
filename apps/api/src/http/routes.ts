@@ -143,6 +143,16 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return claims.role === "PlatformAdmin" || (claims.role === "OrgAdmin" && claims.orgId === orgId);
   }
 
+  // A verification request is driveable by its verifier ORG (the existing path)
+  // OR by a use-case-scoped Verifier desk user whose useCaseKey matches the
+  // request's credential use case (the additive F5 path). The scoped verifier
+  // owns no org, so a request they raised carries verifierOrgId "" and is bound
+  // to the use case via credentialUseCaseKey.
+  function verifierScoped(claims: TokenClaims, r: VerificationRequestRecord): boolean {
+    return orgScoped(claims, r.verifierOrgId)
+      || (claims.role === "Verifier" && !!r.credentialUseCaseKey && claims.useCaseKey === r.credentialUseCaseKey);
+  }
+
   // --- auth ---------------------------------------------------------------
   app.post("/auth/login", { schema: S.login }, async (request, reply) => {
     if (loginThrottled(request.ip)) {
@@ -2111,6 +2121,34 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   app.post("/verification-requests", { schema: S.createVerificationRequest, ...auth }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const b = request.body as { holderDid: string; requestedTypes: string[]; purpose: string; credentialUseCaseKey?: string };
+
+    // F5 — a use-case-scoped Verifier desk user (no org). Authorized purely by
+    // role + useCaseKey: they may only verify their OWN credential use case, and
+    // the request is bound to it (credentialUseCaseKey) so verify() only ever
+    // accepts that use case's credential types. Additive — the org path below is
+    // untouched.
+    if (claims.role === "Verifier") {
+      const key = b.credentialUseCaseKey ?? claims.useCaseKey ?? undefined;
+      if (!key || key !== claims.useCaseKey) {
+        return reply.code(403).send({ error: "VERIFIER_NOT_PERMITTED", message: "you may only verify your own credential use case" });
+      }
+      const def = await deps.credentialUseCases.get(key);
+      if (!def) return notFound(reply, `credential use case '${key}' not found`);
+      const names = new Set(def.credentialTypes.map((t) => t.name));
+      if (!b.requestedTypes.every((t) => names.has(t))) {
+        return reply.code(400).send({ error: "TYPES_NOT_IN_USECASE", message: "a requested type is not part of this use case" });
+      }
+      const rec = await deps.verificationRequests.create({
+        verifierOrgId: "", holderDid: b.holderDid, requestedTypes: b.requestedTypes, purpose: b.purpose,
+        credentialUseCaseKey: key,
+        challenge: randomUUID(), status: "pending", presentationVpJwt: null, consentedAt: null,
+        consentedCredentialIds: null, verifierResult: null, verifiedAt: null,
+        expiresAt: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+      });
+      await deps.audit.append({ actorId: claims.id, action: "verification-requested" as LifecycleAction, payload: { requestId: rec.id, verifierUserId: claims.id, holderDid: b.holderDid, types: b.requestedTypes, credentialUseCaseKey: rec.credentialUseCaseKey } });
+      return reply.code(201).send(vreqView(rec));
+    }
+
     if (claims.role !== "OrgAdmin" || !claims.orgId) {
       return reply.code(403).send({ error: "NOT_A_VERIFIER", message: "only an organization admin may request a presentation" });
     }
@@ -2163,7 +2201,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const { id } = request.params as { id: string };
     const r = await deps.verificationRequests.get(id);
     const isHolder = !!claims.did && claims.did === r?.holderDid;
-    const isVerifier = !!r && orgScoped(claims, r.verifierOrgId);
+    const isVerifier = !!r && verifierScoped(claims, r);
     if (!r || (!isHolder && !isVerifier)) return notFound(reply, "verification request not found");
     return vreqView(r);
   });
@@ -2226,7 +2264,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const claims = request.user as TokenClaims;
     const { id } = request.params as { id: string };
     const r = await deps.verificationRequests.get(id);
-    if (!r || !orgScoped(claims, r.verifierOrgId)) return notFound(reply, "verification request not found");
+    if (!r || !verifierScoped(claims, r)) return notFound(reply, "verification request not found");
     if (r.status !== "consented" || !r.presentationVpJwt) {
       return reply.code(409).send({ error: "NOT_CONSENTED", message: `request is ${r.status}; nothing to verify` });
     }
