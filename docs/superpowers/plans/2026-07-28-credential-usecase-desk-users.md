@@ -132,15 +132,16 @@ export function useCaseDomainOf(
 const ORG_INTERNAL_ROLES: Role[] = ["UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor", "Holder", "Verifier"];
 ```
 - Import the domain type at top: `import type { UseCaseDomain } from "./use-case-domain.js";`
-- Replace `assignableRoles`:
+- Replace `assignableRoles` (PRESERVES tokenization behavior exactly — PlatformAdmin/OrgAdmin keep `UseCaseAdmin`+`Trader` — and adds the identity roster in parallel):
 ```ts
-/** Which roles a given manager may assign to a new user in a use case of `domain`
- *  (defaults to tokenization). Identity use cases use the DID/VC roster. */
+/** Which roles a given manager may assign to a new user in a use case of `domain`.
+ *  PlatformAdmin/OrgAdmin may also mint a UseCaseAdmin; a UseCaseAdmin mints only
+ *  the domain roster. Tokenization is unchanged; identity adds Holder/Verifier. */
 export function assignableRoles(role: Role, domain: UseCaseDomain = "tokenization"): Role[] {
-  const roster: Role[] = domain === "identity" ? ["Issuer", "Holder", "Verifier"] : ["Issuer", "Buyer", "Auditor"];
-  if (role === "PlatformAdmin") return roster;
-  if (role === "OrgAdmin") return roster;
-  if (role === "UseCaseAdmin") return roster;
+  const adminRoster: Role[] = domain === "identity" ? ["Issuer", "Holder", "Verifier"] : ["Issuer", "Trader", "Buyer", "Auditor"];
+  const ucaRoster: Role[] = domain === "identity" ? ["Issuer", "Holder", "Verifier"] : ["Issuer", "Buyer", "Auditor"];
+  if (role === "PlatformAdmin" || role === "OrgAdmin") return ["UseCaseAdmin", ...adminRoster];
+  if (role === "UseCaseAdmin") return ucaRoster;
   return [];
 }
 ```
@@ -411,13 +412,17 @@ In the verification **request** route (currently gated to a verifier org via `ve
 
 - [ ] **Step 1: types** — add `"Holder"`/`"Verifier"` to the web `Role` union; add `useCaseDomain?: "tokenization" | "identity" | null` to the `me`/auth user type.
 
-- [ ] **Step 2: rbac** — add `Holder`/`Verifier` to `MATRIX` (mirror core: `Holder: ["read","buy"]`, `Verifier: ["read"]`); make `assignableRoles` domain-aware:
+- [ ] **Step 2: rbac** — add `Holder`/`Verifier` to `MATRIX` (mirror core: `Holder: ["read","buy"]`, `Verifier: ["read"]`); make `assignableRoles` domain-aware, mirroring core exactly (note the web copy currently returns `["UseCaseAdmin"]` for PlatformAdmin — preserve that a PlatformAdmin/OrgAdmin can pick UseCaseAdmin):
 ```ts
 export function assignableRoles(role: Role, domain: "tokenization" | "identity" = "tokenization"): Role[] {
-  const roster: Role[] = domain === "identity" ? ["Issuer", "Holder", "Verifier"] : ["Issuer", "Buyer", "Auditor"];
-  return role === "PlatformAdmin" || role === "OrgAdmin" || role === "UseCaseAdmin" ? roster : [];
+  const adminRoster: Role[] = domain === "identity" ? ["Issuer", "Holder", "Verifier"] : ["Issuer", "Trader", "Buyer", "Auditor"];
+  const ucaRoster: Role[] = domain === "identity" ? ["Issuer", "Holder", "Verifier"] : ["Issuer", "Buyer", "Auditor"];
+  if (role === "PlatformAdmin" || role === "OrgAdmin") return ["UseCaseAdmin", ...adminRoster];
+  if (role === "UseCaseAdmin") return ucaRoster;
+  return [];
 }
 ```
+(The current web `assignableRoles("PlatformAdmin")` returns only `["UseCaseAdmin"]`; this widens it to the full picker, which is fine since the server re-checks. Confirm no web caller depends on the old narrow list.)
 
 - [ ] **Step 3: domains** — add credential-desk nav ids to `NAV_DOMAIN` as `"identity"`: `"issue-credentials": "identity"`, and reuse existing `"verify"`, `"credentials"` (already identity/shared). Ensure `credentials` (My Credentials) stays `"shared"`.
 

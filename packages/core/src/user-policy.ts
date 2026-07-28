@@ -1,4 +1,5 @@
 import type { Role } from "./types.js";
+import type { UseCaseDomain } from "./use-case-domain.js";
 
 /** Identity of the user performing a management action. */
 export interface ManagerRef {
@@ -7,30 +8,36 @@ export interface ManagerRef {
 }
 
 /** Org-internal roles an OrgAdmin (or PlatformAdmin) may assign to a member. */
-const ORG_INTERNAL_ROLES: Role[] = ["UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"];
+const ORG_INTERNAL_ROLES: Role[] = ["UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor", "Holder", "Verifier"];
 
 /** Roles allowed to provision other users. */
 export function canManageUsers(role: Role): boolean {
   return role === "PlatformAdmin" || role === "OrgAdmin" || role === "UseCaseAdmin";
 }
 
-/** Which roles a given manager may assign to a new user. */
-export function assignableRoles(role: Role): Role[] {
-  // PlatformAdmin may provision the full roster (gated onboarding approves it),
-  // not just UseCaseAdmins; scoping still requires a named use case below.
-  if (role === "PlatformAdmin") return [...ORG_INTERNAL_ROLES];
-  if (role === "OrgAdmin") return [...ORG_INTERNAL_ROLES];
-  if (role === "UseCaseAdmin") return ["Issuer", "Buyer", "Auditor"];
+/** Which roles a given manager may assign to a new user in a use case of `domain`.
+ *  PlatformAdmin/OrgAdmin may also mint a UseCaseAdmin; a UseCaseAdmin mints only
+ *  the domain roster. Tokenization behavior is unchanged; identity adds Holder/Verifier. */
+export function assignableRoles(role: Role, domain: UseCaseDomain = "tokenization"): Role[] {
+  const adminRoster: Role[] = domain === "identity" ? ["Issuer", "Holder", "Verifier"] : ["Issuer", "Trader", "Buyer", "Auditor"];
+  const ucaRoster: Role[] = domain === "identity" ? ["Issuer", "Holder", "Verifier"] : ["Issuer", "Buyer", "Auditor"];
+  if (role === "PlatformAdmin" || role === "OrgAdmin") return ["UseCaseAdmin", ...adminRoster];
+  if (role === "UseCaseAdmin") return ucaRoster;
   return [];
 }
 
 /**
- * May `manager` create a user with `targetRole` in `targetUseCaseKey`?
- * - PlatformAdmin: any roster role, and a use case must be named.
- * - UseCaseAdmin: only roster roles, and only in their own use case.
+ * May `manager` create a user with `targetRole` in `targetUseCaseKey` (of `targetDomain`)?
+ * - PlatformAdmin: any roster role for that domain, and a use case must be named.
+ * - UseCaseAdmin: only roster roles for that domain, and only in their own use case.
  */
-export function canCreateUser(manager: ManagerRef, targetRole: Role, targetUseCaseKey: string | null): boolean {
-  if (!assignableRoles(manager.role).includes(targetRole)) return false;
+export function canCreateUser(
+  manager: ManagerRef,
+  targetRole: Role,
+  targetUseCaseKey: string | null,
+  targetDomain: UseCaseDomain = "tokenization",
+): boolean {
+  if (!assignableRoles(manager.role, targetDomain).includes(targetRole)) return false;
   if (manager.role === "PlatformAdmin") return targetUseCaseKey !== null;
   if (manager.role === "UseCaseAdmin") return targetUseCaseKey !== null && targetUseCaseKey === manager.useCaseKey;
   return false;

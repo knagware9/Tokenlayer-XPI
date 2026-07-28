@@ -7,9 +7,9 @@
  */
 
 /** Roles recognised by the platform's access-control policy. */
-export type Role = "PlatformAdmin" | "OrgAdmin" | "UseCaseAdmin" | "Issuer" | "Trader" | "Buyer" | "Auditor";
+export type Role = "PlatformAdmin" | "OrgAdmin" | "UseCaseAdmin" | "Issuer" | "Trader" | "Buyer" | "Auditor" | "Holder" | "Verifier";
 
-export const ROLES: readonly Role[] = ["PlatformAdmin", "OrgAdmin", "UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"];
+export const ROLES: readonly Role[] = ["PlatformAdmin", "OrgAdmin", "UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor", "Holder", "Verifier"];
 
 /** The kind of tenant an organization is. */
 export type OrgType = "bank" | "corporate" | "msme" | "government" | "verifier";
