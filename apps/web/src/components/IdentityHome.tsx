@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api.js";
 import { useAuth } from "../auth.js";
-import type { CredentialUseCase } from "../types.js";
+import type { CredentialUseCase, Organization } from "../types.js";
 import { CredentialUseCaseBuilder } from "./CredentialUseCaseBuilder.js";
 import { IssueUsecaseCredential } from "./IssueUsecaseCredential.js";
 import { Card, EmptyState, Pill, SectionHeader, Skeleton } from "./ui.js";
 
 /** One-line summary of the Issuer / Holder / Verifier bindings. */
-function bindingSummary(u: CredentialUseCase): string {
-  const issuer = u.issuer.kind === "platform" ? "Platform" : `Org ${u.issuer.orgId}`;
+function bindingSummary(u: CredentialUseCase, orgNames: Record<string, string>): string {
+  const issuer = u.issuer.kind === "platform" ? "Platform" : (orgNames[u.issuer.orgId] ?? `Org ${u.issuer.orgId}`);
   const holder =
     u.holderPolicy.who === "any-onboarded"
       ? "any onboarded org"
@@ -22,6 +22,7 @@ function bindingSummary(u: CredentialUseCase): string {
 export function IdentityHome(): JSX.Element {
   const { token, user } = useAuth();
   const [useCases, setUseCases] = useState<CredentialUseCase[] | null>(null);
+  const [orgNames, setOrgNames] = useState<Record<string, string>>({});
   const [showBuilder, setShowBuilder] = useState(false);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const isPlatformAdmin = user?.role === "PlatformAdmin";
@@ -35,6 +36,9 @@ export function IdentityHome(): JSX.Element {
   const reload = useCallback((): void => {
     if (!token) return;
     void api.credentialUseCases(token).then(setUseCases).catch(() => setUseCases([]));
+    // Resolve issuer-org ids to names for the binding summary (best-effort — a
+    // caller who can't list orgs simply sees the id fall back).
+    void api.orgs(token).then((os: Organization[]) => setOrgNames(Object.fromEntries(os.map((o) => [o.id, o.name])))).catch(() => {});
   }, [token]);
 
   useEffect(() => reload(), [reload]);
@@ -109,7 +113,7 @@ export function IdentityHome(): JSX.Element {
                   <Pill key={ct.name} tone="info">{ct.name}</Pill>
                 ))}
               </div>
-              <div className="mt-3 pt-3 border-t border-slate-100 text-[11px] text-slate-500">{bindingSummary(u)}</div>
+              <div className="mt-3 pt-3 border-t border-slate-100 text-[11px] text-slate-500">{bindingSummary(u, orgNames)}</div>
               {canIssue(u) && (
                 <button
                   onClick={() => setExpandedKey((k) => (k === u.key ? null : u.key))}
