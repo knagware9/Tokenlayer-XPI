@@ -71,4 +71,19 @@ describe("passwordless QR login", () => {
     const list = await app.inject({ method: "GET", url: `${V1}/me/login-keys`, headers: auth(admin) });
     expect((list.json() as unknown[]).length).toBe(1);
   });
+
+  it("DELETE is owner-only — another user cannot revoke your key (404, no existence leak)", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const other = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    const key = generateDidKey();
+    const enrol = await app.inject({ method: "POST", url: `${V1}/me/login-keys`, headers: auth(admin), payload: { did: key.did, label: "admin's device" } });
+    const keyId = enrol.json().id as string;
+    // a different user cannot delete it — 404 (not 403), so key existence isn't disclosed
+    expect((await app.inject({ method: "DELETE", url: `${V1}/me/login-keys/${keyId}`, headers: auth(other) })).statusCode).toBe(404);
+    // the key is untouched — still authenticable by its owner
+    expect((await app.inject({ method: "GET", url: `${V1}/me/login-keys`, headers: auth(admin) })).json().length).toBe(1);
+    // the owner can delete it
+    expect((await app.inject({ method: "DELETE", url: `${V1}/me/login-keys/${keyId}`, headers: auth(admin) })).statusCode).toBe(204);
+  });
 });
