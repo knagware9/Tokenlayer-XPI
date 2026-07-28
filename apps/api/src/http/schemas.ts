@@ -1033,10 +1033,11 @@ export const S: Record<string, FastifySchema> = {
     tags: ["Credentials"], summary: "Issue a configured credential type (gated by the type's approval depth)", security: bearer,
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     body: {
-      type: "object", additionalProperties: false, required: ["credentialType", "subjectUserId", "claims"],
+      type: "object", additionalProperties: false, required: ["credentialType", "claims"],
       properties: {
         credentialType: { type: "string" },
         subjectUserId: { type: "string" },
+        subjectOrgId: { type: "string" },
         claims: { type: "object", additionalProperties: true },
       },
     },

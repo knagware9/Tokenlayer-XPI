@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AssetRecord, CashflowRecord, CompanyProfile, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, invoiceFingerprint, issueCredential, issuerBindingAllows, normalizeUseCaseDefinition, PolicyError, presentCredential, presentCredentials, publicKeyFromDidKey, splitProRata, validateCredentialUseCase, validateMetadata, verifierBindingAllows, verifyChain, verifyPresentation, verifyPresentationCredentials, type Actor, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type Role, type UseCaseDefinition } from "@tokenlayer/core";
+import { auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, invoiceFingerprint, issueCredential, issuerBindingAllows, normalizeUseCaseDefinition, PolicyError, presentCredential, presentCredentials, publicKeyFromDidKey, splitProRata, validateCredentialUseCase, validateMetadata, verifierBindingAllows, verifyChain, verifyPresentation, verifyPresentationCredentials, type Actor, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type OrgType, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { isSupportedCurrency } from "../currencies.js";
 import { renderContractCode } from "../contract-code.js";
@@ -417,13 +417,20 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (!def) return notFound(reply, `credential use case '${key}' not found`);
     const resolved = await resolveIssuer(reply, claims, def); // same gate as issuing
     if (!resolved) return;
+    const out: { kind: "user" | "org"; id: string; label: string; did: string; subLabel: string | null }[] = [];
     const users = await deps.users.list();
-    const out: { id: string; email: string; did: string; orgName: string | null }[] = [];
     for (const u of users) {
       if (!u.did) continue;
       const org = u.orgId ? await deps.organizations.get(u.orgId) : null;
       if (holderPolicyAllows(def.holderPolicy, org ? { id: org.id, orgType: org.orgType } : null)) {
-        out.push({ id: u.id, email: u.email, did: u.did, orgName: org?.name ?? null });
+        out.push({ kind: "user", id: u.id, label: u.email, did: u.did, subLabel: org?.name ?? null });
+      }
+    }
+    const orgs = await deps.organizations.list();
+    for (const o of orgs) {
+      if (!o.did) continue;
+      if (holderPolicyAllows(def.holderPolicy, { id: o.id, orgType: o.orgType })) {
+        out.push({ kind: "org", id: o.id, label: o.name, did: o.did, subLabel: o.orgType });
       }
     }
     return out;
@@ -432,7 +439,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   app.post("/credential-use-cases/:key/credentials", { schema: S.issueUsecaseCredential, ...auth }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const { key } = request.params as { key: string };
-    const b = request.body as { credentialType: string; subjectUserId: string; claims: Record<string, unknown> };
+    const b = request.body as { credentialType: string; subjectUserId?: string; subjectOrgId?: string; claims: Record<string, unknown> };
     const def = await deps.credentialUseCases.get(key);
     if (!def) return notFound(reply, `credential use case '${key}' not found`);
     const resolved = await resolveIssuer(reply, claims, def);
@@ -443,18 +450,33 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     try { spec = credentialUseCaseType(def, b.credentialType); }
     catch (err) { return reply.code(400).send({ error: "UNKNOWN_CREDENTIAL_TYPE", message: (err as Error).message }); }
 
-    const subject = await deps.users.findById(b.subjectUserId);
-    if (!subject) return notFound(reply, "subject user not found");
-    if (!subject.did) return reply.code(400).send({ error: "SUBJECT_HAS_NO_DID", message: "the subject has no decentralized identifier" });
-    const holderOrg = subject.orgId ? await deps.organizations.get(subject.orgId) : null;
-    if (!holderPolicyAllows(def.holderPolicy, holderOrg ? { id: holderOrg.id, orgType: holderOrg.orgType } : null)) {
+    // Subject is EXACTLY ONE of a user or an org.
+    if ((!b.subjectUserId) === (!b.subjectOrgId)) {
+      return reply.code(400).send({ error: "SUBJECT_REQUIRED", message: "provide exactly one of subjectUserId or subjectOrgId" });
+    }
+    let subjectDid: string;
+    let holderOrg: { id: string; orgType: OrgType } | null;
+    const subjectRef: { subjectUserId?: string; subjectOrgId?: string } = {};
+    if (b.subjectUserId) {
+      const subject = await deps.users.findById(b.subjectUserId);
+      if (!subject) return notFound(reply, "subject user not found");
+      if (!subject.did) return reply.code(400).send({ error: "SUBJECT_HAS_NO_DID", message: "the subject has no decentralized identifier" });
+      const org = subject.orgId ? await deps.organizations.get(subject.orgId) : null;
+      subjectDid = subject.did; holderOrg = org ? { id: org.id, orgType: org.orgType } : null; subjectRef.subjectUserId = subject.id;
+    } else {
+      const org = await deps.organizations.get(b.subjectOrgId!);
+      if (!org) return notFound(reply, "subject organization not found");
+      if (!org.did) return reply.code(400).send({ error: "SUBJECT_HAS_NO_DID", message: "the subject organization has no DID" });
+      subjectDid = org.did; holderOrg = { id: org.id, orgType: org.orgType }; subjectRef.subjectOrgId = org.id;
+    }
+    if (!holderPolicyAllows(def.holderPolicy, holderOrg)) {
       return reply.code(403).send({ error: "HOLDER_NOT_ELIGIBLE", message: "the subject is not an eligible holder for this use case" });
     }
     validateMetadata(b.claims, spec.claimSchema); // throws INVALID_METADATA → 400
 
     const proposal = await deps.proposals.create({
       useCaseKey: null, orgId: issuerOrg.id, assetId: null, kind: "issue-usecase-credential",
-      payload: { credentialUseCaseKey: key, credentialType: spec.name, subjectDid: subject.did, subjectUserId: subject.id, claims: b.claims, issuerOrgId: issuerOrg.id },
+      payload: { credentialUseCaseKey: key, credentialType: spec.name, subjectDid, ...subjectRef, claims: b.claims, issuerOrgId: issuerOrg.id },
       proposerId: claims.id, proposerLabel: claims.email, required: spec.requiredApprovals,
     });
     return reply.code(202).send({ proposal });
