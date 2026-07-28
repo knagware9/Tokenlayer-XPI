@@ -131,9 +131,12 @@ export const env: Env = {
   registryChainId: process.env.REGISTRY_CHAIN_ID ?? "besu",
   enabledDomains: (() => {
     const known = ["tokenization", "identity"];
-    const parsed = (process.env.ENABLED_DOMAINS ?? "tokenization,identity")
-      .split(",").map((s) => s.trim()).filter(Boolean).filter((d) => known.includes(d));
-    return parsed.length > 0 ? parsed : known; // empty/all-unknown ⇒ both (never zero)
+    const raw = (process.env.ENABLED_DOMAINS ?? "tokenization,identity").split(",").map((s) => s.trim()).filter(Boolean);
+    const parsed = raw.filter((d) => known.includes(d));
+    const dropped = raw.filter((d) => !known.includes(d));
+    if (dropped.length) console.warn(`[env] ENABLED_DOMAINS: ignoring unknown domain(s): ${dropped.join(", ")}`);
+    if (parsed.length === 0) { if (raw.length) console.warn("[env] ENABLED_DOMAINS had no known domains — defaulting to both"); return known; }
+    return parsed; // empty/all-unknown ⇒ both (never zero)
   })(),
 };
 
