@@ -39,8 +39,10 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     if (!token) return;
-    void Promise.all([api.chains(token), api.useCases(token), api.config(token)]).then(([c, u, cfg]) => {
-      setChains(c); setUseCases(u);
+    void Promise.all([api.chains(token), api.useCases(token)]).then(([c, u]) => { setChains(c); setUseCases(u); });
+    // Isolated from chains/useCases: a /config failure must not blank the dashboard —
+    // it only falls back to all domains, leaving the rest of the app fully functional.
+    void api.config(token).then((cfg) => {
       const enabled = (cfg.domains as DomainKey[]).filter((d) => DOMAIN_KEYS.includes(d));
       const eff = enabled.length ? enabled : DOMAIN_KEYS;
       setEnabledDomains(eff);
