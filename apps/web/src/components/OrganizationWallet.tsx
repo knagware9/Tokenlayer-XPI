@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api.js";
 import { useAuth } from "../auth.js";
-import type { CredentialStatusInfo, HeldCredential } from "../types.js";
+import type { CredentialStatusInfo, HeldCredential, Organization } from "../types.js";
 import { Card, EmptyState, SectionHeader, Skeleton } from "./ui.js";
 import { CredentialCard } from "./CredentialCard.js";
 
@@ -11,10 +11,12 @@ export function OrganizationWallet(): JSX.Element {
   const orgId = user?.orgId ?? null;
   const [creds, setCreds] = useState<HeldCredential[] | null>(null);
   const [statuses, setStatuses] = useState<Record<string, CredentialStatusInfo>>({});
+  const [org, setOrg] = useState<Organization | null>(null);
 
   useEffect(() => {
     if (!token || !orgId) { setCreds([]); return; }
     void api.orgWallet(token, orgId).then(setCreds).catch(() => setCreds([]));
+    void api.org(token, orgId).then(setOrg).catch(() => setOrg(null));
   }, [token, orgId]);
 
   useEffect(() => {
@@ -33,7 +35,11 @@ export function OrganizationWallet(): JSX.Element {
   }
   return (
     <div>
-      <SectionHeader title="Organization wallet" description="Verifiable credentials held by your organization as an entity." />
+      <SectionHeader
+        title={org ? `Organization wallet · ${org.name}` : "Organization wallet"}
+        description="Verifiable credentials held by your organization as an entity."
+      />
+      {org && <p className="font-mono text-xs text-slate-500 break-all -mt-3 mb-4">{org.did}</p>}
       {creds === null ? <Card><Skeleton lines={4} /></Card>
         : creds.length === 0 ? <Card><EmptyState icon="doc" title="No credentials yet" hint="Credentials issued to your organization will appear here." /></Card>
         : <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">{creds.map((c) => <CredentialCard key={c.id} credential={c} status={statuses[c.id]} />)}</div>}
