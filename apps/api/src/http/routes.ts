@@ -153,6 +153,19 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       || (claims.role === "Verifier" && !!r.credentialUseCaseKey && claims.useCaseKey === r.credentialUseCaseKey);
   }
 
+  // Resolve a use-case key to its product domain the SAME way GET /me does —
+  // shared by the login + QR-poll responses (which populate the web SessionUser)
+  // and the /me handler, so the domain a session carries never drifts. Null when
+  // the user has no use-case key (e.g. a PlatformAdmin) or the key names neither.
+  async function resolveUseCaseDomain(useCaseKey: string | null): Promise<"tokenization" | "identity" | null> {
+    if (!useCaseKey) return null;
+    const [tks, cks] = await Promise.all([deps.useCases.list(), deps.credentialUseCases.list()]);
+    return useCaseDomainOf(useCaseKey, {
+      tokenizationKeys: tks.map((u) => u.key),
+      credentialKeys: cks.map((u) => u.key),
+    }) ?? null;
+  }
+
   // --- auth ---------------------------------------------------------------
   app.post("/auth/login", { schema: S.login }, async (request, reply) => {
     if (loginThrottled(request.ip)) {
@@ -168,20 +181,14 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     }
     const claims: TokenClaims = { id: user.id, email: user.email, role: user.role, useCaseKey: user.useCaseKey, orgId: user.orgId ?? null, did: user.did ?? null };
     const wallet = user.accountId ? await deps.accounts.findById(user.accountId) : null;
-    return { token: app.jwt.sign(claims), user: { ...claims, walletAddress: wallet?.address ?? null } };
+    const useCaseDomain = await resolveUseCaseDomain(user.useCaseKey);
+    return { token: app.jwt.sign(claims), user: { ...claims, walletAddress: wallet?.address ?? null, useCaseDomain } };
   });
 
   app.get("/me", { schema: S.me, ...auth }, async (request) => {
     const base = actorOf(request);
     const claims = request.user as TokenClaims;
-    let useCaseDomain: "tokenization" | "identity" | null = null;
-    if (claims.useCaseKey) {
-      const [tks, cks] = await Promise.all([deps.useCases.list(), deps.credentialUseCases.list()]);
-      useCaseDomain = useCaseDomainOf(claims.useCaseKey, {
-        tokenizationKeys: tks.map((u) => u.key),
-        credentialKeys: cks.map((u) => u.key),
-      }) ?? null;
-    }
+    const useCaseDomain = await resolveUseCaseDomain(claims.useCaseKey);
     return { ...base, useCaseDomain };
   });
 
@@ -229,7 +236,8 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         const user = await deps.users.findById(done.userId);
         const wallet = user?.accountId ? await deps.accounts.findById(user.accountId) : null;
         const claims = user ? { id: user.id, email: user.email, role: user.role, useCaseKey: user.useCaseKey, orgId: user.orgId ?? null, did: user.did ?? null } : null;
-        return { status: "authenticated", token: done.token, user: claims ? { ...claims, walletAddress: wallet?.address ?? null } : null };
+        const useCaseDomain = user ? await resolveUseCaseDomain(user.useCaseKey) : null;
+        return { status: "authenticated", token: done.token, user: claims ? { ...claims, walletAddress: wallet?.address ?? null, useCaseDomain } : null };
       }
     }
     return { status: sess.status };

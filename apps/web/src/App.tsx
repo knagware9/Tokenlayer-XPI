@@ -10,6 +10,7 @@ import { Home } from "./components/Home.js";
 import { IdentityHome } from "./components/IdentityHome.js";
 import { InvestorPortal } from "./components/InvestorPortal.js";
 import { InvoiceRegister } from "./components/InvoiceRegister.js";
+import { IssueUsecaseCredential } from "./components/IssueUsecaseCredential.js";
 import { Login } from "./components/Login.js";
 import { MyIdentity } from "./components/MyIdentity.js";
 import { MyProfile } from "./components/MyProfile.js";
@@ -24,7 +25,7 @@ import { VerificationRequests } from "./components/VerificationRequests.js";
 import { SectionHeader } from "./components/ui.js";
 import { can, canManageUsers } from "./rbac.js";
 import { DOMAINS, DOMAIN_KEYS, type DomainKey, loadActiveDomain, saveActiveDomain, itemsForDomain, availableDomains } from "./domains.js";
-import type { ChainInfo, UseCase } from "./types.js";
+import type { ChainInfo, CredentialUseCase, UseCase } from "./types.js";
 
 export function App(): JSX.Element {
   const { token, user, logout } = useAuth();
@@ -34,8 +35,14 @@ export function App(): JSX.Element {
   const [view, setView] = useState<string>("dashboard");
   const [enabledDomains, setEnabledDomains] = useState<DomainKey[]>(DOMAIN_KEYS);
   const [activeDomain, setActiveDomain] = useState<DomainKey>(() => loadActiveDomain(DOMAIN_KEYS));
+  // The credential use case this desk operates, loaded only for an identity-domain
+  // desk user (drives the Issue Credentials surface). Null otherwise.
+  const [deskCredUC, setDeskCredUC] = useState<CredentialUseCase | null>(null);
 
   const reloadUseCases = (): void => { if (token) void api.useCases(token).then(setUseCases); };
+  const reloadDeskCredUC = (): void => {
+    if (token && user?.useCaseKey) void api.credentialUseCase(token, user.useCaseKey).then(setDeskCredUC).catch(() => setDeskCredUC(null));
+  };
 
   useEffect(() => {
     if (!token) return;
@@ -54,6 +61,15 @@ export function App(): JSX.Element {
   useEffect(() => {
     if (user && user.useCaseKey && routeKey !== user.useCaseKey) navigate(`/${user.useCaseKey}`);
   }, [user, routeKey, navigate]);
+
+  // Load the desk's own credential use case for identity-domain operators.
+  useEffect(() => {
+    if (token && user?.useCaseKey && user.useCaseDomain === "identity") {
+      void api.credentialUseCase(token, user.useCaseKey).then(setDeskCredUC).catch(() => setDeskCredUC(null));
+    } else {
+      setDeskCredUC(null);
+    }
+  }, [token, user?.useCaseKey, user?.useCaseDomain]);
 
   // Reset the active view when the active use case changes — honouring a one-shot
   // intent (e.g. "Start tokenizing" lands on the Asset Ledger) set before navigating.
@@ -148,6 +164,43 @@ export function App(): JSX.Element {
 
   // Operator console: desk roles (UseCaseAdmin/Issuer/Auditor), OrgAdmin, and a
   // PlatformAdmin scoped into a specific use case.
+  //
+  // Identity-domain desk: a credential-use-case-scoped operator (UseCaseAdmin /
+  // Issuer / Verifier / Holder). Their nav + panels are the credential desk, not
+  // the tokenization ledger. OrgAdmin and everyone tokenization-scoped fall
+  // through to the unchanged branch below (their useCaseDomain is null →
+  // "tokenization"), so nothing about the existing desk changes.
+  const deskDomain = user.useCaseDomain ?? "tokenization";
+  if (deskDomain === "identity") {
+    const r = user.role;
+    const idItems: NavItem[] = [
+      ...(r === "UseCaseAdmin" || r === "Issuer" ? [{ id: "issue-credentials", label: "Issue Credentials", icon: "doc" as const }] : []),
+      ...(r === "UseCaseAdmin" || r === "Verifier" ? [{ id: "verify", label: "Verification", icon: "shield" as const }] : []),
+      ...(r === "UseCaseAdmin" || r === "Issuer" ? [{ id: "approvals", label: "Approvals", icon: "check" as const }] : []),
+      ...(canManageUsers(r) ? [{ id: "users", label: "User Management", icon: "users" as const }] : []),
+      ...pinned,
+    ];
+    const idIds = idItems.map((i) => i.id).filter((id) => id !== "logout");
+    const idActive = idIds.includes(view) ? view : (idIds[0] ?? "credentials");
+    let idPanel: JSX.Element;
+    if (idActive === "issue-credentials") {
+      idPanel = deskCredUC
+        ? <IssueUsecaseCredential useCase={deskCredUC} onIssued={reloadDeskCredUC} />
+        : <SectionHeader title="Issue Credentials" description="Loading this desk's credential use case…" />;
+    } else if (idActive === "verify") {
+      idPanel = <VerificationRequests />;
+    } else if (idActive === "approvals") {
+      idPanel = <ApprovalsPanel />;
+    } else if (idActive === "users") {
+      idPanel = <UserManagement useCaseKey={user.useCaseKey ?? ""} useCases={useCases} />;
+    } else if (idActive === "profile") {
+      idPanel = <MyProfile onSelect={setView} />;
+    } else {
+      idPanel = <MyIdentity />;
+    }
+    return <AppShell items={idItems} active={idActive} onSelect={handleSelect}>{idPanel}</AppShell>;
+  }
+
   const activeUseCaseObj = useCases.find((u) => u.key === activeUseCase);
   const showInvoices = isInvoiceUseCase(activeUseCaseObj) && can(user.role, "issue");
 

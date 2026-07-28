@@ -86,6 +86,27 @@ describe("onboarding credential-desk users", () => {
     expect(me.json().useCaseDomain).toBe("identity");
   });
 
+  it("the LOGIN response (not just /me) carries useCaseDomain=identity for a credential-desk UseCaseAdmin", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const admin2 = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    const key = await createCredUC(app, admin, "desk-login-domain");
+
+    const res = await app.inject({
+      method: "POST", url: `${V1}/users`, headers: auth(admin),
+      payload: { email: "desk.login@x.dev", password: "secret1", role: "UseCaseAdmin", useCaseKey: key },
+    });
+    expect(res.statusCode).toBe(202);
+    const ap = await app.inject({ method: "POST", url: `${V1}/proposals/${res.json().proposal.id}/approve`, headers: auth(admin2), payload: {} });
+    expect(ap.statusCode).toBe(200);
+
+    // The web app populates SessionUser from the login response, not /me — so the
+    // domain must be on the login body's `user` too.
+    const login = await app.inject({ method: "POST", url: `${V1}/auth/login`, payload: { email: "desk.login@x.dev", password: "secret1" } });
+    expect(login.statusCode).toBe(200);
+    expect(login.json().user.useCaseDomain).toBe("identity");
+  });
+
   it("rejects onboarding a Buyer into a credential use case (400 ROLE_DOMAIN_MISMATCH)", async () => {
     const app = await buildTestApp();
     const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
