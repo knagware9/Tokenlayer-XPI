@@ -15,7 +15,7 @@ const MATRIX: Record<Role, ReadonlySet<LifecycleAction>> = {
   Trader: new Set<LifecycleAction>(["transfer", "burn", "buy", "list", "cancel-listing", "read"]),
   Buyer: new Set<LifecycleAction>(["buy", "list", "cancel-listing", "read"]),
   Auditor: new Set<LifecycleAction>(["read"]),
-  Holder: new Set<LifecycleAction>(["read", "buy"]),
+  Holder: new Set<LifecycleAction>(["read"]),
   Verifier: new Set<LifecycleAction>(["read"]),
 };
 

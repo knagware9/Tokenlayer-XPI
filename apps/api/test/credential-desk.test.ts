@@ -276,3 +276,77 @@ describe("scoped desk issuance", () => {
     expect(issueOther.statusCode).toBe(403);
   });
 });
+
+describe("scoped desk revoke", () => {
+  it("a scoped Issuer for a credential use case CAN revoke a credential of that use case", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const admin2 = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    const keyA = await createCredUC(app, admin, "revoke-uc-a");
+
+    // Onboard an Issuer scoped to uc-a only.
+    await onboardUser(app, admin, admin2, { email: "desk.revoke.issuer@x.dev", password: "secret1", role: "Issuer", useCaseKey: keyA });
+    const issuerToken = await loginAs(app, "desk.revoke.issuer@x.dev", "secret1");
+
+    // Onboard a holder eligible for uc-a (onboarding mints a custodial DID).
+    const holder = await onboardUser(app, admin, admin2, { email: "desk.revoke.holder@x.dev", password: "secret1", role: "Holder", useCaseKey: keyA });
+
+    // Issue + approve a uc-a credential to the holder (scoped Issuer proposes, a PlatformAdmin approves).
+    const issue = await app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/${keyA}/credentials`, headers: auth(issuerToken),
+      payload: { credentialType: "T", subjectUserId: holder.id, claims: { a: "x" } },
+    });
+    expect(issue.statusCode).toBe(202);
+    expect((await app.inject({ method: "POST", url: `${V1}/proposals/${issue.json().proposal.id}/approve`, headers: auth(admin2), payload: {} })).statusCode).toBe(200);
+
+    const holderToken = await loginAs(app, "desk.revoke.holder@x.dev", "secret1");
+    const held = (await app.inject({ method: "GET", url: `${V1}/me/credentials`, headers: auth(holderToken) })).json() as { id: string; type: string[] }[];
+    const credentialId = held.find((c) => c.type.includes("T"))!.id;
+
+    // The scoped Issuer (not the signing platform org's OrgAdmin) revokes the
+    // credential of THEIR OWN use case — same 202-proposal / approve-200 contract
+    // as the platform-org revoke path in credential-usecase-verify.test.ts.
+    const revoke = await app.inject({
+      method: "POST", url: `${V1}/credentials/${credentialId}/revoke`, headers: auth(issuerToken),
+      payload: { reason: "scoped desk revoke" },
+    });
+    expect(revoke.statusCode).toBe(202);
+    const approve = await app.inject({ method: "POST", url: `${V1}/proposals/${revoke.json().proposal.id}/approve`, headers: auth(admin2), payload: {} });
+    expect(approve.statusCode).toBe(200);
+
+    const status = await app.inject({ method: "GET", url: `${V1}/credentials/${credentialId}/status` });
+    expect(status.json().revoked).toBe(true);
+  });
+
+  it("a desk user scoped to a DIFFERENT credential use case CANNOT revoke it (403)", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const admin2 = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    const keyA = await createCredUC(app, admin, "revoke-uc-a2");
+    const keyB = await createCredUC(app, admin, "revoke-uc-b2");
+
+    // Onboard a holder eligible for uc-a and issue+approve a uc-a credential (platform admin issues).
+    const holder = await onboardUser(app, admin, admin2, { email: "desk.revoke.holder2@x.dev", password: "secret1", role: "Holder", useCaseKey: keyA });
+    const issue = await app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/${keyA}/credentials`, headers: auth(admin),
+      payload: { credentialType: "T", subjectUserId: holder.id, claims: { a: "x" } },
+    });
+    expect(issue.statusCode).toBe(202);
+    expect((await app.inject({ method: "POST", url: `${V1}/proposals/${issue.json().proposal.id}/approve`, headers: auth(admin2), payload: {} })).statusCode).toBe(200);
+
+    const holderToken = await loginAs(app, "desk.revoke.holder2@x.dev", "secret1");
+    const held = (await app.inject({ method: "GET", url: `${V1}/me/credentials`, headers: auth(holderToken) })).json() as { id: string; type: string[] }[];
+    const credentialId = held.find((c) => c.type.includes("T"))!.id;
+
+    // A desk operator scoped to uc-b (a different credential use case) must not
+    // be admitted as a revoker of a uc-a credential.
+    await onboardUser(app, admin, admin2, { email: "desk.revoke.issuer.b@x.dev", password: "secret1", role: "Issuer", useCaseKey: keyB });
+    const issuerBToken = await loginAs(app, "desk.revoke.issuer.b@x.dev", "secret1");
+
+    const revoke = await app.inject({
+      method: "POST", url: `${V1}/credentials/${credentialId}/revoke`, headers: auth(issuerBToken),
+      payload: { reason: "should be forbidden" },
+    });
+    expect(revoke.statusCode).toBe(403);
+  });
+});

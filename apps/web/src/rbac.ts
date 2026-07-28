@@ -24,7 +24,7 @@ const MATRIX: Record<Role, Action[]> = {
   Trader: ["transfer", "burn", "buy", "list", "cancel-listing", "read"],
   Buyer: ["read", "buy", "list", "cancel-listing"],
   Auditor: ["read"],
-  Holder: ["read", "buy"],
+  Holder: ["read"],
   Verifier: ["read"],
 };
 
