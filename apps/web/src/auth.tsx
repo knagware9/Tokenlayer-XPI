@@ -6,6 +6,7 @@ interface AuthState {
   token: string | null;
   user: SessionUser | null;
   login: (email: string, password: string) => Promise<void>;
+  setSession: (token: string, user: SessionUser) => void;
   logout: () => void;
 }
 
@@ -32,6 +33,11 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
         setToken(res.token);
         setUser(res.user);
         localStorage.setItem(STORAGE_KEY, JSON.stringify(res));
+      },
+      setSession(token, user) {
+        setToken(token);
+        setUser(user);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ token, user }));
       },
       logout() {
         setToken(null);
