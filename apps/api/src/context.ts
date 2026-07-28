@@ -5,6 +5,7 @@ import { createComplianceProvider } from "./compliance-provider.js";
 import type { Currency } from "./currencies.js";
 import type { ChallengeStore } from "./identity-challenges.js";
 import type { Keystore } from "./keystore.js";
+import type { QrLoginStore } from "./qr-login-sessions.js";
 import type {
   AccountRepository,
   AssetRepository,
@@ -15,6 +16,7 @@ import type {
   CredentialRepository,
   DocumentRepository,
   ListingRepository,
+  LoginKeyRepository,
   OrganizationRepository,
   ProposalRepository,
   StagedInvoiceRepository,
@@ -49,6 +51,12 @@ export interface AppDeps {
   /** True iff DID_MASTER_KEY was explicitly configured (production must set it). */
   didMasterConfigured: boolean;
   challenges: ChallengeStore;
+  /** Self-custody device login keys (public did:key) for passwordless login. */
+  loginKeys: LoginKeyRepository;
+  /** In-memory single-use QR passwordless-login sessions. */
+  qrLogin: QrLoginStore;
+  /** Public base URL of the web app, embedded in QR-login sign URLs. */
+  publicWebUrl: string;
   /** Allowlist of trusted KYC credential issuer DIDs; empty/absent ⇒ no issuer is trusted (fail closed). */
   trustedKycIssuers?: string[];
   /** Dev-only deterministic issuer seed for the demo mint route (never set in production). */

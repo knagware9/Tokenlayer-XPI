@@ -487,3 +487,20 @@ export interface StagedInvoiceRepository {
   markTokenized(id: string, assetId: string, at: string): Promise<StagedInvoiceRecord>;
   remove(id: string): Promise<void>;
 }
+
+export interface LoginKeyRecord {
+  id: string;
+  userId: string;
+  did: string;
+  label: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+export interface LoginKeyRepository {
+  create(input: Omit<LoginKeyRecord, "id" | "createdAt" | "lastUsedAt">): Promise<LoginKeyRecord>;
+  listByUser(userId: string): Promise<LoginKeyRecord[]>;
+  getByDid(did: string): Promise<LoginKeyRecord | null>;
+  get(id: string): Promise<LoginKeyRecord | null>;
+  remove(id: string): Promise<void>;
+  touch(id: string, at: string): Promise<void>;
+}

@@ -20,6 +20,8 @@ import type {
   DocumentRepository,
   ListingRecord,
   ListingRepository,
+  LoginKeyRecord,
+  LoginKeyRepository,
   OrganizationRecord,
   OrganizationRepository,
   OrgStatus,
@@ -598,5 +600,32 @@ export class MemoryStagedInvoiceRepository implements StagedInvoiceRepository {
   }
   async remove(invId: string): Promise<void> {
     this.byId.delete(invId);
+  }
+}
+
+export class MemoryLoginKeyRepository implements LoginKeyRepository {
+  private readonly byId = new Map<string, LoginKeyRecord>();
+  async create(input: Omit<LoginKeyRecord, "id" | "createdAt" | "lastUsedAt">): Promise<LoginKeyRecord> {
+    const rec: LoginKeyRecord = { ...input, id: id("lk"), createdAt: now(), lastUsedAt: null };
+    this.byId.set(rec.id, rec);
+    return rec;
+  }
+  async listByUser(userId: string): Promise<LoginKeyRecord[]> {
+    return [...this.byId.values()]
+      .filter((r) => r.userId === userId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+  async getByDid(did: string): Promise<LoginKeyRecord | null> {
+    return [...this.byId.values()].find((r) => r.did === did) ?? null;
+  }
+  async get(keyId: string): Promise<LoginKeyRecord | null> {
+    return this.byId.get(keyId) ?? null;
+  }
+  async remove(keyId: string): Promise<void> {
+    this.byId.delete(keyId);
+  }
+  async touch(keyId: string, at: string): Promise<void> {
+    const rec = this.byId.get(keyId);
+    if (rec) rec.lastUsedAt = at;
   }
 }

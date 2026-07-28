@@ -6,6 +6,7 @@ import { createEngine } from "./context.js";
 import { loadCurrencies } from "./currencies.js";
 import { env } from "./env.js";
 import { createMemoryChallengeStore } from "./identity-challenges.js";
+import { createMemoryQrLoginStore } from "./qr-login-sessions.js";
 import { createKeystore } from "./keystore.js";
 import { ensureNamedOrg, ensurePlatformIssuerOrg, ensureUserWallet, provisionOrgMemberIdentities, provisionPlatformOperatorIdentities } from "./platform-org.js";
 import {
@@ -20,6 +21,7 @@ import {
   PrismaCashRepository,
   PrismaDocumentRepository,
   PrismaListingRepository,
+  PrismaLoginKeyRepository,
   PrismaRegistryDeploymentRepository,
   PrismaStagedInvoiceRepository,
   PrismaCredentialUseCaseRepository,
@@ -52,6 +54,7 @@ async function main(): Promise<void> {
   const credentials = new PrismaCredentialRepository();
   const verificationRequests = new PrismaVerificationRequestRepository();
   const stagedInvoices = new PrismaStagedInvoiceRepository();
+  const loginKeys = new PrismaLoginKeyRepository();
   const keystore = createKeystore(env.didMasterKey);
   // Demo users/accounts (with predictable passwords) are seeded only outside production.
   if (env.nodeEnv !== "production") await seedDefaults(users, accounts);
@@ -91,6 +94,9 @@ async function main(): Promise<void> {
     keystore,
     didMasterConfigured: env.didMasterConfigured,
     challenges: createMemoryChallengeStore(),
+    loginKeys,
+    qrLogin: createMemoryQrLoginStore(),
+    publicWebUrl: env.publicWebUrl,
     trustedKycIssuers: env.trustedKycIssuers,
     devIssuerSeed: env.devKycIssuerSeed,
     currencies: loadCurrencies(),
