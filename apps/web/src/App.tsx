@@ -16,6 +16,7 @@ import { MyProfile } from "./components/MyProfile.js";
 import { Organizations } from "./components/Organizations.js";
 import { OrganizationWallet } from "./components/OrganizationWallet.js";
 import { PlatformHome, type PlatformTab } from "./components/PlatformHome.js";
+import { QrSign } from "./components/QrSign.js";
 import { Signup } from "./components/Signup.js";
 import { UseCaseBuilder } from "./components/UseCaseBuilder.js";
 import { UserManagement } from "./components/UserManagement.js";
@@ -30,6 +31,10 @@ export function App(): JSX.Element {
   const [chains, setChains] = useState<ChainInfo[]>([]);
   const [useCases, setUseCases] = useState<UseCase[]>([]);
   const [view, setView] = useState<string>("dashboard");
+
+  // An enrolled device opening a QR's signUrl must reach the sign page
+  // regardless of its own session — so this precedes the auth gate below.
+  if (routeKey === "qr-sign") return <QrSign />;
 
   const reloadUseCases = (): void => { if (token) void api.useCases(token).then(setUseCases); };
 

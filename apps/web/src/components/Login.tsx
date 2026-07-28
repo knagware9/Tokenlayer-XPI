@@ -1,7 +1,8 @@
-import { useState } from "react";
-import { ApiError } from "../api.js";
+import { useEffect, useRef, useState } from "react";
+import { api, ApiError } from "../api.js";
 import { useAuth } from "../auth.js";
 import { useRoute } from "../router.js";
+import { getOrCreateDeviceKey, hasDeviceKey } from "../lib/device-wallet.js";
 import { Logo, LogoMark } from "./Logo.js";
 import { Icon, type IconName } from "./ui.js";
 
@@ -12,12 +13,29 @@ const HIGHLIGHTS: { icon: IconName; title: string; text: string }[] = [
 ];
 
 export function Login(): JSX.Element {
-  const { login } = useAuth();
+  const { login, setSession } = useAuth();
   const { navigate } = useRoute();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Passwordless (QR / this-device) sign-in state.
+  const [qrSvg, setQrSvg] = useState<string | null>(null);
+  const [qrError, setQrError] = useState<string | null>(null);
+  const [qrBusy, setQrBusy] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const hasKey = hasDeviceKey();
+
+  const stopPolling = (): void => {
+    if (pollRef.current !== null) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  };
+
+  // Ensure the poll interval never leaks past unmount.
+  useEffect(() => stopPolling, []);
 
   async function submit(e?: React.FormEvent): Promise<void> {
     e?.preventDefault();
@@ -29,6 +47,63 @@ export function Login(): JSX.Element {
       setError(err instanceof ApiError ? err.message : "Login failed");
     } finally {
       setBusy(false);
+    }
+  }
+
+  // Show a QR that an enrolled device scans + approves; poll until authenticated.
+  async function startQr(): Promise<void> {
+    stopPolling();
+    setQrError(null);
+    setQrSvg(null);
+    setQrBusy(true);
+    try {
+      const { sessionId, qrSvg: svg } = await api.qrStart();
+      setQrSvg(svg);
+      pollRef.current = setInterval(() => {
+        void api
+          .qrPoll(sessionId)
+          .then((res) => {
+            if (res.status === "authenticated" && res.token && res.user) {
+              stopPolling();
+              setSession(res.token, res.user);
+            } else if (res.status === "consumed" || res.status === "expired") {
+              stopPolling();
+              setQrError(res.status === "expired" ? "This sign-in request expired. Try again." : "This sign-in request was already used.");
+            }
+          })
+          .catch((err) => {
+            stopPolling();
+            setQrError(err instanceof ApiError ? err.message : "Sign-in failed");
+          });
+      }, 2000);
+    } catch (err) {
+      setQrError(err instanceof ApiError ? err.message : "Could not start QR sign-in");
+    } finally {
+      setQrBusy(false);
+    }
+  }
+
+  // Single-device passwordless: start a session and sign+authenticate it locally.
+  async function useThisDevice(): Promise<void> {
+    stopPolling();
+    setQrError(null);
+    setQrSvg(null);
+    setQrBusy(true);
+    try {
+      const { sessionId, challenge } = await api.qrStart();
+      const key = await getOrCreateDeviceKey();
+      const signature = await key.sign(`qr-login:${sessionId}:${challenge}`);
+      await api.qrAuthenticate(sessionId, { did: key.did, signature });
+      const res = await api.qrPoll(sessionId);
+      if (res.status === "authenticated" && res.token && res.user) {
+        setSession(res.token, res.user);
+      } else {
+        setQrError("Sign-in could not be completed. Try again.");
+      }
+    } catch (err) {
+      setQrError(err instanceof ApiError ? err.message : "Sign-in failed");
+    } finally {
+      setQrBusy(false);
     }
   }
 
@@ -120,6 +195,40 @@ export function Login(): JSX.Element {
                   {busy ? "Signing in…" : "Sign in"}
                 </button>
               </form>
+              {/* Passwordless sign-in */}
+              <div className="mt-6 pt-6 border-t border-slate-100">
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => void startQr()}
+                    disabled={qrBusy}
+                    className="flex-1 rounded-lg border border-slate-300 text-slate-700 py-2.5 text-sm font-medium hover:bg-slate-50 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-colors"
+                  >
+                    Sign in with QR
+                  </button>
+                  {hasKey && (
+                    <button
+                      type="button"
+                      onClick={() => void useThisDevice()}
+                      disabled={qrBusy}
+                      className="flex-1 rounded-lg border border-slate-300 text-slate-700 py-2.5 text-sm font-medium hover:bg-slate-50 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-colors"
+                    >
+                      Use this device
+                    </button>
+                  )}
+                </div>
+                {qrError && <p className="mt-3 text-sm text-red-600">{qrError}</p>}
+                {qrSvg && (
+                  <div className="mt-4 flex flex-col items-center">
+                    <div
+                      className="w-44 h-44 [&>svg]:w-full [&>svg]:h-full"
+                      dangerouslySetInnerHTML={{ __html: qrSvg }}
+                    />
+                    <p className="mt-2 text-xs text-slate-500">Scan with an enrolled device</p>
+                  </div>
+                )}
+              </div>
+
               <p className="mt-5 text-center text-sm text-slate-500">
                 New enterprise?{" "}
                 <button
