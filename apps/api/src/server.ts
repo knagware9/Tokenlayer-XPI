@@ -97,6 +97,7 @@ async function main(): Promise<void> {
     loginKeys,
     qrLogin: createMemoryQrLoginStore(),
     publicWebUrl: env.publicWebUrl,
+    enabledDomains: env.enabledDomains,
     trustedKycIssuers: env.trustedKycIssuers,
     devIssuerSeed: env.devKycIssuerSeed,
     currencies: loadCurrencies(),

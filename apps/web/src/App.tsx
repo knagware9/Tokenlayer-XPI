@@ -23,6 +23,7 @@ import { UserManagement } from "./components/UserManagement.js";
 import { VerificationRequests } from "./components/VerificationRequests.js";
 import { SectionHeader } from "./components/ui.js";
 import { can, canManageUsers } from "./rbac.js";
+import { DOMAINS, DOMAIN_KEYS, type DomainKey, loadActiveDomain, saveActiveDomain, itemsForDomain, availableDomains } from "./domains.js";
 import type { ChainInfo, UseCase } from "./types.js";
 
 export function App(): JSX.Element {
@@ -31,12 +32,22 @@ export function App(): JSX.Element {
   const [chains, setChains] = useState<ChainInfo[]>([]);
   const [useCases, setUseCases] = useState<UseCase[]>([]);
   const [view, setView] = useState<string>("dashboard");
+  const [enabledDomains, setEnabledDomains] = useState<DomainKey[]>(DOMAIN_KEYS);
+  const [activeDomain, setActiveDomain] = useState<DomainKey>(() => loadActiveDomain(DOMAIN_KEYS));
 
   const reloadUseCases = (): void => { if (token) void api.useCases(token).then(setUseCases); };
 
   useEffect(() => {
     if (!token) return;
     void Promise.all([api.chains(token), api.useCases(token)]).then(([c, u]) => { setChains(c); setUseCases(u); });
+    // Isolated from chains/useCases: a /config failure must not blank the dashboard —
+    // it only falls back to all domains, leaving the rest of the app fully functional.
+    void api.config(token).then((cfg) => {
+      const enabled = (cfg.domains as DomainKey[]).filter((d) => DOMAIN_KEYS.includes(d));
+      const eff = enabled.length ? enabled : DOMAIN_KEYS;
+      setEnabledDomains(eff);
+      setActiveDomain((cur) => (eff.includes(cur) ? cur : loadActiveDomain(eff)));
+    }).catch(() => { setEnabledDomains(DOMAIN_KEYS); });
   }, [token]);
 
   // Scoped users are clamped to their own use case's path.
@@ -73,6 +84,12 @@ export function App(): JSX.Element {
     if (id === "logout") { navigate("/"); logout(); return; }
     if (id === "back") { navigate("/"); return; }
     setView(id);
+  };
+
+  const onDomainChange = (d: DomainKey): void => {
+    setActiveDomain(d);
+    saveActiveDomain(d);
+    setView(DOMAINS.find((x) => x.key === d)!.defaultView);
   };
 
   const pinned: NavItem[] = [
@@ -117,13 +134,16 @@ export function App(): JSX.Element {
       dashboard: "overview", "use-cases": "use-cases", create: "create",
       organizations: "organizations", approvals: "approvals", verify: "verify", networks: "networks", identity: "identity",
     };
+    const branchDomains = availableDomains(items, enabledDomains);
+    const effDomain = branchDomains.some((d) => d.key === activeDomain) ? activeDomain : (branchDomains[0]?.key ?? activeDomain);
+    const visible = itemsForDomain(items, effDomain);
     const knownIds = [...Object.keys(platViews), "profile", "credentials"];
-    const activeId = knownIds.includes(view) ? view : "dashboard";
+    const activeId = knownIds.includes(view) && itemsForDomain([{ id: view }], effDomain).length ? view : DOMAINS.find((d) => d.key === effDomain)!.defaultView;
     const panel =
-      view === "profile" ? <MyProfile onSelect={setView} />
-      : view === "credentials" ? <MyIdentity />
-      : <PlatformHome useCases={useCases} chains={chains} onReloadUseCases={reloadUseCases} view={platViews[view] ?? "overview"} />;
-    return <AppShell items={items} active={activeId} onSelect={handleSelect}>{panel}</AppShell>;
+      activeId === "profile" ? <MyProfile onSelect={setView} />
+      : activeId === "credentials" ? <MyIdentity />
+      : <PlatformHome useCases={useCases} chains={chains} onReloadUseCases={reloadUseCases} view={platViews[activeId] ?? "overview"} />;
+    return <AppShell items={visible} active={activeId} onSelect={handleSelect} domains={branchDomains} activeDomain={effDomain} onDomainChange={onDomainChange}>{panel}</AppShell>;
   }
 
   // Operator console: desk roles (UseCaseAdmin/Issuer/Auditor), OrgAdmin, and a
@@ -145,10 +165,19 @@ export function App(): JSX.Element {
     ...pinned,
   ];
 
+  const branchDomains = availableDomains(items, enabledDomains);
+  const effDomain = branchDomains.some((d) => d.key === activeDomain) ? activeDomain : (branchDomains[0]?.key ?? activeDomain);
+  const visible = itemsForDomain(items, effDomain);
+  const deskIds = visible.map((i) => i.id).filter((id) => id !== "back" && id !== "logout");
+  const activeId = deskIds.includes(view) ? view : (deskIds.includes(DOMAINS.find((d) => d.key === effDomain)!.defaultView) ? DOMAINS.find((d) => d.key === effDomain)!.defaultView : (deskIds[0] ?? "dashboard"));
+
+  // Render the panel from the reconciled `activeId` (not raw `view`) so the panel
+  // always matches the sidebar highlight — including after a reload with a stale
+  // persisted domain, where `view` may point at a surface hidden in the active domain.
   let panel: JSX.Element;
-  if (view === "assets") {
+  if (activeId === "assets") {
     panel = <AssetManagement useCaseKey={activeUseCase} useCases={useCases} chains={chains} />;
-  } else if (view === "invoices") {
+  } else if (activeId === "invoices") {
     panel = activeUseCaseObj
       ? <InvoiceRegister useCase={activeUseCaseObj} chains={chains} />
       : (
@@ -156,21 +185,21 @@ export function App(): JSX.Element {
           <SectionHeader title="Invoices" description="Select an invoice use case to view its register." />
         </div>
       );
-  } else if (view === "approvals") {
+  } else if (activeId === "approvals") {
     panel = <ApprovalsPanel />;
-  } else if (view === "users") {
+  } else if (activeId === "users") {
     panel = <UserManagement useCaseKey={activeUseCase} useCases={useCases} />;
-  } else if (view === "organizations") {
+  } else if (activeId === "organizations") {
     panel = <Organizations />;
-  } else if (view === "verify") {
+  } else if (activeId === "verify") {
     panel = <VerificationRequests />;
-  } else if (view === "identity") {
+  } else if (activeId === "identity") {
     panel = <IdentityHome />;
-  } else if (view === "org-wallet") {
+  } else if (activeId === "org-wallet") {
     panel = <OrganizationWallet />;
-  } else if (view === "profile") {
+  } else if (activeId === "profile") {
     panel = <MyProfile onSelect={setView} />;
-  } else if (view === "credentials") {
+  } else if (activeId === "credentials") {
     panel = <MyIdentity />;
   } else if (isOrgAdmin) {
     // Dashboard slot for OrgAdmin is the low-code use-case configurator.
@@ -184,7 +213,5 @@ export function App(): JSX.Element {
     panel = <Dashboard useCaseKey={activeUseCase} />;
   }
 
-  const deskIds = items.map((i) => i.id).filter((id) => id !== "back" && id !== "logout");
-  const activeId = deskIds.includes(view) ? view : "dashboard";
-  return <AppShell items={items} active={activeId} onSelect={handleSelect}>{panel}</AppShell>;
+  return <AppShell items={visible} active={activeId} onSelect={handleSelect} domains={branchDomains} activeDomain={effDomain} onDomainChange={onDomainChange}>{panel}</AppShell>;
 }

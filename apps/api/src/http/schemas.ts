@@ -481,6 +481,10 @@ export const S: Record<string, FastifySchema> = {
     },
   },
   me: { tags: ["Auth"], summary: "Current session principal", security: bearer, response: { 200: { type: "object", additionalProperties: true }, ...errs(401) } },
+  config: {
+    tags: ["Config"], summary: "Deployment configuration (enabled domains)", security: bearer,
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(401) },
+  },
 
   enrollLoginKey: {
     tags: ["Auth"], summary: "Enrol a device login key (public did:key)", security: bearer,

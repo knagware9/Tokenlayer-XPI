@@ -99,6 +99,8 @@ export interface Env {
   publicWebUrl: string;
   /** The single chain hosting the identity registries. Absent/unavailable ⇒ credentials issue unanchored. */
   registryChainId: string;
+  /** Domains this deployment runs (tokenization, identity). Empty/all-unknown ⇒ both. */
+  enabledDomains: string[];
 }
 
 const platformFeeAccount =
@@ -127,6 +129,15 @@ export const env: Env = {
   publicApiUrl: process.env.PUBLIC_API_URL ?? `http://localhost:${Number(process.env.PORT ?? 4000)}/api/v1`,
   publicWebUrl: process.env.PUBLIC_WEB_URL ?? (process.env.CORS_ORIGINS ?? "http://localhost:5173").split(",")[0]!.trim(),
   registryChainId: process.env.REGISTRY_CHAIN_ID ?? "besu",
+  enabledDomains: (() => {
+    const known = ["tokenization", "identity"];
+    const raw = (process.env.ENABLED_DOMAINS ?? "tokenization,identity").split(",").map((s) => s.trim()).filter(Boolean);
+    const parsed = raw.filter((d) => known.includes(d));
+    const dropped = raw.filter((d) => !known.includes(d));
+    if (dropped.length) console.warn(`[env] ENABLED_DOMAINS: ignoring unknown domain(s): ${dropped.join(", ")}`);
+    if (parsed.length === 0) { if (raw.length) console.warn("[env] ENABLED_DOMAINS had no known domains — defaulting to both"); return known; }
+    return parsed; // empty/all-unknown ⇒ both (never zero)
+  })(),
 };
 
 if (!env.didMasterConfigured) {

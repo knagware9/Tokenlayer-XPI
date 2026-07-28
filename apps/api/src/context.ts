@@ -57,6 +57,8 @@ export interface AppDeps {
   qrLogin: QrLoginStore;
   /** Public base URL of the web app, embedded in QR-login sign URLs. */
   publicWebUrl: string;
+  /** Domains this deployment runs (tokenization, identity). Never empty. */
+  enabledDomains: string[];
   /** Allowlist of trusted KYC credential issuer DIDs; empty/absent ⇒ no issuer is trusted (fail closed). */
   trustedKycIssuers?: string[];
   /** Dev-only deterministic issuer seed for the demo mint route (never set in production). */
