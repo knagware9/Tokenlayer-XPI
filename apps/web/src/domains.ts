@@ -32,3 +32,8 @@ export function saveActiveDomain(d: DomainKey): void { localStorage.setItem(STOR
 export function itemsForDomain<T extends { id: string }>(items: T[], active: DomainKey): T[] {
   return items.filter((i) => { const d = NAV_DOMAIN[i.id] ?? "shared"; return d === "shared" || d === active; });
 }
+
+/** Deployment-enabled domains that this role actually has >=1 non-shared nav item in. */
+export function availableDomains(items: { id: string }[], enabled: DomainKey[]): DomainDef[] {
+  return DOMAINS.filter((d) => enabled.includes(d.key) && items.some((i) => NAV_DOMAIN[i.id] === d.key));
+}

@@ -23,7 +23,7 @@ import { UserManagement } from "./components/UserManagement.js";
 import { VerificationRequests } from "./components/VerificationRequests.js";
 import { SectionHeader } from "./components/ui.js";
 import { can, canManageUsers } from "./rbac.js";
-import { DOMAINS, DOMAIN_KEYS, type DomainKey, loadActiveDomain, saveActiveDomain, itemsForDomain } from "./domains.js";
+import { DOMAINS, DOMAIN_KEYS, type DomainKey, loadActiveDomain, saveActiveDomain, itemsForDomain, availableDomains } from "./domains.js";
 import type { ChainInfo, UseCase } from "./types.js";
 
 export function App(): JSX.Element {
@@ -89,7 +89,6 @@ export function App(): JSX.Element {
     saveActiveDomain(d);
     setView(DOMAINS.find((x) => x.key === d)!.defaultView);
   };
-  const shellDomains = DOMAINS.filter((d) => enabledDomains.includes(d.key));
 
   const pinned: NavItem[] = [
     { id: "profile", label: "My Profile", icon: "users", pinned: true },
@@ -133,14 +132,16 @@ export function App(): JSX.Element {
       dashboard: "overview", "use-cases": "use-cases", create: "create",
       organizations: "organizations", approvals: "approvals", verify: "verify", networks: "networks", identity: "identity",
     };
-    const visible = itemsForDomain(items, activeDomain);
+    const branchDomains = availableDomains(items, enabledDomains);
+    const effDomain = branchDomains.some((d) => d.key === activeDomain) ? activeDomain : (branchDomains[0]?.key ?? activeDomain);
+    const visible = itemsForDomain(items, effDomain);
     const knownIds = [...Object.keys(platViews), "profile", "credentials"];
-    const activeId = knownIds.includes(view) && itemsForDomain([{ id: view }], activeDomain).length ? view : DOMAINS.find((d) => d.key === activeDomain)!.defaultView;
+    const activeId = knownIds.includes(view) && itemsForDomain([{ id: view }], effDomain).length ? view : DOMAINS.find((d) => d.key === effDomain)!.defaultView;
     const panel =
       view === "profile" ? <MyProfile onSelect={setView} />
       : view === "credentials" ? <MyIdentity />
       : <PlatformHome useCases={useCases} chains={chains} onReloadUseCases={reloadUseCases} view={platViews[view] ?? "overview"} />;
-    return <AppShell items={visible} active={activeId} onSelect={handleSelect} domains={shellDomains} activeDomain={activeDomain} onDomainChange={onDomainChange}>{panel}</AppShell>;
+    return <AppShell items={visible} active={activeId} onSelect={handleSelect} domains={branchDomains} activeDomain={effDomain} onDomainChange={onDomainChange}>{panel}</AppShell>;
   }
 
   // Operator console: desk roles (UseCaseAdmin/Issuer/Auditor), OrgAdmin, and a
@@ -201,8 +202,10 @@ export function App(): JSX.Element {
     panel = <Dashboard useCaseKey={activeUseCase} />;
   }
 
-  const visible = itemsForDomain(items, activeDomain);
+  const branchDomains = availableDomains(items, enabledDomains);
+  const effDomain = branchDomains.some((d) => d.key === activeDomain) ? activeDomain : (branchDomains[0]?.key ?? activeDomain);
+  const visible = itemsForDomain(items, effDomain);
   const deskIds = visible.map((i) => i.id).filter((id) => id !== "back" && id !== "logout");
-  const activeId = deskIds.includes(view) ? view : (deskIds.includes(DOMAINS.find((d) => d.key === activeDomain)!.defaultView) ? DOMAINS.find((d) => d.key === activeDomain)!.defaultView : (deskIds[0] ?? "dashboard"));
-  return <AppShell items={visible} active={activeId} onSelect={handleSelect} domains={shellDomains} activeDomain={activeDomain} onDomainChange={onDomainChange}>{panel}</AppShell>;
+  const activeId = deskIds.includes(view) ? view : (deskIds.includes(DOMAINS.find((d) => d.key === effDomain)!.defaultView) ? DOMAINS.find((d) => d.key === effDomain)!.defaultView : (deskIds[0] ?? "dashboard"));
+  return <AppShell items={visible} active={activeId} onSelect={handleSelect} domains={branchDomains} activeDomain={effDomain} onDomainChange={onDomainChange}>{panel}</AppShell>;
 }
