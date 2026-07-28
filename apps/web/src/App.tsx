@@ -23,6 +23,7 @@ import { UserManagement } from "./components/UserManagement.js";
 import { VerificationRequests } from "./components/VerificationRequests.js";
 import { SectionHeader } from "./components/ui.js";
 import { can, canManageUsers } from "./rbac.js";
+import { DOMAINS, DOMAIN_KEYS, type DomainKey, loadActiveDomain, saveActiveDomain, itemsForDomain } from "./domains.js";
 import type { ChainInfo, UseCase } from "./types.js";
 
 export function App(): JSX.Element {
@@ -31,12 +32,20 @@ export function App(): JSX.Element {
   const [chains, setChains] = useState<ChainInfo[]>([]);
   const [useCases, setUseCases] = useState<UseCase[]>([]);
   const [view, setView] = useState<string>("dashboard");
+  const [enabledDomains, setEnabledDomains] = useState<DomainKey[]>(DOMAIN_KEYS);
+  const [activeDomain, setActiveDomain] = useState<DomainKey>(() => loadActiveDomain(DOMAIN_KEYS));
 
   const reloadUseCases = (): void => { if (token) void api.useCases(token).then(setUseCases); };
 
   useEffect(() => {
     if (!token) return;
-    void Promise.all([api.chains(token), api.useCases(token)]).then(([c, u]) => { setChains(c); setUseCases(u); });
+    void Promise.all([api.chains(token), api.useCases(token), api.config(token)]).then(([c, u, cfg]) => {
+      setChains(c); setUseCases(u);
+      const enabled = (cfg.domains as DomainKey[]).filter((d) => DOMAIN_KEYS.includes(d));
+      const eff = enabled.length ? enabled : DOMAIN_KEYS;
+      setEnabledDomains(eff);
+      setActiveDomain((cur) => (eff.includes(cur) ? cur : loadActiveDomain(eff)));
+    }).catch(() => { setEnabledDomains(DOMAIN_KEYS); });
   }, [token]);
 
   // Scoped users are clamped to their own use case's path.
@@ -74,6 +83,13 @@ export function App(): JSX.Element {
     if (id === "back") { navigate("/"); return; }
     setView(id);
   };
+
+  const onDomainChange = (d: DomainKey): void => {
+    setActiveDomain(d);
+    saveActiveDomain(d);
+    setView(DOMAINS.find((x) => x.key === d)!.defaultView);
+  };
+  const shellDomains = DOMAINS.filter((d) => enabledDomains.includes(d.key));
 
   const pinned: NavItem[] = [
     { id: "profile", label: "My Profile", icon: "users", pinned: true },
@@ -117,13 +133,14 @@ export function App(): JSX.Element {
       dashboard: "overview", "use-cases": "use-cases", create: "create",
       organizations: "organizations", approvals: "approvals", verify: "verify", networks: "networks", identity: "identity",
     };
+    const visible = itemsForDomain(items, activeDomain);
     const knownIds = [...Object.keys(platViews), "profile", "credentials"];
-    const activeId = knownIds.includes(view) ? view : "dashboard";
+    const activeId = knownIds.includes(view) && itemsForDomain([{ id: view }], activeDomain).length ? view : DOMAINS.find((d) => d.key === activeDomain)!.defaultView;
     const panel =
       view === "profile" ? <MyProfile onSelect={setView} />
       : view === "credentials" ? <MyIdentity />
       : <PlatformHome useCases={useCases} chains={chains} onReloadUseCases={reloadUseCases} view={platViews[view] ?? "overview"} />;
-    return <AppShell items={items} active={activeId} onSelect={handleSelect}>{panel}</AppShell>;
+    return <AppShell items={visible} active={activeId} onSelect={handleSelect} domains={shellDomains} activeDomain={activeDomain} onDomainChange={onDomainChange}>{panel}</AppShell>;
   }
 
   // Operator console: desk roles (UseCaseAdmin/Issuer/Auditor), OrgAdmin, and a
@@ -184,7 +201,8 @@ export function App(): JSX.Element {
     panel = <Dashboard useCaseKey={activeUseCase} />;
   }
 
-  const deskIds = items.map((i) => i.id).filter((id) => id !== "back" && id !== "logout");
-  const activeId = deskIds.includes(view) ? view : "dashboard";
-  return <AppShell items={items} active={activeId} onSelect={handleSelect}>{panel}</AppShell>;
+  const visible = itemsForDomain(items, activeDomain);
+  const deskIds = visible.map((i) => i.id).filter((id) => id !== "back" && id !== "logout");
+  const activeId = deskIds.includes(view) ? view : (deskIds.includes(DOMAINS.find((d) => d.key === activeDomain)!.defaultView) ? DOMAINS.find((d) => d.key === activeDomain)!.defaultView : (deskIds[0] ?? "dashboard"));
+  return <AppShell items={visible} active={activeId} onSelect={handleSelect} domains={shellDomains} activeDomain={activeDomain} onDomainChange={onDomainChange}>{panel}</AppShell>;
 }
