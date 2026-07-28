@@ -223,21 +223,9 @@ describe("GET /me reports useCaseDomain", () => {
 ```
 Run: `pnpm -s --filter @tokenlayer/api test credential-desk` → FAIL.
 
-- [ ] **Step 2: Key-collision guard on both create routes**
+- [ ] **Step 2: Key-collision guard — ALREADY EXISTS**
 
-In `POST /credential-use-cases` (routes.ts ~416, before `deps.credentialUseCases.create`): after the existing validation, add:
-```ts
-if (await deps.useCases.get(def.key)) {
-  return reply.code(409).send({ error: "KEY_IN_USE", message: `a tokenization use case already uses the key '${def.key}'` });
-}
-```
-In `POST /use-cases` (the tokenization create path — find where a new use case is persisted): add the mirror:
-```ts
-if (await deps.credentialUseCases.get(<newKey>)) {
-  return reply.code(409).send({ error: "KEY_IN_USE", message: `a credential use case already uses the key '${<newKey>}'` });
-}
-```
-(Use the actual variable holding the incoming key. If `deps.useCases.get`/`credentialUseCases.get` return `null` for missing, this is correct.)
+A cross-type key-collision guard is already present (added 2026-07-27): both create routes reject a cross-domain key clash with `409 KEY_TAKEN` (same-domain duplicate keeps its existing code too), and `usecase-kinds.ts` mirrors it on the OrgAdmin proposal-execution path. **Do not add a competing code.** Keep `KEY_TAKEN`. This task therefore only adds `/me useCaseDomain` (Step 3); the F2 test just documents the existing collision behavior. Note the repos' `.get(key)` **throws** `UNKNOWN_USECASE` for a missing key — use `.has(key)` for existence checks (the existing guard already does).
 
 - [ ] **Step 3: /me returns useCaseDomain**
 
