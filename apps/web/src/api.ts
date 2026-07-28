@@ -173,6 +173,7 @@ export const api = {
   createMember: (token: string, id: string, body: { email: string; password: string; role: string; useCaseKey?: string; walletAddress?: string }) =>
     request<{ id: string; did: string; membershipVc: boolean }>(`/orgs/${encodeURIComponent(id)}/users`, token, { method: "POST", body: JSON.stringify(body) }),
   myCredentials: (token: string) => request<HeldCredential[]>("/me/credentials", token),
+  orgWallet: (token: string, orgId: string) => request<HeldCredential[]>(`/orgs/${encodeURIComponent(orgId)}/wallet`, token),
   didDocument: (token: string, did: string) => request<DidDocument>(`/dids/${encodeURIComponent(did)}/document`, token),
   credentialTypes: (token: string) => request<CredentialTypeInfo[]>("/credential-types", token),
   // 202 → { proposal }: issuance is gated; nothing is issued until it is approved.
@@ -213,6 +214,6 @@ export const api = {
   updateCredentialUseCase: (token: string, key: string, def: CredentialUseCase) => request<CredentialUseCase>(`/credential-use-cases/${encodeURIComponent(key)}`, token, { method: "PATCH", body: JSON.stringify(def) }),
   eligibleHolders: (token: string, key: string) =>
     request<EligibleHolder[]>(`/credential-use-cases/${encodeURIComponent(key)}/eligible-holders`, token),
-  issueUsecaseCredential: (token: string, key: string, body: { credentialType: string; subjectUserId: string; claims: Record<string, unknown> }) =>
+  issueUsecaseCredential: (token: string, key: string, body: { credentialType: string; subjectUserId?: string; subjectOrgId?: string; claims: Record<string, unknown> }) =>
     request<{ proposal: Proposal }>(`/credential-use-cases/${encodeURIComponent(key)}/credentials`, token, { method: "POST", body: JSON.stringify(body) }),
 };
