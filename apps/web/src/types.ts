@@ -1,4 +1,4 @@
-export type Role = "PlatformAdmin" | "OrgAdmin" | "UseCaseAdmin" | "Issuer" | "Trader" | "Buyer" | "Auditor";
+export type Role = "PlatformAdmin" | "OrgAdmin" | "UseCaseAdmin" | "Issuer" | "Trader" | "Buyer" | "Auditor" | "Holder" | "Verifier";
 
 export interface SessionUser {
   id: string;
@@ -8,6 +8,7 @@ export interface SessionUser {
   walletAddress?: string | null;
   orgId?: string | null;
   did?: string | null;
+  useCaseDomain?: "tokenization" | "identity" | null;
 }
 
 export type TokenStandard = "ERC-20" | "ERC-721" | "ERC-3643";
