@@ -14,6 +14,7 @@ import { Login } from "./components/Login.js";
 import { MyIdentity } from "./components/MyIdentity.js";
 import { MyProfile } from "./components/MyProfile.js";
 import { Organizations } from "./components/Organizations.js";
+import { OrganizationWallet } from "./components/OrganizationWallet.js";
 import { PlatformHome, type PlatformTab } from "./components/PlatformHome.js";
 import { Signup } from "./components/Signup.js";
 import { UseCaseBuilder } from "./components/UseCaseBuilder.js";
@@ -134,6 +135,7 @@ export function App(): JSX.Element {
     ...(isPlatform || isOrgAdmin ? [{ id: "organizations", label: "Organizations", icon: "users" as const }] : []),
     ...(isPlatform || isOrgAdmin ? [{ id: "verify", label: "Verification", icon: "shield" as const }] : []),
     ...(isPlatform || isOrgAdmin ? [{ id: "identity", label: "Identity", icon: "shield" as const }] : []),
+    ...(isOrgAdmin ? [{ id: "org-wallet", label: "Organization Wallet", icon: "coins" as const }] : []),
     ...pinned,
   ];
 
@@ -158,6 +160,8 @@ export function App(): JSX.Element {
     panel = <VerificationRequests />;
   } else if (view === "identity") {
     panel = <IdentityHome />;
+  } else if (view === "org-wallet") {
+    panel = <OrganizationWallet />;
   } else if (view === "profile") {
     panel = <MyProfile onSelect={setView} />;
   } else if (view === "credentials") {

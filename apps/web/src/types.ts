@@ -337,7 +337,9 @@ export interface OrgMember {
 export interface HeldCredential {
   id: string;
   type: string[];
+  credentialUseCaseKey?: string | null;
   issuerDid: string;
+  issuerName?: string | null;
   holderDid: string;
   claims: Record<string, unknown>;
   issuedAt: string;
@@ -430,7 +432,7 @@ export interface InvoiceRowResult { index: number; status: "staged" | "duplicate
 export interface TokenizeResult { id: string; status: "tokenized" | "skipped" | "failed"; assetId?: string; error?: string }
 
 export interface CredentialTypeSpec { name: string; title: string; claimSchema: { type: "object"; required?: string[]; properties: Record<string, { type: string; pattern?: string; enum?: string[] }> }; validityDays: number; requiredApprovals: number; }
-export interface EligibleHolder { id: string; email: string; did: string; orgName: string | null; }
+export interface EligibleHolder { kind: "user" | "org"; id: string; label: string; did: string; subLabel: string | null; }
 export type IssuerBinding = { kind: "platform" } | { kind: "org"; orgId: string };
 export type HolderPolicy = { who: "any-onboarded" } | { who: "orgType"; orgTypes: string[] } | { who: "specific"; orgIds: string[] };
 export type VerifierBinding = { kind: "any" } | { kind: "orgs"; orgIds: string[] };

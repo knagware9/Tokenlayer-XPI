@@ -2,24 +2,9 @@ import { useEffect, useState } from "react";
 import { ApiError, api } from "../api.js";
 import { useAuth } from "../auth.js";
 import type { CredentialStatusInfo, DidDocument, HeldCredential } from "../types.js";
-import { Card, EmptyState, Pill, SectionHeader, Skeleton } from "./ui.js";
+import { Card, EmptyState, SectionHeader, Skeleton } from "./ui.js";
+import { CredentialCard } from "./CredentialCard.js";
 import { VerificationInbox } from "./VerificationInbox.js";
-
-function truncateDid(v: string): string {
-  return v.length > 28 ? `${v.slice(0, 18)}…${v.slice(-6)}` : v;
-}
-
-function fmtDate(v: string | null): string {
-  if (!v) return "—";
-  const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? v : d.toLocaleDateString();
-}
-
-/** The organization that issued a credential, when the claims carry it. */
-function issuerLabel(c: HeldCredential): string | null {
-  const org = c.claims.organization;
-  return typeof org === "string" && org ? org : null;
-}
 
 /**
  * The signed-in user's decentralized identity: their DID, the resolved DID
@@ -94,34 +79,7 @@ export function MyIdentity(): JSX.Element {
           </Card>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {creds.map((c) => {
-              const status = statuses[c.id];
-              return (
-              <div key={c.id} className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-4 space-y-2">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-1.5 min-w-0">
-                    {c.type.map((t) => <Pill key={t} tone="info">{t}</Pill>)}
-                  </div>
-                  <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0">
-                    <Pill tone={c.revoked ? "danger" : "ok"}>{c.revoked ? "revoked" : "valid"}</Pill>
-                    {status && (status.anchored
-                      ? <Pill tone="info">anchored · {status.chainId}</Pill>
-                      : <Pill tone="muted">unanchored</Pill>)}
-                  </div>
-                </div>
-                <div className="text-xs text-slate-600">
-                  {issuerLabel(c) && <span className="font-medium text-slate-800">{issuerLabel(c)}</span>}
-                  <span className="font-mono text-slate-500" title={c.issuerDid}>
-                    {issuerLabel(c) ? " · " : ""}{truncateDid(c.issuerDid)}
-                  </span>
-                </div>
-                <div className="text-xs text-slate-500">
-                  Issued {fmtDate(c.issuedAt)} · Expires {fmtDate(c.expiresAt)}
-                </div>
-                {c.revokedReason && <div className="text-xs text-rose-600 mt-0.5">Revoked: {c.revokedReason}</div>}
-              </div>
-              );
-            })}
+            {creds.map((c) => <CredentialCard key={c.id} credential={c} status={statuses[c.id]} />)}
           </div>
         )}
       </div>

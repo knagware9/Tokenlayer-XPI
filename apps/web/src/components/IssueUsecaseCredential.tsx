@@ -7,7 +7,7 @@ export function IssueUsecaseCredential({ useCase, onIssued }: { useCase: Credent
   const { token } = useAuth();
   const [typeName, setTypeName] = useState(useCase.credentialTypes[0]?.name ?? "");
   const [holders, setHolders] = useState<EligibleHolder[]>([]);
-  const [subjectUserId, setSubjectUserId] = useState("");
+  const [subjectId, setSubjectId] = useState("");
   const [claims, setClaims] = useState<Record<string, string>>({});
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -21,9 +21,13 @@ export function IssueUsecaseCredential({ useCase, onIssued }: { useCase: Credent
 
   async function submit(): Promise<void> {
     setErr(null); setMsg(null);
-    if (!token || !subjectUserId) { setErr("pick a holder"); return; }
+    if (!token || !subjectId) { setErr("pick a holder"); return; }
+    const picked = holders.find((h) => h.id === subjectId);
+    if (!picked) { setErr("pick a holder"); return; }
     try {
-      await api.issueUsecaseCredential(token, useCase.key, { credentialType: typeName, subjectUserId, claims });
+      await api.issueUsecaseCredential(token, useCase.key, picked.kind === "org"
+        ? { credentialType: typeName, subjectOrgId: picked.id, claims }
+        : { credentialType: typeName, subjectUserId: picked.id, claims });
       setMsg("Issuance submitted — pending approval."); setClaims({}); onIssued();
     } catch (e) { setErr(e instanceof ApiError ? e.message : String(e)); }
   }
@@ -38,9 +42,9 @@ export function IssueUsecaseCredential({ useCase, onIssued }: { useCase: Credent
         {useCase.credentialTypes.map((t) => <option key={t.name} value={t.name}>{t.title} ({t.name})</option>)}
       </select>
       <label className="block text-xs text-slate-500 mb-1">Holder</label>
-      <select className="input w-full mb-2" value={subjectUserId} onChange={(e) => setSubjectUserId(e.target.value)}>
+      <select className="input w-full mb-2" value={subjectId} onChange={(e) => setSubjectId(e.target.value)}>
         <option value="">— select an eligible holder —</option>
-        {holders.map((h) => <option key={h.id} value={h.id}>{h.email}{h.orgName ? ` · ${h.orgName}` : ""}</option>)}
+        {holders.map((h) => <option key={`${h.kind}:${h.id}`} value={h.id}>{h.kind === "org" ? "🏢 " : ""}{h.label}{h.subLabel ? ` · ${h.subLabel}` : ""}</option>)}
       </select>
       {spec && Object.entries(spec.claimSchema.properties).map(([field, p]) => (
         <div key={field} className="mb-2">

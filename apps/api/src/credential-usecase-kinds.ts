@@ -20,7 +20,8 @@ export interface IssueUsecaseCredentialPayload {
   credentialUseCaseKey: string;
   credentialType: string;
   subjectDid: string;
-  subjectUserId: string;
+  subjectUserId?: string;
+  subjectOrgId?: string;
   claims: Record<string, unknown>;
   issuerOrgId: string;
 }

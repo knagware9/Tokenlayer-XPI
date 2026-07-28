@@ -1033,10 +1033,11 @@ export const S: Record<string, FastifySchema> = {
     tags: ["Credentials"], summary: "Issue a configured credential type (gated by the type's approval depth)", security: bearer,
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     body: {
-      type: "object", additionalProperties: false, required: ["credentialType", "subjectUserId", "claims"],
+      type: "object", additionalProperties: false, required: ["credentialType", "claims"],
       properties: {
         credentialType: { type: "string" },
         subjectUserId: { type: "string" },
+        subjectOrgId: { type: "string" },
         claims: { type: "object", additionalProperties: true },
       },
     },
@@ -1067,6 +1068,11 @@ export const S: Record<string, FastifySchema> = {
   },
   orgCredentials: {
     tags: ["Credentials"], summary: "Credentials issued by an organization", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403, 404) },
+  },
+  orgWallet: {
+    tags: ["Identity"], summary: "Credentials held by an organization (entity wallet)", security: bearer,
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403, 404) },
   },
