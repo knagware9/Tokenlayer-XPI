@@ -85,3 +85,33 @@ describe("issue-to-org (entity holder)", () => {
     for (const r of rows) { expect(r.did).toBeTruthy(); expect(["user", "org"]).toContain(r.kind); }
   });
 });
+
+describe("entity wallet read", () => {
+  it("me/credentials + org wallet carry credentialUseCaseKey + issuerName", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const admin2 = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    await seedUseCase(app, admin);
+    const org = await makeOrg(app, admin, "Epsilon Corp");
+    const issued = await app.inject({ method: "POST", url: `${V1}/credential-use-cases/corp-kyb/credentials`, headers: auth(admin),
+      payload: { credentialType: "MCACredential", subjectOrgId: org.id, claims: { cin: "c", companyName: "Epsilon Corp" } } });
+    const pid = issued.json().proposal.id;
+    await app.inject({ method: "POST", url: `${V1}/proposals/${pid}/approve`, headers: auth(admin2), payload: {} });
+
+    const wallet = (await app.inject({ method: "GET", url: `${V1}/orgs/${org.id}/wallet`, headers: auth(admin) })).json() as { credentialUseCaseKey: string | null; issuerName: string | null }[];
+    expect(wallet[0]!.credentialUseCaseKey).toBe("corp-kyb");
+    expect(wallet[0]!.issuerName).toBeTruthy(); // the platform issuer org's name
+  });
+
+  it("org wallet is org-scoped: a foreign OrgAdmin is 403", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const orgA = await makeOrg(app, admin, "Org A");
+    const orgB = await makeOrg(app, admin, "Org B");
+    // an OrgAdmin of B
+    await app.inject({ method: "POST", url: `${V1}/orgs/${orgB.id}/users`, headers: auth(admin), payload: { email: "b.admin@x.io", password: "badmin123", role: "OrgAdmin" } });
+    const bAdmin = await loginAs(app, "b.admin@x.io", "badmin123");
+    expect((await app.inject({ method: "GET", url: `${V1}/orgs/${orgA.id}/wallet`, headers: auth(bAdmin) })).statusCode).toBe(403);
+    expect((await app.inject({ method: "GET", url: `${V1}/orgs/${orgB.id}/wallet`, headers: auth(bAdmin) })).statusCode).toBe(200);
+  });
+});

@@ -1071,6 +1071,11 @@ export const S: Record<string, FastifySchema> = {
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403, 404) },
   },
+  orgWallet: {
+    tags: ["Identity"], summary: "Credentials held by an organization (entity wallet)", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403, 404) },
+  },
 
   createVerificationRequest: {
     tags: ["Verification"], summary: "A verifier org requests a credential presentation", security: bearer,

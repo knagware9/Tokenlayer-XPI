@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { AssetRecord, CashflowRecord, CompanyProfile, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord } from "../persistence/types.js";
+import type { AssetRecord, CashflowRecord, CompanyProfile, CredentialRecord, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
 import { auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, invoiceFingerprint, issueCredential, issuerBindingAllows, normalizeUseCaseDefinition, PolicyError, presentCredential, presentCredentials, publicKeyFromDidKey, splitProRata, validateCredentialUseCase, validateMetadata, verifierBindingAllows, verifyChain, verifyPresentation, verifyPresentationCredentials, type Actor, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type OrgType, type Role, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
@@ -1636,6 +1636,22 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return reply.code(201).send({ id: org.id, name: org.name, did: org.did, orgType: org.orgType, registrationId: org.registrationId, jurisdiction: org.jurisdiction, verified: org.verified, status: org.status });
   });
 
+  /** Enriched held-credential projection: adds the use case + the issuer org's
+   *  name (memoised per call), shared by /me/credentials and the org wallet. */
+  async function mapHeld(rows: CredentialRecord[]) {
+    const names = new Map<string, string | null>();
+    const nameOf = async (did: string): Promise<string | null> => {
+      if (!names.has(did)) names.set(did, (await deps.organizations.findByDid(did))?.name ?? null);
+      return names.get(did) ?? null;
+    };
+    return Promise.all(rows.map(async (c) => ({
+      id: c.id, type: c.type.split(","), credentialUseCaseKey: c.credentialUseCaseKey,
+      issuerDid: c.issuerDid, issuerName: await nameOf(c.issuerDid), holderDid: c.holderDid,
+      claims: c.subjectClaims, issuedAt: c.issuedAt, expiresAt: c.expiresAt,
+      revoked: c.revoked, revokedAt: c.revokedAt, revokedReason: c.revokedReason, vcJwt: c.vcJwt,
+    })));
+  }
+
   /** orgView + the credentials HELD by the org's parent DID (issuance attribution). */
   async function orgViewWithCreds(o: OrganizationRecord) {
     const held = await deps.credentials.listByHolder(o.did);
@@ -1818,8 +1834,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   app.get("/me/credentials", { schema: S.myCredentials, ...auth }, async (request) => {
     const claims = request.user as TokenClaims;
     if (!claims.did) return [];
-    const rows = await deps.credentials.listByHolder(claims.did);
-    return rows.map((c) => ({ id: c.id, type: c.type.split(","), issuerDid: c.issuerDid, holderDid: c.holderDid, claims: c.subjectClaims, issuedAt: c.issuedAt, expiresAt: c.expiresAt, revoked: c.revoked, revokedAt: c.revokedAt, revokedReason: c.revokedReason, vcJwt: c.vcJwt }));
+    return mapHeld(await deps.credentials.listByHolder(claims.did));
   });
 
   // --- credentials ---------------------------------------------------------
@@ -1953,6 +1968,15 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       id: c.id, type: c.type, holderDid: c.holderDid, claims: c.subjectClaims,
       issuedAt: c.issuedAt, expiresAt: c.expiresAt, revoked: c.revoked, revokedAt: c.revokedAt, revokedReason: c.revokedReason,
     }));
+  });
+
+  app.get("/orgs/:id/wallet", { schema: S.orgWallet, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    if (!orgScoped(claims, id)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to view that organization's wallet" });
+    const org = await deps.organizations.get(id);
+    if (!org) return notFound(reply, "organization not found");
+    return mapHeld(await deps.credentials.listByHolder(org.did));
   });
 
   // --- verification (verifier-request → holder-consent → verify) -----------
