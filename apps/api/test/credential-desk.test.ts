@@ -139,3 +139,39 @@ describe("onboarding credential-desk users", () => {
     expect(res.statusCode).toBe(202);
   });
 });
+
+describe("scoped desk issuance", () => {
+  it("a scoped Issuer may read eligible-holders and issue in their own use case, but is 403 in another", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const admin2 = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    const keyA = await createCredUC(app, admin, "uc-a");
+    const keyB = await createCredUC(app, admin, "uc-b");
+
+    // Onboard an Issuer scoped to uc-a only.
+    await onboardUser(app, admin, admin2, { email: "desk.scoped.issuer@x.dev", password: "secret1", role: "Issuer", useCaseKey: keyA });
+    const issuerToken = await loginAs(app, "desk.scoped.issuer@x.dev", "secret1");
+
+    // Onboard a holder eligible for uc-a so eligible-holders returns a subject.
+    await onboardUser(app, admin, admin2, { email: "desk.uc-a.holder@x.dev", password: "secret1", role: "Holder", useCaseKey: keyA });
+
+    const holders = await app.inject({ method: "GET", url: `${V1}/credential-use-cases/${keyA}/eligible-holders`, headers: auth(issuerToken) });
+    expect(holders.statusCode).toBe(200);
+    const subject = (holders.json() as { kind: "user" | "org"; id: string }[])[0];
+    expect(subject).toBeTruthy();
+    const subjectRef = subject.kind === "user" ? { subjectUserId: subject.id } : { subjectOrgId: subject.id };
+
+    const issue = await app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/${keyA}/credentials`, headers: auth(issuerToken),
+      payload: { credentialType: "T", ...subjectRef, claims: { a: "x" } },
+    });
+    expect(issue.statusCode).toBe(202);
+
+    // Not scoped to uc-b: issuing there must be forbidden.
+    const issueOther = await app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/${keyB}/credentials`, headers: auth(issuerToken),
+      payload: { credentialType: "T", ...subjectRef, claims: { a: "x" } },
+    });
+    expect(issueOther.statusCode).toBe(403);
+  });
+});

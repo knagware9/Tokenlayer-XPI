@@ -474,15 +474,25 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
 
   // A shared issuer-authorization helper: resolve the bound issuer org + confirm
   // the caller may act as it. Returns { issuerOrg } or sends an error + null.
-  async function resolveIssuer(reply: FastifyReply, claims: TokenClaims, def: Awaited<ReturnType<typeof deps.credentialUseCases.get>>) {
+  //
+  // Two independent ways in: (1) the classic org/platform path — PlatformAdmin,
+  // or the OrgAdmin of the use case's bound issuer org, via issuerBindingAllows;
+  // (2) a credential-use-case-SCOPED desk operator (UseCaseAdmin/Issuer whose
+  // claims.useCaseKey matches this use case's key) — they operate issuance for
+  // the use case WITHOUT being the cryptographic issuer; the VC is still signed
+  // by the use case's bound issuer org (issuerOrg resolution below is unchanged).
+  async function resolveIssuer(reply: FastifyReply, claims: TokenClaims, def: Awaited<ReturnType<typeof deps.credentialUseCases.get>>, key: string) {
     const isPlatformAdmin = claims.role === "PlatformAdmin";
-    if (claims.role !== "PlatformAdmin" && claims.role !== "OrgAdmin") {
-      reply.code(403).send({ error: "FORBIDDEN", message: "only a Platform Admin or an Org Admin may issue credentials" });
-      return null;
-    }
-    if (!issuerBindingAllows(def!.issuer, { callerOrgId: claims.orgId ?? null, isPlatformAdmin })) {
-      reply.code(403).send({ error: "ISSUER_NOT_PERMITTED", message: "you may not issue for this use case's configured issuer" });
-      return null;
+    const scopedOperator = (claims.role === "UseCaseAdmin" || claims.role === "Issuer") && claims.useCaseKey === key;
+    if (!scopedOperator) {
+      if (claims.role !== "PlatformAdmin" && claims.role !== "OrgAdmin") {
+        reply.code(403).send({ error: "FORBIDDEN", message: "only a Platform Admin or an Org Admin may issue credentials" });
+        return null;
+      }
+      if (!issuerBindingAllows(def!.issuer, { callerOrgId: claims.orgId ?? null, isPlatformAdmin })) {
+        reply.code(403).send({ error: "ISSUER_NOT_PERMITTED", message: "you may not issue for this use case's configured issuer" });
+        return null;
+      }
     }
     const issuerOrg = def!.issuer.kind === "platform"
       ? await deps.organizations.findByName(PLATFORM_ORG_NAME)
@@ -499,7 +509,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const { key } = request.params as { key: string };
     const def = await deps.credentialUseCases.get(key);
     if (!def) return notFound(reply, `credential use case '${key}' not found`);
-    const resolved = await resolveIssuer(reply, claims, def); // same gate as issuing
+    const resolved = await resolveIssuer(reply, claims, def, key); // same gate as issuing
     if (!resolved) return;
     const out: { kind: "user" | "org"; id: string; label: string; did: string; subLabel: string | null }[] = [];
     const users = await deps.users.list();
@@ -526,7 +536,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const b = request.body as { credentialType: string; subjectUserId?: string; subjectOrgId?: string; claims: Record<string, unknown> };
     const def = await deps.credentialUseCases.get(key);
     if (!def) return notFound(reply, `credential use case '${key}' not found`);
-    const resolved = await resolveIssuer(reply, claims, def);
+    const resolved = await resolveIssuer(reply, claims, def, key);
     if (!resolved) return;
     const { issuerOrg } = resolved;
 
@@ -1990,7 +2000,12 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     // Only the ISSUING org may revoke: find the org whose parent DID signed it.
     const issuer = await deps.organizations.findByDid(cred.issuerDid);
     if (!issuer) return notFound(reply, "issuing organization not found");
-    if (!orgScoped(claims, issuer.id)) {
+    // A credential-use-case-SCOPED desk operator (UseCaseAdmin/Issuer whose
+    // claims.useCaseKey matches the credential's own use case) may also revoke,
+    // without being the signing org — mirrors the issue-side scopedOperator gate.
+    const scopedOperator = (claims.role === "UseCaseAdmin" || claims.role === "Issuer")
+      && cred.credentialUseCaseKey !== null && claims.useCaseKey === cred.credentialUseCaseKey;
+    if (!scopedOperator && !orgScoped(claims, issuer.id)) {
       return reply.code(403).send({ error: "FORBIDDEN", message: "only the issuing organization may revoke this credential" });
     }
     // Depth comes from the credential's OWN type — revoking an AuthorizedSignatory
