@@ -138,9 +138,9 @@ export function App(): JSX.Element {
     const knownIds = [...Object.keys(platViews), "profile", "credentials"];
     const activeId = knownIds.includes(view) && itemsForDomain([{ id: view }], effDomain).length ? view : DOMAINS.find((d) => d.key === effDomain)!.defaultView;
     const panel =
-      view === "profile" ? <MyProfile onSelect={setView} />
-      : view === "credentials" ? <MyIdentity />
-      : <PlatformHome useCases={useCases} chains={chains} onReloadUseCases={reloadUseCases} view={platViews[view] ?? "overview"} />;
+      activeId === "profile" ? <MyProfile onSelect={setView} />
+      : activeId === "credentials" ? <MyIdentity />
+      : <PlatformHome useCases={useCases} chains={chains} onReloadUseCases={reloadUseCases} view={platViews[activeId] ?? "overview"} />;
     return <AppShell items={visible} active={activeId} onSelect={handleSelect} domains={branchDomains} activeDomain={effDomain} onDomainChange={onDomainChange}>{panel}</AppShell>;
   }
 
@@ -163,10 +163,19 @@ export function App(): JSX.Element {
     ...pinned,
   ];
 
+  const branchDomains = availableDomains(items, enabledDomains);
+  const effDomain = branchDomains.some((d) => d.key === activeDomain) ? activeDomain : (branchDomains[0]?.key ?? activeDomain);
+  const visible = itemsForDomain(items, effDomain);
+  const deskIds = visible.map((i) => i.id).filter((id) => id !== "back" && id !== "logout");
+  const activeId = deskIds.includes(view) ? view : (deskIds.includes(DOMAINS.find((d) => d.key === effDomain)!.defaultView) ? DOMAINS.find((d) => d.key === effDomain)!.defaultView : (deskIds[0] ?? "dashboard"));
+
+  // Render the panel from the reconciled `activeId` (not raw `view`) so the panel
+  // always matches the sidebar highlight — including after a reload with a stale
+  // persisted domain, where `view` may point at a surface hidden in the active domain.
   let panel: JSX.Element;
-  if (view === "assets") {
+  if (activeId === "assets") {
     panel = <AssetManagement useCaseKey={activeUseCase} useCases={useCases} chains={chains} />;
-  } else if (view === "invoices") {
+  } else if (activeId === "invoices") {
     panel = activeUseCaseObj
       ? <InvoiceRegister useCase={activeUseCaseObj} chains={chains} />
       : (
@@ -174,21 +183,21 @@ export function App(): JSX.Element {
           <SectionHeader title="Invoices" description="Select an invoice use case to view its register." />
         </div>
       );
-  } else if (view === "approvals") {
+  } else if (activeId === "approvals") {
     panel = <ApprovalsPanel />;
-  } else if (view === "users") {
+  } else if (activeId === "users") {
     panel = <UserManagement useCaseKey={activeUseCase} useCases={useCases} />;
-  } else if (view === "organizations") {
+  } else if (activeId === "organizations") {
     panel = <Organizations />;
-  } else if (view === "verify") {
+  } else if (activeId === "verify") {
     panel = <VerificationRequests />;
-  } else if (view === "identity") {
+  } else if (activeId === "identity") {
     panel = <IdentityHome />;
-  } else if (view === "org-wallet") {
+  } else if (activeId === "org-wallet") {
     panel = <OrganizationWallet />;
-  } else if (view === "profile") {
+  } else if (activeId === "profile") {
     panel = <MyProfile onSelect={setView} />;
-  } else if (view === "credentials") {
+  } else if (activeId === "credentials") {
     panel = <MyIdentity />;
   } else if (isOrgAdmin) {
     // Dashboard slot for OrgAdmin is the low-code use-case configurator.
@@ -202,10 +211,5 @@ export function App(): JSX.Element {
     panel = <Dashboard useCaseKey={activeUseCase} />;
   }
 
-  const branchDomains = availableDomains(items, enabledDomains);
-  const effDomain = branchDomains.some((d) => d.key === activeDomain) ? activeDomain : (branchDomains[0]?.key ?? activeDomain);
-  const visible = itemsForDomain(items, effDomain);
-  const deskIds = visible.map((i) => i.id).filter((id) => id !== "back" && id !== "logout");
-  const activeId = deskIds.includes(view) ? view : (deskIds.includes(DOMAINS.find((d) => d.key === effDomain)!.defaultView) ? DOMAINS.find((d) => d.key === effDomain)!.defaultView : (deskIds[0] ?? "dashboard"));
   return <AppShell items={visible} active={activeId} onSelect={handleSelect} domains={branchDomains} activeDomain={effDomain} onDomainChange={onDomainChange}>{panel}</AppShell>;
 }
