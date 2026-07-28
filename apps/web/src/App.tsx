@@ -16,6 +16,7 @@ import { MyProfile } from "./components/MyProfile.js";
 import { Organizations } from "./components/Organizations.js";
 import { OrganizationWallet } from "./components/OrganizationWallet.js";
 import { PlatformHome, type PlatformTab } from "./components/PlatformHome.js";
+import { QrSign } from "./components/QrSign.js";
 import { Signup } from "./components/Signup.js";
 import { UseCaseBuilder } from "./components/UseCaseBuilder.js";
 import { UserManagement } from "./components/UserManagement.js";
@@ -50,6 +51,11 @@ export function App(): JSX.Element {
     if (want) sessionStorage.removeItem("tl:section");
     setView(want === "assets" ? "assets" : "dashboard");
   }, [user?.role === "PlatformAdmin" ? routeKey : user?.useCaseKey]);
+
+  // An enrolled device opening a QR's signUrl must reach the sign page
+  // regardless of its own session — so this precedes the auth gate below.
+  // Placed after all hooks to keep hook order unconditional on every render.
+  if (routeKey === "qr-sign") return <QrSign />;
 
   // Public (unauthenticated) surface: a marketing homepage plus the corporate
   // self-registration flow. The first path segment selects the screen.

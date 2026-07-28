@@ -438,6 +438,10 @@ export type HolderPolicy = { who: "any-onboarded" } | { who: "orgType"; orgTypes
 export type VerifierBinding = { kind: "any" } | { kind: "orgs"; orgIds: string[] };
 export interface CredentialUseCase { key: string; name: string; description?: string; credentialTypes: CredentialTypeSpec[]; issuer: IssuerBinding; holderPolicy: HolderPolicy; verifier: VerifierBinding; ownerOrgId?: string | null; status?: string; }
 
+export interface LoginKeyInfo { id: string; did: string; label: string; createdAt: string; lastUsedAt: string | null; }
+export interface QrLoginStart { sessionId: string; challenge: string; signUrl: string; qrSvg: string; expiresAt: string; }
+export interface QrLoginPoll { status: "pending" | "authenticated" | "consumed" | "expired"; token?: string; user?: SessionUser; }
+
 export interface VerificationResult {
   valid: boolean;
   holderDid: string | null;

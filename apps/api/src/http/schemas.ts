@@ -482,6 +482,22 @@ export const S: Record<string, FastifySchema> = {
   },
   me: { tags: ["Auth"], summary: "Current session principal", security: bearer, response: { 200: { type: "object", additionalProperties: true }, ...errs(401) } },
 
+  enrollLoginKey: {
+    tags: ["Auth"], summary: "Enrol a device login key (public did:key)", security: bearer,
+    body: { type: "object", additionalProperties: false, required: ["did", "label"], properties: { did: { type: "string" }, label: { type: "string", minLength: 1 } } },
+    response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 409) },
+  },
+  listLoginKeys: { tags: ["Auth"], summary: "The caller's enrolled device login keys", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401) } },
+  removeLoginKey: { tags: ["Auth"], summary: "Revoke a device login key", security: bearer, params: { type: "object", required: ["id"], properties: { id: { type: "string" } } }, response: { 204: { type: "null" }, ...errs(401, 404) } },
+  qrStart: { tags: ["Auth"], summary: "Begin a passwordless QR login session", response: { 200: { type: "object", additionalProperties: true } } },
+  qrPoll: { tags: ["Auth"], summary: "Poll a QR login session", params: { type: "object", required: ["id"], properties: { id: { type: "string" } } }, response: { 200: { type: "object", additionalProperties: true }, ...errs(404) } },
+  qrAuthenticate: {
+    tags: ["Auth"], summary: "Authenticate a QR login session by signing its challenge",
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    body: { type: "object", additionalProperties: false, required: ["did", "signature"], properties: { did: { type: "string" }, signature: { type: "string" } } },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 404, 410, 429) },
+  },
+
   chains: { tags: ["Catalog"], summary: "List configured chains/DLTs", security: bearer, response: { 200: { type: "array", items: { $ref: "Chain#" } }, ...errs(401) } },
   chainStatus: {
     tags: ["Catalog"], summary: "Probe one chain's live status (on-demand health check)", security: bearer,

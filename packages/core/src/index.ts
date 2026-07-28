@@ -21,6 +21,7 @@ export {
   signJwt,
   decodeJwt,
   verifyJwtSignature,
+  verifyDidSignature,
   issueCredential,
   presentCredential,
   verifyPresentation,

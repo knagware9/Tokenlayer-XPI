@@ -7,6 +7,7 @@ import { createEngine } from "../src/context.js";
 import { loadCurrencies } from "../src/currencies.js";
 import { createMemoryChallengeStore } from "../src/identity-challenges.js";
 import { createKeystore } from "../src/keystore.js";
+import { createMemoryQrLoginStore } from "../src/qr-login-sessions.js";
 import {
   MemoryAccountRepository,
   MemoryAssetRepository,
@@ -14,6 +15,7 @@ import {
   MemoryAuditRepository,
   MemoryCashflowRepository,
   MemoryCredentialRepository,
+  MemoryLoginKeyRepository,
   MemoryOrganizationRepository,
   MemoryProposalRepository,
   MemoryCashRepository,
@@ -70,7 +72,7 @@ export async function buildTestApp(opts: { loginRateLimitMax?: number; platformF
   const deps: AppDeps = {
     useCases, credentialUseCases, rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents, cashflows, proposals,
     organizations, credentials, verificationRequests, stagedInvoices, keystore, didMasterConfigured: opts.didMasterConfigured ?? true,
-    challenges: createMemoryChallengeStore(), trustedKycIssuers: opts.trustedKycIssuers,
+    challenges: createMemoryChallengeStore(), loginKeys: new MemoryLoginKeyRepository(), qrLogin: createMemoryQrLoginStore(), publicWebUrl: "http://localhost:5173", trustedKycIssuers: opts.trustedKycIssuers,
     devIssuerSeed: opts.devIssuerSeed, isProduction: opts.isProduction,
     currencies: loadCurrencies(), jwtSecret: "test-secret", publicApiUrl: "http://test.local/api/v1",
     loginRateLimitMax: opts.loginRateLimitMax ?? 100000,

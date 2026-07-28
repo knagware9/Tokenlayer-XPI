@@ -80,6 +80,19 @@ export function verifyJwtSignature(jwt: string, publicKey: KeyObject): boolean {
   } catch { return false; }
 }
 
+/**
+ * Verify a raw Ed25519 signature (base64url) over `message`'s UTF-8 bytes,
+ * against the public key encoded in `did` (did:key ed25519). Returns false on a
+ * malformed did/signature rather than throwing. Used by passwordless login.
+ */
+export function verifyDidSignature(did: string, message: string, signatureB64u: string): boolean {
+  try {
+    return edVerify(null, Buffer.from(message, "utf8"), publicKeyFromDidKey(did), fromB64u(signatureB64u));
+  } catch {
+    return false;
+  }
+}
+
 export interface IssueInput { issuerDid: string; issuerKey: KeyObject; subjectDid: string; claims: Record<string, unknown>; expiresAt: number; now: number; type?: string[]; }
 /** Mint a VC-JWT (dev/test helper). credentialSubject.id = subjectDid; jti = credential id. Defaults to a KycCredential type. */
 export function issueCredential(i: IssueInput): string {

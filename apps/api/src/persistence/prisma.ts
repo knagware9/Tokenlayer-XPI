@@ -36,6 +36,8 @@ import type {
   KycStatus,
   ListingRecord,
   ListingRepository,
+  LoginKeyRecord,
+  LoginKeyRepository,
   OrganizationRecord,
   OrganizationRepository,
   OrgStatus,
@@ -932,5 +934,36 @@ export class PrismaStagedInvoiceRepository implements StagedInvoiceRepository {
   }
   async remove(id: string): Promise<void> {
     await prisma.stagedInvoice.delete({ where: { id } });
+  }
+}
+
+const toLoginKey = (r: {
+  id: string; userId: string; did: string; label: string; createdAt: Date; lastUsedAt: Date | null;
+}): LoginKeyRecord => ({
+  id: r.id, userId: r.userId, did: r.did, label: r.label,
+  createdAt: r.createdAt.toISOString(),
+  lastUsedAt: r.lastUsedAt ? r.lastUsedAt.toISOString() : null,
+});
+
+export class PrismaLoginKeyRepository implements LoginKeyRepository {
+  async create(input: Omit<LoginKeyRecord, "id" | "createdAt" | "lastUsedAt">): Promise<LoginKeyRecord> {
+    return toLoginKey(await prisma.loginKey.create({ data: { userId: input.userId, did: input.did, label: input.label } }));
+  }
+  async listByUser(userId: string): Promise<LoginKeyRecord[]> {
+    return (await prisma.loginKey.findMany({ where: { userId }, orderBy: { createdAt: "desc" } })).map(toLoginKey);
+  }
+  async getByDid(did: string): Promise<LoginKeyRecord | null> {
+    const r = await prisma.loginKey.findUnique({ where: { did } });
+    return r ? toLoginKey(r) : null;
+  }
+  async get(id: string): Promise<LoginKeyRecord | null> {
+    const r = await prisma.loginKey.findFirst({ where: { id } });
+    return r ? toLoginKey(r) : null;
+  }
+  async remove(id: string): Promise<void> {
+    await prisma.loginKey.delete({ where: { id } });
+  }
+  async touch(id: string, at: string): Promise<void> {
+    await prisma.loginKey.update({ where: { id }, data: { lastUsedAt: new Date(at) } });
   }
 }

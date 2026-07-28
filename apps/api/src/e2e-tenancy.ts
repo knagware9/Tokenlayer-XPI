@@ -4,6 +4,7 @@ import { buildApp } from "./app.js";
 import { buildChainRegistry } from "./chains.js";
 import { createEngine } from "./context.js";
 import { createMemoryChallengeStore } from "./identity-challenges.js";
+import { createMemoryQrLoginStore } from "./qr-login-sessions.js";
 import { createKeystore } from "./keystore.js";
 import { loadCurrencies } from "./currencies.js";
 import { MemoryAccountRepository, MemoryAssetRepository, MemoryAuditAnchorRepository, MemoryAuditRepository, MemoryCashRepository,
@@ -13,6 +14,7 @@ import { MemoryAccountRepository, MemoryAssetRepository, MemoryAuditAnchorReposi
   MemoryCredentialRepository,
   MemoryOrganizationRepository,
   MemoryListingRepository,
+  MemoryLoginKeyRepository,
   MemoryStagedInvoiceRepository,
   MemoryCredentialUseCaseRepository, MemoryUseCaseRepository, MemoryUserRepository, MemoryVerificationRequestRepository } from "./persistence/memory.js";
 import { seedDefaults } from "./seed.js";
@@ -38,7 +40,7 @@ async function main(): Promise<void> {
   });
   const cash = new MemoryCashRepository();
   const listings = new MemoryListingRepository();
-  const app = await buildApp({ useCases, credentialUseCases: new MemoryCredentialUseCaseRepository(), rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents: new MemoryDocumentRepository(), cashflows: new MemoryCashflowRepository(), proposals: new MemoryProposalRepository(), organizations: new MemoryOrganizationRepository(), credentials: new MemoryCredentialRepository(), verificationRequests: new MemoryVerificationRequestRepository(), stagedInvoices: new MemoryStagedInvoiceRepository(), keystore: createKeystore("11".repeat(32)), didMasterConfigured: true, challenges: createMemoryChallengeStore(), currencies: loadCurrencies(), jwtSecret: "e2e", publicApiUrl: "http://localhost:4000/api/v1" });
+  const app = await buildApp({ useCases, credentialUseCases: new MemoryCredentialUseCaseRepository(), rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents: new MemoryDocumentRepository(), cashflows: new MemoryCashflowRepository(), proposals: new MemoryProposalRepository(), organizations: new MemoryOrganizationRepository(), credentials: new MemoryCredentialRepository(), verificationRequests: new MemoryVerificationRequestRepository(), stagedInvoices: new MemoryStagedInvoiceRepository(), keystore: createKeystore("11".repeat(32)), didMasterConfigured: true, challenges: createMemoryChallengeStore(), loginKeys: new MemoryLoginKeyRepository(), qrLogin: createMemoryQrLoginStore(), publicWebUrl: "http://localhost:5173", currencies: loadCurrencies(), jwtSecret: "e2e", publicApiUrl: "http://localhost:4000/api/v1" });
 
   const platform = await login(app, "admin@tokenlayer.dev", "admin123");
   const carbonAdmin = await login(app, "carbon.admin@tokenlayer.dev", "carbon123");

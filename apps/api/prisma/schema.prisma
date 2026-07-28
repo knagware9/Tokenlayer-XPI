@@ -301,3 +301,16 @@ model StagedInvoice {
   @@index([useCaseKey, status])
   @@index([useCaseKey, invoiceHash])
 }
+
+// A self-custody device login key: the public did:key of a browser-held Ed25519
+// keypair, registered for passwordless login. The private key never leaves the device.
+model LoginKey {
+  id         String   @id @default(cuid())
+  userId     String
+  did        String   @unique
+  label      String
+  createdAt  DateTime @default(now())
+  lastUsedAt DateTime?
+
+  @@index([userId])
+}

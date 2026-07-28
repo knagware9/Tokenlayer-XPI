@@ -16,6 +16,7 @@ import type { FastifyInstance } from "fastify";
 import { buildApp } from "./app.js";
 import { buildChainRegistry } from "./chains.js";
 import { createMemoryChallengeStore } from "./identity-challenges.js";
+import { createMemoryQrLoginStore } from "./qr-login-sessions.js";
 import { createKeystore } from "./keystore.js";
 import { createEngine } from "./context.js";
 import { loadCurrencies } from "./currencies.js";
@@ -30,6 +31,7 @@ import {
   MemoryDocumentRepository,
   MemoryCredentialRepository,
   MemoryOrganizationRepository,
+  MemoryLoginKeyRepository,
   MemoryStagedInvoiceRepository,
   MemoryListingRepository,
   MemoryCredentialUseCaseRepository,
@@ -69,7 +71,7 @@ async function main(): Promise<void> {
   });
   const cash = new MemoryCashRepository();
   const listings = new MemoryListingRepository();
-  const app = await buildApp({ useCases, credentialUseCases: new MemoryCredentialUseCaseRepository(), rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents: new MemoryDocumentRepository(), cashflows: new MemoryCashflowRepository(), proposals: new MemoryProposalRepository(), organizations: new MemoryOrganizationRepository(), credentials: new MemoryCredentialRepository(), verificationRequests: new MemoryVerificationRequestRepository(), stagedInvoices: new MemoryStagedInvoiceRepository(), keystore: createKeystore("11".repeat(32)), didMasterConfigured: true, challenges: createMemoryChallengeStore(), currencies: loadCurrencies(), jwtSecret: "e2e", publicApiUrl: "http://localhost:4000/api/v1" });
+  const app = await buildApp({ useCases, credentialUseCases: new MemoryCredentialUseCaseRepository(), rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents: new MemoryDocumentRepository(), cashflows: new MemoryCashflowRepository(), proposals: new MemoryProposalRepository(), organizations: new MemoryOrganizationRepository(), credentials: new MemoryCredentialRepository(), verificationRequests: new MemoryVerificationRequestRepository(), stagedInvoices: new MemoryStagedInvoiceRepository(), keystore: createKeystore("11".repeat(32)), didMasterConfigured: true, challenges: createMemoryChallengeStore(), loginKeys: new MemoryLoginKeyRepository(), qrLogin: createMemoryQrLoginStore(), publicWebUrl: "http://localhost:5173", currencies: loadCurrencies(), jwtSecret: "e2e", publicApiUrl: "http://localhost:4000/api/v1" });
 
   // Per-use-case roster seeded by seedDefaults — password is "carbon123" for all.
   const adminToken = await login(app, "carbon.admin@tokenlayer.dev", "carbon123");
