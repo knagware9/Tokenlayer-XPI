@@ -9,6 +9,7 @@ export * from "./user-policy.js";
 export { useCaseDomainOf, type UseCaseDomain } from "./use-case-domain.js";
 export * from "./credential-types.js";
 export * from "./credential-use-cases.js";
+export * from "./use-case-templates.js";
 export { invoiceFingerprint, type InvoiceFingerprintInput } from "./invoice-fingerprint.js";
 export { computeCashflowSchedule, splitProRata, type TermsConfig, type ScheduledCashflow } from "./cashflows.js";
 export { auditGenesis, auditEntryHash, verifyChain, type AuditChainFields, type ChainEntry, type VerifyResult } from "./audit-chain.js";

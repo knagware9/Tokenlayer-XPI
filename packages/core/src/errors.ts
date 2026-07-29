@@ -15,7 +15,10 @@ export type PolicyErrorCode =
   | "HOLDER_LIMIT_EXCEEDED"
   | "LOCKUP_ACTIVE"
   | "JURISDICTION_NOT_ALLOWED"
-  | "UNKNOWN_CREDENTIAL_TYPE";
+  | "UNKNOWN_CREDENTIAL_TYPE"
+  | "INVALID_TEMPLATE"
+  | "INVALID_TEMPLATE_PARAMS"
+  | "UNKNOWN_TEMPLATE";
 
 /** Raised when a request violates RBAC, lifecycle, or compliance policy. */
 export class PolicyError extends Error {
