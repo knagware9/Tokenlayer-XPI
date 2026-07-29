@@ -599,6 +599,27 @@ export const S: Record<string, FastifySchema> = {
     // response serialization instead of being stripped as an unlisted property.
     response: { 200: { type: "object", additionalProperties: true }, 400: { type: "object", additionalProperties: true }, ...errs(401, 404) },
   },
+  provisionUseCase: {
+    tags: ["Credential Use Cases"], summary: "One-step enterprise provisioning from a template: ensure the issuer org, instantiate the bound credential use case, and optionally create scoped desk users (PlatformAdmin; OrgAdmin scoped to their own org)", security: bearer,
+    body: {
+      type: "object", additionalProperties: true, required: ["templateKey", "params"],
+      properties: {
+        templateKey: { type: "string" },
+        params: { type: "object", additionalProperties: true },
+        provisioning: { type: "object", additionalProperties: true },
+      },
+    },
+    // 201/200/400 are LOOSE (additionalProperties:true) so nested fields survive
+    // fast-json-stringify — most importantly deskUsers[].password, the one-time
+    // plaintext credential returned exactly once. A strict/ref response schema
+    // would silently strip it (the G3 trap).
+    response: {
+      200: { type: "object", additionalProperties: true },
+      201: { type: "object", additionalProperties: true },
+      400: { type: "object", additionalProperties: true },
+      ...errs(401, 403, 404, 409, 502, 503),
+    },
+  },
 
   issueAsset: {
     tags: ["Assets"], summary: "Issue (tokenize) a new asset", security: bearer,
