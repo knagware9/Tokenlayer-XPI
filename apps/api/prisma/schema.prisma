@@ -91,6 +91,17 @@ model CredentialUseCase {
   updatedAt       DateTime @updatedAt
 }
 
+model CredentialUseCaseTemplate {
+  key         String   @id
+  name        String
+  category    String
+  description String?
+  parameters  String   // JSON: TemplateParam[]
+  body        String   // JSON: UseCaseTemplate["body"]
+  ownerOrgId  String?
+  createdAt   DateTime @default(now())
+}
+
 // Append-only audit stream. assetId is an unconstrained reference (not a FK) so
 // entries can be written before/after an asset row exists and survive its removal.
 model AuditLog {

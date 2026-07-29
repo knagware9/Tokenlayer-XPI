@@ -4,6 +4,7 @@ import { useAuth } from "../auth.js";
 import type { CredentialUseCase, Organization } from "../types.js";
 import { CredentialUseCaseBuilder } from "./CredentialUseCaseBuilder.js";
 import { IssueUsecaseCredential } from "./IssueUsecaseCredential.js";
+import { ProvisionFromTemplate } from "./ProvisionFromTemplate.js";
 import { Card, EmptyState, Pill, SectionHeader, Skeleton } from "./ui.js";
 
 /** One-line summary of the Issuer / Holder / Verifier bindings. */
@@ -24,8 +25,12 @@ export function IdentityHome(): JSX.Element {
   const [useCases, setUseCases] = useState<CredentialUseCase[] | null>(null);
   const [orgNames, setOrgNames] = useState<Record<string, string>>({});
   const [showBuilder, setShowBuilder] = useState(false);
+  const [showProvision, setShowProvision] = useState(false);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const isPlatformAdmin = user?.role === "PlatformAdmin";
+  // The provisioning API allows an OrgAdmin to stand up a use case for their own
+  // org as well as a PlatformAdmin acting platform-wide.
+  const canProvision = isPlatformAdmin || user?.role === "OrgAdmin";
 
   // Mirror the server's issuer binding: a PlatformAdmin may issue for any use
   // case; an OrgAdmin only when their own org is the bound issuer. Anyone else
@@ -68,19 +73,52 @@ export function IdentityHome(): JSX.Element {
     );
   }
 
+  if (showProvision) {
+    return (
+      <div>
+        <div className="flex justify-end mb-2">
+          <button
+            onClick={() => setShowProvision(false)}
+            className="rounded-lg border border-slate-200 text-slate-600 px-3 py-1.5 text-xs font-medium hover:border-brand-400 hover:text-brand-700"
+          >
+            ← Back to list
+          </button>
+        </div>
+        <ProvisionFromTemplate
+          onDone={() => {
+            setShowProvision(false);
+            reload();
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div>
       <SectionHeader
         title="Identity"
         description="Configurable credential (DID/VC) use cases — custom claim types plus issuer, holder and verifier bindings."
         actions={
-          isPlatformAdmin ? (
-            <button
-              onClick={() => setShowBuilder(true)}
-              className="rounded-lg bg-brand-600 text-white px-3.5 py-1.5 text-xs font-semibold hover:bg-brand-700"
-            >
-              New credential use case
-            </button>
+          isPlatformAdmin || canProvision ? (
+            <div className="flex items-center gap-2">
+              {canProvision && (
+                <button
+                  onClick={() => setShowProvision(true)}
+                  className="rounded-lg border border-slate-200 text-slate-600 px-3.5 py-1.5 text-xs font-medium hover:border-brand-400 hover:text-brand-700"
+                >
+                  Provision from template
+                </button>
+              )}
+              {isPlatformAdmin && (
+                <button
+                  onClick={() => setShowBuilder(true)}
+                  className="rounded-lg bg-brand-600 text-white px-3.5 py-1.5 text-xs font-semibold hover:bg-brand-700"
+                >
+                  New credential use case
+                </button>
+              )}
+            </div>
           ) : undefined
         }
       />

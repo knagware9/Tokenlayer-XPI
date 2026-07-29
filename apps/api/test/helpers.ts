@@ -23,6 +23,7 @@ import {
   MemoryListingRepository,
   MemoryStagedInvoiceRepository,
   MemoryCredentialUseCaseRepository,
+  MemoryCredentialUseCaseTemplateRepository,
   MemoryUseCaseRepository,
   MemoryUserRepository,
   MemoryVerificationRequestRepository,
@@ -48,6 +49,7 @@ export async function buildTestApp(opts: { loginRateLimitMax?: number; platformF
   const accounts = new MemoryAccountRepository();
   const useCases = new MemoryUseCaseRepository();
   const credentialUseCases = new MemoryCredentialUseCaseRepository();
+  const credentialTemplates = new MemoryCredentialUseCaseTemplateRepository();
   const cash = new MemoryCashRepository();
   const listings = new MemoryListingRepository();
   const documents = new MemoryDocumentRepository();
@@ -70,7 +72,7 @@ export async function buildTestApp(opts: { loginRateLimitMax?: number; platformF
   });
   // The suite makes many logins from one IP; raise the throttle unless a test opts into it.
   const deps: AppDeps = {
-    useCases, credentialUseCases, rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents, cashflows, proposals,
+    useCases, credentialUseCases, credentialTemplates, rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents, cashflows, proposals,
     organizations, credentials, verificationRequests, stagedInvoices, keystore, didMasterConfigured: opts.didMasterConfigured ?? true,
     challenges: createMemoryChallengeStore(), loginKeys: new MemoryLoginKeyRepository(), qrLogin: createMemoryQrLoginStore(), publicWebUrl: "http://localhost:5173", enabledDomains: opts.enabledDomains ?? ["tokenization", "identity"], trustedKycIssuers: opts.trustedKycIssuers,
     devIssuerSeed: opts.devIssuerSeed, isProduction: opts.isProduction,

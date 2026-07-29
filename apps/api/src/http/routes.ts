@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AssetRecord, CashflowRecord, CompanyProfile, CredentialRecord, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, invoiceFingerprint, issueCredential, issuerBindingAllows, normalizeUseCaseDefinition, PolicyError, presentCredential, presentCredentials, publicKeyFromDidKey, splitProRata, useCaseDomainOf, validateCredentialUseCase, validateMetadata, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type OrgType, type Role, type UseCaseDefinition } from "@tokenlayer/core";
+import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, issueCredential, issuerBindingAllows, normalizeUseCaseDefinition, PolicyError, presentCredential, presentCredentials, publicKeyFromDidKey, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateCredentialUseCase, validateMetadata, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type OrgType, type Role, type UseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
 import qrcode from "qrcode";
 import type { AppDeps } from "../context.js";
 import { isSupportedCurrency } from "../currencies.js";
@@ -189,7 +189,9 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const base = actorOf(request);
     const claims = request.user as TokenClaims;
     const useCaseDomain = await resolveUseCaseDomain(claims.useCaseKey);
-    return { ...base, useCaseDomain };
+    // useCaseKey mirrors the login response so a scoped desk operator's session
+    // principal is self-describing (role + scope + domain) from /me alone.
+    return { ...base, useCaseKey: claims.useCaseKey ?? null, useCaseDomain };
   });
 
   app.get("/config", { schema: S.config, ...auth }, async () => ({ domains: deps.enabledDomains }));
@@ -488,6 +490,230 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const updated = await deps.credentialUseCases.update(key, { ...def, ownerOrgId: def.ownerOrgId ?? existing.ownerOrgId ?? null });
     await deps.audit.append({ actorId: claims.id, action: "credential-usecase-updated" as LifecycleAction, payload: { key } });
     return reply.code(200).send(updated);
+  });
+
+  // --- credential use-case TEMPLATE catalog (ID-G) ------------------------
+  // Declarative, parameterized starting points for authoring a credential use
+  // case (distinct from the raw per-credential-type CREDENTIAL_TEMPLATES above
+  // at GET /credential-templates — that route is pre-existing and unrelated).
+  // Built-ins live in core (TEMPLATE_CATALOG); saved custom templates persist
+  // via deps.credentialTemplates. Reads are open to any authed user; saving is
+  // PlatformAdmin/OrgAdmin-only.
+  app.get("/credential-use-case-templates", { schema: S.listUseCaseTemplates, ...auth }, async () => {
+    const saved = await deps.credentialTemplates.list();
+    const all = [...TEMPLATE_CATALOG, ...saved];
+    return { templates: all.map(({ body, ...meta }) => meta) };
+  });
+
+  app.get("/credential-use-case-templates/:key", { schema: S.getUseCaseTemplate, ...auth }, async (request, reply) => {
+    const { key } = request.params as { key: string };
+    const builtIn = TEMPLATE_CATALOG.find((t) => t.key === key);
+    const t = builtIn ?? (await deps.credentialTemplates.get(key));
+    if (!t) return notFound(reply, `template '${key}' not found`);
+    return t;
+  });
+
+  app.post("/credential-use-case-templates", { schema: S.createUseCaseTemplate, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    if (claims.role !== "PlatformAdmin" && claims.role !== "OrgAdmin") {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "only a platform admin or org admin may save a credential-use-case template" });
+    }
+    const t = request.body as UseCaseTemplate;
+    try {
+      validateTemplate(t);
+    } catch (e) {
+      return reply.code(400).send({ error: "INVALID_TEMPLATE", message: (e as Error).message });
+    }
+    if (TEMPLATE_CATALOG.some((x) => x.key === t.key) || (await deps.credentialTemplates.get(t.key))) {
+      return reply.code(409).send({ error: "TEMPLATE_KEY_TAKEN", message: `template key '${t.key}' already exists` });
+    }
+    t.builtIn = false;
+    const created = await deps.credentialTemplates.create(t);
+    return reply.code(201).send(created);
+  });
+
+  app.post("/credential-use-case-templates/:key/preview", { schema: S.previewUseCaseTemplate, ...auth }, async (request, reply) => {
+    const { key } = request.params as { key: string };
+    const builtIn = TEMPLATE_CATALOG.find((t) => t.key === key);
+    const t = builtIn ?? (await deps.credentialTemplates.get(key));
+    if (!t) return notFound(reply, `template '${key}' not found`);
+    const b = request.body as { params?: Record<string, unknown> };
+    try {
+      return { definition: instantiateTemplate(t, b.params ?? {}) };
+    } catch (e) {
+      if (e instanceof PolicyError && e.code === "INVALID_TEMPLATE_PARAMS") {
+        return reply.code(400).send({ error: e.code, message: e.message, problems: (e.details as { problems?: string[] })?.problems ?? [] });
+      }
+      throw e;
+    }
+  });
+
+  // Validate + create a credential use case from a fully-bound definition, reusing
+  // the SAME checks as POST /credential-use-cases (referenced-org existence,
+  // cross-type KEY_TAKEN guard). Throws coded errors the provisioner maps to HTTP.
+  async function createCredentialUseCaseFromDef(def: CredentialUseCaseDefinition, ownerOrgId: string, actorId: string) {
+    if (await deps.credentialUseCases.has(def.key) || await deps.useCases.has(def.key)) {
+      throw coded(409, "KEY_TAKEN", `use-case key '${def.key}' already exists`);
+    }
+    const ids = new Set<string>();
+    if (def.issuer.kind === "org") ids.add(def.issuer.orgId);
+    if (def.holderPolicy.who === "specific") def.holderPolicy.orgIds.forEach((i) => ids.add(i));
+    if (def.verifier.kind === "orgs") def.verifier.orgIds.forEach((i) => ids.add(i));
+    const known = new Set<string>();
+    for (const id of ids) if (await deps.organizations.get(id).catch(() => null)) known.add(id);
+    try {
+      validateCredentialUseCase(def, { orgExists: (id) => known.has(id) });
+    } catch (err) {
+      throw coded(400, "INVALID_CREDENTIAL_USECASE", (err as Error).message);
+    }
+    const created = await deps.credentialUseCases.create({ ...def, ownerOrgId });
+    await deps.audit.append({ actorId, action: "credential-usecase-created" as LifecycleAction, payload: { key: def.key } });
+    return created;
+  }
+
+  // Create ONE scoped desk user (ID-F model: useCaseKey = the credential use
+  // case key, role ∈ {Issuer,Holder,Verifier}, identity domain). Provisioning is
+  // a single PlatformAdmin/OrgAdmin action, so rather than the two-party
+  // maker-checker HTTP dance we create the onboard-user proposal and immediately
+  // run its executor in-process (auto-approve): the underlying user-mint logic —
+  // password hash (done here), custodial DID mint, user row — is REUSED verbatim
+  // from onboardUserKind.execute, never duplicated. The plaintext password is
+  // generated here and returned to the caller exactly once.
+  async function provisionDeskUser(
+    email: string, role: Role, useCaseKey: string, actor: { id: string; role: Role; email: string }, log: FastifyRequest["log"],
+  ): Promise<{ email: string; password: string; role: Role }> {
+    const password = randomUUID().replace(/-/g, ""); // 32-hex one-time credential
+    const proposal = await deps.proposals.create({
+      useCaseKey, orgId: null, assetId: null, kind: "onboard-user",
+      payload: {
+        email, passwordHash: await bcrypt.hash(password, BCRYPT_ROUNDS),
+        role, useCaseKey, walletAddress: null, kyc: null,
+      },
+      proposerId: actor.id, proposerLabel: actor.email, required: 1,
+    });
+    try {
+      await proposalKind("onboard-user").execute({ deps, log }, { id: actor.id, role: actor.role }, proposal);
+    } catch (err) {
+      // A mid-provision executor failure must not strand a `pending` proposal in
+      // the store (it would otherwise be re-approvable out of band). Mark it
+      // failed, then re-throw so the caller sees the real error.
+      await deps.proposals.setStatus(proposal.id, "failed", (err as Error).message).catch(() => undefined);
+      throw err;
+    }
+    await deps.proposals.setStatus(proposal.id, "executed");
+    return { email, password, role };
+  }
+
+  // One-step enterprise provisioning from a template (ID-G G4): ensure the issuer
+  // org exists → instantiate the credential use case bound to that org → optionally
+  // create scoped Issuer/Holder/Verifier desk users. Idempotent. The bound issuer
+  // org stays the VC signer — provisioning only REBINDS def.issuer to the org.
+  app.post("/credential-use-cases/provision", { schema: S.provisionUseCase, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    if (claims.role !== "PlatformAdmin" && claims.role !== "OrgAdmin") {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "only a platform admin or org admin may provision a credential use case" });
+    }
+    if (!deps.didMasterConfigured && deps.isProduction) return reply.code(503).send({ error: "DID_KEYSTORE_UNCONFIGURED", message: "DID_MASTER_KEY must be set to provision" });
+    const b = request.body as {
+      templateKey: string;
+      params?: Record<string, unknown>;
+      provisioning?: {
+        issuerOrgName?: string; issuerOrgType?: OrgType;
+        createDeskUsers?: boolean; deskEmailDomain?: string; failIfExists?: boolean;
+      };
+    };
+    const params = b.params ?? {};
+    const prov = b.provisioning ?? {};
+
+    // 1. Resolve the template (built-in catalog first, then saved custom).
+    const t = TEMPLATE_CATALOG.find((x) => x.key === b.templateKey) ?? (await deps.credentialTemplates.get(b.templateKey));
+    if (!t) return notFound(reply, `template '${b.templateKey}' not found`);
+
+    // 2. Instantiate the definition (throws INVALID_TEMPLATE_PARAMS with problems).
+    let def: CredentialUseCaseDefinition;
+    try {
+      def = instantiateTemplate(t, params);
+    } catch (e) {
+      if (e instanceof PolicyError && e.code === "INVALID_TEMPLATE_PARAMS") {
+        return reply.code(400).send({ error: e.code, message: e.message, problems: (e.details as { problems?: string[] })?.problems ?? [] });
+      }
+      throw e;
+    }
+
+    // 3. Ensure the issuer org, then REBIND the definition's issuer to it.
+    const orgName = prov.issuerOrgName ?? (params.issuerOrgName as string | undefined);
+    if (!orgName) return reply.code(400).send({ error: "MISSING_ISSUER_ORG", message: "issuerOrgName is required (in params or provisioning)" });
+    let org: OrganizationRecord;
+    if (claims.role === "OrgAdmin") {
+      // An OrgAdmin may only provision for their OWN org — never create a new one
+      // (org creation is PlatformAdmin-only) and never bind to a foreign org.
+      const own = claims.orgId ? await deps.organizations.get(claims.orgId) : null;
+      if (!own || own.name !== orgName) {
+        return reply.code(403).send({ error: "FORBIDDEN", message: "an org admin may only provision for their own organization" });
+      }
+      org = own;
+    } else {
+      try {
+        org = await ensureOrg(orgName, prov.issuerOrgType ?? "verifier", { actorId: claims.id });
+      } catch (err) {
+        if (err instanceof CodedError && err.code === "REGISTRY_UNAVAILABLE") return reply.code(502).send({ error: err.code, message: err.message });
+        throw err;
+      }
+    }
+    def = { ...def, issuer: { kind: "org", orgId: org.id } };
+
+    // 4. Create the use case, or rebind an existing one (idempotent unless failIfExists).
+    let useCase;
+    let created = false;
+    const existing = await deps.credentialUseCases.get(def.key);
+    if (existing) {
+      // A re-provision may only rebind a use case the caller legitimately owns:
+      // a PlatformAdmin may re-provision any; an OrgAdmin only one already owned by
+      // their org. Otherwise an OrgAdmin could HIJACK a foreign-owned use case via
+      // a slug collision (def.key is a non-injective org-name slug) and become its
+      // VC signer. A null ownerOrgId (e.g. a legacy platform-owned record) also
+      // fails `!== org.id`, correctly 403ing any non-platform caller.
+      if (claims.role !== "PlatformAdmin" && existing.ownerOrgId !== org.id) {
+        return reply.code(403).send({ error: "FORBIDDEN", message: `credential use-case '${def.key}' is owned by another organization` });
+      }
+      if (prov.failIfExists) return reply.code(409).send({ error: "KEY_TAKEN", message: `credential use-case '${def.key}' already exists` });
+      // Rebind the issuer (and owner) to the resolved org — the rest of the def is
+      // deterministic from the template + params, so a re-provision is a no-op.
+      try {
+        validateCredentialUseCase(def, { orgExists: (id) => id === org.id });
+      } catch (err) {
+        return reply.code(400).send({ error: "INVALID_CREDENTIAL_USECASE", message: (err as Error).message });
+      }
+      useCase = await deps.credentialUseCases.update(def.key, { ...def, ownerOrgId: org.id });
+    } else {
+      try {
+        useCase = await createCredentialUseCaseFromDef(def, org.id, claims.id);
+        created = true;
+      } catch (err) {
+        if (err instanceof CodedError) return reply.code(err.statusCode).send({ error: err.code, message: err.message });
+        throw err;
+      }
+    }
+
+    // 5. Optionally create scoped desk users (idempotent: pre-existing emails are
+    // skipped and omitted from the response — only NEWLY-created users carry a
+    // one-time plaintext password back).
+    const deskUsers: Array<{ email: string; password: string; role: Role }> = [];
+    if (prov.createDeskUsers) {
+      const domain = prov.deskEmailDomain;
+      if (!domain) return reply.code(400).send({ error: "MISSING_DESK_EMAIL_DOMAIN", message: "deskEmailDomain is required when createDeskUsers is true" });
+      for (const role of ["Issuer", "Holder", "Verifier"] as const) {
+        const email = `${role.toLowerCase()}@${domain}`;
+        if (await deps.users.findByEmail(email)) continue; // idempotent: already provisioned
+        deskUsers.push(await provisionDeskUser(email, role, def.key, { id: claims.id, role: claims.role, email: claims.email }, request.log));
+      }
+    }
+
+    return reply.code(created ? 201 : 200).send({
+      org: { id: org.id, name: org.name, did: org.did },
+      useCase,
+      deskUsers,
+    });
   });
 
   // A shared issuer-authorization helper: resolve the bound issuer org + confirm
@@ -1737,13 +1963,20 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return reply.code(202).send({ organizationId: org.id, status: org.status });
   });
 
-  app.post("/orgs", { schema: S.createOrg, ...auth }, async (request, reply) => {
-    const claims = request.user as TokenClaims;
-    if (claims.role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only the Platform Admin may create organizations" });
-    if (!deps.didMasterConfigured && deps.isProduction) return reply.code(503).send({ error: "DID_KEYSTORE_UNCONFIGURED", message: "DID_MASTER_KEY must be set to create organizations" });
-    const b = request.body as { name: string; orgType: "bank" | "corporate" | "msme" | "government" | "verifier"; registrationId?: string; jurisdiction?: string };
-    if (await deps.organizations.findByName(b.name)) return reply.code(409).send({ error: "NAME_TAKEN", message: "an organization with that name already exists" });
-    if (b.registrationId && (await deps.organizations.findByRegistrationId(b.registrationId))) return reply.code(409).send({ error: "REGISTRATION_TAKEN", message: "an organization with that registration id already exists" });
+  // Find-by-name-or-create an ACTIVE, verified org with a fresh custodial DID.
+  // Extracted from POST /orgs (below) so the template provisioner can reuse the
+  // EXACT create internals (seed → encrypt → on-chain register → persist →
+  // audit). Idempotent on name: an existing org is returned untouched, which is
+  // what makes provisioning re-runnable. Throws coded(502) on registry failure;
+  // callers map that to the same 502 the direct route returned (the shared error
+  // handler only maps 4xx CodedErrors, so a 502 must be caught explicitly).
+  async function ensureOrg(
+    name: string,
+    orgType: OrgType,
+    opts: { registrationId?: string | null; jurisdiction?: string | null; actorId?: string } = {},
+  ): Promise<OrganizationRecord> {
+    const existing = await deps.organizations.findByName(name);
+    if (existing) return existing;
     const seed = deps.keystore.newSeed();
     const didSeedEncrypted = deps.keystore.encryptSeed(seed);
     const did = deps.keystore.keyOf(didSeedEncrypted).did;
@@ -1754,15 +1987,35 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       try {
         await deps.registry.anchor.registerDid(deps.registry.didRegistry, did);
       } catch (err) {
-        request.log.error({ err }, "org DID registration failed");
-        return reply.code(502).send({ error: "REGISTRY_UNAVAILABLE", message: "could not register the organization's DID on-chain — no organization was created" });
+        app.log.error({ err }, "org DID registration failed");
+        throw coded(502, "REGISTRY_UNAVAILABLE", "could not register the organization's DID on-chain — no organization was created");
       }
     }
     const org = await deps.organizations.create({
-      name: b.name, orgType: b.orgType, registrationId: b.registrationId ?? null, jurisdiction: b.jurisdiction ?? null,
+      name, orgType, registrationId: opts.registrationId ?? null, jurisdiction: opts.jurisdiction ?? null,
       did, didSeedEncrypted, status: "active", verified: true, verifiedAt: new Date().toISOString(), companyProfile: null,
     });
-    await deps.audit.append({ actorId: claims.id, action: "org-created" as LifecycleAction, payload: { orgId: org.id, name: org.name, did: org.did } });
+    await deps.audit.append({ actorId: opts.actorId ?? "provisioning", action: "org-created" as LifecycleAction, payload: { orgId: org.id, name: org.name, did: org.did } });
+    return org;
+  }
+
+  app.post("/orgs", { schema: S.createOrg, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    if (claims.role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only the Platform Admin may create organizations" });
+    if (!deps.didMasterConfigured && deps.isProduction) return reply.code(503).send({ error: "DID_KEYSTORE_UNCONFIGURED", message: "DID_MASTER_KEY must be set to create organizations" });
+    const b = request.body as { name: string; orgType: "bank" | "corporate" | "msme" | "government" | "verifier"; registrationId?: string; jurisdiction?: string };
+    // POST /orgs keeps its explicit name-taken guard (a duplicate is a 409 here,
+    // whereas ensureOrg deliberately RETURNS the existing org for the idempotent
+    // provisioner). After this guard the name is free, so ensureOrg always creates.
+    if (await deps.organizations.findByName(b.name)) return reply.code(409).send({ error: "NAME_TAKEN", message: "an organization with that name already exists" });
+    if (b.registrationId && (await deps.organizations.findByRegistrationId(b.registrationId))) return reply.code(409).send({ error: "REGISTRATION_TAKEN", message: "an organization with that registration id already exists" });
+    let org: OrganizationRecord;
+    try {
+      org = await ensureOrg(b.name, b.orgType, { registrationId: b.registrationId ?? null, jurisdiction: b.jurisdiction ?? null, actorId: claims.id });
+    } catch (err) {
+      if (err instanceof CodedError && err.code === "REGISTRY_UNAVAILABLE") return reply.code(502).send({ error: err.code, message: err.message });
+      throw err;
+    }
     return reply.code(201).send({ id: org.id, name: org.name, did: org.did, orgType: org.orgType, registrationId: org.registrationId, jurisdiction: org.jurisdiction, verified: org.verified, status: org.status });
   });
 

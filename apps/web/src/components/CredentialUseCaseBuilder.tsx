@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "../api.js";
 import { useAuth } from "../auth.js";
-import type { CredentialTypeSpec, CredentialUseCase, HolderPolicy, IssuerBinding, Organization, OrgType, VerifierBinding } from "../types.js";
+import type { CredentialTypeSpec, CredentialUseCase, HolderPolicy, IssuerBinding, Organization, OrgType, UseCaseTemplate, VerifierBinding } from "../types.js";
 import { SchemaFieldEditor, fieldsToSchema, type FieldKind, type FieldRow } from "./SchemaFieldEditor.js";
 import { Icon } from "./ui.js";
 
@@ -80,6 +80,15 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Step 4 — save as template (a lightweight, unparameterized snapshot of the
+  // authored definition — see buildTemplate below).
+  const [showSaveTemplate, setShowSaveTemplate] = useState(false);
+  const [templateName, setTemplateName] = useState("");
+  const [templateCategory, setTemplateCategory] = useState("");
+  const [templateBusy, setTemplateBusy] = useState(false);
+  const [templateError, setTemplateError] = useState<string | null>(null);
+  const [templateSaved, setTemplateSaved] = useState(false);
+
   useEffect(() => {
     if (!token) return;
     void api.credentialTemplates(token).then(setTemplates).catch(() => setTemplates({}));
@@ -152,6 +161,55 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
       holderPolicy,
       verifier,
     };
+  }
+
+  /** Turn the currently-authored definition into a saveable, unparameterized
+   * `UseCaseTemplate` — `parameters: []` and a `body` whose keyTemplate/nameTemplate
+   * are the literal current key/name (no `${param}` interpolation). This mirrors
+   * the definition exactly, so instantiating the saved template always reproduces
+   * this same use case.
+   * TODO(ID-G follow-up): offer turning specific fields (issuer org name, validity
+   * days, etc.) into real `${param}` placeholders so a saved template can be
+   * reused across issuers instead of only replaying this one configuration. */
+  function buildTemplate(tName: string, category: string): UseCaseTemplate {
+    const def = buildDefinition();
+    return {
+      key: slugify(tName) || def.key,
+      name: tName.trim(),
+      category: category.trim() || "custom",
+      parameters: [],
+      body: {
+        keyTemplate: def.key,
+        nameTemplate: def.name,
+        descriptionTemplate: def.description,
+        credentialTypes: def.credentialTypes.map((ct) => ({
+          name: ct.name,
+          title: ct.title,
+          validityDays: ct.validityDays,
+          requiredApprovals: ct.requiredApprovals,
+          required: ct.claimSchema.required ?? [],
+          properties: ct.claimSchema.properties,
+        })),
+        holderPolicy: def.holderPolicy,
+        verifier: def.verifier,
+      },
+      builtIn: false,
+    };
+  }
+
+  async function saveAsTemplate(): Promise<void> {
+    if (!token) return;
+    setTemplateBusy(true);
+    setTemplateError(null);
+    try {
+      await api.saveUseCaseTemplate(token, buildTemplate(templateName, templateCategory));
+      setTemplateSaved(true);
+      setShowSaveTemplate(false);
+    } catch (err) {
+      setTemplateError(err instanceof ApiError ? err.message : "Could not save template");
+    } finally {
+      setTemplateBusy(false);
+    }
   }
 
   async function create(): Promise<void> {
@@ -404,6 +462,59 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
                 </SummaryTile>
               </div>
               {error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2">{error}</div>}
+
+              <div className="rounded-xl border border-slate-200 p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Save as template</div>
+                    <p className="text-[11px] text-slate-400 mt-0.5">Publish this configuration to the template catalog so it can be provisioned again later.</p>
+                  </div>
+                  {!showSaveTemplate && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTemplateName(name);
+                        setShowSaveTemplate(true);
+                        setTemplateSaved(false);
+                      }}
+                      disabled={!canCreate}
+                      className="rounded-lg border border-slate-200 text-slate-600 px-3 py-1.5 text-xs font-medium hover:border-brand-400 hover:text-brand-700 disabled:opacity-40 shrink-0"
+                    >
+                      Save as template
+                    </button>
+                  )}
+                </div>
+                {showSaveTemplate && (
+                  <div className="grid sm:grid-cols-2 gap-3 mt-3">
+                    <L label="Template name">
+                      <input className="input" value={templateName} onChange={(e) => setTemplateName(e.target.value)} placeholder="e.g. Corporate KYC" />
+                    </L>
+                    <L label="Category">
+                      <input className="input" value={templateCategory} onChange={(e) => setTemplateCategory(e.target.value)} placeholder="e.g. Corporate" />
+                    </L>
+                    <div className="sm:col-span-2 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void saveAsTemplate()}
+                        disabled={templateBusy || !templateName.trim() || !templateCategory.trim()}
+                        className="rounded-lg bg-brand-600 text-white px-4 py-1.5 text-sm font-semibold hover:bg-brand-700 disabled:opacity-50"
+                      >
+                        {templateBusy ? "Saving…" : "Save template"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowSaveTemplate(false)}
+                        disabled={templateBusy}
+                        className="rounded-lg border border-slate-200 text-slate-600 px-3.5 py-1.5 text-sm font-medium hover:border-brand-400 hover:text-brand-700"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                    {templateError && <div className="sm:col-span-2 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs px-3 py-1.5">{templateError}</div>}
+                  </div>
+                )}
+                {templateSaved && !showSaveTemplate && <p className="text-xs text-emerald-600 mt-2">Template saved — it now appears in the provisioning catalog.</p>}
+              </div>
             </div>
           )}
 
