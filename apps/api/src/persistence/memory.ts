@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { auditGenesis, auditEntryHash, normalizeUseCaseDefinition, PolicyError, type UseCaseDefinition, type CredentialUseCaseDefinition } from "@tokenlayer/core";
+import { auditGenesis, auditEntryHash, normalizeUseCaseDefinition, PolicyError, type UseCaseDefinition, type CredentialUseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
 import type {
   AccountRecord,
   AccountRepository,
@@ -37,6 +37,7 @@ import type {
   StagedInvoiceRepository,
   StagedInvoiceStatus,
   CredentialUseCaseRepository,
+  CredentialUseCaseTemplateRepository,
   UseCaseRepository,
   UserRecord,
   UserRepository,
@@ -215,6 +216,17 @@ export class MemoryCredentialUseCaseRepository implements CredentialUseCaseRepos
   async list(): Promise<CredentialUseCaseDefinition[]> { return [...this.store.values()].map((d) => ({ ...d })); }
   async update(key: string, def: CredentialUseCaseDefinition): Promise<CredentialUseCaseDefinition> {
     this.store.set(key, { ...def }); return { ...def };
+  }
+}
+
+export class MemoryCredentialUseCaseTemplateRepository implements CredentialUseCaseTemplateRepository {
+  private store = new Map<string, UseCaseTemplate>();
+  async list(): Promise<UseCaseTemplate[]> { return [...this.store.values()].map((t) => ({ ...t })); }
+  async get(key: string): Promise<UseCaseTemplate | null> {
+    const t = this.store.get(key); return t ? { ...t } : null;
+  }
+  async create(t: UseCaseTemplate): Promise<UseCaseTemplate> {
+    this.store.set(t.key, { ...t }); return { ...t };
   }
 }
 

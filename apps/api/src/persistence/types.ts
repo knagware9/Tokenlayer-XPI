@@ -1,4 +1,4 @@
-import type { Role, TokenStandard, TokenType, LifecycleAction, OrgType, UseCaseDefinition, UseCaseSource, CredentialUseCaseDefinition } from "@tokenlayer/core";
+import type { Role, TokenStandard, TokenType, LifecycleAction, OrgType, UseCaseDefinition, UseCaseSource, CredentialUseCaseDefinition, UseCaseTemplate } from "@tokenlayer/core";
 
 export type { OrgType };
 
@@ -157,6 +157,13 @@ export interface CredentialUseCaseRepository {
   has(key: string): Promise<boolean>;
   list(): Promise<CredentialUseCaseDefinition[]>;
   update(key: string, def: CredentialUseCaseDefinition): Promise<CredentialUseCaseDefinition>;
+}
+
+/** Customer-saved use-case templates (built-in templates live in TEMPLATE_CATALOG, not persisted). */
+export interface CredentialUseCaseTemplateRepository {
+  list(): Promise<UseCaseTemplate[]>;
+  get(key: string): Promise<UseCaseTemplate | null>;
+  create(t: UseCaseTemplate): Promise<UseCaseTemplate>;
 }
 
 /** A secondary-market sell listing. `quantity` is the REMAINING quantity. */

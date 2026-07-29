@@ -12,6 +12,7 @@ import {
   type TokenType,
   type UseCaseDefinition,
   type CredentialUseCaseDefinition,
+  type UseCaseTemplate,
 } from "@tokenlayer/core";
 import type {
   AccountRecord,
@@ -54,6 +55,7 @@ import type {
   StagedInvoiceRepository,
   StagedInvoiceStatus,
   CredentialUseCaseRepository,
+  CredentialUseCaseTemplateRepository,
   UseCaseRepository,
   UserRecord,
   UserRepository,
@@ -482,6 +484,31 @@ export class PrismaCredentialUseCaseRepository implements CredentialUseCaseRepos
       holderPolicy: JSON.stringify(def.holderPolicy), verifier: JSON.stringify(def.verifier),
       ownerOrgId: def.ownerOrgId ?? null } });
     return toCredentialUseCase(r);
+  }
+}
+
+function toCredentialUseCaseTemplate(r: {
+  key: string; name: string; category: string; description: string | null;
+  parameters: string; body: string;
+}): UseCaseTemplate {
+  return {
+    key: r.key, name: r.name, category: r.category, description: r.description ?? undefined,
+    parameters: JSON.parse(r.parameters), body: JSON.parse(r.body),
+  };
+}
+export class PrismaCredentialUseCaseTemplateRepository implements CredentialUseCaseTemplateRepository {
+  async list(): Promise<UseCaseTemplate[]> {
+    return (await prisma.credentialUseCaseTemplate.findMany({ orderBy: { createdAt: "asc" } })).map(toCredentialUseCaseTemplate);
+  }
+  async get(key: string): Promise<UseCaseTemplate | null> {
+    const r = await prisma.credentialUseCaseTemplate.findUnique({ where: { key } });
+    return r ? toCredentialUseCaseTemplate(r) : null;
+  }
+  async create(t: UseCaseTemplate): Promise<UseCaseTemplate> {
+    const r = await prisma.credentialUseCaseTemplate.create({ data: {
+      key: t.key, name: t.name, category: t.category, description: t.description ?? null,
+      parameters: JSON.stringify(t.parameters), body: JSON.stringify(t.body) } });
+    return toCredentialUseCaseTemplate(r);
   }
 }
 
