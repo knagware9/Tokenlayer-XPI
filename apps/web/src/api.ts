@@ -1,4 +1,4 @@
-import type { AccountState, ActivityEvent, AnalyticsSummary, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, ChainInfo, ChainStatus, CompanyCategory, ContractCode, CredentialStatusInfo, CredentialTypeInfo, CredentialTypeSpec, CredentialUseCase, DidDocument, EligibleHolder, HeldCredential, IdentityRegistryInfo, IdentityResult, InvoiceRowResult, IssuedCredential, Listing, LoginKeyInfo, OrgMember, OrgType, Organization, Portfolio, Proposal, QrLoginPoll, QrLoginStart, Role, SessionUser, StagedInvoice, TokenInfo, TokenStandard, TokenizeResult, Trade, UseCase, VerificationRequest, VerificationResult } from "./types.js";
+import type { AccountState, ActivityEvent, AnalyticsSummary, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, ChainInfo, ChainStatus, CompanyCategory, ContractCode, CredentialStatusInfo, CredentialTypeInfo, CredentialTypeSpec, CredentialUseCase, DidDocument, EligibleHolder, HeldCredential, IdentityRegistryInfo, IdentityResult, InvoiceRowResult, IssuedCredential, Listing, LoginKeyInfo, OrgMember, OrgType, Organization, Portfolio, ProvisionResult, Proposal, QrLoginPoll, QrLoginStart, Role, SessionUser, StagedInvoice, TokenInfo, TokenStandard, TokenizeResult, Trade, UseCase, UseCaseTemplate, UseCaseTemplateMeta, VerificationRequest, VerificationResult } from "./types.js";
 
 export interface Currency { code: string; label: string; }
 export interface CashBalance { currency: string; address: string; amount: string; }
@@ -225,4 +225,11 @@ export const api = {
   qrAuthenticate: (id: string, body: { did: string; signature: string }) =>
     request<{ ok: boolean }>(`/auth/qr/${encodeURIComponent(id)}/authenticate`, null, { method: "POST", body: JSON.stringify(body) }),
   config: (token: string) => request<{ domains: string[] }>("/config", token),
+  credentialUseCaseTemplates: (token: string) => request<{ templates: UseCaseTemplateMeta[] }>("/credential-use-case-templates", token),
+  credentialUseCaseTemplate: (token: string, key: string) => request<UseCaseTemplate>(`/credential-use-case-templates/${encodeURIComponent(key)}`, token),
+  saveUseCaseTemplate: (token: string, body: UseCaseTemplate) => request<UseCaseTemplate>("/credential-use-case-templates", token, { method: "POST", body: JSON.stringify(body) }),
+  previewUseCaseTemplate: (token: string, key: string, params: Record<string, unknown>) =>
+    request<{ definition: unknown }>(`/credential-use-case-templates/${encodeURIComponent(key)}/preview`, token, { method: "POST", body: JSON.stringify({ params }) }),
+  provisionUseCase: (token: string, body: { templateKey: string; params: Record<string, unknown>; provisioning: { issuerOrgName: string; issuerOrgType?: string; createDeskUsers: boolean; deskEmailDomain?: string; failIfExists?: boolean } }) =>
+    request<ProvisionResult>("/credential-use-cases/provision", token, { method: "POST", body: JSON.stringify(body) }),
 };

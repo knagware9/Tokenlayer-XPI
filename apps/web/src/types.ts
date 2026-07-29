@@ -439,6 +439,13 @@ export type HolderPolicy = { who: "any-onboarded" } | { who: "orgType"; orgTypes
 export type VerifierBinding = { kind: "any" } | { kind: "orgs"; orgIds: string[] };
 export interface CredentialUseCase { key: string; name: string; description?: string; credentialTypes: CredentialTypeSpec[]; issuer: IssuerBinding; holderPolicy: HolderPolicy; verifier: VerifierBinding; ownerOrgId?: string | null; status?: string; }
 
+export type TemplateParamType = "text" | "number" | "enum" | "boolean";
+export interface TemplateParam { name: string; label: string; type: TemplateParamType; required: boolean; default?: string | number | boolean; options?: string[]; min?: number; max?: number; help?: string; }
+export interface UseCaseTemplateMeta { key: string; name: string; category: string; description?: string; parameters: TemplateParam[]; builtIn?: boolean; }
+export interface UseCaseTemplate extends UseCaseTemplateMeta { body: unknown; } // body shape is server-owned; opaque to the client
+export interface ProvisionedDeskUser { email: string; password: string; role: "Issuer" | "Holder" | "Verifier"; }
+export interface ProvisionResult { org: { id: string; name: string; did: string }; useCase: CredentialUseCase; deskUsers: ProvisionedDeskUser[]; }
+
 export interface LoginKeyInfo { id: string; did: string; label: string; createdAt: string; lastUsedAt: string | null; }
 export interface QrLoginStart { sessionId: string; challenge: string; signUrl: string; qrSvg: string; expiresAt: string; }
 export interface QrLoginPoll { status: "pending" | "authenticated" | "consumed" | "expired"; token?: string; user?: SessionUser; }
