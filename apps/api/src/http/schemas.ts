@@ -576,6 +576,30 @@ export const S: Record<string, FastifySchema> = {
     response: { 200: { $ref: "CredentialUseCase#" }, ...errs(400, 401, 403, 404) },
   },
 
+  listUseCaseTemplates: {
+    tags: ["Credential Use Cases"], summary: "List the credential-use-case template catalog (built-in + saved)", security: bearer,
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(401) },
+  },
+  getUseCaseTemplate: {
+    tags: ["Credential Use Cases"], summary: "Get a credential-use-case template by key (built-in or saved)", security: bearer,
+    params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 404) },
+  },
+  createUseCaseTemplate: {
+    tags: ["Credential Use Cases"], summary: "Save a custom credential-use-case template (PlatformAdmin/OrgAdmin)", security: bearer,
+    body: { type: "object", additionalProperties: true, required: ["key", "name", "category", "parameters", "body"] },
+    response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 409) },
+  },
+  previewUseCaseTemplate: {
+    tags: ["Credential Use Cases"], summary: "Preview the CredentialUseCaseDefinition a template instantiates to, given param values", security: bearer,
+    params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
+    body: { type: "object", additionalProperties: true, properties: { params: { type: "object", additionalProperties: true } } },
+    // 400 is overridden (not the shared Error# ref) so `problems` — an array of
+    // human-readable per-param validation failures — survives fast-json-stringify's
+    // response serialization instead of being stripped as an unlisted property.
+    response: { 200: { type: "object", additionalProperties: true }, 400: { type: "object", additionalProperties: true }, ...errs(401, 404) },
+  },
+
   issueAsset: {
     tags: ["Assets"], summary: "Issue (tokenize) a new asset", security: bearer,
     body: {

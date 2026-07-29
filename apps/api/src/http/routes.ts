@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AssetRecord, CashflowRecord, CompanyProfile, CredentialRecord, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, invoiceFingerprint, issueCredential, issuerBindingAllows, normalizeUseCaseDefinition, PolicyError, presentCredential, presentCredentials, publicKeyFromDidKey, splitProRata, useCaseDomainOf, validateCredentialUseCase, validateMetadata, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type OrgType, type Role, type UseCaseDefinition } from "@tokenlayer/core";
+import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, issueCredential, issuerBindingAllows, normalizeUseCaseDefinition, PolicyError, presentCredential, presentCredentials, publicKeyFromDidKey, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateCredentialUseCase, validateMetadata, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type OrgType, type Role, type UseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
 import qrcode from "qrcode";
 import type { AppDeps } from "../context.js";
 import { isSupportedCurrency } from "../currencies.js";
@@ -488,6 +488,62 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const updated = await deps.credentialUseCases.update(key, { ...def, ownerOrgId: def.ownerOrgId ?? existing.ownerOrgId ?? null });
     await deps.audit.append({ actorId: claims.id, action: "credential-usecase-updated" as LifecycleAction, payload: { key } });
     return reply.code(200).send(updated);
+  });
+
+  // --- credential use-case TEMPLATE catalog (ID-G) ------------------------
+  // Declarative, parameterized starting points for authoring a credential use
+  // case (distinct from the raw per-credential-type CREDENTIAL_TEMPLATES above
+  // at GET /credential-templates — that route is pre-existing and unrelated).
+  // Built-ins live in core (TEMPLATE_CATALOG); saved custom templates persist
+  // via deps.credentialTemplates. Reads are open to any authed user; saving is
+  // PlatformAdmin/OrgAdmin-only.
+  app.get("/credential-use-case-templates", { schema: S.listUseCaseTemplates, ...auth }, async () => {
+    const saved = await deps.credentialTemplates.list();
+    const all = [...TEMPLATE_CATALOG, ...saved];
+    return { templates: all.map(({ body, ...meta }) => meta) };
+  });
+
+  app.get("/credential-use-case-templates/:key", { schema: S.getUseCaseTemplate, ...auth }, async (request, reply) => {
+    const { key } = request.params as { key: string };
+    const builtIn = TEMPLATE_CATALOG.find((t) => t.key === key);
+    const t = builtIn ?? (await deps.credentialTemplates.get(key));
+    if (!t) return notFound(reply, `template '${key}' not found`);
+    return t;
+  });
+
+  app.post("/credential-use-case-templates", { schema: S.createUseCaseTemplate, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    if (claims.role !== "PlatformAdmin" && claims.role !== "OrgAdmin") {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "only a platform admin or org admin may save a credential-use-case template" });
+    }
+    const t = request.body as UseCaseTemplate;
+    try {
+      validateTemplate(t);
+    } catch (e) {
+      return reply.code(400).send({ error: "INVALID_TEMPLATE", message: (e as Error).message });
+    }
+    if (TEMPLATE_CATALOG.some((x) => x.key === t.key) || (await deps.credentialTemplates.get(t.key))) {
+      return reply.code(409).send({ error: "TEMPLATE_KEY_TAKEN", message: `template key '${t.key}' already exists` });
+    }
+    t.builtIn = false;
+    const created = await deps.credentialTemplates.create(t);
+    return reply.code(201).send(created);
+  });
+
+  app.post("/credential-use-case-templates/:key/preview", { schema: S.previewUseCaseTemplate, ...auth }, async (request, reply) => {
+    const { key } = request.params as { key: string };
+    const builtIn = TEMPLATE_CATALOG.find((t) => t.key === key);
+    const t = builtIn ?? (await deps.credentialTemplates.get(key));
+    if (!t) return notFound(reply, `template '${key}' not found`);
+    const b = request.body as { params?: Record<string, unknown> };
+    try {
+      return { definition: instantiateTemplate(t, b.params ?? {}) };
+    } catch (e) {
+      if (e instanceof PolicyError && e.code === "INVALID_TEMPLATE_PARAMS") {
+        return reply.code(400).send({ error: e.code, message: e.message, problems: (e.details as { problems?: string[] })?.problems ?? [] });
+      }
+      throw e;
+    }
   });
 
   // A shared issuer-authorization helper: resolve the bound issuer org + confirm
