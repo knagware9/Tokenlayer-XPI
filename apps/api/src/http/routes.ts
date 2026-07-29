@@ -591,7 +591,15 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       },
       proposerId: actor.id, proposerLabel: actor.email, required: 1,
     });
-    await proposalKind("onboard-user").execute({ deps, log }, { id: actor.id, role: actor.role }, proposal);
+    try {
+      await proposalKind("onboard-user").execute({ deps, log }, { id: actor.id, role: actor.role }, proposal);
+    } catch (err) {
+      // A mid-provision executor failure must not strand a `pending` proposal in
+      // the store (it would otherwise be re-approvable out of band). Mark it
+      // failed, then re-throw so the caller sees the real error.
+      await deps.proposals.setStatus(proposal.id, "failed", (err as Error).message).catch(() => undefined);
+      throw err;
+    }
     await deps.proposals.setStatus(proposal.id, "executed");
     return { email, password, role };
   }
@@ -659,6 +667,15 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     let created = false;
     const existing = await deps.credentialUseCases.get(def.key);
     if (existing) {
+      // A re-provision may only rebind a use case the caller legitimately owns:
+      // a PlatformAdmin may re-provision any; an OrgAdmin only one already owned by
+      // their org. Otherwise an OrgAdmin could HIJACK a foreign-owned use case via
+      // a slug collision (def.key is a non-injective org-name slug) and become its
+      // VC signer. A null ownerOrgId (e.g. a legacy platform-owned record) also
+      // fails `!== org.id`, correctly 403ing any non-platform caller.
+      if (claims.role !== "PlatformAdmin" && existing.ownerOrgId !== org.id) {
+        return reply.code(403).send({ error: "FORBIDDEN", message: `credential use-case '${def.key}' is owned by another organization` });
+      }
       if (prov.failIfExists) return reply.code(409).send({ error: "KEY_TAKEN", message: `credential use-case '${def.key}' already exists` });
       // Rebind the issuer (and owner) to the resolved org — the rest of the def is
       // deterministic from the template + params, so a re-provision is a no-op.

@@ -267,6 +267,52 @@ describe("POST /credential-use-cases/provision", () => {
     expect(ok.statusCode).toBe(201);
     expect(ok.json().org.id).toBe(orgA.id);
     expect(ok.json().useCase.issuer.orgId).toBe(orgA.id);
+
+    // Re-provisioning their OWN use case is idempotent (rebind → 200, still theirs).
+    const again = await app.inject({
+      method: "POST", url: `${V1}${PROVISION}`, headers: auth(orgAdmin),
+      payload: { templateKey: "education-certificate", params: { issuerOrgName: "Scoped University" }, provisioning: { createDeskUsers: false } },
+    });
+    expect(again.statusCode).toBe(200);
+    expect(again.json().useCase.issuer.orgId).toBe(orgA.id);
+    await app.close();
+  });
+
+  it("an OrgAdmin cannot HIJACK a foreign-owned use case via a slug collision (403)", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+
+    // PlatformAdmin provisions the use case for "Foreign University" — key
+    // education-foreign-university, owned by THAT org.
+    const foreign = await app.inject({
+      method: "POST", url: `${V1}${PROVISION}`, headers: auth(admin),
+      payload: { templateKey: "education-certificate", params: { issuerOrgName: "Foreign University" }, provisioning: { issuerOrgType: "government", createDeskUsers: false } },
+    });
+    expect(foreign.statusCode).toBe(201);
+    const foreignOrgId = foreign.json().org.id as string;
+    const collidingKey = foreign.json().useCase.key as string; // education-foreign-university
+
+    // A DIFFERENT org whose distinct exact name slugs to the SAME key.
+    const attacker = (await app.inject({ method: "POST", url: `${V1}/orgs`, headers: auth(admin), payload: { name: "Foreign-University", orgType: "corporate" } })).json();
+    expect(attacker.id).not.toBe(foreignOrgId);
+    const mk = await app.inject({
+      method: "POST", url: `${V1}/orgs/${attacker.id}/users`, headers: auth(admin),
+      payload: { email: `orgadmin.${attacker.id}@x.io`, password: "secret1", role: "OrgAdmin" },
+    });
+    expect(mk.statusCode).toBe(201);
+    const attackerAdmin = await loginAs(app, `orgadmin.${attacker.id}@x.io`, "secret1");
+
+    // The attacker OrgAdmin provisions for their OWN org name, which slugs to the
+    // foreign-owned key → the ownership gate must 403 (no hijack of the VC signer).
+    const hijack = await app.inject({
+      method: "POST", url: `${V1}${PROVISION}`, headers: auth(attackerAdmin),
+      payload: { templateKey: "education-certificate", params: { issuerOrgName: "Foreign-University" }, provisioning: { createDeskUsers: false } },
+    });
+    expect(hijack.statusCode).toBe(403);
+
+    // The use case is untouched: still bound to the original foreign org.
+    const uc = await app.inject({ method: "GET", url: `${V1}/credential-use-cases/${collidingKey}`, headers: auth(admin) });
+    expect(uc.json().issuer.orgId).toBe(foreignOrgId);
     await app.close();
   });
 });
