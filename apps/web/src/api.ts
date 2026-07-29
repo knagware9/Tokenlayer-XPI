@@ -17,8 +17,17 @@ export class ApiError extends Error {
     message: string,
     readonly status: number,
     readonly code?: string,
+    /** The parsed error body, when the server returned JSON. Lets callers read
+     * structured detail such as a 400's `problems: string[]` list. */
+    readonly body?: unknown,
   ) {
     super(message);
+  }
+
+  /** Convenience accessor for a validation-style `problems` array on the body. */
+  get problems(): string[] | undefined {
+    const p = (this.body as { problems?: unknown } | null | undefined)?.problems;
+    return Array.isArray(p) ? p.filter((x): x is string => typeof x === "string") : undefined;
   }
 }
 
@@ -34,7 +43,7 @@ async function request<T>(path: string, token: string | null, init: RequestInit 
   const text = await res.text();
   const body = text ? JSON.parse(text) : null;
   if (!res.ok) {
-    throw new ApiError(body?.message ?? body?.error ?? res.statusText, res.status, body?.error);
+    throw new ApiError(body?.message ?? body?.error ?? res.statusText, res.status, body?.error, body);
   }
   return body as T;
 }
