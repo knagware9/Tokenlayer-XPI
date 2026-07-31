@@ -6,6 +6,7 @@ import { ListingConflictError } from "../persistence/types.js";
 import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, issueCredential, issuerBindingAllows, normalizeUseCaseDefinition, PolicyError, presentCredential, presentCredentials, publicKeyFromDidKey, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateCredentialUseCase, validateMetadata, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type OrgType, type Role, type UseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
 import qrcode from "qrcode";
 import type { AppDeps } from "../context.js";
+import { renderCredentialCertificate } from "../certificate.js";
 import { isSupportedCurrency } from "../currencies.js";
 import { renderContractCode } from "../contract-code.js";
 import { deployAndCreateUseCase } from "../use-cases.js";
@@ -2027,11 +2028,24 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       if (!names.has(did)) names.set(did, deps.organizations.findByDid(did).then((o) => o?.name ?? null));
       return names.get(did)!;
     };
+    const ucs = new Map<string, Promise<CredentialUseCaseDefinition | null>>();
+    const ucOf = (key: string): Promise<CredentialUseCaseDefinition | null> => {
+      if (!ucs.has(key)) ucs.set(key, deps.credentialUseCases.get(key).catch(() => null));
+      return ucs.get(key)!;
+    };
+    const certOk = async (c: CredentialRecord): Promise<boolean> => {
+      if (!c.credentialUseCaseKey) return false;
+      const def = await ucOf(c.credentialUseCaseKey);
+      if (!def) return false;
+      const typeNames = c.type.split(",");
+      return def.credentialTypes.some((t) => typeNames.includes(t.name) && t.certificate?.enabled === true);
+    };
     return Promise.all(rows.map(async (c) => ({
       id: c.id, type: c.type.split(","), credentialUseCaseKey: c.credentialUseCaseKey,
       issuerDid: c.issuerDid, issuerName: await nameOf(c.issuerDid), holderDid: c.holderDid,
       claims: c.subjectClaims, issuedAt: c.issuedAt, expiresAt: c.expiresAt,
       revoked: c.revoked, revokedAt: c.revokedAt, revokedReason: c.revokedReason, vcJwt: c.vcJwt,
+      certificateAvailable: await certOk(c),
     })));
   }
 
@@ -2334,6 +2348,40 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       registry: deps.registry.vcRegistry,
       vcHash: onChain.vcHash,
     };
+  });
+
+  // PUBLIC capability URL (the unguessable credential id is the token, same
+  // posture as /status). Renders a human-readable PDF certificate on the fly
+  // when the credential's type has certificate.enabled. Reflects live status.
+  app.get("/credentials/:id/certificate.pdf", { schema: S.credentialCertificate }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const cred = await deps.credentials.get(id);
+    if (!cred) return notFound(reply, "credential not found");
+    if (!cred.credentialUseCaseKey) return notFound(reply, "no certificate for this credential");
+    const def = await deps.credentialUseCases.get(cred.credentialUseCaseKey).catch(() => null);
+    const typeNames = cred.type.split(",");
+    const spec = def?.credentialTypes.find((t) => typeNames.includes(t.name) && t.certificate?.enabled === true);
+    if (!def || !spec) return notFound(reply, "no certificate for this credential");
+
+    const issuerName = (await deps.organizations.findByDid(cred.issuerDid))?.name ?? null;
+    const statusUrl = `${deps.publicApiUrl}/credentials/${cred.id}/status`;
+    let status = { revoked: cred.revoked, revokedAt: cred.revokedAt, revokedReason: cred.revokedReason };
+    if (deps.registry) {
+      try {
+        const onChain = await deps.registry.anchor.credentialStatusOf(deps.registry.vcRegistry, cred.id);
+        if (onChain.exists) status = { revoked: onChain.revoked, revokedAt: onChain.revokedAt ? new Date(onChain.revokedAt * 1000).toISOString() : null, revokedReason: cred.revokedReason };
+      } catch (err) { request.log.error({ err }, "cert on-chain status read failed"); }
+    }
+    let logoBytes: Buffer | null = null;
+    if (spec.certificate?.logoDocumentId) { try { logoBytes = (await deps.documents.get(spec.certificate.logoDocumentId))?.bytes ?? null; } catch { logoBytes = null; } }
+
+    const pdf = await renderCredentialCertificate({ credential: cred, spec, issuerName, statusUrl, status, logoBytes, nowMs: Date.now() });
+    const fname = `${(spec.name || "credential").replace(/[^a-zA-Z0-9._-]/g, "_")}-${cred.id}.pdf`;
+    return reply
+      .header("content-type", "application/pdf")
+      .header("x-content-type-options", "nosniff")
+      .header("content-disposition", `attachment; filename="${fname}"`)
+      .send(pdf);
   });
 
   app.get("/registry", { schema: S.identityRegistry, ...auth }, async () => {
