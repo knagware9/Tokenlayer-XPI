@@ -216,6 +216,9 @@ class FakeCompliance implements ComplianceProvider {
   holders = 0;
   acquired = new Map<string, string | null>();
   jurisdictions = new Map<string, string | null>();
+  verified = new Map<string, boolean>();
+  /** When true, hasVerifiedIdentity throws — used to prove it's never consulted when the flag is off. */
+  throwOnVerify = false;
   async holderCount(_ref: AssetRef): Promise<number> {
     return this.holders;
   }
@@ -224,6 +227,10 @@ class FakeCompliance implements ComplianceProvider {
   }
   async jurisdictionOf(account: string): Promise<string | null> {
     return this.jurisdictions.get(account) ?? null;
+  }
+  async hasVerifiedIdentity(account: string): Promise<boolean> {
+    if (this.throwOnVerify) throw new Error("hasVerifiedIdentity should not be consulted when the flag is off");
+    return this.verified.get(account) ?? false;
   }
 }
 
@@ -329,6 +336,87 @@ describe("LifecycleEngine — engine-enforced compliance rules", () => {
     // No provider wired → holder-limit rule is skipped entirely.
     await expect(engine.mint(ADMIN, holderCtx, "alice", "10")).resolves.toBeDefined();
     await expect(engine.mint(ADMIN, holderCtx, "bob", "10")).resolves.toBeDefined();
+  });
+});
+
+describe("LifecycleEngine — compliance.requireVerifiedIdentity gate", () => {
+  let adapter: FakeAdapter;
+  let audit: MemoryAudit;
+  let provider: FakeCompliance;
+
+  const VERIFIED_ID_UC: UseCaseDefinition = {
+    ...FUNGIBLE_USE_CASE,
+    key: "verified-id",
+    compliance: { allowlist: false, transferRestrictions: true, requireVerifiedIdentity: true },
+  };
+  const FLAG_OFF_UC: UseCaseDefinition = {
+    ...FUNGIBLE_USE_CASE,
+    key: "verified-id-off",
+    compliance: { allowlist: false, transferRestrictions: true },
+  };
+
+  const idCtx: AssetContext = { ref: { id: "v1", chainId: "fake", contractRef: "fake:v1" }, useCaseKey: "verified-id" };
+  const offCtx: AssetContext = { ref: { id: "v2", chainId: "fake", contractRef: "fake:v2" }, useCaseKey: "verified-id-off" };
+
+  function makeEngine(): LifecycleEngine {
+    return new LifecycleEngine({
+      useCases: new StaticUseCaseSource([VERIFIED_ID_UC, FLAG_OFF_UC]),
+      rbac: new RbacPolicy(),
+      resolveAdapter: () => adapter,
+      audit,
+      now: () => "2026-01-01T00:00:00.000Z",
+      compliance: provider,
+    });
+  }
+
+  beforeEach(() => {
+    adapter = new FakeAdapter();
+    audit = new MemoryAudit();
+    provider = new FakeCompliance();
+  });
+
+  it("flag on: blocks mint to an account with no verified identity (IDENTITY_NOT_VERIFIED)", async () => {
+    const engine = makeEngine();
+    provider.verified.set("alice", false);
+    await expect(engine.mint(ADMIN, idCtx, "alice", "10")).rejects.toThrow(/IDENTITY_NOT_VERIFIED|verified identity/);
+  });
+
+  it("flag on: blocks transfer to an unverified recipient", async () => {
+    const engine = makeEngine();
+    provider.verified.set("alice", true);
+    await engine.mint(ADMIN, idCtx, "alice", "10");
+    provider.verified.set("bob", false);
+    await expect(engine.transfer(ADMIN, idCtx, "alice", "bob", "5")).rejects.toThrow(/IDENTITY_NOT_VERIFIED|verified identity/);
+  });
+
+  it("flag on: blocks buy delivery to an unverified buyer", async () => {
+    const engine = makeEngine();
+    provider.verified.set("treasury", true);
+    await engine.mint(ADMIN, idCtx, "treasury", "100");
+    provider.verified.set("buyer", false);
+    await expect(
+      engine.buy(ADMIN, idCtx, "treasury", "buyer", "10", { unitPrice: "5", currency: "CBDC-INR", cost: "50" }),
+    ).rejects.toThrow(/IDENTITY_NOT_VERIFIED|verified identity/);
+  });
+
+  it("flag on: allows mint/transfer/buy once the account is verified", async () => {
+    const engine = makeEngine();
+    provider.verified.set("alice", true);
+    await expect(engine.mint(ADMIN, idCtx, "alice", "10")).resolves.toBeDefined();
+    provider.verified.set("bob", true);
+    await expect(engine.transfer(ADMIN, idCtx, "alice", "bob", "5")).resolves.toBeDefined();
+    expect(await engine.balanceOf(ADMIN, idCtx, "bob")).toBe("5");
+    provider.verified.set("buyer", true);
+    await expect(
+      engine.buy(ADMIN, idCtx, "alice", "buyer", "1", { unitPrice: "5", currency: "CBDC-INR", cost: "5" }),
+    ).resolves.toBeDefined();
+  });
+
+  it("flag off/absent: never consults hasVerifiedIdentity even if it would reject", async () => {
+    const engine = makeEngine();
+    provider.throwOnVerify = true; // would throw if consulted at all
+    await expect(engine.mint(ADMIN, offCtx, "alice", "10")).resolves.toBeDefined();
+    await expect(engine.transfer(ADMIN, offCtx, "alice", "bob", "5")).resolves.toBeDefined();
   });
 });
 

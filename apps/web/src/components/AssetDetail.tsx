@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, ApiError } from "../api.js";
+import { api, ApiError, describeApiError } from "../api.js";
 import { useAuth } from "../auth.js";
 import { can } from "../rbac.js";
 import { CashflowPanel } from "./CashflowPanel.js";
@@ -87,7 +87,7 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
       await reload();
       onChanged();
     } catch (err) {
-      setError(err instanceof ApiError ? `${err.code ?? "Error"}: ${err.message}` : "Action failed");
+      setError(describeApiError(err, "Action failed"));
     } finally {
       setBusy(false);
     }
@@ -104,7 +104,7 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
       onChanged();
       await refreshBalance();
     } catch (err) {
-      setBuyError(err instanceof ApiError ? `${err.code ?? "Error"}: ${err.message}` : "Buy failed");
+      setBuyError(describeApiError(err, "Buy failed"));
     } finally {
       setBuyBusy(false);
     }

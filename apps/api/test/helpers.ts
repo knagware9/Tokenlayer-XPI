@@ -65,7 +65,7 @@ export async function buildTestApp(opts: { loginRateLimitMax?: number; platformF
   // null-scope user) has an eligible second approver: SoD forbids
   // proposer===approver, and only PlatformAdmins can approve those proposals.
   await seedDefaults(users, accounts);
-  const engine = createEngine(useCases, rbac, chains, audit, { users, accounts });
+  const engine = createEngine(useCases, rbac, chains, audit, { users, accounts, credentials });
   await seedUseCases(useCases, {
     availableChainIds: new Set(chains.list().map((c) => c.id)),
     deploy: (def, chainId) => engine.deployUseCaseContract(def, chainId),

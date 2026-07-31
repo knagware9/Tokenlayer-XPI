@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, ApiError } from "../api.js";
+import { api, ApiError, describeApiError } from "../api.js";
 import { useAuth } from "../auth.js";
 import type { ActivityEvent, Asset, Holding, Listing, Portfolio, UseCase } from "../types.js";
 import { Card, EmptyState, Skeleton, StatCard } from "./ui.js";
@@ -73,7 +73,7 @@ function InvestorOfferings({ useCases, onSubscribed }: { useCases: UseCase[]; on
       await reload();
       onSubscribed();
     } catch (err) {
-      setError(err instanceof ApiError ? `${err.code ?? "Error"}: ${err.message}` : "Subscription failed");
+      setError(describeApiError(err, "Subscription failed"));
     } finally { setBusy(false); }
   }
 
@@ -86,7 +86,7 @@ function InvestorOfferings({ useCases, onSubscribed }: { useCases: UseCase[]; on
       await reload();
       onSubscribed();
     } catch (err) {
-      setError(err instanceof ApiError ? `${err.code ?? "Error"}: ${err.message}` : "Purchase failed");
+      setError(describeApiError(err, "Purchase failed"));
     } finally { setBusy(false); }
   }
 

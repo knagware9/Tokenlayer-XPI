@@ -168,6 +168,7 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
             <Badge on={useCase.lifecycle.burn}>burn</Badge>
             <Badge on={useCase.lifecycle.freeze}>freeze</Badge>
             <Badge on={useCase.compliance.allowlist}>allowlist</Badge>
+            <Badge on={!!useCase.compliance.requireVerifiedIdentity}>verified identity required</Badge>
           </p>
         </div>
       )}

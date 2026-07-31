@@ -191,6 +191,8 @@ export interface UseCaseDefinition {
     lockupDays?: number;
     /** Holder KYC country codes permitted to receive tokens. */
     allowedJurisdictions?: string[];
+    /** Require the receiver to hold a valid, unrevoked identity (KYC) credential. */
+    requireVerifiedIdentity?: boolean;
   };
   /** Optional fee configuration; the API layer applies the cash movements. */
   fees?: {
@@ -261,6 +263,8 @@ export interface ComplianceProvider {
   acquiredAt(ref: AssetRef, account: string): Promise<string | null>;
   /** Holder address → KYC country code, or null if unknown. */
   jurisdictionOf(account: string): Promise<string | null>;
+  /** True iff the account's user holds a valid, unrevoked identity (KYC) credential. */
+  hasVerifiedIdentity(account: string): Promise<boolean>;
 }
 
 /**

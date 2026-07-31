@@ -61,7 +61,7 @@ async function main(): Promise<void> {
   // Demo users/accounts (with predictable passwords) are seeded only outside production.
   if (env.nodeEnv !== "production") await seedDefaults(users, accounts);
 
-  const engine = createEngine(useCases, rbac, chains, audit, { users, accounts });
+  const engine = createEngine(useCases, rbac, chains, audit, { users, accounts, credentials });
   // Seed default use cases and deploy their contracts on each allowed+available
   // chain (best-effort; never crashes boot). Available = present in the registry.
   await seedUseCases(useCases, {
