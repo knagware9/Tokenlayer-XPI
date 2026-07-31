@@ -142,6 +142,7 @@ export class LifecycleEngine {
     this.requireLifecycle(useCase, "mint");
     await this.requireAllowed(adapter, ctx.ref, useCase, [to]);
     await this.requireJurisdiction(useCase, to);
+    await this.requireVerifiedIdentity(useCase, to);
     await this.requireHolderLimit(ctx.ref, useCase, adapter, to);
     const receipt = await adapter.mint(ctx.ref, to, amount);
     await this.writeReceipt(actor, "mint", ctx, receipt, { to, amount });
@@ -155,6 +156,7 @@ export class LifecycleEngine {
     await this.requireAllowed(adapter, ctx.ref, useCase, [from, to]);
     await this.requireNotFrozen(adapter, ctx.ref, [from, to]);
     await this.requireJurisdiction(useCase, to);
+    await this.requireVerifiedIdentity(useCase, to);
     await this.requireHolderLimit(ctx.ref, useCase, adapter, to);
     await this.requireLockup(ctx.ref, useCase, from);
     const receipt = await adapter.transfer(ctx.ref, from, to, amount);
@@ -183,6 +185,7 @@ export class LifecycleEngine {
     await this.requireAllowed(adapter, ctx.ref, useCase, [from, to]);
     await this.requireNotFrozen(adapter, ctx.ref, [from, to]);
     await this.requireJurisdiction(useCase, to);
+    await this.requireVerifiedIdentity(useCase, to);
     await this.requireHolderLimit(ctx.ref, useCase, adapter, to);
     await this.requireLockup(ctx.ref, useCase, from);
     const receipt = await adapter.transfer(ctx.ref, from, to, amount);
@@ -248,6 +251,7 @@ export class LifecycleEngine {
     await this.requireAllowed(adapter, ctx.ref, useCase, [to]);
     await this.requireNotFrozen(adapter, ctx.ref, [to]);
     await this.requireJurisdiction(useCase, to);
+    await this.requireVerifiedIdentity(useCase, to);
     await this.requireHolderLimit(ctx.ref, useCase, adapter, to);
     // NO lockup check: the sender is the escrow (a system account, not a holder) —
     // the seller's lockup was already enforced at list time (escrowList).
@@ -273,6 +277,7 @@ export class LifecycleEngine {
     this.requireLifecycle(useCase, "mint");
     await this.requireAllowed(adapter, ctx.ref, useCase, [to]);
     await this.requireJurisdiction(useCase, to);
+    await this.requireVerifiedIdentity(useCase, to);
     await this.requireHolderLimit(ctx.ref, useCase, adapter, to);
     const receipt = await adapter.mintToken(ctx.ref, to, tokenId, uri);
     await this.writeReceipt(actor, "mint", ctx, receipt, { to, tokenId, uri });
@@ -286,6 +291,7 @@ export class LifecycleEngine {
     await this.requireAllowed(adapter, ctx.ref, useCase, [from, to]);
     await this.requireNotFrozen(adapter, ctx.ref, [from, to]);
     await this.requireJurisdiction(useCase, to);
+    await this.requireVerifiedIdentity(useCase, to);
     await this.requireHolderLimit(ctx.ref, useCase, adapter, to);
     await this.requireLockup(ctx.ref, useCase, from);
     const receipt = await adapter.transferToken(ctx.ref, from, to, tokenId);
@@ -469,6 +475,22 @@ export class LifecycleEngine {
         "JURISDICTION_NOT_ALLOWED",
         `account '${to}' jurisdiction '${j ?? "unknown"}' is not allowed (permitted: ${allowed.join(", ")})`,
         { useCase: useCase.key, account: to, jurisdiction: j, allowedJurisdictions: allowed },
+      );
+    }
+  }
+
+  /**
+   * Require the recipient to hold a valid, unrevoked identity (KYC) credential.
+   * No-op unless the rule is set AND a ComplianceProvider is wired.
+   */
+  private async requireVerifiedIdentity(useCase: UseCaseDefinition, to: string): Promise<void> {
+    if (!useCase.compliance.requireVerifiedIdentity || !this.compliance) return;
+    const ok = await this.compliance.hasVerifiedIdentity(to);
+    if (!ok) {
+      throw new PolicyError(
+        "IDENTITY_NOT_VERIFIED",
+        `account '${to}' has no valid verified identity (DID/VC) credential`,
+        { useCase: useCase.key, account: to },
       );
     }
   }
