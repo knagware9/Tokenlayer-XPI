@@ -197,6 +197,7 @@ export const api = {
   orgMembers: (token: string, id: string) => request<OrgMember[]>(`/orgs/${encodeURIComponent(id)}/members`, token),
   createMember: (token: string, id: string, body: { email: string; password: string; role: string; useCaseKey?: string; walletAddress?: string }) =>
     request<{ id: string; did: string; membershipVc: boolean }>(`/orgs/${encodeURIComponent(id)}/users`, token, { method: "POST", body: JSON.stringify(body) }),
+  certificateUrl: (id: string): string => `${BASE}/credentials/${encodeURIComponent(id)}/certificate.pdf`,
   myCredentials: (token: string) => request<HeldCredential[]>("/me/credentials", token),
   orgWallet: (token: string, orgId: string) => request<HeldCredential[]>(`/orgs/${encodeURIComponent(orgId)}/wallet`, token),
   didDocument: (token: string, did: string) => request<DidDocument>(`/dids/${encodeURIComponent(did)}/document`, token),
