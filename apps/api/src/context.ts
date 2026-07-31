@@ -14,14 +14,14 @@ import type {
   CashflowRepository,
   CashRepository,
   CredentialRepository,
+  CredentialUseCaseRepository,
+  CredentialUseCaseTemplateRepository,
   DocumentRepository,
   ListingRepository,
   LoginKeyRepository,
   OrganizationRepository,
   ProposalRepository,
   StagedInvoiceRepository,
-  CredentialUseCaseRepository,
-  CredentialUseCaseTemplateRepository,
   UseCaseRepository,
   UserRepository,
   VerificationRequestRepository,
@@ -93,16 +93,17 @@ export interface AppDeps {
 /**
  * Wires a LifecycleEngine over the use-case source, chains, and audit store.
  * When the repos needed to answer data-dependent compliance rules (users +
- * accounts) are supplied, a ComplianceProvider is injected so the engine can
- * enforce maxHolders / lockupDays / allowedJurisdictions. Omit them (e.g. a
- * deploy-only harness) and those rules are simply not consulted.
+ * accounts + credentials) are supplied, a ComplianceProvider is injected so
+ * the engine can enforce maxHolders / lockupDays / allowedJurisdictions /
+ * requireVerifiedIdentity. Omit them (e.g. a deploy-only harness) and those
+ * rules are simply not consulted.
  */
 export function createEngine(
   useCases: UseCaseSource,
   rbac: RbacPolicy,
   chains: ChainRegistry,
   audit: AuditRepository,
-  complianceRepos?: { users: UserRepository; accounts: AccountRepository },
+  complianceRepos?: { users: UserRepository; accounts: AccountRepository; credentials: CredentialRepository },
 ): LifecycleEngine {
   return new LifecycleEngine({
     useCases,
@@ -110,7 +111,7 @@ export function createEngine(
     resolveAdapter: (chainId) => chains.resolveAdapter(chainId),
     audit: new RepositoryAuditSink(audit),
     compliance: complianceRepos
-      ? createComplianceProvider({ audit, users: complianceRepos.users, accounts: complianceRepos.accounts })
+      ? createComplianceProvider({ audit, users: complianceRepos.users, accounts: complianceRepos.accounts, credentials: complianceRepos.credentials })
       : undefined,
   });
 }
