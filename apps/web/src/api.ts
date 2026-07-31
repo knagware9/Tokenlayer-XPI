@@ -31,6 +31,22 @@ export class ApiError extends Error {
   }
 }
 
+/** Friendlier copy for error codes worth explaining beyond the raw API message. */
+const FRIENDLY_ERROR_MESSAGES: Record<string, string> = {
+  IDENTITY_NOT_VERIFIED: "This asset requires a verified DID/VC identity — you need a valid KYC credential to participate.",
+};
+
+/** Renders a caught error for display: known codes get friendlier copy, other
+ * ApiErrors show `code: message`, anything else falls back to a generic message. */
+export function describeApiError(err: unknown, fallback: string): string {
+  if (err instanceof ApiError) {
+    const friendly = err.code ? FRIENDLY_ERROR_MESSAGES[err.code] : undefined;
+    if (friendly) return friendly;
+    return `${err.code ?? "Error"}: ${err.message}`;
+  }
+  return fallback;
+}
+
 async function request<T>(path: string, token: string | null, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,

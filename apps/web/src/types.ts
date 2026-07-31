@@ -99,6 +99,9 @@ export interface UseCase {
     maxHolders?: number;
     lockupDays?: number;
     allowedJurisdictions?: string[];
+    /** When true, a buy/mint/transfer to a wallet is refused unless its user
+     * holds a valid, unrevoked KYC credential (DID/VC identity gate). */
+    requireVerifiedIdentity?: boolean;
   };
   fees?: { marketplaceBps?: number; issuanceFlat?: string };
   saleTermsDefault?: { unitPrice?: string; currency?: string };
