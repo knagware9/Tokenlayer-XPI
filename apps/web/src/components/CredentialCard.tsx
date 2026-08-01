@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { api } from "../api.js";
 import type { CredentialStatusInfo, HeldCredential } from "../types.js";
 import { Pill } from "./ui.js";
 
@@ -55,6 +56,10 @@ export function CredentialCard({ credential: c, status }: { credential: HeldCred
               onClick={() => void navigator.clipboard.writeText(c.vcJwt)}>Copy VC-JWT</button>
             <a className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-medium hover:border-brand-400"
               href={`data:application/jwt;charset=utf-8,${encodeURIComponent(c.vcJwt)}`} download={`${c.type[0] ?? "credential"}-${c.id}.jwt`}>Download</a>
+            {c.certificateAvailable && (
+              <a className="rounded-lg border border-brand-200 bg-brand-50 px-2.5 py-1 text-[11px] font-medium text-brand-700 hover:border-brand-400"
+                href={api.certificateUrl(c.id)} target="_blank" rel="noopener noreferrer">Download certificate</a>
+            )}
           </div>
         </div>
       )}

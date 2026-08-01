@@ -18,6 +18,22 @@ export interface CredentialTypeSpec {
   validityDays: number;
   /** Maker-checker approvals needed to issue this type. Missing ⇒ 1. */
   requiredApprovals: number;
+  /** Optional PDF-certificate configuration for this credential type. */
+  certificate?: CertificateConfig;
+}
+
+/** Optional PDF-certificate rendering for credentials of a type. */
+export interface CertificateConfig {
+  /** When true, credentials of this type expose a downloadable PDF certificate. */
+  enabled: boolean;
+  /** Certificate title; defaults to the credential type `title`. */
+  heading?: string;
+  /** Optional line under the heading (e.g. the issuing authority). */
+  subheading?: string;
+  /** Claim keys to print, in order; defaults to all claim-schema properties in schema order. */
+  claimOrder?: string[];
+  /** Optional logo/seal image, referencing a stored Document id. */
+  logoDocumentId?: string;
 }
 
 export type IssuerBinding = { kind: "platform" } | { kind: "org"; orgId: string };
@@ -88,6 +104,18 @@ export function validateCredentialUseCase(
     if (ct.requiredApprovals !== undefined && !(Number.isInteger(ct.requiredApprovals) && ct.requiredApprovals >= 1))
       fail(`credential type '${ct.name}' has an invalid requiredApprovals (must be an integer >= 1)`);
     validateMetadataSchema(ct.claimSchema, `${def.key}:${ct.name}`, fail);
+    if (ct.certificate !== undefined) {
+      const cert = ct.certificate;
+      if (typeof cert.enabled !== "boolean") fail(`credential type '${ct.name}' certificate.enabled must be a boolean`);
+      for (const [f, v] of [["heading", cert.heading], ["subheading", cert.subheading], ["logoDocumentId", cert.logoDocumentId]] as const)
+        if (v !== undefined && typeof v !== "string") fail(`credential type '${ct.name}' certificate.${f} must be a string`);
+      if (cert.claimOrder !== undefined) {
+        if (!Array.isArray(cert.claimOrder) || cert.claimOrder.some((k) => typeof k !== "string"))
+          fail(`credential type '${ct.name}' certificate.claimOrder must be an array of strings`);
+        for (const k of cert.claimOrder)
+          if (!(k in ct.claimSchema.properties)) fail(`credential type '${ct.name}' certificate.claimOrder references unknown claim '${k}'`);
+      }
+    }
   }
   if (def.issuer.kind === "org" && !ctx.orgExists(def.issuer.orgId)) fail(`unknown issuer org '${def.issuer.orgId}'`);
   if (def.holderPolicy.who === "specific") for (const id of def.holderPolicy.orgIds) if (!ctx.orgExists(id)) fail(`unknown holder org '${id}'`);

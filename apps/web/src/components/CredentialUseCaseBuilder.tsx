@@ -18,6 +18,11 @@ interface CredTypeDraft {
   requiredApprovals: number;
   fields: FieldRow[];
   templateKey: string;
+  certEnabled: boolean;
+  certHeading: string;
+  certSubheading: string;
+  certClaimKeys: string[];
+  certLogoDocumentId: string;
 }
 
 const ORG_TYPES: OrgType[] = ["bank", "corporate", "msme", "government", "verifier"];
@@ -48,7 +53,10 @@ function templateToFields(spec: CredentialTypeSpec): FieldRow[] {
   });
 }
 
-const emptyCredType = (): CredTypeDraft => ({ name: "", title: "", validityDays: 365, requiredApprovals: 1, fields: [], templateKey: "" });
+const emptyCredType = (): CredTypeDraft => ({
+  name: "", title: "", validityDays: 365, requiredApprovals: 1, fields: [], templateKey: "",
+  certEnabled: false, certHeading: "", certSubheading: "", certClaimKeys: [], certLogoDocumentId: "",
+});
 
 /** Guided 4-step wizard that authors a CredentialUseCase (POST /credential-use-cases). */
 export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
@@ -156,7 +164,18 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
       description: description.trim() || undefined,
       credentialTypes: credTypes
         .filter((c) => c.name.trim())
-        .map((c) => ({ name: c.name.trim(), title: c.title.trim() || c.name.trim(), validityDays: c.validityDays, requiredApprovals: c.requiredApprovals, claimSchema: fieldsToSchema(c.fields) })),
+        .map((c) => ({
+          name: c.name.trim(), title: c.title.trim() || c.name.trim(),
+          validityDays: c.validityDays, requiredApprovals: c.requiredApprovals,
+          claimSchema: fieldsToSchema(c.fields),
+          ...(c.certEnabled ? { certificate: {
+            enabled: true,
+            heading: c.certHeading.trim() || undefined,
+            subheading: c.certSubheading.trim() || undefined,
+            claimOrder: c.certClaimKeys.length ? c.certClaimKeys : undefined,
+            logoDocumentId: c.certLogoDocumentId || undefined,
+          } } : {}),
+        })),
       issuer,
       holderPolicy,
       verifier,
@@ -353,6 +372,40 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
                     <div>
                       <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Claim fields</div>
                       <SchemaFieldEditor fields={ct.fields} onChange={(f) => patchCredType(i, { fields: f })} />
+                    </div>
+                    <div className="mt-3 rounded-lg border border-slate-200 p-3 space-y-2">
+                      <label className="flex items-center gap-2 text-xs font-medium">
+                        <input type="checkbox" checked={ct.certEnabled} onChange={(e) => patchCredType(i, { certEnabled: e.target.checked })} />
+                        Issue PDF certificate for this credential type
+                      </label>
+                      {ct.certEnabled && (
+                        <div className="space-y-2 pl-1">
+                          <input className="w-full rounded border-slate-300 text-xs" placeholder="Certificate heading (e.g. Certificate of Domicile)"
+                            value={ct.certHeading} onChange={(e) => patchCredType(i, { certHeading: e.target.value })} />
+                          <input className="w-full rounded border-slate-300 text-xs" placeholder="Subheading (e.g. issuing authority)"
+                            value={ct.certSubheading} onChange={(e) => patchCredType(i, { certSubheading: e.target.value })} />
+                          <div className="text-[11px] text-slate-500">Claims to show (none selected ⇒ all):</div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {ct.fields.map((f) => f.name).filter(Boolean).map((k) => (
+                              <button type="button" key={k}
+                                className={`rounded-full border px-2 py-0.5 text-[11px] ${ct.certClaimKeys.includes(k) ? "border-brand-400 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-500"}`}
+                                onClick={() => patchCredType(i, { certClaimKeys: toggle(ct.certClaimKeys, k) })}>{k}</button>
+                            ))}
+                          </div>
+                          <label className="block text-[11px] text-slate-500">
+                            Logo / seal (optional):
+                            <input type="file" accept="image/png,image/jpeg,image/webp" className="mt-1 block text-[11px]"
+                              onChange={async (e) => {
+                                const file = e.target.files?.[0]; if (!file || !token) return;
+                                const bytes = new Uint8Array(await file.arrayBuffer());
+                                let bin = ""; for (let n = 0; n < bytes.length; n++) bin += String.fromCharCode(bytes[n] as number);
+                                try { const r = await api.uploadDocument(token, file.type, btoa(bin)); patchCredType(i, { certLogoDocumentId: r.id }); }
+                                catch { setError("logo upload failed"); }
+                              }} />
+                            {ct.certLogoDocumentId && <span className="ml-2 text-emerald-600">✓ uploaded</span>}
+                          </label>
+                        </div>
+                      )}
                     </div>
                   </section>
                 ))}

@@ -128,6 +128,34 @@ describe("verifierBindingAllows", () => {
   });
 });
 
+const baseDef2 = (certificate?: unknown): CredentialUseCaseDefinition => ({
+  key: "domicile", name: "Domicile", credentialTypes: [{
+    name: "DomicileCredential", title: "Domicile Certificate", validityDays: 365, requiredApprovals: 1,
+    claimSchema: { type: "object", required: ["fullName"], properties: { fullName: { type: "string" }, district: { type: "string" } } },
+    ...(certificate !== undefined ? { certificate } : {}),
+  }],
+  issuer: { kind: "platform" }, holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
+} as CredentialUseCaseDefinition);
+const certCtx = { orgExists: () => true };
+
+describe("certificate config validation", () => {
+  it("accepts a valid certificate config", () => {
+    expect(() => validateCredentialUseCase(baseDef2({ enabled: true, heading: "Certificate of Domicile", subheading: "Govt of X", claimOrder: ["fullName", "district"] }), certCtx)).not.toThrow();
+  });
+  it("accepts a type with no certificate (back-compat)", () => {
+    expect(() => validateCredentialUseCase(baseDef2(), certCtx)).not.toThrow();
+  });
+  it("rejects a non-boolean enabled", () => {
+    expect(() => validateCredentialUseCase(baseDef2({ enabled: "yes" }), certCtx)).toThrow(/enabled/);
+  });
+  it("rejects a non-string heading", () => {
+    expect(() => validateCredentialUseCase(baseDef2({ enabled: true, heading: 5 }), certCtx)).toThrow(/heading/);
+  });
+  it("rejects a claimOrder entry not in the claim schema", () => {
+    expect(() => validateCredentialUseCase(baseDef2({ enabled: true, claimOrder: ["fullName", "ghost"] }), certCtx)).toThrow(/ghost|claimOrder/);
+  });
+});
+
 describe("validateCredentialUseCase requiredApprovals", () => {
   it("rejects a present-but-invalid requiredApprovals", () => {
     const bad = { ...baseDef, credentialTypes: [{ ...baseDef.credentialTypes[0]!, requiredApprovals: 0 }] };

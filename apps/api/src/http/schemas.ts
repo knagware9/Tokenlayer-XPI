@@ -1127,6 +1127,11 @@ export const S: Record<string, FastifySchema> = {
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(404) },
   },
+  credentialCertificate: {
+    tags: ["Credentials"], summary: "Public: download a credential's PDF certificate (when its type enables one)",
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    response: { ...errs(404) },
+  },
   identityRegistry: {
     tags: ["Identity"], summary: "The deployed on-chain identity registries (null when none)", security: bearer,
     response: { 200: { type: "object", nullable: true, additionalProperties: true }, ...errs(401) },

@@ -352,6 +352,7 @@ export interface HeldCredential {
   revokedAt: string | null;
   revokedReason: string | null;
   vcJwt: string;
+  certificateAvailable?: boolean;
 }
 
 export interface DidDocument {
@@ -435,7 +436,8 @@ export interface StagedInvoice {
 export interface InvoiceRowResult { index: number; status: "staged" | "duplicate" | "invalid"; id?: string; error?: string }
 export interface TokenizeResult { id: string; status: "tokenized" | "skipped" | "failed"; assetId?: string; error?: string }
 
-export interface CredentialTypeSpec { name: string; title: string; claimSchema: { type: "object"; required?: string[]; properties: Record<string, { type: string; pattern?: string; enum?: string[] }> }; validityDays: number; requiredApprovals: number; }
+export interface CertificateConfig { enabled: boolean; heading?: string; subheading?: string; claimOrder?: string[]; logoDocumentId?: string; }
+export interface CredentialTypeSpec { name: string; title: string; claimSchema: { type: "object"; required?: string[]; properties: Record<string, { type: string; pattern?: string; enum?: string[] }> }; validityDays: number; requiredApprovals: number; certificate?: CertificateConfig; }
 export interface EligibleHolder { kind: "user" | "org"; id: string; label: string; did: string; subLabel: string | null; }
 export type IssuerBinding = { kind: "platform" } | { kind: "org"; orgId: string };
 export type HolderPolicy = { who: "any-onboarded" } | { who: "orgType"; orgTypes: string[] } | { who: "specific"; orgIds: string[] };
