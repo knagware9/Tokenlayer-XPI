@@ -208,6 +208,7 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
           requiredApprovals: ct.requiredApprovals,
           required: ct.claimSchema.required ?? [],
           properties: ct.claimSchema.properties,
+          ...(ct.certificate ? { certificate: ct.certificate } : {}),
         })),
         holderPolicy: def.holderPolicy,
         verifier: def.verifier,
