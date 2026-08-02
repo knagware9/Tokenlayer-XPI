@@ -307,9 +307,21 @@ export function ProvisionFromTemplate({ onDone }: { onDone?: () => void }): JSX.
               ) : previewError ? (
                 <ProblemBox title={previewError.message} problems={previewError.problems} />
               ) : preview !== null ? (
-                <pre className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] font-mono text-slate-700 overflow-auto max-h-80 whitespace-pre-wrap break-words">
-                  {JSON.stringify(preview, null, 2)}
-                </pre>
+                <>
+                  {(() => {
+                    const types = (preview as { credentialTypes?: { name: string; certificate?: { enabled?: boolean } }[] })?.credentialTypes ?? [];
+                    const certTypes = types.filter((t) => t.certificate?.enabled).map((t) => t.name);
+                    return certTypes.length ? (
+                      <div className="mb-2 flex items-center gap-1.5 flex-wrap">
+                        <Pill tone="info">PDF certificate</Pill>
+                        <span className="text-[11px] text-slate-500">{certTypes.join(", ")}</span>
+                      </div>
+                    ) : null;
+                  })()}
+                  <pre className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] font-mono text-slate-700 overflow-auto max-h-80 whitespace-pre-wrap break-words">
+                    {JSON.stringify(preview, null, 2)}
+                  </pre>
+                </>
               ) : (
                 <p className="text-sm text-slate-500">No preview.</p>
               )}
