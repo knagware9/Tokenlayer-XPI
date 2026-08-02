@@ -109,5 +109,42 @@ if (rev.status === 202) await call("POST", `/proposals/${rev.json.proposal.id}/a
 const b3 = await call("POST", `/assets/${assetId}/buy`, { quantity: "10" }, buyerTok);
 ok(b3.status >= 400 && b3.json?.error === "IDENTITY_NOT_VERIFIED", "③ buy AFTER revoke → refused again (revocation flips the gate live)", { status: b3.status, error: b3.json?.error });
 
-console.log(`\n${fails ? `❌ ${fails} CHECK(S) FAILED` : "✅ FULL-PLATFORM E2E PASSED — provisioned an identity program from a template (ID-G), a scoped desk issued a credential (ID-F), and a KYC credential gated a real tokenization buy with live revocation (ID-H)."}`);
+// ─────────────── PART 4 — ID-I PDF certificate for an issued credential ───────────────
+console.log("\n═══ PART 4 · ID-I — a PDF certificate for an issued credential ═══");
+const pdfGet = async (p, t) => {
+  const res = await fetch(API + p, { headers: t ? { Authorization: `Bearer ${t}` } : {} });
+  return { status: res.status, ct: res.headers.get("content-type"), buf: Buffer.from(await res.arrayBuffer()) };
+};
+// enable a PDF certificate on a Domicile type in a fresh credential use case
+const certKey = `domicile-cert-${runId}`;
+const certUc = await call("POST", "/credential-use-cases", {
+  key: certKey, name: `Domicile Certificates ${runId}`,
+  credentialTypes: [{ name: "DomicileCredential", title: "Domicile Certificate", validityDays: 365, requiredApprovals: 1,
+    claimSchema: { type: "object", required: ["fullName", "district"], properties: {
+      fullName: { type: "string", description: "Full Name" }, district: { type: "string", description: "District" }, state: { type: "string", description: "State" } } },
+    certificate: { enabled: true, heading: "Certificate of Domicile", subheading: `Government demo · run ${runId}`, claimOrder: ["fullName", "district", "state"] } }],
+  issuer: { kind: "platform" }, holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
+}, admin);
+ok(certUc.status === 201 && certUc.json?.credentialTypes?.[0]?.certificate?.enabled === true, `use case '${certKey}' created with a cert-enabled type (config round-trips)`);
+// issue a Domicile credential to the PART-2 Holder
+const cHolders = (await call("GET", `/credential-use-cases/${certKey}/eligible-holders`, null, admin)).json ?? [];
+const cSubj = cHolders.find((h) => (h.label ?? "").includes(holderLogin.email)) ?? cHolders[0];
+const cIss = await call("POST", `/credential-use-cases/${certKey}/credentials`, { credentialType: "DomicileCredential", [cSubj?.kind === "org" ? "subjectOrgId" : "subjectUserId"]: cSubj?.id, claims: { fullName: "Asha Rao", district: "Central", state: "Statelandia" } }, admin);
+if (cIss.status === 202) await call("POST", `/proposals/${cIss.json.proposal.id}/approve`, {}, admin2);
+const cHeld = (await call("GET", "/me/credentials", null, holderTok)).json?.find((c) => c.type.includes("DomicileCredential"));
+ok(!!cHeld && cHeld.certificateAvailable === true, "holder holds the DomicileCredential with certificateAvailable=true", cHeld && { certAvail: cHeld.certificateAvailable });
+// download as the holder AND via the public capability URL (no auth)
+const cAsHolder = await pdfGet(`/credentials/${cHeld.id}/certificate.pdf`, holderTok);
+ok(cAsHolder.status === 200 && cAsHolder.buf.subarray(0, 5).toString("latin1") === "%PDF-", `holder downloads the PDF certificate (${cAsHolder.buf.length} bytes)`, { status: cAsHolder.status });
+const cPublic = await pdfGet(`/credentials/${cHeld.id}/certificate.pdf`, null);
+ok(cPublic.status === 200 && cPublic.buf.subarray(0, 5).toString("latin1") === "%PDF-" && (cPublic.ct ?? "").includes("application/pdf"), "anyone with the link downloads the same PDF (public capability URL)");
+// revoke → the certificate re-renders with a REVOKED watermark (bytes change), QR/status flips
+const cRev = await call("POST", `/credentials/${cHeld.id}/revoke`, { reason: "e2e demo" }, admin);
+if (cRev.status === 202) await call("POST", `/proposals/${cRev.json.proposal.id}/approve`, {}, admin2);
+const cAfter = await pdfGet(`/credentials/${cHeld.id}/certificate.pdf`, null);
+ok(cAfter.status === 200 && cAfter.buf.subarray(0, 5).toString("latin1") === "%PDF-" && cAfter.buf.length !== cAsHolder.buf.length, "after revoke the certificate still renders — now watermarked (bytes differ)", { clean: cAsHolder.buf.length, revoked: cAfter.buf.length });
+const cStatus = (await call("GET", `/credentials/${cHeld.id}/status`)).json;
+ok(cStatus?.revoked === true, "the certificate's QR/status URL reports revoked=true");
+
+console.log(`\n${fails ? `❌ ${fails} CHECK(S) FAILED` : "✅ FULL-PLATFORM E2E PASSED — template provisioning (ID-G), scoped-desk issuance (ID-F), a KYC credential gating a live tokenization buy with revocation (ID-H), and a downloadable PDF certificate with a live revocation watermark (ID-I)."}`);
 process.exit(fails ? 1 : 0);
