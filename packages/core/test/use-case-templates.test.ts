@@ -201,3 +201,31 @@ describe("template certificate config", () => {
     expect(() => validateTemplate(certTemplate({ enabled: true, heading: 5 }))).toThrow(/heading/);
   });
 });
+
+describe("built-in certificate defaults", () => {
+  it("education-certificate instantiates cert-enabled and valid", () => {
+    const t = TEMPLATE_CATALOG.find((x) => x.key === "education-certificate")!;
+    const def = instantiateTemplate(t, { issuerOrgName: "Acme University" });
+    const c = def.credentialTypes[0]!.certificate;
+    expect(c?.enabled).toBe(true);
+    expect(c?.subheading).toBe("Acme University");
+    expect(() => validateCredentialUseCase(def, { orgExists: () => true })).not.toThrow();
+  });
+  it("education claimOrder drops classification when toggled off", () => {
+    const t = TEMPLATE_CATALOG.find((x) => x.key === "education-certificate")!;
+    const def = instantiateTemplate(t, { issuerOrgName: "Acme University", includeClassification: false });
+    expect(def.credentialTypes[0]!.certificate?.claimOrder).not.toContain("classification");
+  });
+  it("domicile-certificate instantiates cert-enabled and valid", () => {
+    const t = TEMPLATE_CATALOG.find((x) => x.key === "domicile-certificate")!;
+    const def = instantiateTemplate(t, { issuerOrgName: "Tehsildar Office" });
+    expect(def.credentialTypes[0]!.certificate?.enabled).toBe(true);
+    expect(() => validateCredentialUseCase(def, { orgExists: () => true })).not.toThrow();
+  });
+  it("the other built-ins stay certificate-free", () => {
+    for (const key of ["invoice-financing", "egovernance-certificate", "generic-credential"]) {
+      const t = TEMPLATE_CATALOG.find((x) => x.key === key)!;
+      for (const ct of t.body.credentialTypes) expect(ct.certificate).toBeUndefined();
+    }
+  });
+});
