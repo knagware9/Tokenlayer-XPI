@@ -8,6 +8,7 @@ import {
   validateCredentialUseCase,
   PolicyError,
 } from "../src/index.js";
+import type { UseCaseTemplate } from "../src/index.js";
 
 const edu = () => getBuiltInTemplate("education-certificate");
 const egov = () => getBuiltInTemplate("egovernance-certificate");
@@ -144,5 +145,59 @@ describe("getBuiltInTemplate", () => {
     } catch (e) {
       expect((e as PolicyError).code).toBe("UNKNOWN_TEMPLATE");
     }
+  });
+});
+
+const certTemplate = (certificate?: unknown): UseCaseTemplate => ({
+  key: "cert-tpl", name: "Cert Tpl", category: "test", parameters: [
+    { name: "issuerOrgName", label: "Issuer", type: "text", required: true },
+    { name: "includeExtra", label: "Extra?", type: "boolean", required: false, default: true },
+  ],
+  body: {
+    keyTemplate: "cert-${issuerOrgNameSlug}", nameTemplate: "${issuerOrgName} Certs",
+    holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
+    credentialTypes: [{
+      name: "DemoCredential", title: "Demo", validityDays: 365, requiredApprovals: 1,
+      required: ["fullName"],
+      properties: { fullName: { type: "string" }, extra: { type: "string", includeIf: "includeExtra" } },
+      ...(certificate !== undefined ? { certificate } : {}),
+    }],
+  },
+} as UseCaseTemplate);
+
+describe("template certificate config", () => {
+  const cert = { enabled: true, heading: "Demo Certificate — ${issuerOrgName}", subheading: "${issuerOrgName}", claimOrder: ["fullName", "extra"] };
+
+  it("emits an interpolated certificate on instantiation", () => {
+    const def = instantiateTemplate(certTemplate(cert), { issuerOrgName: "Acme" });
+    const c = def.credentialTypes[0].certificate;
+    expect(c?.enabled).toBe(true);
+    expect(c?.heading).toBe("Demo Certificate — Acme");
+    expect(c?.subheading).toBe("Acme");
+    expect(c?.claimOrder).toEqual(["fullName", "extra"]);
+  });
+
+  it("filters claimOrder to includeIf-surviving claims", () => {
+    const def = instantiateTemplate(certTemplate(cert), { issuerOrgName: "Acme", includeExtra: false });
+    expect(def.credentialTypes[0].certificate?.claimOrder).toEqual(["fullName"]);
+  });
+
+  it("emits undefined claimOrder when filtering empties it, and undefined heading when interpolation is blank", () => {
+    const t = certTemplate({ enabled: true, heading: "${missing}", claimOrder: ["extra"] });
+    const def = instantiateTemplate(t, { issuerOrgName: "Acme", includeExtra: false });
+    expect(def.credentialTypes[0].certificate?.claimOrder).toBeUndefined();
+    expect(def.credentialTypes[0].certificate?.heading).toBeUndefined();
+  });
+
+  it("emits no certificate when the template has none (back-compat)", () => {
+    const def = instantiateTemplate(certTemplate(), { issuerOrgName: "Acme" });
+    expect(def.credentialTypes[0].certificate).toBeUndefined();
+  });
+
+  it("validateTemplate accepts a valid certificate and rejects bad ones", () => {
+    expect(() => validateTemplate(certTemplate(cert))).not.toThrow();
+    expect(() => validateTemplate(certTemplate({ enabled: "yes" }))).toThrow(/enabled/);
+    expect(() => validateTemplate(certTemplate({ enabled: true, claimOrder: ["ghost"] }))).toThrow(/ghost|claimOrder/);
+    expect(() => validateTemplate(certTemplate({ enabled: true, heading: 5 }))).toThrow(/heading/);
   });
 });

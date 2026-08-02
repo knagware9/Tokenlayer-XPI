@@ -15,6 +15,7 @@ import type {
   CredentialTypeSpec,
   HolderPolicy,
   VerifierBinding,
+  CertificateConfig,
 } from "./credential-use-cases.js";
 import type { MetadataSchema, PropertySchema } from "./types.js";
 
@@ -67,6 +68,10 @@ export interface TemplateCredentialType {
   properties: Record<string, TemplateClaimProp>;
   /** Boolean param name; when its value is false the whole type is dropped. */
   includeIf?: string;
+  /** Optional ID-I PDF-certificate config. `heading`/`subheading` may contain
+   *  `${param}` references (interpolated at instantiation); `claimOrder` is
+   *  filtered to claims that survive `includeIf` pruning. */
+  certificate?: CertificateConfig;
 }
 
 export interface UseCaseTemplate {
@@ -110,6 +115,19 @@ export function validateTemplate(t: UseCaseTemplate): void {
     if (p.type === "enum" && !p.options?.length) fail(`enum param '${p.name}' needs options`);
   }
   if (!t.body?.credentialTypes?.length) fail("template needs at least one credential type");
+  for (const ct of t.body.credentialTypes) {
+    const cert = ct.certificate;
+    if (cert === undefined) continue;
+    if (typeof cert.enabled !== "boolean") fail(`credential type '${ct.name}' certificate.enabled must be a boolean`);
+    for (const [f, v] of [["heading", cert.heading], ["subheading", cert.subheading], ["logoDocumentId", cert.logoDocumentId]] as const)
+      if (v !== undefined && typeof v !== "string") fail(`credential type '${ct.name}' certificate.${f} must be a string`);
+    if (cert.claimOrder !== undefined) {
+      if (!Array.isArray(cert.claimOrder) || cert.claimOrder.some((k) => typeof k !== "string"))
+        fail(`credential type '${ct.name}' certificate.claimOrder must be an array of strings`);
+      for (const k of cert.claimOrder)
+        if (!(k in ct.properties)) fail(`credential type '${ct.name}' certificate.claimOrder references unknown claim '${k}'`);
+    }
+  }
 }
 
 /**
@@ -197,12 +215,30 @@ export function instantiateTemplate(
         properties[key] = schemaProp as PropertySchema;
         if (ctpl.required.includes(key)) required.push(key);
       }
+      let certificate: CertificateConfig | undefined;
+      if (ctpl.certificate) {
+        const src = ctpl.certificate;
+        const interpOrUndef = (s: string | undefined): string | undefined => {
+          if (s === undefined) return undefined;
+          const out = interp(s, vals).trim();
+          return out || undefined;
+        };
+        const claimOrder = src.claimOrder?.filter((k) => k in properties);
+        certificate = {
+          enabled: src.enabled,
+          heading: interpOrUndef(src.heading),
+          subheading: interpOrUndef(src.subheading),
+          claimOrder: claimOrder?.length ? claimOrder : undefined,
+          logoDocumentId: src.logoDocumentId,
+        };
+      }
       return {
         name: ctpl.name,
         title: interp(ctpl.title, vals),
         validityDays: num(ctpl.validityDays, vals),
         requiredApprovals: num(ctpl.requiredApprovals, vals),
         claimSchema: { type: "object", required, properties } satisfies MetadataSchema,
+        ...(certificate ? { certificate } : {}),
       };
     });
 
