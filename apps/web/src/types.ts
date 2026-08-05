@@ -464,5 +464,6 @@ export interface VerificationResult {
   credentials: { id: string | null; type: string | null; issuer: string | null; reason: string | null;
     claims: Record<string, unknown> | null;
     checks: { signature: boolean; trusted: boolean; notExpired: boolean; subjectBound: boolean; notRevoked: boolean | "unknown" };
+    issuerResolution?: { registered: boolean; active: boolean; chainId: string } | null;
     valid: boolean }[];
 }

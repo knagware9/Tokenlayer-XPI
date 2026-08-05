@@ -93,6 +93,13 @@ export function VerificationRequests(): JSX.Element {
                   <span>sig {check(c.checks.signature)}</span><span>trusted {check(c.checks.trusted)}</span>
                   <span>not-expired {check(c.checks.notExpired)}</span><span>subject {check(c.checks.subjectBound)}</span>
                   <span>not-revoked {check(c.checks.notRevoked)}</span>
+                  {c.issuerResolution && (
+                    c.issuerResolution.active
+                      ? <Pill tone="ok">issuer on-chain · {c.issuerResolution.chainId} · active</Pill>
+                      : c.issuerResolution.registered
+                        ? <Pill tone="danger">issuer deactivated</Pill>
+                        : <Pill tone="muted">issuer not registered</Pill>
+                  )}
                 </div>
                 {c.claims && <div className="text-xs text-slate-500 mt-1">{Object.entries(c.claims).map(([k, v]) => `${k}: ${String(v)}`).join(" · ")}</div>}
               </div>
