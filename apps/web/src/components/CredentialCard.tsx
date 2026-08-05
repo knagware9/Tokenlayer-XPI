@@ -49,7 +49,11 @@ export function CredentialCard({ credential: c, status }: { credential: HeldCred
               ))}
             </dl>
           </div>
-          <div className="text-[11px] text-slate-500 font-mono break-all">issuer · {c.issuerDid}</div>
+          <div className="text-[11px] text-slate-500 font-mono break-all">
+            issuer ·{" "}
+            <a className="text-brand-600 hover:text-brand-700 underline decoration-dotted"
+              href={api.didResolveUrl(c.issuerDid)} target="_blank" rel="noopener noreferrer">{c.issuerDid}</a>
+          </div>
           <div className="text-[11px] text-slate-500 font-mono break-all">holder · {c.holderDid}</div>
           <div className="flex gap-2">
             <button className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-medium hover:border-brand-400"

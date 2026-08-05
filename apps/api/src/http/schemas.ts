@@ -1079,6 +1079,11 @@ export const S: Record<string, FastifySchema> = {
     params: { type: "object", required: ["did"], properties: { did: { type: "string" } } },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401) },
   },
+  didResolve: {
+    tags: ["Identity"], summary: "Public: resolve a DID (W3C DID Resolution Result; did:key + on-chain registration)",
+    params: { type: "object", required: ["did"], properties: { did: { type: "string" } } },
+    response: { 200: { type: "object", additionalProperties: true } },
+  },
 
   credentialTypes: { tags: ["Credentials"], summary: "The credential-type catalog", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401) } },
   requestCredential: {
