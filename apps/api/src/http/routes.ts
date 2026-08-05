@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AssetRecord, CashflowRecord, CompanyProfile, CredentialRecord, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, issueCredential, issuerBindingAllows, normalizeUseCaseDefinition, PolicyError, presentCredential, presentCredentials, publicKeyFromDidKey, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateCredentialUseCase, validateMetadata, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type OrgType, type Role, type UseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
+import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, issueCredential, issuerBindingAllows, normalizeUseCaseDefinition, PolicyError, presentCredential, presentCredentials, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateCredentialUseCase, validateMetadata, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type OrgType, type Role, type UseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
 import qrcode from "qrcode";
 import type { AppDeps } from "../context.js";
 import { renderCredentialCertificate } from "../certificate.js";
@@ -18,6 +18,7 @@ import { computeActivity, computePortfolio } from "../investor.js";
 import { readErpInvoices, stageInvoice } from "../invoice-register.js";
 import { assetBalancesOf, coded, CodedError, dropPayerShare, executeCashflowCore, executeIssueActivation, runGatedAction } from "../executors.js";
 import { proposalKind } from "../proposal-kinds.js";
+import { resolveDid } from "../did-resolver.js";
 import { S } from "./schemas.js";
 import { actorOf, contextOf, isPositiveIntString, notFound, requireUser, scopedToCaller, type TokenClaims } from "./support.js";
 
@@ -2199,33 +2200,31 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return members.map((u) => ({ id: u.id, email: u.email, role: u.role, useCaseKey: u.useCaseKey, did: u.did ?? null, active: u.active, kycStatus: u.kycStatus }));
   });
 
+  // PUBLIC W3C DID resolution — a DID document is public key material; same
+  // public posture as /credentials/:id/status. Third-party verifiers resolve
+  // an issuer DID against the on-chain DidRegistry with no platform account.
+  app.get("/dids/:did/resolve", { schema: S.didResolve }, async (request) => {
+    const { did } = request.params as { did: string };
+    return resolveDid(did, {
+      registry: deps.registry,
+      onChainError: (err) => request.log.error({ err, did }, "on-chain DID registration read failed"),
+    });
+  });
+
   app.get("/dids/:did/document", { schema: S.didDocument, ...auth }, async (request, reply) => {
     const { did } = request.params as { did: string };
-    try {
-      publicKeyFromDidKey(did); // validates it's a resolvable did:key ed25519
-    } catch {
+    const res = await resolveDid(did, {
+      registry: deps.registry,
+      onChainError: (err) => request.log.error({ err, did }, "on-chain DID registration read failed"),
+    });
+    if (res.didResolutionMetadata.error || !res.didDocument) {
       return reply.code(400).send({ error: "UNSUPPORTED_DID", message: "only did:key ed25519 can be resolved" });
     }
-    const vm = `${did}#0`;
-    // The DID registry's read path. Without this the registry would be a
-    // write-only list — the exact decorative pattern this design rejects.
-    let registration: { registered: boolean; active: boolean; chainId: string; registry: string } | null = null;
-    if (deps.registry) {
-      try {
-        const r = await deps.registry.anchor.didRegistration(deps.registry.didRegistry, did);
-        registration = { ...r, chainId: deps.registry.chainId, registry: deps.registry.didRegistry };
-      } catch (err) {
-        request.log.error({ err }, "on-chain DID registration read failed");
-      }
-    }
-    return {
-      "@context": ["https://www.w3.org/ns/did/v1"],
-      id: did,
-      verificationMethod: [{ id: vm, type: "Ed25519VerificationKey2020", controller: did, publicKeyMultibase: did.slice("did:key:".length) }],
-      authentication: [vm],
-      assertionMethod: [vm],
-      registration,
-    };
+    const m = res.didDocumentMetadata;
+    const registration = m.source === "chain"
+      ? { registered: m.registered, active: m.active, chainId: m.chainId, registry: m.registry }
+      : null;
+    return { ...res.didDocument, registration };
   });
 
   app.get("/me/credentials", { schema: S.myCredentials, ...auth }, async (request) => {
