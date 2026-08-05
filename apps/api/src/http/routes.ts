@@ -2590,15 +2590,20 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         if (typeof raw === "string") { try { issuerDids.add(String(decodeJwt(raw).payload.iss ?? "")); } catch { /* skip */ } }
       }
     } catch { /* malformed → core fails it below */ }
-    const trusted: string[] = [];
+    const resolutions = new Map<string, Awaited<ReturnType<typeof resolveDid>>>();
     for (const did of issuerDids) {
       if (!did) continue;
-      if (deps.registry) {
-        try {
-          const reg = await deps.registry.anchor.didRegistration(deps.registry.didRegistry, did);
-          if (reg.registered && reg.active) trusted.push(did);
-        } catch (err) { request.log.error({ err, did }, "on-chain issuer-trust read failed"); }
-      } else if ((deps.trustedKycIssuers ?? []).includes(did)) {
+      resolutions.set(did, await resolveDid(did, {
+        registry: deps.registry,
+        onChainError: (err) => request.log.error({ err, did }, "on-chain issuer-trust read failed"),
+      }));
+    }
+    const trusted: string[] = [];
+    for (const [did, res] of resolutions) {
+      const m = res.didDocumentMetadata;
+      if (m.source === "chain") {
+        if (m.registered && m.active) trusted.push(did);
+      } else if (!deps.registry && (deps.trustedKycIssuers ?? []).includes(did)) {
         trusted.push(did);
       }
     }
@@ -2641,9 +2646,14 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         subjectBound: c.reason !== "SUBJECT_MISMATCH",
         notRevoked,
       };
+      const issuerDid = c.credential?.issuer ?? null;
+      const resMeta = issuerDid ? resolutions.get(issuerDid)?.didDocumentMetadata : undefined;
       return {
-        id: jti, type, issuer: c.credential?.issuer ?? null, claims: c.credential?.claims ?? null,
+        id: jti, type, issuer: issuerDid, claims: c.credential?.claims ?? null,
         reason: c.reason ?? null, checks, valid: c.valid && notRevoked,
+        issuerResolution: resMeta && resMeta.source === "chain"
+          ? { registered: resMeta.registered, active: resMeta.active, chainId: resMeta.chainId }
+          : null,
       };
     }));
 
