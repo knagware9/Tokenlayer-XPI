@@ -111,6 +111,24 @@ describe("holder acceptance state — persistence + born-pending issuance (L2)",
     expect(kyc).toBeDefined();
     expect(kyc!.acceptance).toBe("accepted");
   });
+
+  // Regression: the Prisma CredentialUseCase repo initially dropped the
+  // top-level holderAcceptance flag on create/update (memory repo spreads
+  // records, so it stayed green there while a live Besu/Prisma deployment
+  // silently lost the flag). Pins the create → PATCH → GET round-trip.
+  it("holderAcceptance survives a create → PATCH → GET round-trip", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const def = await seedUseCase(app, admin, { holderAcceptance: true });
+
+    const patched = await app.inject({ method: "PATCH", url: `${V1}/credential-use-cases/corp-kyc`, headers: auth(admin), payload: def });
+    expect(patched.statusCode).toBe(200);
+    expect(patched.json().holderAcceptance).toBe(true);
+
+    const got = await app.inject({ method: "GET", url: `${V1}/credential-use-cases/corp-kyc`, headers: auth(admin) });
+    expect(got.statusCode).toBe(200);
+    expect(got.json().holderAcceptance).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------

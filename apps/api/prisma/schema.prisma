@@ -87,6 +87,7 @@ model CredentialUseCase {
   verifier        String   // JSON: VerifierBinding
   ownerOrgId      String?
   status          String   @default("active")
+  holderAcceptance Boolean @default(false)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 }

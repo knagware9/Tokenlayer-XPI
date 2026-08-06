@@ -452,12 +452,14 @@ export class PrismaUseCaseRepository implements UseCaseRepository {
 function toCredentialUseCase(r: {
   key: string; name: string; description: string | null;
   credentialTypes: string; issuer: string; holderPolicy: string; verifier: string; ownerOrgId: string | null;
+  holderAcceptance: boolean;
 }): CredentialUseCaseDefinition {
   return {
     key: r.key, name: r.name, description: r.description ?? undefined,
     credentialTypes: JSON.parse(r.credentialTypes), issuer: JSON.parse(r.issuer),
     holderPolicy: JSON.parse(r.holderPolicy), verifier: JSON.parse(r.verifier),
     ownerOrgId: r.ownerOrgId,
+    ...(r.holderAcceptance ? { holderAcceptance: true } : {}),
   };
 }
 export class PrismaCredentialUseCaseRepository implements CredentialUseCaseRepository {
@@ -466,7 +468,7 @@ export class PrismaCredentialUseCaseRepository implements CredentialUseCaseRepos
       key: def.key, name: def.name, description: def.description ?? null,
       credentialTypes: JSON.stringify(def.credentialTypes), issuer: JSON.stringify(def.issuer),
       holderPolicy: JSON.stringify(def.holderPolicy), verifier: JSON.stringify(def.verifier),
-      ownerOrgId: def.ownerOrgId ?? null } });
+      ownerOrgId: def.ownerOrgId ?? null, holderAcceptance: def.holderAcceptance ?? false } });
     return toCredentialUseCase(r);
   }
   async get(key: string): Promise<CredentialUseCaseDefinition | null> {
@@ -482,7 +484,7 @@ export class PrismaCredentialUseCaseRepository implements CredentialUseCaseRepos
       name: def.name, description: def.description ?? null,
       credentialTypes: JSON.stringify(def.credentialTypes), issuer: JSON.stringify(def.issuer),
       holderPolicy: JSON.stringify(def.holderPolicy), verifier: JSON.stringify(def.verifier),
-      ownerOrgId: def.ownerOrgId ?? null } });
+      ownerOrgId: def.ownerOrgId ?? null, holderAcceptance: def.holderAcceptance ?? false } });
     return toCredentialUseCase(r);
   }
 }
