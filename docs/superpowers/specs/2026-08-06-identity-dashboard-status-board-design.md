@@ -26,7 +26,7 @@ New `apps/api/src/identity-analytics.ts`, same contract as `analytics.ts`: takes
 **Input:** `{ useCases, credentials, verifications, holderLabels, now, days }` where `useCases` is the scoped slice of `CredentialUseCaseDefinition`s, `credentials`/`verifications` are pre-filtered to those keys, `holderLabels` is a `Map<holderDid, string>` built by the route (user email, else org name, else truncated DID), `days` = 30.
 
 **Derived per-credential status** (one pill per credential, precedence documented and tested):
-`revoked` → else `expiresAt < now` ⇒ `expired` → else the ID-L `acceptance` value (`pending` | `changes_requested` | `rejected` | `accepted`). This matches the public `/status` endpoint's semantics — the dashboard must never disagree with the credential's own status page.
+`acceptance === "rejected"` ⇒ `rejected` → else `revoked` → else `expiresAt < now` ⇒ `expired` → else the remaining ID-L `acceptance` value (`pending` | `changes_requested` | `accepted`). Rejected must be checked FIRST: ID-L's holder-reject revokes on-chain before recording the rejection, so every holder-rejected credential also has `revoked: true` — a revoked-first precedence would permanently zero the "rejected by holder" tile and misattribute holder rejections to the issuer. For every other credential this agrees with the public `/status` endpoint's semantics; a rejected credential's status page shows it revoked, and the dashboard adds *who* ended it.
 
 **Output:**
 - `totals` — `{ issued, accepted, pendingAcceptance, changesRequested, rejectedByHolder, revoked, expired }` (`issued` = row count; the other six partition it by the derived status).
