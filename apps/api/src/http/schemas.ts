@@ -1132,6 +1132,35 @@ export const S: Record<string, FastifySchema> = {
     },
     response: { 202: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
   },
+  issueUsecaseCredentialsBatch: {
+    tags: ["Credentials"], summary: "Batch-issue a configured credential type from parsed CSV rows (one maker-checker proposal; draft-time all-or-nothing, execution-time per-row)", security: bearer,
+    params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
+    body: {
+      type: "object", additionalProperties: false, required: ["credentialType", "rows"],
+      properties: {
+        credentialType: { type: "string" },
+        rows: {
+          type: "array", minItems: 1, maxItems: 200,
+          items: {
+            type: "object", additionalProperties: false, required: ["subjectEmail", "claims"],
+            properties: {
+              subjectEmail: { type: "string" },
+              claims: { type: "object", additionalProperties: true },
+            },
+          },
+        },
+      },
+    },
+    response: {
+      202: { type: "object", additionalProperties: true },
+      // 400 is overridden (not the shared Error# ref) so `problems` — the
+      // per-row draft-time validation report — survives fast-json-stringify's
+      // response serialization instead of being stripped as an unlisted
+      // property (the ID-G lesson).
+      400: { type: "object", additionalProperties: true },
+      ...errs(401, 403, 404),
+    },
+  },
   eligibleHolders: {
     tags: ["Credentials"], summary: "Users eligible to hold a credential of this use case", security: bearer,
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },

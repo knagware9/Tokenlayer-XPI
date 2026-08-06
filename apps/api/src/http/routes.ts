@@ -823,6 +823,50 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return reply.code(202).send({ proposal });
   });
 
+  // Batch credential issuance from parsed CSV rows: ONE maker-checker proposal
+  // covering every row. Draft-time validation is all-or-nothing (any row
+  // problem ⇒ 400, no proposal at all); execution is row-independent (one
+  // row's failure never aborts the others — see issueUsecaseCredentialBatchKind).
+  // Subjects are addressed by EMAIL (not subjectUserId/subjectOrgId as the
+  // single route allows) and are resolved at EXECUTION time, so a not-yet-
+  // onboarded holder fails only its own row instead of the whole batch.
+  app.post("/credential-use-cases/:key/credentials/batch", { schema: S.issueUsecaseCredentialsBatch, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { key } = request.params as { key: string };
+    const b = request.body as { credentialType: string; rows: { subjectEmail: string; claims: Record<string, unknown> }[] };
+    const def = await deps.credentialUseCases.get(key);
+    if (!def) return notFound(reply, `credential use case '${key}' not found`);
+    const resolved = await resolveIssuer(reply, claims, def, key); // same gate as the single route
+    if (!resolved) return;
+    const { issuerOrg } = resolved;
+
+    let spec;
+    try { spec = credentialUseCaseType(def, b.credentialType); }
+    catch (err) { return reply.code(400).send({ error: "UNKNOWN_CREDENTIAL_TYPE", message: (err as Error).message }); }
+
+    const problems: { index: number; error: string }[] = [];
+    for (let i = 0; i < b.rows.length; i++) {
+      const row = b.rows[i]!;
+      if (!row.subjectEmail?.includes("@")) { problems.push({ index: i, error: "invalid subjectEmail" }); continue; }
+      try { validateMetadata(row.claims, spec.claimSchema); }
+      catch (err) { problems.push({ index: i, error: (err as Error).message }); }
+    }
+    if (problems.length) {
+      return reply.code(400).send({ error: "BATCH_INVALID", message: `${problems.length} row(s) failed validation`, problems });
+    }
+
+    const proposal = await deps.proposals.create({
+      useCaseKey: null, orgId: issuerOrg.id, assetId: null, kind: "issue-usecase-credential-batch",
+      payload: { useCaseKey: key, credentialType: spec.name, issuerOrgId: issuerOrg.id, rows: b.rows },
+      proposerId: claims.id, proposerLabel: claims.email, required: spec.requiredApprovals,
+    });
+    await deps.audit.append({
+      actorId: claims.id, action: "credential-batch-proposed" as LifecycleAction,
+      payload: { proposalId: proposal.id, useCaseKey: key, credentialType: spec.name, total: b.rows.length },
+    });
+    return reply.code(202).send({ proposal });
+  });
+
   // --- assets -------------------------------------------------------------
   // Core issuance logic shared by POST /assets and the invoice-register tokenize
   // endpoint: validation → derive invoiceFingerprint → unique guard → cashflow

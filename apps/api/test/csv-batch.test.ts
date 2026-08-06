@@ -215,3 +215,195 @@ describe("onboard-user-batch (ID-M task M2)", () => {
     expect(okRow?.status).toBe("ok");
   });
 });
+
+// ---------------------------------------------------------------------------
+// M3: issue-usecase-credential-batch kind + POST /credential-use-cases/:key/credentials/batch
+// ---------------------------------------------------------------------------
+
+interface CredBatchRowResult { index: number; subjectEmail: string; status: "ok" | "failed"; credentialId?: string; error?: string }
+interface CredBatchResult { total: number; succeeded: number; failed: number; rows: CredBatchRowResult[] }
+interface CredProposalView { id: string; kind: string; status: string; required: number; result: CredBatchResult | null }
+interface HeldCredentialM3 { id: string; type: string[]; acceptance: "accepted" | "pending" | "rejected" | "changes_requested" }
+
+/** A credential use case whose claim schema has a required string + a required number field. */
+async function seedScoreUseCase(app: Awaited<ReturnType<typeof buildTestApp>>, admin: string, key: string, over: Record<string, unknown> = {}) {
+  const DEF = {
+    key, name: "Batch Score UC",
+    credentialTypes: [{ name: "ScoreCredential", title: "Score", validityDays: 365, requiredApprovals: 1,
+      claimSchema: { type: "object", required: ["legalName", "score"], properties: { legalName: { type: "string" }, score: { type: "number" } } } }],
+    issuer: { kind: "platform" }, holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
+    ...over,
+  };
+  const r = await app.inject({ method: "POST", url: `${V1}/credential-use-cases`, headers: auth(admin), payload: DEF });
+  expect(r.statusCode).toBe(201);
+  return key;
+}
+
+/** Onboard `n` Holders scoped to `key`, via the single onboard-user path (maker/checker), each minted a DID. */
+async function onboardHolders(
+  app: Awaited<ReturnType<typeof buildTestApp>>, maker: string, checker: string, key: string, n: number,
+): Promise<{ email: string; password: string }[]> {
+  const out: { email: string; password: string }[] = [];
+  for (let i = 0; i < n; i++) {
+    const email = `m3-holder-${i}-${Math.random().toString(36).slice(2)}@x.dev`;
+    const password = "secret123";
+    await onboardUser(app, maker, checker, { email, password, role: "Holder", useCaseKey: key });
+    out.push({ email, password });
+  }
+  return out;
+}
+
+describe("issue-usecase-credential-batch (M3)", () => {
+  it("happy batch: 3 rows draft as one proposal → approve → executed 3/3 ok, each holder holds the credential", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const admin2 = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    const key = await seedScoreUseCase(app, admin, `m3-happy-${Math.random().toString(36).slice(2)}`);
+    const holders = await onboardHolders(app, admin, admin2, key, 3);
+
+    const rows = holders.map((h, i) => ({ subjectEmail: h.email, claims: { legalName: `Holder ${i}`, score: 10 + i } }));
+    const draft = await app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/${key}/credentials/batch`, headers: auth(admin),
+      payload: { credentialType: "ScoreCredential", rows },
+    });
+    expect(draft.statusCode).toBe(202);
+    const drafted = draft.json().proposal as CredProposalView;
+    expect(drafted.kind).toBe("issue-usecase-credential-batch");
+    expect(drafted.required).toBe(1);
+    expect(drafted.result).toBeNull();
+
+    const approve = await app.inject({ method: "POST", url: `${V1}/proposals/${drafted.id}/approve`, headers: auth(admin2), payload: {} });
+    expect(approve.statusCode).toBe(200);
+    const executed = approve.json().proposal as CredProposalView;
+    expect(executed.status).toBe("executed");
+    expect(executed.result).toMatchObject({ total: 3, succeeded: 3, failed: 0 });
+    expect(executed.result!.rows).toHaveLength(3);
+    for (const row of executed.result!.rows) {
+      expect(row.status).toBe("ok");
+      expect(typeof row.credentialId).toBe("string");
+    }
+
+    for (const h of holders) {
+      const tok = await loginAs(app, h.email, h.password);
+      const me = await app.inject({ method: "GET", url: `${V1}/me/credentials`, headers: auth(tok) });
+      expect(me.statusCode).toBe(200);
+      const held = me.json() as HeldCredentialM3[];
+      expect(held.some((c) => c.type.includes("ScoreCredential"))).toBe(true);
+    }
+  });
+
+  it("a row whose subjectEmail is unknown fails at execution; others still succeed", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const admin2 = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    const key = await seedScoreUseCase(app, admin, `m3-notfound-${Math.random().toString(36).slice(2)}`);
+    const holders = await onboardHolders(app, admin, admin2, key, 2);
+    const unknownEmail = `m3-unknown-${Math.random().toString(36).slice(2)}@x.dev`;
+
+    const rows = [
+      { subjectEmail: unknownEmail, claims: { legalName: "Nobody", score: 1 } },
+      { subjectEmail: holders[0]!.email, claims: { legalName: "Holder 0", score: 2 } },
+      { subjectEmail: holders[1]!.email, claims: { legalName: "Holder 1", score: 3 } },
+    ];
+    const draft = await app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/${key}/credentials/batch`, headers: auth(admin),
+      payload: { credentialType: "ScoreCredential", rows },
+    });
+    expect(draft.statusCode).toBe(202);
+    const drafted = draft.json().proposal as CredProposalView;
+
+    const approve = await app.inject({ method: "POST", url: `${V1}/proposals/${drafted.id}/approve`, headers: auth(admin2), payload: {} });
+    expect(approve.statusCode).toBe(200);
+    const executed = approve.json().proposal as CredProposalView;
+    expect(executed.status).toBe("executed");
+    expect(executed.result).toMatchObject({ total: 3, succeeded: 2, failed: 1 });
+    const failedRow = executed.result!.rows.find((r) => r.subjectEmail === unknownEmail);
+    expect(failedRow?.status).toBe("failed");
+    expect(failedRow?.error).toMatch(/holder not found/i);
+    const okRows = executed.result!.rows.filter((r) => r.subjectEmail !== unknownEmail);
+    expect(okRows.every((r) => r.status === "ok")).toBe(true);
+  });
+
+  it("draft-time claim rejects: a row missing a required claim → 400 BATCH_INVALID with that row's index, no proposal", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const admin2 = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    const key = await seedScoreUseCase(app, admin, `m3-invalid-${Math.random().toString(36).slice(2)}`);
+    const holders = await onboardHolders(app, admin, admin2, key, 2);
+
+    const before = await app.inject({ method: "GET", url: `${V1}/proposals`, headers: auth(admin) });
+    const beforeCount = (before.json() as { kind: string }[]).filter((p) => p.kind === "issue-usecase-credential-batch").length;
+
+    const rows = [
+      { subjectEmail: holders[0]!.email, claims: { legalName: "Holder 0", score: 1 } },
+      { subjectEmail: holders[1]!.email, claims: { legalName: "Holder 1" } }, // missing 'score'
+    ];
+    const res = await app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/${key}/credentials/batch`, headers: auth(admin),
+      payload: { credentialType: "ScoreCredential", rows },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("BATCH_INVALID");
+    expect(res.json().problems).toEqual(expect.arrayContaining([expect.objectContaining({ index: 1 })]));
+
+    const after = await app.inject({ method: "GET", url: `${V1}/proposals`, headers: auth(admin) });
+    const afterCount = (after.json() as { kind: string }[]).filter((p) => p.kind === "issue-usecase-credential-batch").length;
+    expect(afterCount).toBe(beforeCount);
+  });
+
+  it("ID-L composition: holderAcceptance: true use case → batch-issued credentials born pending", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const admin2 = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    const key = await seedScoreUseCase(app, admin, `m3-pending-${Math.random().toString(36).slice(2)}`, { holderAcceptance: true });
+    const holders = await onboardHolders(app, admin, admin2, key, 1);
+
+    const rows = [{ subjectEmail: holders[0]!.email, claims: { legalName: "Holder 0", score: 5 } }];
+    const draft = await app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/${key}/credentials/batch`, headers: auth(admin),
+      payload: { credentialType: "ScoreCredential", rows },
+    });
+    expect(draft.statusCode).toBe(202);
+    const proposalId = draft.json().proposal.id;
+    const approve = await app.inject({ method: "POST", url: `${V1}/proposals/${proposalId}/approve`, headers: auth(admin2), payload: {} });
+    expect(approve.statusCode).toBe(200);
+
+    const tok = await loginAs(app, holders[0]!.email, holders[0]!.password);
+    const me = await app.inject({ method: "GET", url: `${V1}/me/credentials`, headers: auth(tok) });
+    const held = me.json() as HeldCredentialM3[];
+    const score = held.find((c) => c.type.includes("ScoreCredential"));
+    expect(score).toBeDefined();
+    expect(score!.acceptance).toBe("pending");
+  });
+
+  it("gates: unknown credentialType → 400; a non-issuer role → 403; rows over 200 → 400 (schema)", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const admin2 = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    const key = await seedScoreUseCase(app, admin, `m3-gates-${Math.random().toString(36).slice(2)}`);
+    const holders = await onboardHolders(app, admin, admin2, key, 1);
+
+    const badType = await app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/${key}/credentials/batch`, headers: auth(admin),
+      payload: { credentialType: "Nope", rows: [{ subjectEmail: holders[0]!.email, claims: {} }] },
+    });
+    expect(badType.statusCode).toBe(400);
+    expect(badType.json().error).toBe("UNKNOWN_CREDENTIAL_TYPE");
+
+    // m1.admin is a UseCaseAdmin — neither PlatformAdmin nor OrgAdmin nor a
+    // scoped desk operator for this use case — same gate as the single route.
+    const useCaseAdmin = await loginAs(app, "m1.admin@tokenlayer.dev", "m1admin123");
+    const forbidden = await app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/${key}/credentials/batch`, headers: auth(useCaseAdmin),
+      payload: { credentialType: "ScoreCredential", rows: [{ subjectEmail: holders[0]!.email, claims: { legalName: "X", score: 1 } }] },
+    });
+    expect(forbidden.statusCode).toBe(403);
+
+    const tooMany = Array.from({ length: 201 }, (_, i) => ({ subjectEmail: `over-${i}@x.dev`, claims: { legalName: "X", score: 1 } }));
+    const overLimit = await app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/${key}/credentials/batch`, headers: auth(admin),
+      payload: { credentialType: "ScoreCredential", rows: tooMany },
+    });
+    expect(overLimit.statusCode).toBe(400);
+  });
+});
