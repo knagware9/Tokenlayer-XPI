@@ -18,6 +18,7 @@ import { computeActivity, computePortfolio } from "../investor.js";
 import { readErpInvoices, stageInvoice } from "../invoice-register.js";
 import { assetBalancesOf, coded, CodedError, dropPayerShare, executeCashflowCore, executeIssueActivation, runGatedAction } from "../executors.js";
 import { proposalKind } from "../proposal-kinds.js";
+import type { OnboardUserPayload } from "../user-kinds.js";
 import { resolveDid } from "../did-resolver.js";
 import { S } from "./schemas.js";
 import { actorOf, contextOf, isPositiveIntString, notFound, requireUser, scopedToCaller, type TokenClaims } from "./support.js";
@@ -818,6 +819,50 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       useCaseKey: null, orgId: issuerOrg.id, assetId: null, kind: "issue-usecase-credential",
       payload: { credentialUseCaseKey: key, credentialType: spec.name, subjectDid, ...subjectRef, claims: b.claims, issuerOrgId: issuerOrg.id },
       proposerId: claims.id, proposerLabel: claims.email, required: spec.requiredApprovals,
+    });
+    return reply.code(202).send({ proposal });
+  });
+
+  // Batch credential issuance from parsed CSV rows: ONE maker-checker proposal
+  // covering every row. Draft-time validation is all-or-nothing (any row
+  // problem ⇒ 400, no proposal at all); execution is row-independent (one
+  // row's failure never aborts the others — see issueUsecaseCredentialBatchKind).
+  // Subjects are addressed by EMAIL (not subjectUserId/subjectOrgId as the
+  // single route allows) and are resolved at EXECUTION time, so a not-yet-
+  // onboarded holder fails only its own row instead of the whole batch.
+  app.post("/credential-use-cases/:key/credentials/batch", { schema: S.issueUsecaseCredentialsBatch, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { key } = request.params as { key: string };
+    const b = request.body as { credentialType: string; rows: { subjectEmail: string; claims: Record<string, unknown> }[] };
+    const def = await deps.credentialUseCases.get(key);
+    if (!def) return notFound(reply, `credential use case '${key}' not found`);
+    const resolved = await resolveIssuer(reply, claims, def, key); // same gate as the single route
+    if (!resolved) return;
+    const { issuerOrg } = resolved;
+
+    let spec;
+    try { spec = credentialUseCaseType(def, b.credentialType); }
+    catch (err) { return reply.code(400).send({ error: "UNKNOWN_CREDENTIAL_TYPE", message: (err as Error).message }); }
+
+    const problems: { index: number; error: string }[] = [];
+    for (let i = 0; i < b.rows.length; i++) {
+      const row = b.rows[i]!;
+      if (!row.subjectEmail?.includes("@")) { problems.push({ index: i, error: "invalid subjectEmail" }); continue; }
+      try { validateMetadata(row.claims, spec.claimSchema); }
+      catch (err) { problems.push({ index: i, error: (err as Error).message }); }
+    }
+    if (problems.length) {
+      return reply.code(400).send({ error: "BATCH_INVALID", message: `${problems.length} row(s) failed validation`, problems });
+    }
+
+    const proposal = await deps.proposals.create({
+      useCaseKey: null, orgId: issuerOrg.id, assetId: null, kind: "issue-usecase-credential-batch",
+      payload: { useCaseKey: key, credentialType: spec.name, issuerOrgId: issuerOrg.id, rows: b.rows },
+      proposerId: claims.id, proposerLabel: claims.email, required: spec.requiredApprovals,
+    });
+    await deps.audit.append({
+      actorId: claims.id, action: "credential-batch-proposed" as LifecycleAction,
+      payload: { proposalId: proposal.id, useCaseKey: key, credentialType: spec.name, total: b.rows.length },
     });
     return reply.code(202).send({ proposal });
   });
@@ -1781,7 +1826,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   app.post("/users", { schema: S.createUser, ...auth }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const b = request.body as { email: string; password: string; role: Role; useCaseKey?: string; walletAddress?: string; kyc?: KycDetails };
-    const targetUseCaseKey = claims.role === "PlatformAdmin" ? (b.useCaseKey ?? null) : claims.useCaseKey;
+    const targetUseCaseKey = claims.role === "PlatformAdmin" ? (b.useCaseKey || null) : claims.useCaseKey;
     const targetDomain = targetUseCaseKey
       ? useCaseDomainOf(targetUseCaseKey, {
           tokenizationKeys: (await deps.useCases.list()).map((u) => u.key),
@@ -1845,6 +1890,75 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         role: b.role, useCaseKey: targetUseCaseKey, walletAddress: b.walletAddress ?? null, kyc,
       },
       proposerId: claims.id, proposerLabel: claims.email, required: 1,
+    });
+    return reply.code(202).send({ proposal });
+  });
+
+  // Batch onboarding from parsed CSV rows: ONE maker-checker proposal covering
+  // every row. Draft-time validation is all-or-nothing (any row problem ⇒ 400,
+  // no proposal at all); execution is row-independent (one row's failure
+  // never aborts the others — see onboardUserBatchKind).
+  app.post("/users/batch", { schema: S.createUsersBatch, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { rows } = request.body as { rows: { email: string; password: string; role: Role; useCaseKey?: string; walletAddress?: string; kyc?: KycDetails }[] };
+    const tokKeys = (await deps.useCases.list()).map((u) => u.key);
+    const credKeys = (await deps.credentialUseCases.list()).map((u) => u.key);
+    const problems: { index: number; error: string }[] = [];
+    const seen = new Set<string>();
+    const prepared: OnboardUserPayload[] = [];
+    const targetKeys = new Set<string | null>();
+    for (let i = 0; i < rows.length; i++) {
+      const b = rows[i]!;
+      // Mirrors POST /users' target-key + domain + role-domain-mismatch + escalation checks, exactly, per row.
+      const targetUseCaseKey = claims.role === "PlatformAdmin" ? (b.useCaseKey || null) : claims.useCaseKey;
+      const targetDomain = targetUseCaseKey
+        ? useCaseDomainOf(targetUseCaseKey, { tokenizationKeys: tokKeys, credentialKeys: credKeys })
+        : undefined;
+      if (targetUseCaseKey && !targetDomain) { problems.push({ index: i, error: `no use case '${targetUseCaseKey}'` }); continue; }
+      if (targetDomain && !assignableRoles("PlatformAdmin", targetDomain).includes(b.role)) {
+        problems.push({ index: i, error: `role '${b.role}' is not valid for a ${targetDomain} use case` });
+        continue;
+      }
+      if (!canCreateUser({ role: claims.role, useCaseKey: claims.useCaseKey }, b.role, targetUseCaseKey, targetDomain ?? "tokenization")) {
+        problems.push({ index: i, error: "not allowed to create that user" });
+        continue;
+      }
+      if (!b.email?.includes("@")) { problems.push({ index: i, error: "invalid email" }); continue; }
+      if (seen.has(b.email)) { problems.push({ index: i, error: "duplicate email within batch" }); continue; }
+      seen.add(b.email);
+      if (await deps.users.findByEmail(b.email)) { problems.push({ index: i, error: "email already registered" }); continue; }
+      const kyc: OnboardUserPayload["kyc"] = b.kyc && b.kyc.legalName && b.kyc.country
+        ? { legalName: b.kyc.legalName, country: b.kyc.country, idType: b.kyc.idType, idNumber: b.kyc.idNumber, documentRef: b.kyc.documentRef }
+        : null;
+      prepared.push({
+        email: b.email, passwordHash: await bcrypt.hash(b.password, BCRYPT_ROUNDS),
+        role: b.role, useCaseKey: targetUseCaseKey, walletAddress: b.walletAddress ?? null, kyc,
+      });
+      targetKeys.add(targetUseCaseKey);
+    }
+    if (problems.length) {
+      return reply.code(400).send({ error: "BATCH_INVALID", message: `${problems.length} row(s) failed validation`, problems });
+    }
+    // Stamp the proposal's useCaseKey with the batch's shared target when every
+    // row agrees (so a scoped UseCaseAdmin can see/approve it, same as a single
+    // onboard-user proposal). A MIXED batch — different use cases per row, only
+    // reachable by a PlatformAdmin caller since non-PlatformAdmin callers are
+    // pinned to their own useCaseKey — gets useCaseKey: null; userScopedView
+    // only matches null-scope proposals for a PlatformAdmin, so approving a
+    // mixed batch is PlatformAdmin-only (acceptable — documented divergence).
+    const uniformUseCaseKey = targetKeys.size === 1 ? [...targetKeys][0]! : null;
+    // DIVERGENCE from the single POST /users route: the org-member direct-create
+    // branch (`claims.orgId`) is NOT replicated here — a batch ALWAYS drafts a
+    // proposal, even for an org-scoped caller, so every batch runs through the
+    // same maker-checker executor path (one onboardSingle call per row).
+    const proposal = await deps.proposals.create({
+      useCaseKey: uniformUseCaseKey, orgId: null, assetId: null, kind: "onboard-user-batch",
+      payload: { rows: prepared },
+      proposerId: claims.id, proposerLabel: claims.email, required: 1,
+    });
+    await deps.audit.append({
+      actorId: claims.id, action: "user-batch-proposed" as LifecycleAction,
+      payload: { proposalId: proposal.id, total: prepared.length },
     });
     return reply.code(202).send({ proposal });
   });

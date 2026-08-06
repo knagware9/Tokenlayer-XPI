@@ -13,12 +13,12 @@
 import type { Actor, LifecycleAction } from "@tokenlayer/core";
 import type { AppDeps } from "./context.js";
 import { issueCredentialKind, revokeCredentialKind } from "./credential-kinds.js";
-import { issueUsecaseCredentialKind } from "./credential-usecase-kinds.js";
+import { issueUsecaseCredentialBatchKind, issueUsecaseCredentialKind } from "./credential-usecase-kinds.js";
 import { coded, executeCashflowCore, executeIssueActivation, runGatedAction } from "./executors.js";
 import type { TokenClaims } from "./http/support.js";
 import { scopedToCaller } from "./http/support.js";
 import type { ProposalRecord } from "./persistence/types.js";
-import { onboardUserKind, revokeUserIdentityKind } from "./user-kinds.js";
+import { onboardUserBatchKind, onboardUserKind, revokeUserIdentityKind } from "./user-kinds.js";
 import { createUseCaseKind } from "./usecase-kinds.js";
 
 /** Minimal logger shape (a Fastify request.log). */
@@ -149,10 +149,12 @@ export function allProposalKinds(): ProposalKindHandler[] {
 registerProposalKind(issueCredentialKind);
 registerProposalKind(revokeCredentialKind);
 registerProposalKind(issueUsecaseCredentialKind);
+registerProposalKind(issueUsecaseCredentialBatchKind);
 
 // Use-case-scoped user-lifecycle kinds. Same registry, same no-runtime-cycle
 // TYPE-only import pattern as the credential kinds above.
 registerProposalKind(onboardUserKind);
+registerProposalKind(onboardUserBatchKind);
 registerProposalKind(revokeUserIdentityKind);
 
 // Org-scoped use-case configuration kind: an OrgAdmin proposes a new org-owned

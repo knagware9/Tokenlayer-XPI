@@ -220,6 +220,16 @@ export interface Proposal {
   error: string | null;
   createdAt: string;
   decidedAt: string | null;
+  /** Set on executed batch proposals (onboard-user-batch, issue-usecase-credential-batch): the per-row report. */
+  result?: BatchReport | Record<string, unknown> | null;
+}
+
+/** Per-row report on an executed batch proposal — total/succeeded/failed counts plus one row per input. */
+export interface BatchReport {
+  total: number;
+  succeeded: number;
+  failed: number;
+  rows: { index: number; email?: string; subjectEmail?: string; status: "ok" | "failed"; credentialId?: string; error?: string }[];
 }
 
 /** Result of verifying one asset's audit hash chain + on-ledger anchor. */

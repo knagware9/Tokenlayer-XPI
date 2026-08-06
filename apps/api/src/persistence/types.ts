@@ -306,12 +306,14 @@ export interface ProposalRecord {
   approvals: ProposalApproval[];
   status: "pending" | "approved" | "rejected" | "executed" | "failed";
   error: string | null;
+  /** Optional executor report (e.g. a CSV batch's per-row outcomes), set after execution. */
+  result: Record<string, unknown> | null;
   createdAt: string;
   decidedAt: string | null;
 }
 
 export interface ProposalRepository {
-  create(input: Omit<ProposalRecord, "id" | "approvals" | "status" | "error" | "createdAt" | "decidedAt">): Promise<ProposalRecord>;
+  create(input: Omit<ProposalRecord, "id" | "approvals" | "status" | "error" | "result" | "createdAt" | "decidedAt">): Promise<ProposalRecord>;
   get(id: string): Promise<ProposalRecord | null>;
   /** Newest first, optionally scoped by use case and/or status. */
   list(useCaseKey?: string, status?: string): Promise<ProposalRecord[]>;
@@ -323,6 +325,8 @@ export interface ProposalRepository {
   claimDecided(id: string, target: ProposalRecord["status"]): Promise<boolean>;
   /** Set a terminal status (+error, +decidedAt for terminal states). */
   setStatus(id: string, status: ProposalRecord["status"], error?: string | null): Promise<ProposalRecord>;
+  /** Record an executor report on the proposal (e.g. a CSV batch's per-row outcomes). */
+  setResult(id: string, result: Record<string, unknown>): Promise<ProposalRecord>;
 }
 
 export interface CashRepository {

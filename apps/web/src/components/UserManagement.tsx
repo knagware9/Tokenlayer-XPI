@@ -5,6 +5,7 @@ import { assignableRoles } from "../rbac.js";
 import type { CredentialUseCase, IdentityResult, Role, UseCase } from "../types.js";
 import type { DomainKey } from "../domains.js";
 import { Pill } from "./ui.js";
+import { BatchCsv } from "./BatchCsv.js";
 
 type Summary = { id: string; email: string; role: Role; useCaseKey: string | null; accountId: string | null; active: boolean; kycStatus: "pending" | "approved" | "rejected"; kyc: { legalName?: string; country?: string; idType?: string; idNumber?: string; documentRef?: string } | null };
 type Sub = "add" | "manage";
@@ -30,7 +31,10 @@ export function UserManagement({ useCaseKey, useCases }: { useCaseKey: string; u
         ))}
       </div>
       {sub === "add" ? (
-        <AddUser useCaseKey={useCaseKey} useCases={useCases} />
+        <div className="space-y-4">
+          <AddUser useCaseKey={useCaseKey} useCases={useCases} />
+          <BatchOnboard />
+        </div>
       ) : (
         <ManageUsers rows={rows} me={user?.email} onChanged={reload} />
       )}
@@ -127,6 +131,53 @@ function AddUser({ useCaseKey, useCases }: { useCaseKey: string; useCases: UseCa
       {notice && <p className="text-sm text-emerald-600">{notice}</p>}
       <button type="submit" className="rounded-lg bg-brand-600 text-white py-1.5 px-4 text-sm font-medium hover:bg-brand-700">Create user</button>
     </form>
+  );
+}
+
+/** Collapsible CSV batch-onboarding panel, next to the single Add-User form. Rows
+ * are onboarded through the same maker-checker path, one proposal per batch. */
+function BatchOnboard(): JSX.Element {
+  const { token } = useAuth();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="rounded-lg border border-slate-200 text-slate-600 px-3.5 py-1.5 text-sm font-medium hover:bg-slate-50"
+      >
+        {open ? "Hide batch onboarding" : "Batch onboard (CSV)"}
+      </button>
+      {open && (
+        <div className="mt-3 max-w-3xl">
+          <BatchCsv
+            title="Batch onboard users (CSV)"
+            requiredHeaders={["email", "password", "role"]}
+            optionalHeaders={["useCaseKey", "walletAddress"]}
+            templateName="holders-template.csv"
+            coerceRow={(row) => ({
+              email: row.email,
+              password: row.password,
+              role: row.role,
+              // Blank optional cells (parseCsv fills "") are dropped, not sent
+              // as empty strings — the API treats the key as absent.
+              ...(row.useCaseKey ? { useCaseKey: row.useCaseKey } : {}),
+              ...(row.walletAddress ? { walletAddress: row.walletAddress } : {}),
+            })}
+            validateRow={(row) => {
+              const email = String(row.email ?? "");
+              const password = String(row.password ?? "");
+              const role = String(row.role ?? "");
+              if (!email.includes("@")) return "invalid email";
+              if (password.length < 6) return "password must be at least 6 characters";
+              if (!role) return "role is required";
+              return null;
+            }}
+            onSubmit={(rows) => api.onboardUsersBatch(token!, rows).then((r) => ({ proposalId: r.proposal.id }))}
+          />
+        </div>
+      )}
+    </div>
   );
 }
 

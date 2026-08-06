@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../api.js";
 import { useAuth } from "../auth.js";
-import type { Proposal } from "../types.js";
+import type { BatchReport, Proposal } from "../types.js";
 import { Pill } from "./ui.js";
+
+/** True when a proposal's `result` looks like a batch report (as opposed to some
+ * other kind-specific result shape, or absent). */
+function isBatchReport(result: Proposal["result"]): result is BatchReport {
+  return !!result && typeof (result as { total?: unknown }).total === "number" && Array.isArray((result as { rows?: unknown }).rows);
+}
 
 const STATUS_TONE: Record<Proposal["status"], "ok" | "warn" | "danger" | "info" | "muted"> = {
   pending: "warn",
@@ -20,6 +26,8 @@ function summarize(p: Proposal): string {
   if (p.kind === "issue-credential") return `issue a ${String(pl.type ?? "credential")} to ${String((pl.claims as Record<string, unknown>)?.legalName ?? pl.subjectDid ?? "a subject")}`;
   if (p.kind === "revoke-credential") return `revoke a credential — ${String(pl.reason ?? "no reason given")}`;
   if (p.kind === "onboard-user") return `onboard ${String(pl.role ?? "user")} ${String(pl.email ?? "")}${(pl.kyc as Record<string, unknown> | null)?.country ? ` (KYC: ${String((pl.kyc as Record<string, unknown>).country)})` : ""}`;
+  if (p.kind === "onboard-user-batch") return `onboard ${(pl.rows as unknown[] | undefined)?.length ?? "?"} users${p.useCaseKey ? ` — ${p.useCaseKey}` : ""}`;
+  if (p.kind === "issue-usecase-credential-batch") return `issue ${(pl.rows as unknown[] | undefined)?.length ?? "?"} × ${String(pl.credentialType ?? "credential")} — ${String(pl.useCaseKey ?? "")}`;
   if (p.kind === "revoke-user-identity") return `revoke a user's identity — ${String(pl.reason ?? "no reason given")}`;
   if (p.kind === "create-use-case") return `configure use case ${String(pl.name ?? pl.key ?? "")} (${String(pl.symbol ?? "")})`;
   if (p.kind === "issue") {
@@ -111,15 +119,46 @@ export function ApprovalsPanel({ onChanged }: { onChanged?: () => void }): JSX.E
       {decided.length > 0 && (
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 space-y-2">
           <h3 className="text-sm font-semibold text-slate-800">Recent decisions</h3>
-          {decided.map((p) => (
-            <div key={p.id} className="flex items-center justify-between text-sm py-1 border-b border-slate-50 last:border-0">
-              <span className="text-slate-600 truncate">
-                <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-semibold uppercase mr-2">{p.kind}</span>
-                {summarize(p)}
-              </span>
-              <span title={p.error ?? ""}><Pill tone={STATUS_TONE[p.status]}>{p.status}</Pill></span>
-            </div>
-          ))}
+          {decided.map((p) => <DecisionRow key={p.id} p={p} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One "recent decisions" row. When the proposal executed a batch (onboard-user-batch,
+ * issue-usecase-credential-batch), an expandable summary line shows the per-row report. */
+function DecisionRow({ p }: { p: Proposal }): JSX.Element {
+  const [expanded, setExpanded] = useState(false);
+  const report = isBatchReport(p.result) ? p.result : null;
+  const failedRows = report?.rows.filter((r) => r.status === "failed") ?? [];
+
+  return (
+    <div className="text-sm py-1 border-b border-slate-50 last:border-0">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-slate-600 truncate">
+          <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-semibold uppercase mr-2">{p.kind}</span>
+          {summarize(p)}
+        </span>
+        <div className="flex items-center gap-2 shrink-0">
+          {report && (
+            <button onClick={() => setExpanded((e) => !e)} className="text-[11px] text-brand-600 hover:text-brand-700 font-medium">
+              {expanded ? "Hide report" : "View report"}
+            </button>
+          )}
+          <span title={p.error ?? ""}><Pill tone={STATUS_TONE[p.status]}>{p.status}</Pill></span>
+        </div>
+      </div>
+      {report && expanded && (
+        <div className="mt-1.5 mb-1 rounded-lg bg-slate-50 border border-slate-100 px-3 py-2 text-xs text-slate-600">
+          <div>Total: {report.total} | Successful: {report.succeeded} | Failed: {report.failed}</div>
+          {failedRows.length > 0 && (
+            <ul className="mt-1 list-disc pl-5 space-y-0.5 text-rose-600">
+              {failedRows.map((r) => (
+                <li key={r.index}>#{r.index + 1} {r.email ?? r.subjectEmail ?? "?"}: {r.error ?? "failed"}</li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
     </div>

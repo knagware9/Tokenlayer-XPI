@@ -3,6 +3,7 @@ import { api, ApiError } from "../api.js";
 import { useAuth } from "../auth.js";
 import type { ChainInfo, InvoiceRowResult, StagedInvoice, TokenizeResult, UseCase } from "../types.js";
 import { Card, EmptyState, Pill, SectionHeader } from "./ui.js";
+import { parseCsv } from "../lib/csv.js";
 
 // ============================================================================
 // Invoice Register — the server-side staging table for the invoice use case.
@@ -49,17 +50,6 @@ function canonicalize(raws: Record<string, string>[]): Record<string, string>[] 
       rec[field] = v;
     }
     return rec;
-  });
-}
-
-/** Simple CSV: first line headers, comma-split, trimmed cells (matches the connector). */
-function parseCsv(text: string): Record<string, string>[] {
-  const [headerLine, ...lines] = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-  if (!headerLine || lines.length === 0) return [];
-  const headers = headerLine.split(",").map((h) => h.trim());
-  return lines.map((line) => {
-    const cells = line.split(",").map((c) => c.trim());
-    return Object.fromEntries(headers.map((h, i) => [h, cells[i] ?? ""]));
   });
 }
 
