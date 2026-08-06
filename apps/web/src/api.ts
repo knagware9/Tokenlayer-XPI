@@ -29,6 +29,15 @@ export class ApiError extends Error {
     const p = (this.body as { problems?: unknown } | null | undefined)?.problems;
     return Array.isArray(p) ? p.filter((x): x is string => typeof x === "string") : undefined;
   }
+
+  /** Convenience accessor for a batch 400's `problems: { index, error }[]` (BATCH_INVALID) — a
+   * different shape from the string-array `problems` above, so it gets its own getter. */
+  get rowProblems(): { index: number; error: string }[] | undefined {
+    const p = (this.body as { problems?: unknown } | null | undefined)?.problems;
+    if (!Array.isArray(p)) return undefined;
+    const rows = p.filter((x): x is { index: number; error: string } => typeof x === "object" && x !== null && typeof (x as { index?: unknown }).index === "number" && typeof (x as { error?: unknown }).error === "string");
+    return rows.length > 0 ? rows : undefined;
+  }
 }
 
 /** Friendlier copy for error codes worth explaining beyond the raw API message. */
@@ -173,6 +182,9 @@ export const api = {
   // 202 → { proposal }: non-org onboarding is gated; the user does not exist until it is approved.
   createUser: (token: string, input: { email: string; password: string; role: Role; useCaseKey?: string; walletAddress?: string; kyc?: { legalName?: string; country?: string; idType?: string; idNumber?: string; documentRef?: string } }) =>
     request<{ proposal: Proposal }>("/users", token, { method: "POST", body: JSON.stringify(input) }),
+  // 202 → { proposal } (one proposal covering the whole batch); 400 BATCH_INVALID → { error, message, problems }.
+  onboardUsersBatch: (token: string, rows: unknown[]) =>
+    request<{ proposal: Proposal }>("/users/batch", token, { method: "POST", body: JSON.stringify({ rows }) }),
   // 202 → { proposal }: identity revocation is gated.
   revokeUserIdentity: (token: string, id: string, reason: string) =>
     request<{ proposal: Proposal }>(`/users/${encodeURIComponent(id)}/revoke-identity`, token, { method: "POST", body: JSON.stringify({ reason }) }),
@@ -250,6 +262,9 @@ export const api = {
     request<EligibleHolder[]>(`/credential-use-cases/${encodeURIComponent(key)}/eligible-holders`, token),
   issueUsecaseCredential: (token: string, key: string, body: { credentialType: string; subjectUserId?: string; subjectOrgId?: string; claims: Record<string, unknown> }) =>
     request<{ proposal: Proposal }>(`/credential-use-cases/${encodeURIComponent(key)}/credentials`, token, { method: "POST", body: JSON.stringify(body) }),
+  // 202 → { proposal } (one proposal covering the whole batch); 400 BATCH_INVALID → { error, message, problems }.
+  issueCredentialsBatch: (token: string, key: string, credentialType: string, rows: unknown[]) =>
+    request<{ proposal: Proposal }>(`/credential-use-cases/${encodeURIComponent(key)}/credentials/batch`, token, { method: "POST", body: JSON.stringify({ credentialType, rows }) }),
   enrollLoginKey: (token: string, body: { did: string; label: string }) =>
     request<LoginKeyInfo>("/me/login-keys", token, { method: "POST", body: JSON.stringify(body) }),
   loginKeys: (token: string) => request<LoginKeyInfo[]>("/me/login-keys", token),
