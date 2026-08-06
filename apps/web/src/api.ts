@@ -210,6 +210,13 @@ export const api = {
   // 202 → { proposal }: revocation is gated too.
   revokeCredential: (token: string, id: string, reason: string) =>
     request<{ proposal: Proposal }>(`/credentials/${encodeURIComponent(id)}/revoke`, token, { method: "POST", body: JSON.stringify({ reason }) }),
+  // Holder acceptance lifecycle: accept, reject (optional note, revokes), or request changes (note required).
+  acceptCredential: (token: string, id: string) =>
+    request<{ id: string; acceptance: string }>(`/me/credentials/${encodeURIComponent(id)}/accept`, token, { method: "POST", body: "{}" }),
+  rejectHeldCredential: (token: string, id: string, note?: string) =>
+    request<{ id: string; acceptance: string }>(`/me/credentials/${encodeURIComponent(id)}/reject`, token, { method: "POST", body: JSON.stringify(note ? { note } : {}) }),
+  requestCredentialChanges: (token: string, id: string, note: string) =>
+    request<{ id: string; acceptance: string }>(`/me/credentials/${encodeURIComponent(id)}/request-changes`, token, { method: "POST", body: JSON.stringify({ note }) }),
   // null → no chain hosts the registry; credentials are issued unanchored.
   identityRegistry: (token: string) => request<IdentityRegistryInfo | null>("/registry", token),
   // Public: a verifier must be able to check a credential without an account.

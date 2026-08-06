@@ -12,12 +12,13 @@ export function OrganizationWallet(): JSX.Element {
   const [creds, setCreds] = useState<HeldCredential[] | null>(null);
   const [statuses, setStatuses] = useState<Record<string, CredentialStatusInfo>>({});
   const [org, setOrg] = useState<Organization | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     if (!token || !orgId) { setCreds([]); return; }
     void api.orgWallet(token, orgId).then(setCreds).catch(() => setCreds([]));
     void api.org(token, orgId).then(setOrg).catch(() => setOrg(null));
-  }, [token, orgId]);
+  }, [token, orgId, reloadKey]);
 
   useEffect(() => {
     if (!creds?.length) return;
@@ -42,7 +43,7 @@ export function OrganizationWallet(): JSX.Element {
       {org && <p className="font-mono text-xs text-slate-500 break-all -mt-3 mb-4">{org.did}</p>}
       {creds === null ? <Card><Skeleton lines={4} /></Card>
         : creds.length === 0 ? <Card><EmptyState icon="doc" title="No credentials yet" hint="Credentials issued to your organization will appear here." /></Card>
-        : <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">{creds.map((c) => <CredentialCard key={c.id} credential={c} status={statuses[c.id]} />)}</div>}
+        : <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">{creds.map((c) => <CredentialCard key={c.id} credential={c} status={statuses[c.id]} onAcceptanceAction={() => setReloadKey((k) => k + 1)} />)}</div>}
     </div>
   );
 }

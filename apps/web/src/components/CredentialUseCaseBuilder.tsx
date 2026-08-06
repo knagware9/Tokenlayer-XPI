@@ -83,6 +83,7 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
   const [holderOrgIds, setHolderOrgIds] = useState<string[]>([]);
   const [verifierKind, setVerifierKind] = useState<VerifierBinding["kind"]>("any");
   const [verifierOrgIds, setVerifierOrgIds] = useState<string[]>([]);
+  const [holderAcceptance, setHolderAcceptance] = useState(false);
 
   // Step 4 — create
   const [error, setError] = useState<string | null>(null);
@@ -179,6 +180,7 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
       issuer,
       holderPolicy,
       verifier,
+      ...(holderAcceptance ? { holderAcceptance: true } : {}),
     };
   }
 
@@ -212,6 +214,7 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
         })),
         holderPolicy: def.holderPolicy,
         verifier: def.verifier,
+        ...(def.holderAcceptance ? { holderAcceptance: true } : {}),
       },
       builtIn: false,
     };
@@ -482,6 +485,11 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
                     ))}
                   </div>
                 )}
+                <label className="flex items-center gap-2 text-xs font-medium mt-3">
+                  <input type="checkbox" checked={holderAcceptance} onChange={(e) => setHolderAcceptance(e.target.checked)} />
+                  Require holder acceptance
+                </label>
+                <p className="text-[11px] text-slate-500 mt-1">Issued credentials stay pending until the holder accepts, rejects, or requests changes.</p>
               </section>
             </div>
           )}
