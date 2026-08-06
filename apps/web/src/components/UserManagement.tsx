@@ -155,12 +155,21 @@ function BatchOnboard(): JSX.Element {
             requiredHeaders={["email", "password", "role"]}
             optionalHeaders={["useCaseKey", "walletAddress"]}
             templateName="holders-template.csv"
+            coerceRow={(row) => ({
+              email: row.email,
+              password: row.password,
+              role: row.role,
+              // Blank optional cells (parseCsv fills "") are dropped, not sent
+              // as empty strings — the API treats the key as absent.
+              ...(row.useCaseKey ? { useCaseKey: row.useCaseKey } : {}),
+              ...(row.walletAddress ? { walletAddress: row.walletAddress } : {}),
+            })}
             validateRow={(row) => {
               const email = String(row.email ?? "");
               const password = String(row.password ?? "");
               const role = String(row.role ?? "");
               if (!email.includes("@")) return "invalid email";
-              if (password.length < 8) return "password must be at least 8 characters";
+              if (password.length < 6) return "password must be at least 6 characters";
               if (!role) return "role is required";
               return null;
             }}

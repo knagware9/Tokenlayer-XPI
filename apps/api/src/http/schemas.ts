@@ -1268,7 +1268,7 @@ export const S: Record<string, FastifySchema> = {
             type: "object", additionalProperties: true, required: ["email", "password", "role"],
             properties: {
               email: { type: "string" },
-              password: { type: "string", minLength: 8 },
+              password: { type: "string", minLength: 6 },
               role: { type: "string", enum: ["UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor", "Holder", "Verifier"] },
               useCaseKey: { type: "string" },
               walletAddress: { type: "string" },

@@ -184,6 +184,22 @@ describe("onboard-user-batch (ID-M task M2)", () => {
     expect(res.json().problems).toEqual(expect.arrayContaining([expect.objectContaining({ index: 0 })]));
   });
 
+  it("a PlatformAdmin row with useCaseKey: '' is treated as no use case → per-row problem, not an orphan-scoped user", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const rows = [{ email: `blank-uc-${Math.random().toString(36).slice(2)}@x.dev`, password: "secret123", role: "Holder", useCaseKey: "" }];
+
+    const res = await app.inject({ method: "POST", url: `${V1}/users/batch`, headers: auth(admin), payload: { rows } });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("BATCH_INVALID");
+    // "" must NOT slip past the use-case-existence gate the way a truthy-but-
+    // unknown key can't: it is normalized to null, and a PlatformAdmin may not
+    // create a user without naming a use case.
+    expect(res.json().problems).toEqual(expect.arrayContaining([
+      expect.objectContaining({ index: 0, error: expect.stringMatching(/not allowed/i) }),
+    ]));
+  });
+
   it("execution-time row failure: a row's email is taken by the single path between draft and approve", async () => {
     const app = await buildTestApp();
     const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
@@ -374,6 +390,41 @@ describe("issue-usecase-credential-batch (M3)", () => {
     const score = held.find((c) => c.type.includes("ScoreCredential"));
     expect(score).toBeDefined();
     expect(score!.acceptance).toBe("pending");
+  });
+
+  it("a scoped Issuer desk user may draft a batch, and requiredApprovals: 2 takes two approvals to execute", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const admin2 = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    const key = await seedScoreUseCase(app, admin, `m3-depth-${Math.random().toString(36).slice(2)}`, {
+      credentialTypes: [{ name: "ScoreCredential", title: "Score", validityDays: 365, requiredApprovals: 2,
+        claimSchema: { type: "object", required: ["legalName", "score"], properties: { legalName: { type: "string" }, score: { type: "number" } } } }],
+    });
+    const holders = await onboardHolders(app, admin, admin2, key, 1);
+    const deskEmail = `m3-desk-${Math.random().toString(36).slice(2)}@x.dev`;
+    await onboardUser(app, admin, admin2, { email: deskEmail, password: "secret123", role: "Issuer", useCaseKey: key });
+    const desk = await loginAs(app, deskEmail, "secret123");
+
+    // The scoped desk operator passes the same resolveIssuer gate as the single route.
+    const draft = await app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/${key}/credentials/batch`, headers: auth(desk),
+      payload: { credentialType: "ScoreCredential", rows: [{ subjectEmail: holders[0]!.email, claims: { legalName: "Holder 0", score: 9 } }] },
+    });
+    expect(draft.statusCode).toBe(202);
+    const drafted = draft.json().proposal as CredProposalView;
+    expect(drafted.required).toBe(2);
+
+    const first = await app.inject({ method: "POST", url: `${V1}/proposals/${drafted.id}/approve`, headers: auth(admin), payload: {} });
+    expect(first.statusCode).toBe(200);
+    const afterOne = first.json().proposal as CredProposalView;
+    expect(afterOne.status).toBe("pending");
+    expect(afterOne.result).toBeNull();
+
+    const second = await app.inject({ method: "POST", url: `${V1}/proposals/${drafted.id}/approve`, headers: auth(admin2), payload: {} });
+    expect(second.statusCode).toBe(200);
+    const executed = second.json().proposal as CredProposalView;
+    expect(executed.status).toBe("executed");
+    expect(executed.result).toMatchObject({ total: 1, succeeded: 1, failed: 0 });
   });
 
   it("gates: unknown credentialType → 400; a non-issuer role → 403; rows over 200 → 400 (schema)", async () => {

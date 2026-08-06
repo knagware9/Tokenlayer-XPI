@@ -83,7 +83,9 @@ export function BatchCsv(props: {
     setRowErrors(coerced.map((r) => (validateRow ? validateRow(r) : null)));
   }
 
-  const hasClientInvalid = rowErrors.some((e) => e !== null);
+  const invalidCount = rowErrors.filter((e) => e !== null).length;
+  const invalidBeyondPreview = rowErrors.slice(PREVIEW_LIMIT).filter((e) => e !== null).length;
+  const hasClientInvalid = invalidCount > 0;
   const columns = rawRows.length > 0 ? Object.keys(rawRows[0]!) : [];
   const preview = rows.slice(0, PREVIEW_LIMIT);
 
@@ -163,6 +165,12 @@ export function BatchCsv(props: {
           </div>
           <p className="text-xs text-slate-500">
             {rows.length} rows total{rows.length > PREVIEW_LIMIT ? ` (showing first ${PREVIEW_LIMIT})` : ""}
+            {invalidCount > 0 && (
+              <span className="text-red-600">
+                {" — "}{invalidCount} invalid row{invalidCount === 1 ? "" : "s"}
+                {invalidBeyondPreview > 0 ? ` (${invalidBeyondPreview} beyond the preview)` : ""}
+              </span>
+            )}
           </p>
         </div>
       )}

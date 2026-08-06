@@ -1826,7 +1826,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   app.post("/users", { schema: S.createUser, ...auth }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const b = request.body as { email: string; password: string; role: Role; useCaseKey?: string; walletAddress?: string; kyc?: KycDetails };
-    const targetUseCaseKey = claims.role === "PlatformAdmin" ? (b.useCaseKey ?? null) : claims.useCaseKey;
+    const targetUseCaseKey = claims.role === "PlatformAdmin" ? (b.useCaseKey || null) : claims.useCaseKey;
     const targetDomain = targetUseCaseKey
       ? useCaseDomainOf(targetUseCaseKey, {
           tokenizationKeys: (await deps.useCases.list()).map((u) => u.key),
@@ -1910,7 +1910,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     for (let i = 0; i < rows.length; i++) {
       const b = rows[i]!;
       // Mirrors POST /users' target-key + domain + role-domain-mismatch + escalation checks, exactly, per row.
-      const targetUseCaseKey = claims.role === "PlatformAdmin" ? (b.useCaseKey ?? null) : claims.useCaseKey;
+      const targetUseCaseKey = claims.role === "PlatformAdmin" ? (b.useCaseKey || null) : claims.useCaseKey;
       const targetDomain = targetUseCaseKey
         ? useCaseDomainOf(targetUseCaseKey, { tokenizationKeys: tokKeys, credentialKeys: credKeys })
         : undefined;
