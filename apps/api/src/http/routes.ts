@@ -2235,14 +2235,20 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return mapHeld(await deps.credentials.listByHolder(claims.did));
   });
 
-  /** Load a credential owned by the caller's DID, currently in one of `from` states. Null ⇒ reply sent. */
+  /** Load a credential owned by the caller — either their own personal DID, or
+   *  (for an ORG-held credential, e.g. issued via subjectOrgId) their org's DID
+   *  when they are that org's OrgAdmin — currently in one of `from` states.
+   *  Null ⇒ reply sent. */
   async function holderCredentialInState(
     request: FastifyRequest, reply: FastifyReply, from: CredentialRecord["acceptance"][],
   ): Promise<CredentialRecord | null> {
     const claims = request.user as TokenClaims;
     const { id } = request.params as { id: string };
     const cred = await deps.credentials.get(id);
-    if (!cred || !claims.did || cred.holderDid !== claims.did) { notFound(reply, "credential not found"); return null; }
+    const isOwnDid = !!cred && !!claims.did && cred.holderDid === claims.did;
+    const isOrgAdminOfHolder = !!cred && claims.role === "OrgAdmin" && !!claims.orgId
+      && (await deps.organizations.get(claims.orgId).catch(() => null))?.did === cred.holderDid;
+    if (!cred || (!isOwnDid && !isOrgAdminOfHolder)) { notFound(reply, "credential not found"); return null; }
     if (!from.includes(cred.acceptance)) {
       reply.code(409).send({ error: "INVALID_ACCEPTANCE_STATE", message: `credential is '${cred.acceptance}'` });
       return null;

@@ -416,3 +416,78 @@ describe("public status includes acceptance (L3)", () => {
     expect(status1.json().acceptance).toBe("accepted");
   });
 });
+
+// ---------------------------------------------------------------------------
+// L3 follow-up: ORG-held pending credentials (subjectOrgId) must be acceptable
+// by the holding org's OrgAdmin — not just a personal-DID holder.
+// ---------------------------------------------------------------------------
+
+async function makeOrg(app: Awaited<ReturnType<typeof buildTestApp>>, admin: string, name: string, orgType = "corporate") {
+  const r = await app.inject({ method: "POST", url: `${V1}/orgs`, headers: auth(admin), payload: { name, orgType } });
+  expect(r.statusCode).toBe(201);
+  return r.json() as { id: string; did: string; name: string };
+}
+
+async function addOrgAdmin(app: Awaited<ReturnType<typeof buildTestApp>>, admin: string, orgId: string): Promise<string> {
+  const email = `orgadmin-${Math.random().toString(36).slice(2)}@x.dev`;
+  const password = "secret1";
+  const r = await app.inject({ method: "POST", url: `${V1}/orgs/${orgId}/users`, headers: auth(admin), payload: { email, password, role: "OrgAdmin" } });
+  expect(r.statusCode).toBe(201);
+  return loginAs(app, email, password);
+}
+
+describe("org-held pending credentials — acceptable by the holding org's OrgAdmin (L3 fix)", () => {
+  async function pendingOrgKyc(admin: string, admin2: string, app: Awaited<ReturnType<typeof buildTestApp>>) {
+    await seedUseCase(app, admin, { holderAcceptance: true });
+    const org = await makeOrg(app, admin, `Org Holder ${Date.now()}`);
+    const issued = await app.inject({ method: "POST", url: `${V1}/credential-use-cases/corp-kyc/credentials`, headers: auth(admin),
+      payload: { credentialType: "KycCredential", subjectOrgId: org.id, claims: { legalName: "Acme Ltd", country: "IN" } } });
+    expect(issued.statusCode).toBe(202);
+    const approved = await app.inject({ method: "POST", url: `${V1}/proposals/${issued.json().proposal.id}/approve`, headers: auth(admin2), payload: {} });
+    expect(approved.statusCode).toBe(200);
+    const wallet = (await app.inject({ method: "GET", url: `${V1}/orgs/${org.id}/wallet`, headers: auth(admin) })).json() as { id: string; holderDid: string; type: string[]; acceptance: string }[];
+    const cred = wallet.find((c) => c.holderDid === org.did && c.type.includes("KycCredential"))!;
+    expect(cred).toBeDefined();
+    expect(cred.acceptance).toBe("pending");
+    return { org, cred };
+  }
+
+  it("the org's OrgAdmin can accept an org-held pending credential", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const admin2 = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    const { org, cred } = await pendingOrgKyc(admin, admin2, app);
+    const orgAdminTok = await addOrgAdmin(app, admin, org.id);
+
+    const res = await app.inject({ method: "POST", url: `${V1}/me/credentials/${cred.id}/accept`, headers: auth(orgAdminTok), payload: {} });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().acceptance).toBe("accepted");
+
+    const wallet = (await app.inject({ method: "GET", url: `${V1}/orgs/${org.id}/wallet`, headers: auth(admin) })).json() as { id: string; acceptance: string }[];
+    expect(wallet.find((c) => c.id === cred.id)!.acceptance).toBe("accepted");
+  });
+
+  it("a DIFFERENT org's OrgAdmin gets 404", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const admin2 = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    const { cred } = await pendingOrgKyc(admin, admin2, app);
+    const otherOrg = await makeOrg(app, admin, `Other Org ${Date.now()}`);
+    const otherOrgAdminTok = await addOrgAdmin(app, admin, otherOrg.id);
+
+    const res = await app.inject({ method: "POST", url: `${V1}/me/credentials/${cred.id}/accept`, headers: auth(otherOrgAdminTok), payload: {} });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("a plain user (not an OrgAdmin) gets 404", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const admin2 = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    const { cred } = await pendingOrgKyc(admin, admin2, app);
+    const plainUser = await subjectWithDid(app);
+    const plainTok = await loginAs(app, plainUser.email, plainUser.password);
+
+    const res = await app.inject({ method: "POST", url: `${V1}/me/credentials/${cred.id}/accept`, headers: auth(plainTok), payload: {} });
+    expect(res.statusCode).toBe(404);
+  });
+});
