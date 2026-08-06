@@ -213,6 +213,7 @@ model Proposal {
   approvals     String    @default("[]") // JSON: [{ userId, email, at }]
   status        String    @default("pending") // pending | approved | rejected | executed | failed
   error         String?
+  result        String? // JSON — optional executor report (e.g. CSV batch per-row outcomes)
   createdAt     DateTime  @default(now())
   decidedAt     DateTime?
 

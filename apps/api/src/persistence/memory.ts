@@ -362,10 +362,10 @@ export class MemoryProposalRepository implements ProposalRepository {
   private rows = new Map<string, ProposalRecord>();
   // Return a deep-enough copy so callers can't alias the stored record's arrays.
   private clone(r: ProposalRecord): ProposalRecord {
-    return { ...r, payload: { ...r.payload }, approvals: r.approvals.map((a) => ({ ...a })) };
+    return { ...r, payload: { ...r.payload }, approvals: r.approvals.map((a) => ({ ...a })), result: r.result ? { ...r.result } : null };
   }
-  async create(input: Omit<ProposalRecord, "id" | "approvals" | "status" | "error" | "createdAt" | "decidedAt">): Promise<ProposalRecord> {
-    const rec: ProposalRecord = { ...input, id: id("proposal"), approvals: [], status: "pending", error: null, createdAt: now(), decidedAt: null };
+  async create(input: Omit<ProposalRecord, "id" | "approvals" | "status" | "error" | "result" | "createdAt" | "decidedAt">): Promise<ProposalRecord> {
+    const rec: ProposalRecord = { ...input, id: id("proposal"), approvals: [], status: "pending", error: null, result: null, createdAt: now(), decidedAt: null };
     this.rows.set(rec.id, rec);
     return this.clone(rec);
   }
@@ -409,6 +409,12 @@ export class MemoryProposalRepository implements ProposalRepository {
     r.status = status;
     r.error = error ?? null;
     if (status === "rejected" || status === "executed" || status === "failed") r.decidedAt = now();
+    return this.clone(r);
+  }
+  async setResult(proposalId: string, result: Record<string, unknown>): Promise<ProposalRecord> {
+    const r = this.rows.get(proposalId);
+    if (!r) throw new Error(`unknown proposal '${proposalId}'`);
+    r.result = result;
     return this.clone(r);
   }
 }

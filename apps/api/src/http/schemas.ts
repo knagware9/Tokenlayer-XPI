@@ -445,6 +445,7 @@ export const components: Record<string, unknown>[] = [
       },
       status: { type: "string", enum: ["pending", "approved", "rejected", "executed", "failed"] },
       error: { type: "string", nullable: true },
+      result: { type: "object", additionalProperties: true, nullable: true, description: "Optional executor report (e.g. a CSV batch's per-row outcomes)." },
       createdAt: { type: "string" },
       decidedAt: { type: "string", nullable: true },
     },

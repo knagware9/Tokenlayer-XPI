@@ -651,22 +651,23 @@ export class PrismaCashflowRepository implements CashflowRepository {
   }
 }
 
-const toProposal = (r: { id: string; useCaseKey: string | null; orgId: string | null; assetId: string | null; kind: string; payload: string; proposerId: string; proposerLabel: string; required: number; approvals: string; status: string; error: string | null; createdAt: Date; decidedAt: Date | null }): ProposalRecord => ({
+const toProposal = (r: { id: string; useCaseKey: string | null; orgId: string | null; assetId: string | null; kind: string; payload: string; proposerId: string; proposerLabel: string; required: number; approvals: string; status: string; error: string | null; result: string | null; createdAt: Date; decidedAt: Date | null }): ProposalRecord => ({
   id: r.id, useCaseKey: r.useCaseKey, orgId: r.orgId ?? null, assetId: r.assetId, kind: r.kind,
   payload: JSON.parse(r.payload) as Record<string, unknown>,
   proposerId: r.proposerId, proposerLabel: r.proposerLabel, required: r.required,
   approvals: JSON.parse(r.approvals) as ProposalApproval[],
   status: r.status as ProposalRecord["status"], error: r.error,
+  result: r.result ? (JSON.parse(r.result) as Record<string, unknown>) : null,
   createdAt: r.createdAt.toISOString(), decidedAt: r.decidedAt?.toISOString() ?? null,
 });
 
 export class PrismaProposalRepository implements ProposalRepository {
-  async create(input: Omit<ProposalRecord, "id" | "approvals" | "status" | "error" | "createdAt" | "decidedAt">): Promise<ProposalRecord> {
+  async create(input: Omit<ProposalRecord, "id" | "approvals" | "status" | "error" | "result" | "createdAt" | "decidedAt">): Promise<ProposalRecord> {
     const r = await prisma.proposal.create({
       data: {
         useCaseKey: input.useCaseKey, orgId: input.orgId, assetId: input.assetId, kind: input.kind,
         payload: JSON.stringify(input.payload), proposerId: input.proposerId,
-        proposerLabel: input.proposerLabel, required: input.required,
+        proposerLabel: input.proposerLabel, required: input.required, result: null,
       },
     });
     return toProposal(r);
@@ -714,6 +715,10 @@ export class PrismaProposalRepository implements ProposalRepository {
       where: { id },
       data: { status, error: error ?? null, ...(terminal ? { decidedAt: new Date() } : {}) },
     });
+    return toProposal(updated);
+  }
+  async setResult(id: string, result: Record<string, unknown>): Promise<ProposalRecord> {
+    const updated = await prisma.proposal.update({ where: { id }, data: { result: JSON.stringify(result) } });
     return toProposal(updated);
   }
 }
