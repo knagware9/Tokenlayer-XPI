@@ -202,6 +202,22 @@ describe("template certificate config", () => {
   });
 });
 
+describe("template holderAcceptance carry", () => {
+  it("emits holderAcceptance from the template body", () => {
+    const t = certTemplate(); (t.body as { holderAcceptance?: boolean }).holderAcceptance = true;
+    const def = instantiateTemplate(t, { issuerOrgName: "Acme" });
+    expect(def.holderAcceptance).toBe(true);
+  });
+  it("omits holderAcceptance when the body has none (back-compat)", () => {
+    const def = instantiateTemplate(certTemplate(), { issuerOrgName: "Acme" });
+    expect(def.holderAcceptance).toBeUndefined();
+  });
+  it("validateTemplate rejects a non-boolean body.holderAcceptance", () => {
+    const t = certTemplate(); (t.body as { holderAcceptance?: unknown }).holderAcceptance = "yes";
+    expect(() => validateTemplate(t)).toThrow(/holderAcceptance/);
+  });
+});
+
 describe("built-in certificate defaults", () => {
   it("education-certificate instantiates cert-enabled and valid", () => {
     const t = TEMPLATE_CATALOG.find((x) => x.key === "education-certificate")!;
