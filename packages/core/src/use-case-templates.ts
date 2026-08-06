@@ -88,6 +88,8 @@ export interface UseCaseTemplate {
     holderPolicy: HolderPolicy;
     /** A literal binding, or `{ param }` naming an enum param ("any" ⇒ any). */
     verifier: VerifierBinding | { param: string };
+    /** Carried onto the emitted definition (ID-L holder acceptance ceremony). */
+    holderAcceptance?: boolean;
   };
   builtIn?: boolean;
 }
@@ -128,6 +130,8 @@ export function validateTemplate(t: UseCaseTemplate): void {
         if (!(k in ct.properties)) fail(`credential type '${ct.name}' certificate.claimOrder references unknown claim '${k}'`);
     }
   }
+  if (t.body.holderAcceptance !== undefined && typeof t.body.holderAcceptance !== "boolean")
+    fail("body.holderAcceptance must be a boolean");
 }
 
 /**
@@ -259,6 +263,7 @@ export function instantiateTemplate(
     issuer: { kind: "platform" },
     holderPolicy: t.body.holderPolicy,
     verifier,
+    ...(t.body.holderAcceptance !== undefined ? { holderAcceptance: t.body.holderAcceptance } : {}),
   };
 }
 

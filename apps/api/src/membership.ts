@@ -44,6 +44,7 @@ export async function mintOrgMembership(
     issuedAt: new Date(now * 1000).toISOString(), expiresAt: new Date(expiresAt * 1000).toISOString(),
     revoked: false, revokedAt: null, revokedReason: null, revokedBy: null, proposalId: null,
     credentialUseCaseKey: null,
+    acceptance: "accepted", acceptanceAt: null, acceptanceNote: null,
   });
   return did;
 }

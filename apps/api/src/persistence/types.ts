@@ -412,6 +412,11 @@ export interface CredentialRecord {
   revokedBy: string | null;
   proposalId: string | null;
   credentialUseCaseKey: string | null;
+  /** Holder acceptance lifecycle (ID-L). Non-use-case issuance and use cases
+   *  without `holderAcceptance` are born "accepted" (back-compat default). */
+  acceptance: "accepted" | "pending" | "rejected" | "changes_requested";
+  acceptanceAt: string | null;
+  acceptanceNote: string | null;
 }
 
 export interface CredentialRepository {
@@ -422,6 +427,7 @@ export interface CredentialRepository {
   get(id: string): Promise<CredentialRecord | null>;
   setRevoked(id: string, revoked: boolean): Promise<CredentialRecord>;
   revoke(id: string, input: { reason: string; by: string; at: string }): Promise<CredentialRecord>;
+  setAcceptance(id: string, patch: { acceptance: CredentialRecord["acceptance"]; at: string; note: string | null }): Promise<CredentialRecord>;
 }
 
 export interface RegistryDeploymentRecord {

@@ -452,12 +452,14 @@ export class PrismaUseCaseRepository implements UseCaseRepository {
 function toCredentialUseCase(r: {
   key: string; name: string; description: string | null;
   credentialTypes: string; issuer: string; holderPolicy: string; verifier: string; ownerOrgId: string | null;
+  holderAcceptance: boolean;
 }): CredentialUseCaseDefinition {
   return {
     key: r.key, name: r.name, description: r.description ?? undefined,
     credentialTypes: JSON.parse(r.credentialTypes), issuer: JSON.parse(r.issuer),
     holderPolicy: JSON.parse(r.holderPolicy), verifier: JSON.parse(r.verifier),
     ownerOrgId: r.ownerOrgId,
+    ...(r.holderAcceptance ? { holderAcceptance: true } : {}),
   };
 }
 export class PrismaCredentialUseCaseRepository implements CredentialUseCaseRepository {
@@ -466,7 +468,7 @@ export class PrismaCredentialUseCaseRepository implements CredentialUseCaseRepos
       key: def.key, name: def.name, description: def.description ?? null,
       credentialTypes: JSON.stringify(def.credentialTypes), issuer: JSON.stringify(def.issuer),
       holderPolicy: JSON.stringify(def.holderPolicy), verifier: JSON.stringify(def.verifier),
-      ownerOrgId: def.ownerOrgId ?? null } });
+      ownerOrgId: def.ownerOrgId ?? null, holderAcceptance: def.holderAcceptance ?? false } });
     return toCredentialUseCase(r);
   }
   async get(key: string): Promise<CredentialUseCaseDefinition | null> {
@@ -482,7 +484,7 @@ export class PrismaCredentialUseCaseRepository implements CredentialUseCaseRepos
       name: def.name, description: def.description ?? null,
       credentialTypes: JSON.stringify(def.credentialTypes), issuer: JSON.stringify(def.issuer),
       holderPolicy: JSON.stringify(def.holderPolicy), verifier: JSON.stringify(def.verifier),
-      ownerOrgId: def.ownerOrgId ?? null } });
+      ownerOrgId: def.ownerOrgId ?? null, holderAcceptance: def.holderAcceptance ?? false } });
     return toCredentialUseCase(r);
   }
 }
@@ -810,13 +812,15 @@ const toCredential = (r: {
   id: string; holderDid: string; issuerDid: string; type: string; vcJwt: string;
   subjectClaims: string; issuedAt: Date; expiresAt: Date | null; revoked: boolean;
   revokedAt: Date | null; revokedReason: string | null; revokedBy: string | null; proposalId: string | null;
-  credentialUseCaseKey: string | null;
+  credentialUseCaseKey: string | null; acceptance: string; acceptanceAt: Date | null; acceptanceNote: string | null;
 }): CredentialRecord => ({
   id: r.id, holderDid: r.holderDid, issuerDid: r.issuerDid, type: r.type, vcJwt: r.vcJwt,
   subjectClaims: JSON.parse(r.subjectClaims) as Record<string, unknown>,
   issuedAt: r.issuedAt.toISOString(), expiresAt: r.expiresAt ? r.expiresAt.toISOString() : null, revoked: r.revoked,
   revokedAt: r.revokedAt ? r.revokedAt.toISOString() : null, revokedReason: r.revokedReason,
   revokedBy: r.revokedBy, proposalId: r.proposalId, credentialUseCaseKey: r.credentialUseCaseKey,
+  acceptance: r.acceptance as CredentialRecord["acceptance"],
+  acceptanceAt: r.acceptanceAt ? r.acceptanceAt.toISOString() : null, acceptanceNote: r.acceptanceNote,
 });
 
 export class PrismaCredentialRepository implements CredentialRepository {
@@ -828,6 +832,8 @@ export class PrismaCredentialRepository implements CredentialRepository {
         subjectClaims: JSON.stringify(input.subjectClaims),
         issuedAt: new Date(input.issuedAt), expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
         revoked: input.revoked, proposalId: input.proposalId, credentialUseCaseKey: input.credentialUseCaseKey,
+        acceptance: input.acceptance, acceptanceAt: input.acceptanceAt ? new Date(input.acceptanceAt) : null,
+        acceptanceNote: input.acceptanceNote,
       },
     }));
   }
@@ -848,6 +854,12 @@ export class PrismaCredentialRepository implements CredentialRepository {
     return toCredential(await prisma.credential.update({
       where: { id },
       data: { revoked: true, revokedReason: input.reason, revokedBy: input.by, revokedAt: new Date(input.at) },
+    }));
+  }
+  async setAcceptance(id: string, patch: { acceptance: CredentialRecord["acceptance"]; at: string; note: string | null }): Promise<CredentialRecord> {
+    return toCredential(await prisma.credential.update({
+      where: { id },
+      data: { acceptance: patch.acceptance, acceptanceAt: new Date(patch.at), acceptanceNote: patch.note },
     }));
   }
 }

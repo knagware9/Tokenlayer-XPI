@@ -353,6 +353,9 @@ export interface HeldCredential {
   revokedReason: string | null;
   vcJwt: string;
   certificateAvailable?: boolean;
+  acceptance?: "accepted" | "pending" | "rejected" | "changes_requested";
+  acceptanceAt?: string | null;
+  acceptanceNote?: string | null;
 }
 
 export interface DidDocument {
@@ -392,6 +395,7 @@ export interface CredentialStatusInfo {
   reason: string | null;
   anchored: boolean;
   source: "chain" | "database";
+  acceptance?: string;
   /** Present only when source === "chain". */
   chainId?: string;
   registry?: string;
@@ -442,7 +446,7 @@ export interface EligibleHolder { kind: "user" | "org"; id: string; label: strin
 export type IssuerBinding = { kind: "platform" } | { kind: "org"; orgId: string };
 export type HolderPolicy = { who: "any-onboarded" } | { who: "orgType"; orgTypes: string[] } | { who: "specific"; orgIds: string[] };
 export type VerifierBinding = { kind: "any" } | { kind: "orgs"; orgIds: string[] };
-export interface CredentialUseCase { key: string; name: string; description?: string; credentialTypes: CredentialTypeSpec[]; issuer: IssuerBinding; holderPolicy: HolderPolicy; verifier: VerifierBinding; ownerOrgId?: string | null; status?: string; }
+export interface CredentialUseCase { key: string; name: string; description?: string; credentialTypes: CredentialTypeSpec[]; issuer: IssuerBinding; holderPolicy: HolderPolicy; verifier: VerifierBinding; holderAcceptance?: boolean; ownerOrgId?: string | null; status?: string; }
 
 export type TemplateParamType = "text" | "number" | "enum" | "boolean";
 export interface TemplateParam { name: string; label: string; type: TemplateParamType; required: boolean; default?: string | number | boolean; options?: string[]; min?: number; max?: number; help?: string; }

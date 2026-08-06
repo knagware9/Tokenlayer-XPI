@@ -1074,6 +1074,24 @@ export const S: Record<string, FastifySchema> = {
     response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403, 404) },
   },
   myCredentials: { tags: ["Identity"], summary: "Credentials held by the caller", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401) } },
+  acceptCredential: {
+    tags: ["Credentials"], summary: "Holder accepts a pending credential", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    body: { type: "object", additionalProperties: false, properties: { note: { type: "string" } } },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 404, 409) },
+  },
+  rejectHeldCredential: {
+    tags: ["Credentials"], summary: "Holder rejects a pending credential (revokes it)", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    body: { type: "object", additionalProperties: false, properties: { note: { type: "string" } } },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 404, 409) },
+  },
+  requestCredentialChanges: {
+    tags: ["Credentials"], summary: "Holder requests changes on a pending credential", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    body: { type: "object", additionalProperties: false, required: ["note"], properties: { note: { type: "string", minLength: 1 } } },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 404, 409) },
+  },
   didDocument: {
     tags: ["Identity"], summary: "Resolve a did:key into a W3C DID document", security: bearer,
     params: { type: "object", required: ["did"], properties: { did: { type: "string" } } },

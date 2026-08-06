@@ -11,7 +11,7 @@ import { isSupportedCurrency } from "../currencies.js";
 import { renderContractCode } from "../contract-code.js";
 import { deployAndCreateUseCase } from "../use-cases.js";
 import { computeAnalytics } from "../analytics.js";
-import { issueCredentialFor } from "../credential-issuance.js";
+import { issueCredentialFor, revokeCredentialById } from "../credential-issuance.js";
 import { mintOrgMembership } from "../membership.js";
 import { ensurePlatformIssuerOrg, PLATFORM_ORG_NAME } from "../platform-org.js";
 import { computeActivity, computePortfolio } from "../investor.js";
@@ -2035,6 +2035,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       return ucs.get(key)!;
     };
     const certOk = async (c: CredentialRecord): Promise<boolean> => {
+      if (c.acceptance !== "accepted") return false;
       if (!c.credentialUseCaseKey) return false;
       const def = await ucOf(c.credentialUseCaseKey);
       if (!def) return false;
@@ -2047,6 +2048,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       claims: c.subjectClaims, issuedAt: c.issuedAt, expiresAt: c.expiresAt,
       revoked: c.revoked, revokedAt: c.revokedAt, revokedReason: c.revokedReason, vcJwt: c.vcJwt,
       certificateAvailable: await certOk(c),
+      acceptance: c.acceptance, acceptanceAt: c.acceptanceAt, acceptanceNote: c.acceptanceNote,
     })));
   }
 
@@ -2233,6 +2235,56 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return mapHeld(await deps.credentials.listByHolder(claims.did));
   });
 
+  /** Load a credential owned by the caller — either their own personal DID, or
+   *  (for an ORG-held credential, e.g. issued via subjectOrgId) their org's DID
+   *  when they are that org's OrgAdmin — currently in one of `from` states.
+   *  Null ⇒ reply sent. */
+  async function holderCredentialInState(
+    request: FastifyRequest, reply: FastifyReply, from: CredentialRecord["acceptance"][],
+  ): Promise<CredentialRecord | null> {
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    const cred = await deps.credentials.get(id);
+    const isOwnDid = !!cred && !!claims.did && cred.holderDid === claims.did;
+    const isOrgAdminOfHolder = !!cred && claims.role === "OrgAdmin" && !!claims.orgId
+      && (await deps.organizations.get(claims.orgId).catch(() => null))?.did === cred.holderDid;
+    if (!cred || (!isOwnDid && !isOrgAdminOfHolder)) { notFound(reply, "credential not found"); return null; }
+    if (!from.includes(cred.acceptance)) {
+      reply.code(409).send({ error: "INVALID_ACCEPTANCE_STATE", message: `credential is '${cred.acceptance}'` });
+      return null;
+    }
+    return cred;
+  }
+
+  app.post("/me/credentials/:id/accept", { schema: S.acceptCredential, ...auth }, async (request, reply) => {
+    const cred = await holderCredentialInState(request, reply, ["pending", "changes_requested"]);
+    if (!cred) return reply;
+    const updated = await deps.credentials.setAcceptance(cred.id, { acceptance: "accepted", at: new Date().toISOString(), note: null });
+    await deps.audit.append({ actorId: (request.user as TokenClaims).id, action: "credential-accepted" as LifecycleAction, payload: { credentialId: cred.id } });
+    return { id: updated.id, acceptance: updated.acceptance, acceptanceAt: updated.acceptanceAt };
+  });
+
+  app.post("/me/credentials/:id/reject", { schema: S.rejectHeldCredential, ...auth }, async (request, reply) => {
+    const cred = await holderCredentialInState(request, reply, ["pending", "changes_requested"]);
+    if (!cred) return reply;
+    const claims = request.user as TokenClaims;
+    const note = (request.body as { note?: string })?.note ?? null;
+    // Chain-first revoke; a throw leaves the credential in its prior state (never DB-revoked/chain-valid).
+    await revokeCredentialById(deps, cred.id, { reason: note ? `holder rejected: ${note}` : "holder rejected", by: claims.id, at: new Date().toISOString() });
+    const updated = await deps.credentials.setAcceptance(cred.id, { acceptance: "rejected", at: new Date().toISOString(), note });
+    await deps.audit.append({ actorId: claims.id, action: "credential-rejected" as LifecycleAction, payload: { credentialId: cred.id, note } });
+    return { id: updated.id, acceptance: updated.acceptance, revoked: true };
+  });
+
+  app.post("/me/credentials/:id/request-changes", { schema: S.requestCredentialChanges, ...auth }, async (request, reply) => {
+    const cred = await holderCredentialInState(request, reply, ["pending"]);
+    if (!cred) return reply;
+    const { note } = request.body as { note: string };
+    const updated = await deps.credentials.setAcceptance(cred.id, { acceptance: "changes_requested", at: new Date().toISOString(), note });
+    await deps.audit.append({ actorId: (request.user as TokenClaims).id, action: "credential-changes-requested" as LifecycleAction, payload: { credentialId: cred.id, note } });
+    return { id: updated.id, acceptance: updated.acceptance, acceptanceNote: updated.acceptanceNote };
+  });
+
   // --- credentials ---------------------------------------------------------
   app.get("/credential-types", { schema: S.credentialTypes, ...auth }, async () =>
     Object.values(CREDENTIAL_TYPES).map((d) => ({
@@ -2327,7 +2379,14 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const { id } = request.params as { id: string };
     const cred = await deps.credentials.get(id);
     if (!cred) return notFound(reply, "credential not found");
-    const fromDb = { id: cred.id, revoked: cred.revoked, revokedAt: cred.revokedAt, reason: cred.revokedReason };
+    // acceptance is omitted for the untouched, born-accepted default (acceptanceAt
+    // never set) so pre-acceptance-ceremony status responses stay byte-identical —
+    // it only appears once a credential has actually gone through the ceremony
+    // (born pending, or explicitly accepted/rejected/changes-requested).
+    const fromDb = {
+      id: cred.id, revoked: cred.revoked, revokedAt: cred.revokedAt, reason: cred.revokedReason,
+      ...(cred.acceptance !== "accepted" || cred.acceptanceAt !== null ? { acceptance: cred.acceptance } : {}),
+    };
     if (!deps.registry) return { ...fromDb, anchored: false, source: "database" };
     let onChain;
     try {
@@ -2361,6 +2420,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const typeNames = cred.type.split(",");
     const spec = def?.credentialTypes.find((t) => typeNames.includes(t.name) && t.certificate?.enabled === true);
     if (!def || !spec) return notFound(reply, "no certificate for this credential");
+    if (cred.acceptance !== "accepted") return notFound(reply, "no certificate for this credential");
 
     const issuerName = (await deps.organizations.findByDid(cred.issuerDid))?.name ?? null;
     const statusUrl = `${deps.publicApiUrl}/credentials/${cred.id}/status`;
@@ -2499,7 +2559,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return rows.map((r) => ({
       ...vreqView(r),
       eligibleCredentials: mine
-        .filter((c) => !c.revoked && r.requestedTypes.includes(c.type))
+        .filter((c) => !c.revoked && c.acceptance === "accepted" && r.requestedTypes.includes(c.type))
         .map((c) => ({ id: c.id, type: c.type, issuerDid: c.issuerDid, issuedAt: c.issuedAt })),
     }));
   });
@@ -2535,8 +2595,8 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const chosen = credentialIds.map((cid) => byId.get(cid));
     for (let i = 0; i < credentialIds.length; i++) {
       const c = chosen[i];
-      if (!c || c.revoked || !r.requestedTypes.includes(c.type)) {
-        return reply.code(400).send({ error: "CREDENTIAL_NOT_ELIGIBLE", message: `credential '${credentialIds[i]}' is not an eligible, unrevoked, requested-type credential you hold` });
+      if (!c || c.revoked || c.acceptance !== "accepted" || !r.requestedTypes.includes(c.type)) {
+        return reply.code(400).send({ error: "CREDENTIAL_NOT_ELIGIBLE", message: `credential '${credentialIds[i]}' is not an eligible, unrevoked, accepted, requested-type credential you hold` });
       }
     }
     // Custodial VP signing: the caller IS the holder, so resolve their own seed.

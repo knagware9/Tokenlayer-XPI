@@ -50,7 +50,7 @@ export function createComplianceProvider(deps: ComplianceProviderDeps): Complian
       const user = (await users.list()).find((u) => u.accountId === acct.id);
       if (!user?.did) return false;
       const held = await credentials.listByHolder(user.did);
-      return held.some((c) => !c.revoked && c.type.includes("KycCredential"));
+      return held.some((c) => !c.revoked && c.acceptance === "accepted" && c.type.includes("KycCredential"));
     },
   };
 }

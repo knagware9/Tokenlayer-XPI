@@ -156,6 +156,16 @@ describe("certificate config validation", () => {
   });
 });
 
+describe("holderAcceptance validation", () => {
+  it("accepts a boolean holderAcceptance and absence (back-compat)", () => {
+    expect(() => validateCredentialUseCase({ ...baseDef2(), holderAcceptance: true } as CredentialUseCaseDefinition, certCtx)).not.toThrow();
+    expect(() => validateCredentialUseCase(baseDef2(), certCtx)).not.toThrow();
+  });
+  it("rejects a non-boolean holderAcceptance", () => {
+    expect(() => validateCredentialUseCase({ ...baseDef2(), holderAcceptance: "yes" } as unknown as CredentialUseCaseDefinition, certCtx)).toThrow(/holderAcceptance/);
+  });
+});
+
 describe("validateCredentialUseCase requiredApprovals", () => {
   it("rejects a present-but-invalid requiredApprovals", () => {
     const bad = { ...baseDef, credentialTypes: [{ ...baseDef.credentialTypes[0]!, requiredApprovals: 0 }] };

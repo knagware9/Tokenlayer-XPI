@@ -530,6 +530,14 @@ export class MemoryCredentialRepository implements CredentialRepository {
     rec.revokedAt = input.at;
     return rec;
   }
+  async setAcceptance(credId: string, patch: { acceptance: CredentialRecord["acceptance"]; at: string; note: string | null }): Promise<CredentialRecord> {
+    const rec = this.byId.get(credId);
+    if (!rec) throw new Error(`unknown credential '${credId}'`);
+    rec.acceptance = patch.acceptance;
+    rec.acceptanceAt = patch.at;
+    rec.acceptanceNote = patch.note;
+    return rec;
+  }
 }
 
 export class MemoryRegistryDeploymentRepository implements RegistryDeploymentRepository {

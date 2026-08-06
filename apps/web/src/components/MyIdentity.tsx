@@ -16,6 +16,7 @@ export function MyIdentity(): JSX.Element {
   const [doc, setDoc] = useState<DidDocument | null>(null);
   const [creds, setCreds] = useState<HeldCredential[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     if (!token || !did) return;
@@ -23,7 +24,7 @@ export function MyIdentity(): JSX.Element {
     void Promise.all([api.didDocument(token, did), api.myCredentials(token)])
       .then(([d, c]) => { setDoc(d); setCreds(c); })
       .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load identity"));
-  }, [token, did]);
+  }, [token, did, reloadKey]);
 
   // Whether each credential is anchored on-chain. The status endpoint is public,
   // so it needs no token; a failure just omits that credential's pill.
@@ -79,7 +80,7 @@ export function MyIdentity(): JSX.Element {
           </Card>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {creds.map((c) => <CredentialCard key={c.id} credential={c} status={statuses[c.id]} />)}
+            {creds.map((c) => <CredentialCard key={c.id} credential={c} status={statuses[c.id]} onAcceptanceAction={() => setReloadKey((k) => k + 1)} />)}
           </div>
         )}
       </div>

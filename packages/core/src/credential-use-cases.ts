@@ -53,6 +53,9 @@ export interface CredentialUseCaseDefinition {
   verifier: VerifierBinding;
   /** Owning organization id (null/undefined for platform-owned). */
   ownerOrgId?: string | null;
+  /** When true, issued credentials require explicit holder acceptance before
+   *  they can be presented, satisfy identity gates, or expose a certificate. */
+  holderAcceptance?: boolean;
 }
 
 /** Editable starter templates surfaced by the builder. */
@@ -117,6 +120,8 @@ export function validateCredentialUseCase(
       }
     }
   }
+  if (def.holderAcceptance !== undefined && typeof def.holderAcceptance !== "boolean")
+    fail("holderAcceptance must be a boolean");
   if (def.issuer.kind === "org" && !ctx.orgExists(def.issuer.orgId)) fail(`unknown issuer org '${def.issuer.orgId}'`);
   if (def.holderPolicy.who === "specific") for (const id of def.holderPolicy.orgIds) if (!ctx.orgExists(id)) fail(`unknown holder org '${id}'`);
   if (def.verifier.kind === "orgs") for (const id of def.verifier.orgIds) if (!ctx.orgExists(id)) fail(`unknown verifier org '${id}'`);
