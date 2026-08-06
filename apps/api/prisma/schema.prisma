@@ -255,6 +255,9 @@ model Credential {
   revokedBy     String? // user id that proposed the revocation
   proposalId    String? // the approved request that produced this credential
   credentialUseCaseKey String? // the CredentialUseCase this VC was issued under, if any
+  acceptance     String    @default("accepted") // accepted | pending | rejected | changes_requested
+  acceptanceAt   DateTime?
+  acceptanceNote String?
 
   @@index([holderDid])
 }

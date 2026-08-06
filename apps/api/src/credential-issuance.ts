@@ -16,6 +16,8 @@ export interface IssueCredentialArgs {
   validityDays: number;
   credentialUseCaseKey?: string | null;
   proposalId: string | null;
+  /** Only the use-case executor ever passes "pending" (ID-L). Defaults to "accepted". */
+  initialAcceptance?: CredentialRecord["acceptance"];
 }
 
 /** Sign → anchor (when a registry is present) → persist. Throws ⇒ nothing persisted. */
@@ -44,6 +46,7 @@ export async function issueCredentialFor(deps: AppDeps, a: IssueCredentialArgs):
     revoked: false, revokedAt: null, revokedReason: null, revokedBy: null,
     proposalId: a.proposalId,
     credentialUseCaseKey: a.credentialUseCaseKey ?? null,
+    acceptance: a.initialAcceptance ?? "accepted", acceptanceAt: null, acceptanceNote: null,
   });
 }
 

@@ -2047,6 +2047,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       claims: c.subjectClaims, issuedAt: c.issuedAt, expiresAt: c.expiresAt,
       revoked: c.revoked, revokedAt: c.revokedAt, revokedReason: c.revokedReason, vcJwt: c.vcJwt,
       certificateAvailable: await certOk(c),
+      acceptance: c.acceptance, acceptanceAt: c.acceptanceAt, acceptanceNote: c.acceptanceNote,
     })));
   }
 

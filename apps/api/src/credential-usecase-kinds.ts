@@ -41,6 +41,7 @@ export const issueUsecaseCredentialKind: ProposalKindHandler = {
     await issueCredentialFor(ctx.deps, {
       issuerOrg: org, subjectDid: pl.subjectDid, type: spec.name, claims: pl.claims,
       validityDays: spec.validityDays, credentialUseCaseKey: def.key, proposalId: p.id,
+      initialAcceptance: def.holderAcceptance ? "pending" : "accepted",
     });
   },
 };
