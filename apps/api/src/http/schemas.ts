@@ -1228,6 +1228,41 @@ export const S: Record<string, FastifySchema> = {
     },
     response: { 201: { type: "object", additionalProperties: true }, 202: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
   },
+  createUsersBatch: {
+    tags: ["Users"], summary: "Batch-onboard users from parsed CSV rows (one maker-checker proposal; draft-time all-or-nothing, execution-time per-row)", security: bearer,
+    body: {
+      type: "object", additionalProperties: false, required: ["rows"],
+      properties: {
+        rows: {
+          type: "array", minItems: 1, maxItems: 200,
+          items: {
+            type: "object", additionalProperties: true, required: ["email", "password", "role"],
+            properties: {
+              email: { type: "string" },
+              password: { type: "string", minLength: 8 },
+              role: { type: "string", enum: ["UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor", "Holder", "Verifier"] },
+              useCaseKey: { type: "string" },
+              walletAddress: { type: "string" },
+              kyc: {
+                type: "object",
+                additionalProperties: false,
+                properties: { legalName: { type: "string" }, country: { type: "string" }, idType: { type: "string" }, idNumber: { type: "string" }, documentRef: { type: "string" } },
+              },
+            },
+          },
+        },
+      },
+    },
+    response: {
+      202: { type: "object", additionalProperties: true },
+      // 400 is overridden (not the shared Error# ref) so `problems` — the
+      // per-row draft-time validation report — survives fast-json-stringify's
+      // response serialization instead of being stripped as an unlisted
+      // property (the ID-G lesson).
+      400: { type: "object", additionalProperties: true },
+      ...errs(401, 403),
+    },
+  },
   revokeUserIdentity: {
     tags: ["Users"], summary: "Revoke a user's identity (gated; reason required)", security: bearer,
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },

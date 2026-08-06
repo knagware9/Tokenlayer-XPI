@@ -3,7 +3,7 @@
  * + KycCredential) and gated identity revocation (chain-first). USE-CASE scoped:
  * PlatformAdmin always; a UseCaseAdmin of the same use case otherwise.
  */
-import { credentialTypeDef, didKeyFromSeed, type LifecycleAction, type Role } from "@tokenlayer/core";
+import { credentialTypeDef, didKeyFromSeed, type Actor, type LifecycleAction, type Role } from "@tokenlayer/core";
 import type { AppDeps } from "./context.js";
 import { issueCredentialFor, revokeCredentialById } from "./credential-issuance.js";
 import { coded } from "./executors.js";
@@ -40,61 +40,111 @@ async function resolveIssuerOrg(deps: AppDeps, useCaseKey: string | null) {
   return platform;
 }
 
+/**
+ * The full onboarding side effect for one row: re-check EMAIL_TAKEN, upsert
+ * the account, create the user, mint the custodial DID, and (if `kyc` is
+ * present) issue the KycCredential — with the same rollback-on-failure as
+ * before. Extracted so `onboard-user-batch` can run the byte-same path per
+ * row (M2); behavior-preserving for the single `onboard-user` kind below.
+ */
+async function onboardSingle(deps: AppDeps, proposer: Actor, pl: OnboardUserPayload, p: ProposalRecord): Promise<void> {
+  // Re-check the email — it may have been taken since propose (race ⇒ failed proposal).
+  if (await deps.users.findByEmail(pl.email)) throw coded(409, "EMAIL_TAKEN", "email already registered");
+  let accountId: string | null = null;
+  if (pl.walletAddress) accountId = (await deps.accounts.upsert(pl.walletAddress, pl.email)).id;
+  const created = await deps.users.create({
+    email: pl.email, passwordHash: pl.passwordHash, role: pl.role, useCaseKey: pl.useCaseKey,
+    accountId, active: true, kycStatus: "pending", kyc: pl.kyc ?? null,
+  });
+  let issuedCredentialId: string | null = null;
+  try {
+    // Mint the custodial DID (same custody as org members: encrypted Ed25519 seed).
+    const seed = deps.keystore.newSeed();
+    const didSeedEncrypted = deps.keystore.encryptSeed(seed);
+    const did = didKeyFromSeed(seed).did;
+    await deps.users.update(created.id, { did, didSeedEncrypted });
+    if (pl.kyc) {
+      const issuerOrg = await resolveIssuerOrg(deps, pl.useCaseKey);
+      const cred = await issueCredentialFor(deps, {
+        issuerOrg, subjectDid: did, type: "KycCredential",
+        claims: { legalName: pl.kyc.legalName, country: pl.kyc.country },
+        validityDays: credentialTypeDef("KycCredential").validityDays, proposalId: p.id,
+      });
+      issuedCredentialId = cred.id;
+      await deps.users.update(created.id, {
+        kycStatus: "approved",
+        kyc: { ...pl.kyc, issuerDid: issuerOrg.did, credentialId: cred.id, verifiedAt: new Date().toISOString() },
+      });
+    }
+    await deps.audit.append({
+      actorId: proposer.id, action: "user-onboarded" as LifecycleAction,
+      payload: { userId: created.id, email: pl.email, role: pl.role, did, kyc: pl.kyc ? { country: pl.kyc.country } : null },
+    });
+  } catch (err) {
+    // DID mint / credential issuance / the post-issuance update / audit append
+    // failed ⇒ no user row AND no live credential survives (mirrors the
+    // org-member rollback). A credential may already be persisted (and
+    // on-chain anchored) by this point, so revoke it chain-first before
+    // dropping the user row — best-effort: a revoke failure here must not
+    // mask the original error. Proposal becomes `failed`; the operator
+    // re-proposes.
+    if (issuedCredentialId) {
+      await revokeCredentialById(deps, issuedCredentialId, {
+        reason: "onboarding rolled back", by: proposer.id, at: new Date().toISOString(),
+      }).catch(() => undefined);
+    }
+    await deps.users.remove(created.id).catch(() => undefined);
+    throw err;
+  }
+}
+
 export const onboardUserKind: ProposalKindHandler = {
   kind: "onboard-user",
   canView: userScopedView,
   canApprove: userScopedView,
   async execute(ctx, proposer, p) {
-    const deps = ctx.deps;
     const pl = p.payload as unknown as OnboardUserPayload;
-    // Re-check the email — it may have been taken since propose (race ⇒ failed proposal).
-    if (await deps.users.findByEmail(pl.email)) throw coded(409, "EMAIL_TAKEN", "email already registered");
-    let accountId: string | null = null;
-    if (pl.walletAddress) accountId = (await deps.accounts.upsert(pl.walletAddress, pl.email)).id;
-    const created = await deps.users.create({
-      email: pl.email, passwordHash: pl.passwordHash, role: pl.role, useCaseKey: pl.useCaseKey,
-      accountId, active: true, kycStatus: "pending", kyc: pl.kyc ?? null,
-    });
-    let issuedCredentialId: string | null = null;
-    try {
-      // Mint the custodial DID (same custody as org members: encrypted Ed25519 seed).
-      const seed = deps.keystore.newSeed();
-      const didSeedEncrypted = deps.keystore.encryptSeed(seed);
-      const did = didKeyFromSeed(seed).did;
-      await deps.users.update(created.id, { did, didSeedEncrypted });
-      if (pl.kyc) {
-        const issuerOrg = await resolveIssuerOrg(deps, pl.useCaseKey);
-        const cred = await issueCredentialFor(deps, {
-          issuerOrg, subjectDid: did, type: "KycCredential",
-          claims: { legalName: pl.kyc.legalName, country: pl.kyc.country },
-          validityDays: credentialTypeDef("KycCredential").validityDays, proposalId: p.id,
-        });
-        issuedCredentialId = cred.id;
-        await deps.users.update(created.id, {
-          kycStatus: "approved",
-          kyc: { ...pl.kyc, issuerDid: issuerOrg.did, credentialId: cred.id, verifiedAt: new Date().toISOString() },
-        });
+    await onboardSingle(ctx.deps, proposer, pl, p);
+  },
+};
+
+export interface OnboardUserBatchPayload {
+  rows: OnboardUserPayload[];
+}
+
+/** Per-row batch report entry — kept minimal (index + email + outcome only; never echoes the row payload). */
+interface BatchRowResult {
+  index: number;
+  email: string;
+  status: "ok" | "failed";
+  error?: string;
+}
+
+export const onboardUserBatchKind: ProposalKindHandler = {
+  kind: "onboard-user-batch",
+  canView: userScopedView,
+  canApprove: userScopedView,
+  async execute(ctx, proposer, p) {
+    const deps = ctx.deps;
+    const pl = p.payload as unknown as OnboardUserBatchPayload;
+    const rows: BatchRowResult[] = [];
+    for (let i = 0; i < pl.rows.length; i++) {
+      const row = pl.rows[i]!;
+      try {
+        // Byte-same path as the single onboard-user kind — row-independent:
+        // one row's failure never aborts the others.
+        await onboardSingle(deps, proposer, row, p);
+        rows.push({ index: i, email: row.email, status: "ok" });
+      } catch (err) {
+        rows.push({ index: i, email: row.email, status: "failed", error: (err as Error).message });
       }
-      await deps.audit.append({
-        actorId: proposer.id, action: "user-onboarded" as LifecycleAction,
-        payload: { userId: created.id, email: pl.email, role: pl.role, did, kyc: pl.kyc ? { country: pl.kyc.country } : null },
-      });
-    } catch (err) {
-      // DID mint / credential issuance / the post-issuance update / audit append
-      // failed ⇒ no user row AND no live credential survives (mirrors the
-      // org-member rollback). A credential may already be persisted (and
-      // on-chain anchored) by this point, so revoke it chain-first before
-      // dropping the user row — best-effort: a revoke failure here must not
-      // mask the original error. Proposal becomes `failed`; the operator
-      // re-proposes.
-      if (issuedCredentialId) {
-        await revokeCredentialById(deps, issuedCredentialId, {
-          reason: "onboarding rolled back", by: proposer.id, at: new Date().toISOString(),
-        }).catch(() => undefined);
-      }
-      await deps.users.remove(created.id).catch(() => undefined);
-      throw err;
     }
+    await deps.proposals.setResult(p.id, {
+      total: rows.length,
+      succeeded: rows.filter((r) => r.status === "ok").length,
+      failed: rows.filter((r) => r.status === "failed").length,
+      rows,
+    });
   },
 };
 

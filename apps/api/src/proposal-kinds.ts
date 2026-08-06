@@ -18,7 +18,7 @@ import { coded, executeCashflowCore, executeIssueActivation, runGatedAction } fr
 import type { TokenClaims } from "./http/support.js";
 import { scopedToCaller } from "./http/support.js";
 import type { ProposalRecord } from "./persistence/types.js";
-import { onboardUserKind, revokeUserIdentityKind } from "./user-kinds.js";
+import { onboardUserBatchKind, onboardUserKind, revokeUserIdentityKind } from "./user-kinds.js";
 import { createUseCaseKind } from "./usecase-kinds.js";
 
 /** Minimal logger shape (a Fastify request.log). */
@@ -153,6 +153,7 @@ registerProposalKind(issueUsecaseCredentialKind);
 // Use-case-scoped user-lifecycle kinds. Same registry, same no-runtime-cycle
 // TYPE-only import pattern as the credential kinds above.
 registerProposalKind(onboardUserKind);
+registerProposalKind(onboardUserBatchKind);
 registerProposalKind(revokeUserIdentityKind);
 
 // Org-scoped use-case configuration kind: an OrgAdmin proposes a new org-owned
