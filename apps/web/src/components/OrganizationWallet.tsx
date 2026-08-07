@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api.js";
 import { useAuth } from "../auth.js";
-import type { CredentialStatusInfo, HeldCredential, Organization } from "../types.js";
+import type { ChainInfo, CredentialStatusInfo, HeldCredential, Organization } from "../types.js";
 import { Card, EmptyState, SectionHeader, Skeleton } from "./ui.js";
 import { CredentialCard } from "./CredentialCard.js";
 
@@ -26,6 +26,12 @@ export function OrganizationWallet(): JSX.Element {
       .then((rows) => setStatuses(Object.fromEntries(rows.filter(Boolean) as (readonly [string, CredentialStatusInfo])[])));
   }, [creds]);
 
+  // Chain catalog for explorer links on tx-hash rows; failure just omits the links.
+  const [chains, setChains] = useState<ChainInfo[]>();
+  useEffect(() => {
+    if (token) void api.chains(token).then(setChains).catch(() => setChains([]));
+  }, [token]);
+
   if (!orgId) {
     return (
       <div>
@@ -43,7 +49,7 @@ export function OrganizationWallet(): JSX.Element {
       {org && <p className="font-mono text-xs text-slate-500 break-all -mt-3 mb-4">{org.did}</p>}
       {creds === null ? <Card><Skeleton lines={4} /></Card>
         : creds.length === 0 ? <Card><EmptyState icon="doc" title="No credentials yet" hint="Credentials issued to your organization will appear here." /></Card>
-        : <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">{creds.map((c) => <CredentialCard key={c.id} credential={c} status={statuses[c.id]} onAcceptanceAction={() => setReloadKey((k) => k + 1)} />)}</div>}
+        : <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">{creds.map((c) => <CredentialCard key={c.id} credential={c} status={statuses[c.id]} chains={chains} onAcceptanceAction={() => setReloadKey((k) => k + 1)} />)}</div>}
     </div>
   );
 }

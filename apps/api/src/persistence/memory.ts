@@ -530,13 +530,14 @@ export class MemoryCredentialRepository implements CredentialRepository {
     rec.revoked = revoked;
     return rec;
   }
-  async revoke(credId: string, input: { reason: string; by: string; at: string }): Promise<CredentialRecord> {
+  async revoke(credId: string, input: { reason: string; by: string; at: string; txHash?: string | null }): Promise<CredentialRecord> {
     const rec = this.byId.get(credId);
     if (!rec) throw new Error(`unknown credential '${credId}'`);
     rec.revoked = true;
     rec.revokedReason = input.reason;
     rec.revokedBy = input.by;
     rec.revokedAt = input.at;
+    rec.revokeTxHash = input.txHash ?? null;
     return rec;
   }
   async setAcceptance(credId: string, patch: { acceptance: CredentialRecord["acceptance"]; at: string; note: string | null }): Promise<CredentialRecord> {

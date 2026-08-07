@@ -818,6 +818,7 @@ const toCredential = (r: {
   subjectClaims: string; issuedAt: Date; expiresAt: Date | null; revoked: boolean;
   revokedAt: Date | null; revokedReason: string | null; revokedBy: string | null; proposalId: string | null;
   credentialUseCaseKey: string | null; acceptance: string; acceptanceAt: Date | null; acceptanceNote: string | null;
+  anchorTxHash: string | null; anchorChainId: string | null; revokeTxHash: string | null;
 }): CredentialRecord => ({
   id: r.id, holderDid: r.holderDid, issuerDid: r.issuerDid, type: r.type, vcJwt: r.vcJwt,
   subjectClaims: JSON.parse(r.subjectClaims) as Record<string, unknown>,
@@ -826,6 +827,7 @@ const toCredential = (r: {
   revokedBy: r.revokedBy, proposalId: r.proposalId, credentialUseCaseKey: r.credentialUseCaseKey,
   acceptance: r.acceptance as CredentialRecord["acceptance"],
   acceptanceAt: r.acceptanceAt ? r.acceptanceAt.toISOString() : null, acceptanceNote: r.acceptanceNote,
+  anchorTxHash: r.anchorTxHash, anchorChainId: r.anchorChainId, revokeTxHash: r.revokeTxHash,
 });
 
 export class PrismaCredentialRepository implements CredentialRepository {
@@ -839,6 +841,7 @@ export class PrismaCredentialRepository implements CredentialRepository {
         revoked: input.revoked, proposalId: input.proposalId, credentialUseCaseKey: input.credentialUseCaseKey,
         acceptance: input.acceptance, acceptanceAt: input.acceptanceAt ? new Date(input.acceptanceAt) : null,
         acceptanceNote: input.acceptanceNote,
+        anchorTxHash: input.anchorTxHash, anchorChainId: input.anchorChainId, revokeTxHash: input.revokeTxHash,
       },
     }));
   }
@@ -858,10 +861,10 @@ export class PrismaCredentialRepository implements CredentialRepository {
   async setRevoked(id: string, revoked: boolean): Promise<CredentialRecord> {
     return toCredential(await prisma.credential.update({ where: { id }, data: { revoked } }));
   }
-  async revoke(id: string, input: { reason: string; by: string; at: string }): Promise<CredentialRecord> {
+  async revoke(id: string, input: { reason: string; by: string; at: string; txHash?: string | null }): Promise<CredentialRecord> {
     return toCredential(await prisma.credential.update({
       where: { id },
-      data: { revoked: true, revokedReason: input.reason, revokedBy: input.by, revokedAt: new Date(input.at) },
+      data: { revoked: true, revokedReason: input.reason, revokedBy: input.by, revokedAt: new Date(input.at), revokeTxHash: input.txHash ?? null },
     }));
   }
   async setAcceptance(id: string, patch: { acceptance: CredentialRecord["acceptance"]; at: string; note: string | null }): Promise<CredentialRecord> {

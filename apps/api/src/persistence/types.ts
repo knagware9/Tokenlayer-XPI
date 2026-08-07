@@ -421,6 +421,11 @@ export interface CredentialRecord {
   acceptance: "accepted" | "pending" | "rejected" | "changes_requested";
   acceptanceAt: string | null;
   acceptanceNote: string | null;
+  /** Receipt of the on-chain anchor write at issuance (null: no registry / pre-ID-O). */
+  anchorTxHash: string | null;
+  anchorChainId: string | null;
+  /** Receipt of the on-chain revoke write (null until revoked on-chain). */
+  revokeTxHash: string | null;
 }
 
 export interface CredentialRepository {
@@ -432,7 +437,7 @@ export interface CredentialRepository {
   list(): Promise<CredentialRecord[]>;
   get(id: string): Promise<CredentialRecord | null>;
   setRevoked(id: string, revoked: boolean): Promise<CredentialRecord>;
-  revoke(id: string, input: { reason: string; by: string; at: string }): Promise<CredentialRecord>;
+  revoke(id: string, input: { reason: string; by: string; at: string; txHash?: string | null }): Promise<CredentialRecord>;
   setAcceptance(id: string, patch: { acceptance: CredentialRecord["acceptance"]; at: string; note: string | null }): Promise<CredentialRecord>;
 }
 
