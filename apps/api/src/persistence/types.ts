@@ -428,6 +428,8 @@ export interface CredentialRepository {
   create(input: CredentialRecord): Promise<CredentialRecord>;
   listByHolder(holderDid: string): Promise<CredentialRecord[]>;
   listByIssuer(issuerDid: string): Promise<CredentialRecord[]>;
+  /** Every stored credential, unordered — dashboard aggregation input (callers sort/filter). */
+  list(): Promise<CredentialRecord[]>;
   get(id: string): Promise<CredentialRecord | null>;
   setRevoked(id: string, revoked: boolean): Promise<CredentialRecord>;
   revoke(id: string, input: { reason: string; by: string; at: string }): Promise<CredentialRecord>;
@@ -472,6 +474,8 @@ export interface VerificationRequestRepository {
   get(id: string): Promise<VerificationRequestRecord | null>;
   listByHolder(holderDid: string, status?: string): Promise<VerificationRequestRecord[]>;
   listByVerifierOrg(orgId: string, status?: string): Promise<VerificationRequestRecord[]>;
+  /** Every stored request, unordered — dashboard aggregation input (callers sort/filter). */
+  list(): Promise<VerificationRequestRecord[]>;
   setConsented(id: string, input: { vpJwt: string; credentialIds: string[]; at: string }): Promise<VerificationRequestRecord>;
   setStatus(id: string, status: VerificationStatus): Promise<VerificationRequestRecord>;
   setVerifierResult(id: string, input: { result: Record<string, unknown>; at: string }): Promise<VerificationRequestRecord>;
