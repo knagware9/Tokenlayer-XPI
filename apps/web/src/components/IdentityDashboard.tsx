@@ -56,6 +56,8 @@ export function IdentityDashboard(): JSX.Element {
 
   useEffect(() => {
     if (!token) return;
+    setData(null);
+    setError(null);
     api.identityDashboard(token).then(setData).catch(() => setError("Could not load the identity dashboard."));
   }, [token]);
 
@@ -156,8 +158,8 @@ export function IdentityDashboard(): JSX.Element {
                   <td className="px-3 py-1.5 text-slate-700">{r.holderLabel}</td>
                   <td className="px-3 py-1.5 text-slate-700">{r.type}</td>
                   <td className="px-3 py-1.5 text-slate-500">{r.useCaseName}</td>
-                  <td className="px-3 py-1.5 text-slate-500">{r.issuedAt.slice(0, 10)}</td>
-                  <td className="px-3 py-1.5 text-slate-500">{r.expiresAt ? r.expiresAt.slice(0, 10) : "—"}</td>
+                  <td className="px-3 py-1.5 text-slate-500">{new Date(r.issuedAt).toLocaleDateString()}</td>
+                  <td className="px-3 py-1.5 text-slate-500">{r.expiresAt ? new Date(r.expiresAt).toLocaleDateString() : "—"}</td>
                   <td className="px-3 py-1.5">
                     <StatusPill status={r.status} />
                     {r.acceptanceNote && <div className="text-[11px] text-rose-600 mt-0.5">{r.acceptanceNote}</div>}
