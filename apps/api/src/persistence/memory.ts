@@ -518,6 +518,9 @@ export class MemoryCredentialRepository implements CredentialRepository {
   async listByIssuer(issuerDid: string): Promise<CredentialRecord[]> {
     return [...this.byId.values()].filter((c) => c.issuerDid === issuerDid);
   }
+  async list(): Promise<CredentialRecord[]> {
+    return [...this.byId.values()];
+  }
   async get(credId: string): Promise<CredentialRecord | null> {
     return this.byId.get(credId) ?? null;
   }
@@ -577,6 +580,9 @@ export class MemoryVerificationRequestRepository implements VerificationRequestR
     return [...this.byId.values()]
       .filter((r) => r.verifierOrgId === orgId && (!status || r.status === status))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+  async list(): Promise<VerificationRequestRecord[]> {
+    return [...this.byId.values()];
   }
   async setConsented(reqId: string, input: { vpJwt: string; credentialIds: string[]; at: string }): Promise<VerificationRequestRecord> {
     const rec = this.byId.get(reqId);

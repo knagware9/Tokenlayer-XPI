@@ -7,6 +7,7 @@ import { AppShell, type NavItem } from "./components/AppShell.js";
 import { AssetManagement, isInvoiceUseCase } from "./components/AssetManagement.js";
 import { Dashboard } from "./components/Dashboard.js";
 import { Home } from "./components/Home.js";
+import { IdentityDashboard } from "./components/IdentityDashboard.js";
 import { IdentityHome } from "./components/IdentityHome.js";
 import { InvestorPortal } from "./components/InvestorPortal.js";
 import { InvoiceRegister } from "./components/InvoiceRegister.js";
@@ -143,6 +144,7 @@ export function App(): JSX.Element {
       { id: "approvals", label: "Approvals", icon: "check" },
       { id: "verify", label: "Verification", icon: "shield" },
       { id: "identity", label: "Identity", icon: "shield" },
+      { id: "identity-dashboard", label: "Identity Dashboard", icon: "spark" },
       { id: "networks", label: "Networks", icon: "chain" },
       ...pinned,
     ];
@@ -153,11 +155,12 @@ export function App(): JSX.Element {
     const branchDomains = availableDomains(items, enabledDomains);
     const effDomain = branchDomains.some((d) => d.key === activeDomain) ? activeDomain : (branchDomains[0]?.key ?? activeDomain);
     const visible = itemsForDomain(items, effDomain);
-    const knownIds = [...Object.keys(platViews), "profile", "credentials"];
+    const knownIds = [...Object.keys(platViews), "profile", "credentials", "identity-dashboard"];
     const activeId = knownIds.includes(view) && itemsForDomain([{ id: view }], effDomain).length ? view : DOMAINS.find((d) => d.key === effDomain)!.defaultView;
     const panel =
       activeId === "profile" ? <MyProfile onSelect={setView} />
       : activeId === "credentials" ? <MyIdentity />
+      : activeId === "identity-dashboard" ? <IdentityDashboard />
       : <PlatformHome useCases={useCases} chains={chains} onReloadUseCases={reloadUseCases} view={platViews[activeId] ?? "overview"} />;
     return <AppShell items={visible} active={activeId} onSelect={handleSelect} domains={branchDomains} activeDomain={effDomain} onDomainChange={onDomainChange}>{panel}</AppShell>;
   }
@@ -174,6 +177,7 @@ export function App(): JSX.Element {
   if (deskDomain === "identity") {
     const r = user.role;
     const idItems: NavItem[] = [
+      ...(r === "UseCaseAdmin" || r === "Issuer" ? [{ id: "identity-dashboard", label: "Dashboard", icon: "spark" as const }] : []),
       ...(r === "UseCaseAdmin" || r === "Issuer" ? [{ id: "issue-credentials", label: "Issue Credentials", icon: "doc" as const }] : []),
       ...(r === "UseCaseAdmin" || r === "Verifier" ? [{ id: "verify", label: "Verification", icon: "shield" as const }] : []),
       ...(r === "UseCaseAdmin" || r === "Issuer" ? [{ id: "approvals", label: "Approvals", icon: "check" as const }] : []),
@@ -183,7 +187,9 @@ export function App(): JSX.Element {
     const idIds = idItems.map((i) => i.id).filter((id) => id !== "logout");
     const idActive = idIds.includes(view) ? view : (idIds[0] ?? "credentials");
     let idPanel: JSX.Element;
-    if (idActive === "issue-credentials") {
+    if (idActive === "identity-dashboard") {
+      idPanel = <IdentityDashboard />;
+    } else if (idActive === "issue-credentials") {
       idPanel = deskCredUC
         ? <IssueUsecaseCredential useCase={deskCredUC} onIssued={reloadDeskCredUC} />
         : <SectionHeader title="Issue Credentials" description="Loading this desk's credential use case…" />;
@@ -214,6 +220,7 @@ export function App(): JSX.Element {
     ...(isPlatform || isOrgAdmin ? [{ id: "organizations", label: "Organizations", icon: "users" as const }] : []),
     ...(isPlatform || isOrgAdmin ? [{ id: "verify", label: "Verification", icon: "shield" as const }] : []),
     ...(isPlatform || isOrgAdmin ? [{ id: "identity", label: "Identity", icon: "shield" as const }] : []),
+    ...(isPlatform || isOrgAdmin ? [{ id: "identity-dashboard", label: "Identity Dashboard", icon: "spark" as const }] : []),
     ...(isOrgAdmin ? [{ id: "org-wallet", label: "Organization Wallet", icon: "coins" as const }] : []),
     ...pinned,
   ];
@@ -248,6 +255,8 @@ export function App(): JSX.Element {
     panel = <VerificationRequests />;
   } else if (activeId === "identity") {
     panel = <IdentityHome />;
+  } else if (activeId === "identity-dashboard") {
+    panel = <IdentityDashboard />;
   } else if (activeId === "org-wallet") {
     panel = <OrganizationWallet />;
   } else if (activeId === "profile") {

@@ -1075,6 +1075,12 @@ export const S: Record<string, FastifySchema> = {
     response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403, 404) },
   },
   myCredentials: { tags: ["Identity"], summary: "Credentials held by the caller", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401) } },
+  identityDashboard: {
+    tags: ["Identity"], summary: "Scoped identity operations dashboard (credential lifecycle + verification aggregates)", security: bearer,
+    // Loose 200: the nested fold output would be silently stripped by
+    // fast-json-stringify under a typed schema (the standing lesson).
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403) },
+  },
   acceptCredential: {
     tags: ["Credentials"], summary: "Holder accepts a pending credential", security: bearer,
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },

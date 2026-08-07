@@ -848,6 +848,9 @@ export class PrismaCredentialRepository implements CredentialRepository {
   async listByIssuer(issuerDid: string): Promise<CredentialRecord[]> {
     return (await prisma.credential.findMany({ where: { issuerDid }, orderBy: { issuedAt: "desc" } })).map(toCredential);
   }
+  async list(): Promise<CredentialRecord[]> {
+    return (await prisma.credential.findMany()).map(toCredential);
+  }
   async get(id: string): Promise<CredentialRecord | null> {
     const r = await prisma.credential.findUnique({ where: { id } });
     return r ? toCredential(r) : null;
@@ -928,6 +931,9 @@ export class PrismaVerificationRequestRepository implements VerificationRequestR
   }
   async listByVerifierOrg(orgId: string, status?: string): Promise<VerificationRequestRecord[]> {
     return (await prisma.verificationRequest.findMany({ where: { verifierOrgId: orgId, ...(status ? { status } : {}) }, orderBy: { createdAt: "desc" } })).map(toVerificationRequest);
+  }
+  async list(): Promise<VerificationRequestRecord[]> {
+    return (await prisma.verificationRequest.findMany()).map(toVerificationRequest);
   }
   async setConsented(id: string, input: { vpJwt: string; credentialIds: string[]; at: string }): Promise<VerificationRequestRecord> {
     return toVerificationRequest(await prisma.verificationRequest.update({ where: { id }, data: { status: "consented", presentationVpJwt: input.vpJwt, consentedCredentialIds: JSON.stringify(input.credentialIds), consentedAt: new Date(input.at) } }));

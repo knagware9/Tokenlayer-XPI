@@ -11,6 +11,7 @@ import { isSupportedCurrency } from "../currencies.js";
 import { renderContractCode } from "../contract-code.js";
 import { deployAndCreateUseCase } from "../use-cases.js";
 import { computeAnalytics } from "../analytics.js";
+import { computeIdentityDashboard } from "../identity-analytics.js";
 import { issueCredentialFor, revokeCredentialById } from "../credential-issuance.js";
 import { mintOrgMembership } from "../membership.js";
 import { ensurePlatformIssuerOrg, PLATFORM_ORG_NAME } from "../platform-org.js";
@@ -1322,6 +1323,42 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       chains,
       now: new Date().toISOString(),
       days,
+    });
+  });
+
+  // ID-N: scoped identity operations dashboard. Read-only aggregation — scope is
+  // resolved here, all counting lives in the pure fold. No chain reads: revocation
+  // comes from the DB flag exactly like every list projection.
+  app.get("/identity/dashboard", { schema: S.identityDashboard, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const all = await deps.credentialUseCases.list();
+    let scoped: typeof all;
+    if (claims.role === "PlatformAdmin") {
+      scoped = all;
+    } else if (claims.role === "OrgAdmin" && claims.orgId) {
+      scoped = all.filter((u) => u.issuer.kind === "org" && u.issuer.orgId === claims.orgId);
+    } else if (
+      (claims.role === "UseCaseAdmin" || claims.role === "Issuer") &&
+      claims.useCaseKey && all.some((u) => u.key === claims.useCaseKey)
+    ) {
+      scoped = all.filter((u) => u.key === claims.useCaseKey);
+    } else {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "no identity dashboard for this role" });
+    }
+
+    const keys = new Set(scoped.map((u) => u.key));
+    const credentials = (await deps.credentials.list())
+      .filter((c) => c.credentialUseCaseKey !== null && keys.has(c.credentialUseCaseKey));
+    const verifications = (await deps.verificationRequests.list())
+      .filter((v) => v.credentialUseCaseKey !== null && keys.has(v.credentialUseCaseKey));
+
+    const holderLabels = new Map<string, string>();
+    for (const u of await deps.users.list()) if (u.did) holderLabels.set(u.did, u.email);
+    for (const o of await deps.organizations.list()) if (o.did) holderLabels.set(o.did, o.name);
+
+    return computeIdentityDashboard({
+      useCases: scoped, credentials, verifications, holderLabels,
+      now: new Date().toISOString(), days: 30,
     });
   });
 
