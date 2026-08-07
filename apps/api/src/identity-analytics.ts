@@ -162,11 +162,18 @@ export function computeIdentityDashboard(input: IdentityDashboardInput): Identit
 
   const verification: VerificationCounts = { pending: 0, consented: 0, rejected: 0, expired: 0, verifiedValid: 0, verifiedInvalid: 0 };
   for (const v of vreqs) {
-    if (v.status === "pending") verification.pending += 1;
+    if (v.status === "pending") {
+      // The API only flips pending→expired lazily (on a post-deadline consent attempt),
+      // so derive expiry here — a never-touched stale request must not count as pending.
+      if (v.expiresAt < input.now) verification.expired += 1;
+      else verification.pending += 1;
+    }
     else if (v.status === "rejected") verification.rejected += 1;
     else if (v.status === "expired") verification.expired += 1;
     else if (v.status === "consented") {
       if (v.verifierResult === null) verification.consented += 1;
+      // The single write path (verifier verify route) always stores a boolean `valid`,
+      // so a malformed result counting as verifiedInvalid is acceptable.
       else if (v.verifierResult.valid === true) verification.verifiedValid += 1;
       else verification.verifiedInvalid += 1;
     }

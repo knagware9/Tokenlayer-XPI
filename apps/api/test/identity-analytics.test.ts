@@ -87,14 +87,17 @@ describe("computeIdentityDashboard", () => {
   it("board: newest first, capped at 200, boardTotal uncapped, labels resolved with DID fallback", () => {
     const creds = Array.from({ length: 205 }, (_, i) =>
       cred(`c${i}`, { issuedAt: `2026-07-01T00:00:${String(i % 60).padStart(2, "0")}.${String(i).padStart(3, "0")}Z` }));
-    const labels = new Map([[creds[0]!.holderDid, "holder0@x.dev"]]);
+    // c179 has the highest (seconds, millis) sort key = (59, 179): guaranteed on the
+    // board (in fact newest). The 200-cap drops the 5 oldest: c0, c60, c120, c180, c1.
+    const c179 = creds.find((c) => c.id === "c179")!;
+    const labels = new Map([[c179.holderDid, "holder179@x.dev"]]);
     const d = fold({ credentials: creds, holderLabels: labels });
     expect(d.board).toHaveLength(200);
     expect(d.boardTotal).toBe(205);
     expect(d.board[0]!.issuedAt >= d.board[199]!.issuedAt).toBe(true);
-    const labeled = d.board.find((r) => r.credentialId === "c0");
-    if (labeled) expect(labeled.holderLabel).toBe("holder0@x.dev");
-    const unlabeled = d.board.find((r) => r.credentialId !== "c0");
+    expect(d.board[0]!.credentialId).toBe("c179");
+    expect(d.board[0]!.holderLabel).toBe("holder179@x.dev");
+    const unlabeled = d.board.find((r) => r.credentialId !== "c179");
     expect(unlabeled!.holderLabel).toContain("…"); // truncated DID fallback
   });
 
@@ -130,7 +133,27 @@ describe("computeIdentityDashboard", () => {
       vreq("v5", { status: "rejected" }),
       vreq("v6", { status: "expired" }),
       vreq("v7", { credentialUseCaseKey: null }), // catalog request: excluded
+      vreq("v8", { expiresAt: "2020-01-01T00:00:00.000Z" }), // stale pending: derived expired (lazy flip never ran)
     ] });
-    expect(d.verification).toEqual({ pending: 1, consented: 1, rejected: 1, expired: 1, verifiedValid: 1, verifiedInvalid: 1 });
+    expect(d.verification).toEqual({ pending: 1, consented: 1, rejected: 1, expired: 2, verifiedValid: 1, verifiedInvalid: 1 });
+  });
+
+  it("a credential of a type no longer in the config still buckets (renamed-type branch)", () => {
+    const d = fold({ credentials: [cred("c1", { type: "LegacyCredential" })] });
+    expect(d.totals.issued).toBe(1);
+    const types = Object.fromEntries(d.byUseCase[0]!.byType.map((t) => [t.type, t.counts]));
+    expect(types.LegacyCredential!.issued).toBe(1);
+    expect(types.ScoreCredential!.issued).toBe(0); // configured type still seeded
+  });
+
+  it("empty use-case scope yields all-zero/empty output", () => {
+    const d = fold({ useCases: [], credentials: [cred("c1")], verifications: [vreq("v1")] });
+    expect(d.totals.issued).toBe(0);
+    expect(d.byUseCase).toEqual([]);
+    expect(d.board).toEqual([]);
+    expect(d.boardTotal).toBe(0);
+    expect(d.activity).toHaveLength(30);
+    expect(d.activity.every((a) => a.issued === 0)).toBe(true);
+    expect(d.verification).toEqual({ pending: 0, consented: 0, rejected: 0, expired: 0, verifiedValid: 0, verifiedInvalid: 0 });
   });
 });
