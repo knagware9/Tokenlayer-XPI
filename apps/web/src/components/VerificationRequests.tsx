@@ -109,21 +109,24 @@ export function VerificationRequests(): JSX.Element {
           <div className="space-y-2">
             {result.credentials.map((c, i) => {
               // ID-O: pre-ID-O stored results may lack `checks` entirely — never fabricate ticks.
-              const reasonOnFailingRow = !!c.checks && CHECK_ROWS.some(({ key }) => c.checks[key] === false);
+              const checks = c.checks;
+              // The per-credential reason belongs to the FIRST failing check only.
+              const firstFail = checks && CHECK_ROWS.find(({ key }) => checks[key] === false)?.key;
+              const reasonOnFailingRow = !!firstFail;
               return (
                 <div key={i} className="border border-slate-100 rounded-lg p-3">
                   <div className="font-medium">{c.type ?? "unknown credential"} {c.reason && !reasonOnFailingRow && <span className="text-xs text-rose-600">· {c.reason}</span>}</div>
-                  {c.checks ? (
+                  {checks ? (
                     <div className="mt-2 space-y-1.5">
                       {CHECK_ROWS.map(({ key, label }) => {
-                        const v = c.checks[key];
+                        const v = checks[key];
                         return (
                           <div key={key} className="text-xs">
                             <div className="flex items-center gap-2">
                               {check(v)}
                               <span className={v === false ? "text-rose-700" : "text-slate-700"}>{label}</span>
                             </div>
-                            {v === false && c.reason && <div className="ml-7 mt-0.5 text-[11px] text-rose-500">{c.reason}</div>}
+                            {key === firstFail && c.reason && <div className="ml-7 mt-0.5 text-[11px] text-rose-500">{c.reason}</div>}
                             {key === "trusted" && c.issuerResolution && <div className="ml-7 mt-0.5">{issuerPill(c.issuerResolution)}</div>}
                             {key === "notRevoked" && c.issuerResolution && <div className="ml-7 mt-0.5 text-[11px] text-slate-400">checked on-chain</div>}
                           </div>

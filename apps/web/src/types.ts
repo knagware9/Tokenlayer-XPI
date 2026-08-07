@@ -481,7 +481,8 @@ export interface VerificationResult {
   verifiedAt: string;
   credentials: { id: string | null; type: string | null; issuer: string | null; reason: string | null;
     claims: Record<string, unknown> | null;
-    checks: { signature: boolean; trusted: boolean; notExpired: boolean; subjectBound: boolean; notRevoked: boolean | "unknown" };
+    /** Absent on pre-ID-O stored results — render no ticks when missing. */
+    checks?: { signature: boolean; trusted: boolean; notExpired: boolean; subjectBound: boolean; notRevoked: boolean | "unknown" };
     issuerResolution?: { registered: boolean; active: boolean; chainId: string } | null;
     /** ID-O: on-chain receipts of the stored credential (absent on pre-ID-O results). */
     anchorTxHash?: string | null;
