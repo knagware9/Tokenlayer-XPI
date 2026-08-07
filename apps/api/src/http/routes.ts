@@ -2200,6 +2200,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       revoked: c.revoked, revokedAt: c.revokedAt, revokedReason: c.revokedReason, vcJwt: c.vcJwt,
       certificateAvailable: await certOk(c),
       acceptance: c.acceptance, acceptanceAt: c.acceptanceAt, acceptanceNote: c.acceptanceNote,
+      anchorTxHash: c.anchorTxHash, anchorChainId: c.anchorChainId, revokeTxHash: c.revokeTxHash,
     })));
   }
 
@@ -2547,6 +2548,10 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       return { ...fromDb, anchored: false, source: "database" };
     }
     if (!onChain.exists) return { ...fromDb, anchored: false, source: "database" };
+    // The tx pointers (ID-O) ride the CHAIN answer only: database-source
+    // responses are shape-pinned byte-identical by pre-ID-O tests (and a
+    // database fallback carrying chain tx hashes would be exactly the
+    // dressed-up provenance those tests forbid).
     return {
       ...fromDb,
       revoked: onChain.revoked,
@@ -2556,6 +2561,9 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       chainId: deps.registry.chainId,
       registry: deps.registry.vcRegistry,
       vcHash: onChain.vcHash,
+      anchorTxHash: cred.anchorTxHash,
+      anchorChainId: cred.anchorChainId,
+      revokeTxHash: cred.revokeTxHash,
     };
   });
 
@@ -2837,8 +2845,9 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       const jti = presentedJtis[i] ?? null;
       let revoked: boolean | "unknown" = "unknown";
       let type: string | null = null;
+      let stored: CredentialRecord | null = null;
       if (jti) {
-        const stored = await deps.credentials.get(jti);
+        stored = await deps.credentials.get(jti);
         type = stored?.type ?? null;
         if (deps.registry) {
           try {
@@ -2865,6 +2874,9 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         issuerResolution: resMeta && resMeta.source === "chain"
           ? { registered: resMeta.registered, active: resMeta.active, chainId: resMeta.chainId }
           : null,
+        anchorTxHash: stored?.anchorTxHash ?? null,
+        anchorChainId: stored?.anchorChainId ?? null,
+        revokeTxHash: stored?.revokeTxHash ?? null,
       };
     }));
 
