@@ -1,4 +1,4 @@
-import type { AccountState, ActivityEvent, AnalyticsSummary, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, ChainInfo, ChainStatus, CompanyCategory, ContractCode, CredentialStatusInfo, CredentialTypeInfo, CredentialTypeSpec, CredentialUseCase, DidDocument, EligibleHolder, HeldCredential, IdentityRegistryInfo, IdentityResult, InvoiceRowResult, IssuedCredential, Listing, LoginKeyInfo, OrgMember, OrgType, Organization, Portfolio, ProvisionResult, Proposal, QrLoginPoll, QrLoginStart, Role, SessionUser, StagedInvoice, TokenInfo, TokenStandard, TokenizeResult, Trade, UseCase, UseCaseTemplate, UseCaseTemplateMeta, VerificationRequest, VerificationResult } from "./types.js";
+import type { AccountState, ActivityEvent, AnalyticsSummary, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, ChainInfo, ChainStatus, CompanyCategory, ContractCode, CredentialStatusInfo, CredentialTypeInfo, CredentialTypeSpec, CredentialUseCase, DidDocument, EligibleHolder, HeldCredential, IdentityDashboardData, IdentityRegistryInfo, IdentityResult, InvoiceRowResult, IssuedCredential, Listing, LoginKeyInfo, OrgMember, OrgType, Organization, Portfolio, ProvisionResult, Proposal, QrLoginPoll, QrLoginStart, Role, SessionUser, StagedInvoice, TokenInfo, TokenStandard, TokenizeResult, Trade, UseCase, UseCaseTemplate, UseCaseTemplateMeta, VerificationRequest, VerificationResult } from "./types.js";
 
 export interface Currency { code: string; label: string; }
 export interface CashBalance { currency: string; address: string; amount: string; }
@@ -119,6 +119,7 @@ export const api = {
     const qs = q.toString();
     return request<AnalyticsSummary>(`/analytics${qs ? `?${qs}` : ""}`, token);
   },
+  identityDashboard: (token: string) => request<IdentityDashboardData>("/identity/dashboard", token),
   accounts: (token: string) => request<{ address: string; label: string }[]>("/accounts", token),
   // 201 → the UseCase; 202 (gated: an OrgAdmin proposes) → { proposal } pending platform approval.
   createUseCase: (token: string, def: UseCase) =>

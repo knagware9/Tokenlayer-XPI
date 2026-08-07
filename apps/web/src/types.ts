@@ -481,3 +481,39 @@ export interface VerificationResult {
     issuerResolution?: { registered: boolean; active: boolean; chainId: string } | null;
     valid: boolean }[];
 }
+
+// ---- ID-N: identity dashboard ----------------------------------------------
+
+export type DerivedCredentialStatus = "accepted" | "pending" | "changes_requested" | "rejected" | "revoked" | "expired";
+
+export interface IdentityStatusCounts {
+  issued: number;
+  accepted: number;
+  pendingAcceptance: number;
+  changesRequested: number;
+  rejectedByHolder: number;
+  revoked: number;
+  expired: number;
+}
+
+export interface IdentityBoardRow {
+  credentialId: string;
+  useCaseKey: string;
+  useCaseName: string;
+  type: string;
+  holderDid: string;
+  holderLabel: string;
+  issuedAt: string;
+  expiresAt: string | null;
+  status: DerivedCredentialStatus;
+  acceptanceNote: string | null;
+}
+
+export interface IdentityDashboardData {
+  totals: IdentityStatusCounts;
+  byUseCase: { key: string; name: string; counts: IdentityStatusCounts; byType: { type: string; counts: IdentityStatusCounts }[] }[];
+  board: IdentityBoardRow[];
+  boardTotal: number;
+  activity: { date: string; issued: number }[];
+  verification: { pending: number; consented: number; rejected: number; expired: number; verifiedValid: number; verifiedInvalid: number };
+}
