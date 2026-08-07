@@ -260,6 +260,11 @@ model Credential {
   acceptance     String    @default("accepted") // accepted | pending | rejected | changes_requested
   acceptanceAt   DateTime?
   acceptanceNote String?
+  // ID-O: receipts of the on-chain writes behind this credential (null when
+  // issued/revoked without a registry, or before ID-O — no backfill).
+  anchorTxHash  String?
+  anchorChainId String?
+  revokeTxHash  String?
 
   @@index([holderDid])
 }

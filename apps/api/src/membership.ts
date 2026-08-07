@@ -45,6 +45,8 @@ export async function mintOrgMembership(
     revoked: false, revokedAt: null, revokedReason: null, revokedBy: null, proposalId: null,
     credentialUseCaseKey: null,
     acceptance: "accepted", acceptanceAt: null, acceptanceNote: null,
+    // Membership VCs are not anchored on-chain — no receipts to capture (ID-O).
+    anchorTxHash: null, anchorChainId: null, revokeTxHash: null,
   });
   return did;
 }

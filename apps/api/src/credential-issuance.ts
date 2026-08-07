@@ -31,8 +31,10 @@ export async function issueCredentialFor(deps: AppDeps, a: IssueCredentialArgs):
     type: a.type, claims: a.claims, credentialId, statusUrl, validityDays: a.validityDays, now,
   });
   // Anchor BEFORE persisting: a throw here fails the caller and no row exists.
+  // Keep the receipt — the tx hash is the credential's public on-chain pointer (ID-O).
+  let anchorReceipt: { txHash: string; chainId: string } | null = null;
   if (deps.registry) {
-    await deps.registry.anchor.anchorCredential(deps.registry.vcRegistry, credentialId, vcJwt, now, expiresAt);
+    anchorReceipt = await deps.registry.anchor.anchorCredential(deps.registry.vcRegistry, credentialId, vcJwt, now, expiresAt);
   }
   return deps.credentials.create({
     id: credentialId,
@@ -47,6 +49,9 @@ export async function issueCredentialFor(deps: AppDeps, a: IssueCredentialArgs):
     proposalId: a.proposalId,
     credentialUseCaseKey: a.credentialUseCaseKey ?? null,
     acceptance: a.initialAcceptance ?? "accepted", acceptanceAt: null, acceptanceNote: null,
+    anchorTxHash: anchorReceipt?.txHash ?? null,
+    anchorChainId: anchorReceipt?.chainId ?? null,
+    revokeTxHash: null,
   });
 }
 
@@ -57,8 +62,9 @@ export async function revokeCredentialById(
   const cred = await deps.credentials.get(credentialId);
   if (!cred) throw coded(404, "NOT_FOUND", "credential missing");
   if (cred.revoked) throw coded(409, "ALREADY_REVOKED", "credential is already revoked");
+  let revokeReceipt: { txHash: string } | null = null;
   if (deps.registry) {
-    await deps.registry.anchor.revokeCredential(deps.registry.vcRegistry, cred.id);
+    revokeReceipt = await deps.registry.anchor.revokeCredential(deps.registry.vcRegistry, cred.id);
   }
-  await deps.credentials.revoke(cred.id, meta);
+  await deps.credentials.revoke(cred.id, { ...meta, txHash: revokeReceipt?.txHash ?? null });
 }
