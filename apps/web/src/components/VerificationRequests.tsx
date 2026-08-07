@@ -1,12 +1,22 @@
 import { useEffect, useState } from "react";
 import { ApiError, api } from "../api.js";
 import { useAuth } from "../auth.js";
-import type { CredentialTypeInfo, CredentialUseCase, VerificationResult } from "../types.js";
+import type { ChainInfo, CredentialTypeInfo, CredentialUseCase, VerificationResult } from "../types.js";
+import { TxHashRow } from "./CredentialCard.js";
 import { Card, Pill } from "./ui.js";
 
 function errMessage(err: unknown, fallback: string): string {
   return err instanceof ApiError ? err.message : fallback;
 }
+
+/** The verifier's step-by-step detail rows, in check order (ID-O). */
+const CHECK_ROWS = [
+  { key: "signature", label: "Signature valid" },
+  { key: "trusted", label: "Issuer trusted" },
+  { key: "notExpired", label: "Not expired" },
+  { key: "subjectBound", label: "Subject bound to holder" },
+  { key: "notRevoked", label: "Not revoked" },
+] as const;
 
 /**
  * Verifier side: request a presentation from a holder, then run verification on
@@ -28,6 +38,10 @@ export function VerificationRequests(): JSX.Element {
 
   useEffect(() => { if (token) void api.credentialTypes(token).then(setTypes).catch(() => setTypes([])); }, [token]);
   useEffect(() => { if (token) void api.credentialUseCases(token).then(setUseCases).catch(() => setUseCases([])); }, [token]);
+
+  // Chain catalog for explorer links on tx-hash rows; failure just omits the links.
+  const [chains, setChains] = useState<ChainInfo[]>();
+  useEffect(() => { if (token) void api.chains(token).then(setChains).catch(() => setChains([])); }, [token]);
 
   const selectedUseCase = useCases.find((u) => u.key === selectedKey);
   // The requestable types come from the selected use case, or the closed catalog when none.
@@ -55,6 +69,13 @@ export function VerificationRequests(): JSX.Element {
 
   const check = (ok: boolean | "unknown"): JSX.Element => (
     <Pill tone={ok === true ? "ok" : ok === "unknown" ? "muted" : "danger"}>{ok === true ? "✓" : ok === "unknown" ? "?" : "✗"}</Pill>
+  );
+  const issuerPill = (r: { registered: boolean; active: boolean; chainId: string }): JSX.Element => (
+    r.active
+      ? <Pill tone="ok">issuer on-chain · {r.chainId} · active</Pill>
+      : r.registered
+        ? <Pill tone="danger">issuer deactivated</Pill>
+        : <Pill tone="muted">issuer not registered</Pill>
   );
 
   return (
@@ -86,24 +107,42 @@ export function VerificationRequests(): JSX.Element {
         <Card title="Verification result" description={result.valid ? "Presentation is valid." : "Presentation did not fully verify."}>
           <div className="mb-2"><Pill tone={result.valid ? "ok" : "danger"}>{result.valid ? "valid" : "invalid"}</Pill> <span className="text-xs text-slate-500">holder {result.holderDid?.slice(0, 20)}…</span></div>
           <div className="space-y-2">
-            {result.credentials.map((c, i) => (
-              <div key={i} className="border border-slate-100 rounded-lg p-3">
-                <div className="font-medium">{c.type ?? "unknown credential"} {c.reason && <span className="text-xs text-rose-600">· {c.reason}</span>}</div>
-                <div className="flex flex-wrap gap-3 text-xs mt-1 items-center">
-                  <span>sig {check(c.checks.signature)}</span><span>trusted {check(c.checks.trusted)}</span>
-                  <span>not-expired {check(c.checks.notExpired)}</span><span>subject {check(c.checks.subjectBound)}</span>
-                  <span>not-revoked {check(c.checks.notRevoked)}</span>
-                  {c.issuerResolution && (
-                    c.issuerResolution.active
-                      ? <Pill tone="ok">issuer on-chain · {c.issuerResolution.chainId} · active</Pill>
-                      : c.issuerResolution.registered
-                        ? <Pill tone="danger">issuer deactivated</Pill>
-                        : <Pill tone="muted">issuer not registered</Pill>
+            {result.credentials.map((c, i) => {
+              // ID-O: pre-ID-O stored results may lack `checks` entirely — never fabricate ticks.
+              const reasonOnFailingRow = !!c.checks && CHECK_ROWS.some(({ key }) => c.checks[key] === false);
+              return (
+                <div key={i} className="border border-slate-100 rounded-lg p-3">
+                  <div className="font-medium">{c.type ?? "unknown credential"} {c.reason && !reasonOnFailingRow && <span className="text-xs text-rose-600">· {c.reason}</span>}</div>
+                  {c.checks ? (
+                    <div className="mt-2 space-y-1.5">
+                      {CHECK_ROWS.map(({ key, label }) => {
+                        const v = c.checks[key];
+                        return (
+                          <div key={key} className="text-xs">
+                            <div className="flex items-center gap-2">
+                              {check(v)}
+                              <span className={v === false ? "text-rose-700" : "text-slate-700"}>{label}</span>
+                            </div>
+                            {v === false && c.reason && <div className="ml-7 mt-0.5 text-[11px] text-rose-500">{c.reason}</div>}
+                            {key === "trusted" && c.issuerResolution && <div className="ml-7 mt-0.5">{issuerPill(c.issuerResolution)}</div>}
+                            {key === "notRevoked" && c.issuerResolution && <div className="ml-7 mt-0.5 text-[11px] text-slate-400">checked on-chain</div>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    c.issuerResolution && <div className="flex flex-wrap gap-3 text-xs mt-1 items-center">{issuerPill(c.issuerResolution)}</div>
                   )}
+                  {(c.anchorTxHash || c.revokeTxHash) && (
+                    <div className="mt-2 space-y-1 border-t border-slate-100 pt-2">
+                      {c.anchorTxHash && <TxHashRow label="Anchored" hash={c.anchorTxHash} chainId={c.anchorChainId} chains={chains} />}
+                      {c.revokeTxHash && <TxHashRow label="Revoked" hash={c.revokeTxHash} chainId={c.anchorChainId} chains={chains} />}
+                    </div>
+                  )}
+                  {c.claims && <div className="text-xs text-slate-500 mt-2">{Object.entries(c.claims).map(([k, v]) => `${k}: ${String(v)}`).join(" · ")}</div>}
                 </div>
-                {c.claims && <div className="text-xs text-slate-500 mt-1">{Object.entries(c.claims).map(([k, v]) => `${k}: ${String(v)}`).join(" · ")}</div>}
-              </div>
-            ))}
+              );
+            })}
           </div>
         </Card>
       )}

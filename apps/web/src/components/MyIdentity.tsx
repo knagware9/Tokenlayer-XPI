@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ApiError, api } from "../api.js";
 import { useAuth } from "../auth.js";
-import type { CredentialStatusInfo, DidDocument, HeldCredential } from "../types.js";
+import type { ChainInfo, CredentialStatusInfo, DidDocument, HeldCredential } from "../types.js";
 import { Card, EmptyState, SectionHeader, Skeleton } from "./ui.js";
 import { CredentialCard } from "./CredentialCard.js";
 import { VerificationInbox } from "./VerificationInbox.js";
@@ -35,6 +35,12 @@ export function MyIdentity(): JSX.Element {
       creds.map((c) => api.credentialStatus(c.id).then((s) => [c.id, s] as const).catch(() => null)),
     ).then((rows) => setStatuses(Object.fromEntries(rows.filter(Boolean) as (readonly [string, CredentialStatusInfo])[])));
   }, [creds]);
+
+  // Chain catalog for explorer links on tx-hash rows; failure just omits the links.
+  const [chains, setChains] = useState<ChainInfo[]>();
+  useEffect(() => {
+    if (token) void api.chains(token).then(setChains).catch(() => setChains([]));
+  }, [token]);
 
   if (!did) {
     return (
@@ -80,7 +86,7 @@ export function MyIdentity(): JSX.Element {
           </Card>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {creds.map((c) => <CredentialCard key={c.id} credential={c} status={statuses[c.id]} onAcceptanceAction={() => setReloadKey((k) => k + 1)} />)}
+            {creds.map((c) => <CredentialCard key={c.id} credential={c} status={statuses[c.id]} chains={chains} onAcceptanceAction={() => setReloadKey((k) => k + 1)} />)}
           </div>
         )}
       </div>

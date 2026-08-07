@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { ApiError, api } from "../api.js";
 import { useAuth } from "../auth.js";
-import type { CredentialStatusInfo, HeldCredential } from "../types.js";
+import { explorerTxUrl } from "../lib/explorers.js";
+import type { ChainInfo, CredentialStatusInfo, HeldCredential } from "../types.js";
 import { Pill } from "./ui.js";
 
 function truncateDid(v: string): string { return v.length > 28 ? `${v.slice(0, 18)}…${v.slice(-6)}` : v; }
@@ -17,7 +18,25 @@ function issuerLabel(c: HeldCredential): string {
   return typeof org === "string" && org ? org : truncateDid(c.issuerDid);
 }
 
-export function CredentialCard({ credential: c, status, onAcceptanceAction }: { credential: HeldCredential; status?: CredentialStatusInfo; onAcceptanceAction?: () => void }): JSX.Element {
+/** A transaction-hash row: explorer link when the chain has one, copyable hash otherwise. */
+export function TxHashRow({ label, hash, chainId, chains }: {
+  label: string; hash: string; chainId?: string | null; chains?: ChainInfo[];
+}): JSX.Element {
+  const url = explorerTxUrl(chains, chainId, hash);
+  const short = `${hash.slice(0, 10)}…${hash.slice(-6)}`;
+  return (
+    <div className="flex items-center gap-2 text-xs">
+      <span className="text-slate-500">{label}</span>
+      {url
+        ? <a className="font-mono text-brand-600 hover:text-brand-700" href={url} target="_blank" rel="noreferrer">{short} ↗</a>
+        : <span className="font-mono text-slate-700">{short}</span>}
+      <button className="text-slate-400 hover:text-slate-600" title="Copy transaction hash"
+        onClick={() => void navigator.clipboard.writeText(hash)}>Copy</button>
+    </div>
+  );
+}
+
+export function CredentialCard({ credential: c, status, onAcceptanceAction, chains }: { credential: HeldCredential; status?: CredentialStatusInfo; onAcceptanceAction?: () => void; chains?: ChainInfo[] }): JSX.Element {
   const { token } = useAuth();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -136,6 +155,8 @@ export function CredentialCard({ credential: c, status, onAcceptanceAction }: { 
               href={api.didResolveUrl(c.issuerDid)} target="_blank" rel="noopener noreferrer">{c.issuerDid}</a>
           </div>
           <div className="text-[11px] text-slate-500 font-mono break-all">holder · {c.holderDid}</div>
+          {c.anchorTxHash && <TxHashRow label="Anchored" hash={c.anchorTxHash} chainId={c.anchorChainId} chains={chains} />}
+          {c.revokeTxHash && <TxHashRow label="Revoked" hash={c.revokeTxHash} chainId={c.anchorChainId} chains={chains} />}
           <div className="flex gap-2">
             <button className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-medium hover:border-brand-400"
               onClick={() => void navigator.clipboard.writeText(c.vcJwt)}>Copy VC-JWT</button>
