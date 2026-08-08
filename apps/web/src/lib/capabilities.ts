@@ -19,6 +19,20 @@ export const ROLE_LABELS: Record<OrgOperatingRole, string> = {
   Verifier: "Verifier",
 };
 
+/**
+ * Mirrors core's `orgRoleEnabled`: a null/absent (legacy) envelope enables
+ * everything, so read-only surfaces that filter on it stay unrestricted for
+ * orgs that predate EN-A.
+ */
+export function orgRoleEnabled(caps: OrgCapabilities | null | undefined, role: OrgOperatingRole): boolean {
+  return caps == null || caps.roles.includes(role);
+}
+
+/** Is a role gated by the envelope at all? Only the three operating roles are. */
+export function isOrgOperatingRole(role: string): role is OrgOperatingRole {
+  return (ORG_OPERATING_ROLES as readonly string[]).includes(role);
+}
+
 /** The unrestricted envelope, spelled out. What an editor seeds with when the
  * org has no explicit envelope yet (legacy null) — narrowing is deliberate. */
 export function fullCapabilities(): OrgCapabilities {

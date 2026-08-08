@@ -182,6 +182,31 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     }) ?? null;
   }
 
+  /**
+   * EN-A member-add filter: an ENVELOPED org only takes on members whose role
+   * and use-case domain fit its envelope. Returns the missing capability (an
+   * operating role or a domain) or null when the add is in-envelope. A legacy
+   * org (null envelope) is unrestricted; roles outside the three operating
+   * roles (Trader/Buyer/UseCaseAdmin/...) gate on domain only; an unknown key
+   * resolves to no domain and stays ungated here (unchanged legacy behavior).
+   *
+   * Shared by BOTH member-creating routes — POST /orgs/:id/users and the
+   * `claims.orgId` branch of POST /users — so an org member cannot route
+   * around the envelope by using the other door. Callers apply the
+   * PlatformAdmin bypass themselves (platform override).
+   */
+  async function orgMemberCapabilityViolation(org: OrganizationRecord, role: Role, useCaseKey: string | null): Promise<string | null> {
+    if (org.capabilities === null) return null;
+    if ((ORG_OPERATING_ROLES as readonly string[]).includes(role) && !orgRoleEnabled(org.capabilities, role as OrgOperatingRole)) {
+      return role;
+    }
+    if (useCaseKey) {
+      const domain = await resolveUseCaseDomain(useCaseKey);
+      if (domain && !orgDomainEnabled(org.capabilities, domain)) return domain;
+    }
+    return null;
+  }
+
   // --- auth ---------------------------------------------------------------
   app.post("/auth/login", { schema: S.login }, async (request, reply) => {
     if (loginThrottled(request.ip)) {
@@ -847,6 +872,10 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const orgs = await deps.organizations.list();
     for (const o of orgs) {
       if (!o.did) continue;
+      // EN-A: the picker must not offer an org that issuance would then 403 —
+      // holding a credential needs the Holder role (same check as the
+      // subjectOrgId branch below). A legacy null envelope passes.
+      if (!orgRoleEnabled(o.capabilities, "Holder")) continue;
       if (holderPolicyAllows(def.holderPolicy, { id: o.id, orgType: o.orgType })) {
         out.push({ kind: "org", id: o.id, label: o.name, did: o.did, subLabel: o.orgType });
       }
@@ -1969,6 +1998,18 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     // sub-DID + membership VC (mirrors POST /orgs/:id/users) — org-member
     // onboarding stays direct.
     if (claims.orgId) {
+      const org = await deps.organizations.get(claims.orgId);
+      // EN-A review fix: this door creates an org member (sub-DID + membership
+      // VC) exactly like POST /orgs/:id/users, so it must run the SAME
+      // member-add envelope filter — otherwise an org-member UseCaseAdmin could
+      // mint out-of-envelope members here. Same PlatformAdmin bypass; a legacy
+      // (null-envelope) org still passes untouched. No binding check is needed
+      // for a Verifier target: a non-PlatformAdmin caller's target key is
+      // pinned to their OWN `claims.useCaseKey`, never attacker-chosen.
+      if (org && claims.role !== "PlatformAdmin") {
+        const missing = await orgMemberCapabilityViolation(org, b.role, targetUseCaseKey);
+        if (missing) return orgCapabilityMissing(reply, org, missing);
+      }
       let accountId: string | null = null;
       if (b.walletAddress) accountId = (await deps.accounts.upsert(b.walletAddress, b.email)).id;
       const created = await deps.users.create({
@@ -1982,7 +2023,6 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         kyc: b.kyc ?? null,
       });
       let mintedDid: string | null = null;
-      const org = await deps.organizations.get(claims.orgId);
       if (org) {
         try {
           mintedDid = await mintMembership(org, created, b.role);
@@ -2446,20 +2486,40 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (!canCreateOrgMember(claims.role, b.role)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to create that member role" });
     const org = await deps.organizations.get(id);
     if (!org) return notFound(reply, "organization not found");
-    // EN-A member-add filter: an ENVELOPED org only takes on members whose role
-    // and use-case domain fit its envelope. A PlatformAdmin bypasses entirely
-    // (platform override) and a legacy org (null envelope) is unrestricted.
-    // Roles outside the three operating roles (Trader/Buyer/UseCaseAdmin/...)
-    // gate on domain only.
-    if (claims.role !== "PlatformAdmin" && org.capabilities !== null) {
-      if ((ORG_OPERATING_ROLES as readonly string[]).includes(b.role) && !orgRoleEnabled(org.capabilities, b.role as OrgOperatingRole)) {
-        return orgCapabilityMissing(reply, org, b.role);
-      }
-      if (b.useCaseKey) {
-        // Same catalog resolution POST /users uses; an unknown key resolves to
-        // no domain and stays ungated here (unchanged legacy behavior).
-        const domain = await resolveUseCaseDomain(b.useCaseKey);
-        if (domain && !orgDomainEnabled(org.capabilities, domain)) return orgCapabilityMissing(reply, org, domain);
+    // EN-A member-add filter (shared with POST /users). A PlatformAdmin bypasses
+    // entirely (platform override).
+    if (claims.role !== "PlatformAdmin") {
+      const missing = await orgMemberCapabilityViolation(org, b.role, b.useCaseKey ?? null);
+      if (missing) return orgCapabilityMissing(reply, org, missing);
+    }
+    // EN-A review fix: A4 widened this route's role enum to the org-internal
+    // Holder/Verifier roles, and the key below is stored VERBATIM. A `Verifier`
+    // member is authorized downstream (POST /verification-requests, and the
+    // request-visibility check) purely by `role + useCaseKey` — never by the
+    // org's binding — so a foreign credential-use-case key here would be a
+    // cross-org escalation. Resolve the key and require the org to be
+    // legitimately attached before minting such a member.
+    //
+    // `Holder` deliberately gets NO attachment check: no route authorizes on
+    // `role === "Holder"` (holder eligibility is decided by the use case's
+    // holderPolicy at issuance time), so a Holder member's key grants nothing.
+    // A TOKENIZATION key is likewise harmless: the desk-verifier branch only
+    // ever resolves the credential-use-case catalog. Both stay ungated.
+    if (b.useCaseKey && (b.role === "Verifier" || b.role === "Holder")) {
+      const domain = await resolveUseCaseDomain(b.useCaseKey);
+      // Same code the sibling POST /users route uses for an unknown key.
+      if (!domain) return reply.code(404).send({ error: "USE_CASE_NOT_FOUND", message: `no use case '${b.useCaseKey}'` });
+      if (b.role === "Verifier" && domain === "identity" && claims.role !== "PlatformAdmin") {
+        const def = await deps.credentialUseCases.get(b.useCaseKey);
+        if (def && def.ownerOrgId !== org.id && !verifierBindingAllows(def.verifier, org.id)) {
+          // A BINDING failure, not a capability one — distinct error, and it
+          // bites for a legacy (null-envelope) org too.
+          return reply.code(403).send({
+            error: "ORG_NOT_BOUND",
+            message: `organization '${org.name}' is neither the owner nor a bound verifier of credential use case '${b.useCaseKey}'`,
+            details: { orgId: org.id, useCaseKey: b.useCaseKey },
+          });
+        }
       }
     }
     if (await deps.users.findByEmail(b.email)) return reply.code(400).send({ error: "EMAIL_TAKEN", message: "email already registered" });

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ApiError, api } from "../api.js";
 import { useAuth } from "../auth.js";
-import { DOMAIN_LABELS, ROLE_LABELS, fullCapabilities, toggleCapability, validateEnvelope } from "../lib/capabilities.js";
+import { DOMAIN_LABELS, ROLE_LABELS, fullCapabilities, isOrgOperatingRole, orgRoleEnabled, toggleCapability, validateEnvelope } from "../lib/capabilities.js";
 import { ORG_DOMAINS, ORG_OPERATING_ROLES, type CompanyCategory, type CredentialStatusInfo, type DidDocument, type KybDocumentRef, type OrgCapabilities, type OrgDomain, type OrgMember, type OrgOperatingRole, type OrgType, type Organization, type Role } from "../types.js";
 import { CredentialsPanel } from "./CredentialsPanel.js";
 import { Card, EmptyState, Pill, SectionHeader } from "./ui.js";
@@ -591,7 +591,7 @@ function Members({ org }: { org: Organization }): JSX.Element {
           </button>
         }
       />
-      {adding && <AddMember orgId={orgId} onAdded={reload} />}
+      {adding && <AddMember orgId={orgId} capabilities={org.capabilities ?? null} onAdded={reload} />}
       {error && <p className="text-sm text-red-600">{error}</p>}
       {rows.length === 0 ? (
         <Card>
@@ -633,10 +633,18 @@ function Members({ org }: { org: Organization }): JSX.Element {
   );
 }
 
-function AddMember({ orgId, onAdded }: { orgId: string; onAdded: () => void }): JSX.Element {
+function AddMember({ orgId, capabilities, onAdded }: { orgId: string; capabilities: OrgCapabilities | null; onAdded: () => void }): JSX.Element {
   const { token, user } = useAuth();
   // An OrgAdmin may not mint another OrgAdmin — the API 403s.
-  const roleOptions = user?.role === "PlatformAdmin" ? MEMBER_ROLES : MEMBER_ROLES.filter((r) => r !== "OrgAdmin");
+  const allowedByRank = user?.role === "PlatformAdmin" ? MEMBER_ROLES : MEMBER_ROLES.filter((r) => r !== "OrgAdmin");
+  // EN-A: only offer roles this org's capability envelope allows. A PlatformAdmin
+  // bypasses the envelope server-side, and a legacy (null) envelope is
+  // unrestricted — both keep the full list. Only the three OPERATING roles are
+  // gated; the rest (UseCaseAdmin/Trader/Buyer/…) are unaffected.
+  const roleOptions = user?.role === "PlatformAdmin"
+    ? allowedByRank
+    : allowedByRank.filter((r) => !isOrgOperatingRole(r) || orgRoleEnabled(capabilities, r));
+  const hiddenByEnvelope = allowedByRank.filter((r) => !roleOptions.includes(r));
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<Role>(roleOptions[0] ?? "Issuer");
@@ -680,6 +688,11 @@ function AddMember({ orgId, onAdded }: { orgId: string; onAdded: () => void }): 
           {roleOptions.map((r) => <option key={r} value={r}>{r}</option>)}
         </select>
         <input className="input" placeholder="use-case key (optional)" value={useCaseKey} onChange={(e) => setUseCaseKey(e.target.value)} />
+        {hiddenByEnvelope.length > 0 && (
+          <p className="col-span-2 text-xs text-slate-500">
+            {hiddenByEnvelope.join(", ")} {hiddenByEnvelope.length === 1 ? "is" : "are"} not offered — this organization&rsquo;s capability envelope does not include {hiddenByEnvelope.length === 1 ? "that role" : "those roles"}.
+          </p>
+        )}
         <input className="input col-span-2" placeholder="wallet address 0x… (optional)" value={walletAddress} onChange={(e) => setWalletAddress(e.target.value)} />
       </div>
       {ok && (

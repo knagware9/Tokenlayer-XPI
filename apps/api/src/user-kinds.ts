@@ -3,7 +3,7 @@
  * + KycCredential) and gated identity revocation (chain-first). USE-CASE scoped:
  * PlatformAdmin always; a UseCaseAdmin of the same use case otherwise.
  */
-import { credentialTypeDef, didKeyFromSeed, type Actor, type LifecycleAction, type Role } from "@tokenlayer/core";
+import { credentialTypeDef, didKeyFromSeed, orgRoleEnabled, type Actor, type LifecycleAction, type Role } from "@tokenlayer/core";
 import type { AppDeps } from "./context.js";
 import { issueCredentialFor, revokeCredentialById } from "./credential-issuance.js";
 import { coded } from "./executors.js";
@@ -65,6 +65,16 @@ async function onboardSingle(deps: AppDeps, proposer: Actor, pl: OnboardUserPayl
     await deps.users.update(created.id, { did, didSeedEncrypted });
     if (pl.kyc) {
       const issuerOrg = await resolveIssuerOrg(deps, pl.useCaseKey);
+      // EN-A (review fix): onboarding SIGNS a KycCredential with this org's DID
+      // — the very act the Issuer capability governs. Mirrors the ninth gate in
+      // credential-kinds.ts, platform exemption included (platform issuance —
+      // the KYB ceremony and this fallback — signs as the platform itself).
+      // In a BATCH this throws inside the per-row try, so onboardUserBatchKind
+      // marks that ROW failed and the other rows still run: rows may target
+      // different use cases, so one owner's envelope must not fail the batch.
+      if (issuerOrg.name !== PLATFORM_ORG_NAME && !orgRoleEnabled(issuerOrg.capabilities, "Issuer")) {
+        throw coded(403, "ORG_CAPABILITY_MISSING", `organization '${issuerOrg.name}' (${issuerOrg.id}) does not have the 'Issuer' capability`);
+      }
       const cred = await issueCredentialFor(deps, {
         issuerOrg, subjectDid: did, type: "KycCredential",
         claims: { legalName: pl.kyc.legalName, country: pl.kyc.country },
