@@ -25,6 +25,7 @@ import { UseCaseBuilder } from "./components/UseCaseBuilder.js";
 import { UserManagement } from "./components/UserManagement.js";
 import { VerificationRequests } from "./components/VerificationRequests.js";
 import { SectionHeader } from "./components/ui.js";
+import { confirmNavigation } from "./lib/nav-guard.js";
 import { can, canManageUsers } from "./rbac.js";
 import { DOMAINS, DOMAIN_KEYS, type DomainKey, loadActiveDomain, saveActiveDomain, itemsForDomain, availableDomains } from "./domains.js";
 import type { ChainInfo, CredentialUseCase, OrgOperatingRole, UseCase } from "./types.js";
@@ -99,12 +100,18 @@ export function App(): JSX.Element {
   const activeUseCase = isPlatform ? routeKey : user.useCaseKey ?? "";
 
   const handleSelect = (id: string): void => {
+    // The panel being replaced may be holding something that unmounting would
+    // destroy — today, the one-time API key secret on the Developers panel. Ask
+    // it first; with no guard registered this is a no-op for every other panel.
+    if (!confirmNavigation()) return;
     if (id === "logout") { navigate("/"); logout(); return; }
     if (id === "back") { navigate("/"); return; }
     setView(id);
   };
 
   const onDomainChange = (d: DomainKey): void => {
+    // Switching domain also swaps the panel out, so it needs the same gate.
+    if (!confirmNavigation()) return;
     setActiveDomain(d);
     saveActiveDomain(d);
     setView(DOMAINS.find((x) => x.key === d)!.defaultView);
