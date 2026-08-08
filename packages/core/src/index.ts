@@ -14,6 +14,7 @@ export { invoiceFingerprint, type InvoiceFingerprintInput } from "./invoice-fing
 export { computeCashflowSchedule, splitProRata, type TermsConfig, type ScheduledCashflow } from "./cashflows.js";
 export { auditGenesis, auditEntryHash, verifyChain, type AuditChainFields, type ChainEntry, type VerifyResult } from "./audit-chain.js";
 export { ORG_DOMAINS, ORG_OPERATING_ROLES, orgDomainEnabled, orgRoleEnabled, validateOrgCapabilities, type OrgDomain, type OrgOperatingRole, type OrgCapabilities } from "./org-capabilities.js";
+export { API_SCOPES, scopeAllows, validateScopes, type ApiScope, type ApiScopeGrant } from "./api-scopes.js";
 // Explicit re-export (not `export *`) because identity's `IssueInput` would
 // otherwise collide with lifecycle-engine's asset `IssueInput` (TS2308).
 export {

@@ -20,7 +20,8 @@ export type PolicyErrorCode =
   | "INVALID_TEMPLATE"
   | "INVALID_TEMPLATE_PARAMS"
   | "UNKNOWN_TEMPLATE"
-  | "INVALID_CAPABILITIES";
+  | "INVALID_CAPABILITIES"
+  | "INVALID_SCOPES";
 
 /** Raised when a request violates RBAC, lifecycle, or compliance policy. */
 export class PolicyError extends Error {
