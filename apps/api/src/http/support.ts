@@ -58,9 +58,19 @@ const LAST_USED_THROTTLE_MS = 60_000;
 /** Per-key request budget window, and the window failed verifications age out of. */
 const RATE_WINDOW_MS = 60_000;
 const FAILED_WINDOW_MS = 60_000;
-/** Defaults; both are overridable through AppDeps (tests dial them down). */
+/** Defaults; all three are overridable through AppDeps (tests dial them down). */
 const DEFAULT_RATE_MAX = 600;
 const DEFAULT_FAILED_MAX = 20;
+/**
+ * Even over its failure budget, a prefix gets ONE bcrypt attempt per this
+ * interval. Without it the bound is a denial-of-service in its own right: an
+ * attacker who knows the (public) prefix spends the budget every window and a
+ * legitimate key that has gone cold can never re-verify. One attempt per 5s
+ * costs an attacker-facing ~10ms/s of CPU per prefix (~1% of a core at
+ * API_KEY_BCRYPT_ROUNDS) while capping a live integration's outage at one
+ * retry interval.
+ */
+const DEFAULT_RESERVE_INTERVAL_MS = 5_000;
 
 /** The raw credential from `Authorization: Bearer …`, or null when absent/malformed. */
 function bearerOf(header: string | undefined): string | null {
@@ -113,15 +123,32 @@ export function requirePrincipal(deps: {
   apiKeyRateLimitMax?: number;
   /** Failed verifications per prefix per minute before the prefix is refused unhashed (default 20). */
   apiKeyFailedAttemptMax?: number;
+  /** Minimum gap between bcrypt attempts for an over-budget prefix (default 5000ms). */
+  apiKeyReserveIntervalMs?: number;
 }) {
   const rateMax = deps.apiKeyRateLimitMax ?? DEFAULT_RATE_MAX;
   const failedMax = deps.apiKeyFailedAttemptMax ?? DEFAULT_FAILED_MAX;
-  // Per-INSTANCE, in-process counters — the same honest limitation the login
-  // throttle documents: this bounds one process, not a cluster.
+  const reserveMs = deps.apiKeyReserveIntervalMs ?? DEFAULT_RESERVE_INTERVAL_MS;
+  // Per-INSTANCE, in-process counters. Like `loginThrottled` they bound ONE
+  // process, not a cluster — but unlike it they are bounded in SIZE too: an
+  // entry is only ever allocated for a prefix that resolved to a live key row
+  // (unknown, revoked and expired prefixes are rejected further up, before any
+  // `bump`), so the key space here is the number of live keys. `loginThrottled`
+  // keys on client IP, which an attacker chooses, and grows without bound.
   const rateHits = new Map<string, { count: number; resetAt: number }>();
   const failedHits = new Map<string, { count: number; resetAt: number }>();
+  /** Last time we spent a bcrypt on this prefix — the reserve's clock. */
+  const lastHashAt = new Map<string, number>();
 
-  /** Fixed-window counter shared by both budgets. Returns the running count. */
+  /**
+   * Fixed-window counter shared by both budgets. Returns the running count.
+   *
+   * The two budgets read it with deliberately different shapes: the RATE limit
+   * bumps first and trips on `count > max` (the request itself is one of the
+   * allowance), while the FAILURE bound checks `count >= max` BEFORE deciding
+   * whether to spend a bcrypt (the work is what we are rationing, so it must be
+   * refused before it happens, not counted after).
+   */
   function bump(store: Map<string, { count: number; resetAt: number }>, k: string, windowMs: number): { count: number; resetAt: number } {
     const now = Date.now();
     const e = store.get(k);
@@ -187,21 +214,30 @@ export function requirePrincipal(deps: {
     // the air by burning its budget.
     const cached = cachedVerification(prefix, raw, key);
     if (!cached) {
-      // TRADEOFF, ACCEPTED AND BOUNDED: once a prefix's failure budget is spent
-      // the window refuses even the RIGHT secret for a COLD key (one absent
-      // from the cache). Unbounded CPU burn is the worse failure — it takes the
-      // whole process down for every tenant, not one key for one minute.
-      if (overBudget(failedHits, prefix, failedMax)) {
+      // THE BOUND, AND ITS OWN ESCAPE HATCH. Over budget, a prefix is refused
+      // without hashing — including with the RIGHT secret, since we cannot tell
+      // which is which without paying the bcrypt we are trying to avoid. That
+      // alone would be a denial of service: prefixes are public, so an attacker
+      // spending 20 failures a minute would keep a cold key off the air forever.
+      // Hence the RESERVE — one attempt per `reserveMs` even when over budget,
+      // so a legitimate key always recovers on retry while the attacker's
+      // achievable CPU cost stays at one hash per interval per prefix.
+      const since = Date.now() - (lastHashAt.get(prefix) ?? 0);
+      if (overBudget(failedHits, prefix, failedMax) && since < reserveMs) {
         await rejectUnauthenticated(reply);
         return;
       }
+      lastHashAt.set(prefix, Date.now());
       if (!(await secretMatches(raw, key.secretHash))) {
         bump(failedHits, prefix, FAILED_WINDOW_MS);
         await rejectUnauthenticated(reply);
         return;
       }
       rememberVerification(prefix, raw, key);
-      failedHits.delete(prefix); // a real verification clears the prefix's failure history
+      // A real verification clears the prefix's failure history AND its reserve
+      // clock, so an attack that resumes after a good request starts from zero.
+      failedHits.delete(prefix);
+      lastHashAt.delete(prefix);
     }
     const user = await deps.users.findById(key.userId);
     if (!user || !user.active) {

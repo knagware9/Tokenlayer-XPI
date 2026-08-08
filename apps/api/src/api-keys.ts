@@ -81,10 +81,22 @@ export const API_KEY_BCRYPT_ROUNDS = 10;
  * no staleness window at all; and an entry is bound to the row's `secretHash`,
  * so a rotation invalidates it by construction (the new row's hash cannot match
  * a pre-rotation entry). `invalidateVerifiedPrefix` on revoke/rotate is belt and
- * braces plus memory hygiene; the TTL only bounds how long an idle entry sits.
+ * braces plus memory hygiene; the TTL only bounds how long an IDLE entry sits.
+ *
+ * The TTL is SLIDING, extended on every hit. An absolute TTL would drop even a
+ * continuously-busy key back onto bcrypt once a minute — and therefore back
+ * behind the failed-attempt bound in support.ts, which is exactly the window an
+ * attacker holding the public prefix would aim at. "Idle" must mean idle, not
+ * "has been alive a while".
  */
 const VERIFIED_TTL_MS = 60_000;
-/** Hard ceiling so a flood of distinct prefixes cannot grow the map without bound. */
+/**
+ * Hard ceiling on entries. Note the map is ALREADY strongly bounded without it:
+ * `rememberVerification` runs only after a successful bcrypt, so a flood of
+ * made-up prefixes cannot put a single entry in — the bound is the number of
+ * LIVE KEYS with recent traffic, not the number of requests. This cap is a
+ * last-resort guard for a deployment with more hot keys than we planned for.
+ */
 const VERIFIED_MAX_ENTRIES = 1000;
 
 interface VerifiedEntry {
@@ -96,6 +108,16 @@ interface VerifiedEntry {
   expiresAt: number;
 }
 
+/**
+ * MODULE-GLOBAL, unlike the rate/failure counters in support.ts which live in
+ * the `requirePrincipal` closure (one set per app instance). The asymmetry is
+ * deliberate: those counters are POLICY and must not leak between instances (a
+ * test app inheriting another's spent budget would be a mystery failure),
+ * whereas this is a pure memo whose every entry is bound to a key id AND that
+ * row's `secretHash` — so a stale cross-instance entry cannot authenticate
+ * anything, and the routes that must invalidate it (rotate, revoke) can reach it
+ * without threading a handle through the whole route module.
+ */
 const verified = new Map<string, VerifiedEntry>();
 let cacheHits = 0;
 let cacheMisses = 0;
@@ -115,8 +137,12 @@ export function cachedVerification(prefix: string, raw: string, key: { id: strin
     return false;
   }
   const hit = entry.keyId === key.id && entry.secretHash === key.secretHash && entry.fingerprint === fingerprintOf(raw);
-  if (hit) cacheHits += 1;
-  else cacheMisses += 1;
+  if (hit) {
+    cacheHits += 1;
+    entry.expiresAt = Date.now() + VERIFIED_TTL_MS; // sliding: see the note above
+  } else {
+    cacheMisses += 1;
+  }
   return hit;
 }
 
@@ -125,7 +151,8 @@ export function rememberVerification(prefix: string, raw: string, key: { id: str
   if (verified.size >= VERIFIED_MAX_ENTRIES && !verified.has(prefix)) {
     // Cheapest useful eviction: drop whatever the map yields first (insertion
     // order). This is a performance cache — evicting a live entry only costs
-    // one bcrypt compare.
+    // one bcrypt compare, and (see the reserve in support.ts) never locks a key
+    // out.
     const oldest = verified.keys().next();
     if (!oldest.done) verified.delete(oldest.value);
   }

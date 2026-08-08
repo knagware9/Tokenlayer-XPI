@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ApiKeyRecord, AssetRecord, CashflowRecord, CompanyProfile, CredentialRecord, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, issueCredential, issuerBindingAllows, normalizeUseCaseDefinition, ORG_OPERATING_ROLES, orgDomainEnabled, orgRoleEnabled, PolicyError, presentCredential, presentCredentials, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateCredentialUseCase, validateMetadata, validateOrgCapabilities, validateScopes, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ApiScope, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type OrgOperatingRole, type OrgType, type Role, type UseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
+import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, issueCredential, issuerBindingAllows, normalizeUseCaseDefinition, ORG_OPERATING_ROLES, orgDomainEnabled, orgRoleEnabled, PolicyError, presentCredential, presentCredentials, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateCredentialUseCase, validateMetadata, scopeAllows, validateOrgCapabilities, validateScopes, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ApiScope, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type OrgOperatingRole, type OrgType, type Role, type UseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
 import qrcode from "qrcode";
 import type { AppDeps } from "../context.js";
 import { renderCredentialCertificate } from "../certificate.js";
@@ -103,6 +103,13 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
    * `auth` plus an API-key scope gate. A JWT request passes the gate
    * unconditionally (see requireScope) — this ONLY narrows machine callers, so
    * composing it onto a route can never change human behaviour.
+   *
+   * READ THIS BEFORE ADDING A ROUTE. `...auth` alone means "ANY key with ANY
+   * scope may call this" — the default is FAIL-OPEN by omission, and three real
+   * holes (provisioning, the invoice register, maker-checker approval) were
+   * found exactly that way. Choosing is not optional: `scope-coverage.test.ts`
+   * fails the build for any new mutating route that is neither `authScoped(...)`
+   * nor listed, with a reason, in that test's DELIBERATELY_UNSCOPED table.
    */
   const authScoped = (required: ApiScope) => ({ preHandler: [principal, requireScope(required)] });
 
@@ -372,7 +379,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (!(await deps.useCases.has(key))) return notFound(reply, `unknown use case '${key}'`);
     return deps.useCases.get(key);
   });
-  app.post("/use-cases", { schema: S.createUseCase, ...auth }, async (request, reply) => {
+  app.post("/use-cases", { schema: S.createUseCase, ...authScoped("usecases:provision") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     // A PlatformAdmin creates directly (201); an active OrgAdmin proposes an
     // org-owned use case for a PlatformAdmin to approve (maker-checker, 202).
@@ -464,7 +471,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return { chainId, family: info.family, mode: info.mode, ...code };
   });
 
-  app.post("/use-cases/:key/deploy", { schema: S.deployUseCase, ...auth }, async (request, reply) => {
+  app.post("/use-cases/:key/deploy", { schema: S.deployUseCase, ...authScoped("usecases:provision") }, async (request, reply) => {
     if ((request.user as TokenClaims).role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only the Platform Admin may deploy use-case contracts" });
     const { key } = request.params as { key: string };
     if (!(await deps.useCases.has(key))) return notFound(reply, `unknown use case '${key}'`);
@@ -486,7 +493,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return deps.useCases.update(key, merged);
   });
 
-  app.put("/use-cases/:key", { schema: S.updateUseCase, ...auth }, async (request, reply) => {
+  app.put("/use-cases/:key", { schema: S.updateUseCase, ...authScoped("usecases:provision") }, async (request, reply) => {
     if ((request.user as TokenClaims).role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only the Platform Admin may edit use cases" });
     const { key } = request.params as { key: string };
     if (!(await deps.useCases.has(key))) return notFound(reply, `unknown use case '${key}'`);
@@ -574,7 +581,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return null;
   }
 
-  app.post("/credential-use-cases", { schema: S.createCredentialUseCase, ...auth }, async (request, reply) => {
+  app.post("/credential-use-cases", { schema: S.createCredentialUseCase, ...authScoped("usecases:provision") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     if (claims.role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only a platform admin may author credential use cases" });
     const def = request.body as CredentialUseCaseDefinition;
@@ -595,7 +602,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return reply.code(201).send(created);
   });
 
-  app.patch("/credential-use-cases/:key", { schema: S.updateCredentialUseCase, ...auth }, async (request, reply) => {
+  app.patch("/credential-use-cases/:key", { schema: S.updateCredentialUseCase, ...authScoped("usecases:provision") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     if (claims.role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only a platform admin may edit credential use cases" });
     const key = (request.params as { key: string }).key;
@@ -637,7 +644,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return t;
   });
 
-  app.post("/credential-use-case-templates", { schema: S.createUseCaseTemplate, ...auth }, async (request, reply) => {
+  app.post("/credential-use-case-templates", { schema: S.createUseCaseTemplate, ...authScoped("usecases:provision") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     if (claims.role !== "PlatformAdmin" && claims.role !== "OrgAdmin") {
       return reply.code(403).send({ error: "FORBIDDEN", message: "only a platform admin or org admin may save a credential-use-case template" });
@@ -729,7 +736,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   // org exists → instantiate the credential use case bound to that org → optionally
   // create scoped Issuer/Holder/Verifier desk users. Idempotent. The bound issuer
   // org stays the VC signer — provisioning only REBINDS def.issuer to the org.
-  app.post("/credential-use-cases/provision", { schema: S.provisionUseCase, ...auth }, async (request, reply) => {
+  app.post("/credential-use-cases/provision", { schema: S.provisionUseCase, ...authScoped("usecases:provision") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     if (claims.role !== "PlatformAdmin" && claims.role !== "OrgAdmin") {
       return reply.code(403).send({ error: "FORBIDDEN", message: "only a platform admin or org admin may provision a credential use case" });
@@ -745,6 +752,17 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     };
     const params = b.params ?? {};
     const prov = b.provisioning ?? {};
+    // A MACHINE PRINCIPAL MUST NEVER ASK FOR DESK USERS. Step 5 below creates
+    // three brand-new HUMAN accounts and returns their server-generated
+    // PLAINTEXT passwords in the response body — precisely the durable
+    // credential-minting the key path already refuses at POST /me/login-keys, at
+    // the key-management routes and at PATCH /users/:id's password. Those would
+    // be three interactive sessions outliving revocation of the key that asked
+    // for them and absent from the Developers surface. Refused HERE, before any
+    // org or use case is created, so a rejected call provisions nothing at all.
+    if (prov.createDeskUsers && machinePrincipal(request)) {
+      return reply.code(403).send({ error: "MACHINE_PRINCIPAL", message: "an API key cannot create desk users; provision them from a human session" });
+    }
 
     // 1. Resolve the template (built-in catalog first, then saved custom).
     const t = TEMPLATE_CATALOG.find((x) => x.key === b.templateKey) ?? (await deps.credentialTemplates.get(b.templateKey));
@@ -1224,7 +1242,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return { useCase, claims, actor, actorId: actor.id };
   }
 
-  app.post("/use-cases/:key/invoices/import", { schema: S.importInvoices, ...auth }, async (request, reply) => {
+  app.post("/use-cases/:key/invoices/import", { schema: S.importInvoices, ...authScoped("assets:issue") }, async (request, reply) => {
     const gate = await invoiceGate(request, reply); if (!gate) return reply;
     const { rows } = request.body as { rows: Record<string, unknown>[] };
     const results: { index: number; status: string; id?: string; error?: string }[] = [];
@@ -1235,7 +1253,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return reply.code(200).send({ staged: results.filter((r) => r.status === "staged").length, results });
   });
 
-  app.post("/use-cases/:key/invoices/pull-erp", { schema: S.pullErp, ...auth }, async (request, reply) => {
+  app.post("/use-cases/:key/invoices/pull-erp", { schema: S.pullErp, ...authScoped("assets:issue") }, async (request, reply) => {
     const gate = await invoiceGate(request, reply); if (!gate) return reply;
     const rows = readErpInvoices();
     const results: { index: number; status: string; id?: string; error?: string }[] = [];
@@ -1246,7 +1264,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return reply.code(200).send({ staged: results.filter((r) => r.status === "staged").length, results });
   });
 
-  app.post("/use-cases/:key/invoices", { schema: S.addInvoice, ...auth }, async (request, reply) => {
+  app.post("/use-cases/:key/invoices", { schema: S.addInvoice, ...authScoped("assets:issue") }, async (request, reply) => {
     const gate = await invoiceGate(request, reply); if (!gate) return reply;
     const { metadata, documentId } = request.body as { metadata: Record<string, unknown>; documentId?: string };
     let doc: { id: string; sha256: string } | null = null;
@@ -1261,13 +1279,13 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return reply.code(409).send({ error: "DUPLICATE_INVOICE", message: r.error });
   });
 
-  app.get("/use-cases/:key/invoices", { schema: S.listInvoices, ...auth }, async (request, reply) => {
+  app.get("/use-cases/:key/invoices", { schema: S.listInvoices, ...authScoped("assets:read") }, async (request, reply) => {
     const gate = await invoiceGate(request, reply); if (!gate) return reply;
     const { status } = request.query as { status?: "staged" | "tokenized" };
     return deps.stagedInvoices.listByUseCase(gate.useCase.key, status);
   });
 
-  app.delete("/use-cases/:key/invoices/:id", { schema: S.deleteInvoice, ...auth }, async (request, reply) => {
+  app.delete("/use-cases/:key/invoices/:id", { schema: S.deleteInvoice, ...authScoped("assets:issue") }, async (request, reply) => {
     const gate = await invoiceGate(request, reply); if (!gate) return reply;
     const { id } = request.params as { key: string; id: string };
     const rec = await deps.stagedInvoices.get(id);
@@ -1277,7 +1295,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return reply.code(200).send({ id, deleted: true });
   });
 
-  app.post("/use-cases/:key/invoices/tokenize", { schema: S.tokenizeInvoices, ...auth }, async (request, reply) => {
+  app.post("/use-cases/:key/invoices/tokenize", { schema: S.tokenizeInvoices, ...authScoped("assets:issue") }, async (request, reply) => {
     const gate = await invoiceGate(request, reply); if (!gate) return reply;
     const { ids, chainId, treasuryAccount, parValue = 1000, sale } = request.body as { ids: string[]; chainId: string; treasuryAccount: string; parValue?: number; sale?: { unitPrice: string; currency: string } };
     const results: { id: string; status: string; assetId?: string; error?: string }[] = [];
@@ -1419,6 +1437,12 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return { assets: results.length, verified: results.filter((r) => r.valid && r.anchorConsistent).length, tampered, anchoredAssets: results.filter((r) => r.lastAnchor).length };
   });
 
+  // EN-B: DELIBERATELY UNSCOPED. Anchoring writes the audit head on-chain but
+  // creates no authority and discloses nothing — it is an integrity operation
+  // whose only cost is gas, already bounded by the role gate below and the
+  // per-key rate limit. No scope in the vocabulary describes it honestly, and
+  // inventing one to cover "spends gas" would not be the resource:action shape
+  // the rest of the map uses.
   app.post("/audit/anchor", { schema: S.anchorAudit, ...auth }, async (request, reply) => {
     const actor = actorOf(request);
     if (!(deps.rbac.can(actor.role, "issue") || actor.role === "Auditor")) {
@@ -1978,7 +2002,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   });
 
   // --- cash (CBDC) --------------------------------------------------------
-  app.post("/cash/credit", { schema: S.creditCash, ...auth }, async (request, reply) => {
+  app.post("/cash/credit", { schema: S.creditCash, ...authScoped("assets:transfer") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     if (!["Issuer", "UseCaseAdmin", "PlatformAdmin"].includes(claims.role)) {
       return reply.code(403).send({ error: "FORBIDDEN", message: "you may not fund accounts" });
@@ -1996,7 +2020,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return reply.code(200).send({ ok: true, balance: await deps.cash.balanceOf(bdy.currency, bdy.account) });
   });
 
-  app.get("/cash/balances", { schema: S.cashBalances, ...auth }, async (request, reply) => {
+  app.get("/cash/balances", { schema: S.cashBalances, ...authScoped("assets:read") }, async (request, reply) => {
     const address = (request.query as { address?: string }).address;
     if (!address) return [];
     const claims = request.user as TokenClaims;
@@ -2169,7 +2193,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return reply.code(202).send({ proposal });
   });
 
-  app.delete("/users/:id", { schema: S.deleteUser, ...auth }, async (request, reply) => {
+  app.delete("/users/:id", { schema: S.deleteUser, ...authScoped("users:onboard") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const { id } = request.params as { id: string };
     const target = await deps.users.findById(id);
@@ -2180,7 +2204,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return reply.code(204).send();
   });
 
-  app.patch("/users/:id", { schema: S.updateUser, ...auth }, async (request, reply) => {
+  app.patch("/users/:id", { schema: S.updateUser, ...authScoped("users:onboard") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const { id } = request.params as { id: string };
     const b = request.body as { password?: string; active?: boolean; kycStatus?: "approved" | "rejected" };
@@ -2205,7 +2229,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return { id: updated.id, email: updated.email, role: updated.role, useCaseKey: updated.useCaseKey, accountId: updated.accountId, active: updated.active, kycStatus: updated.kycStatus };
   });
 
-  app.post("/users/:id/revoke-identity", { schema: S.revokeUserIdentity, ...auth }, async (request, reply) => {
+  app.post("/users/:id/revoke-identity", { schema: S.revokeUserIdentity, ...authScoped("users:onboard") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const { id } = request.params as { id: string };
     const { reason } = request.body as { reason: string };
@@ -2337,7 +2361,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return org;
   }
 
-  app.post("/orgs", { schema: S.createOrg, ...auth }, async (request, reply) => {
+  app.post("/orgs", { schema: S.createOrg, ...authScoped("usecases:provision") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     if (claims.role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only the Platform Admin may create organizations" });
     if (!deps.didMasterConfigured && deps.isProduction) return reply.code(503).send({ error: "DID_KEYSTORE_UNCONFIGURED", message: "DID_MASTER_KEY must be set to create organizations" });
@@ -2416,7 +2440,23 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return orgViewWithCreds(org);
   });
 
+  /**
+   * Platform governance: admitting a tenant and setting the EN-A envelope that
+   * bounds it. NO KEY, EVER — the same call the `org-capability-change` proposal
+   * kind makes with `apiScope: null`, and for the same reason: an envelope is
+   * the ceiling on what every key in that org may do, so a machine principal
+   * must never be able to raise it (nor to admit the org it would apply to).
+   * Refusing the proposal path while leaving the DIRECT patch open would have
+   * been the whole gate, bypassed.
+   */
+  function platformGovernanceRefused(request: FastifyRequest, reply: FastifyReply): boolean {
+    if (!machinePrincipal(request)) return false;
+    reply.code(403).send({ error: "MACHINE_PRINCIPAL", message: "an API key may not perform platform governance on organizations" });
+    return true;
+  }
+
   app.post("/orgs/:id/approve", { schema: S.approveOrg, ...auth }, async (request, reply) => {
+    if (platformGovernanceRefused(request, reply)) return reply;
     const claims = request.user as TokenClaims;
     if (claims.role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only the Platform Admin may approve organizations" });
     const { id } = request.params as { id: string };
@@ -2485,6 +2525,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   });
 
   app.post("/orgs/:id/reject", { schema: S.rejectOrg, ...auth }, async (request, reply) => {
+    if (platformGovernanceRefused(request, reply)) return reply;
     const claims = request.user as TokenClaims;
     if (claims.role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only the Platform Admin may reject organizations" });
     const { id } = request.params as { id: string };
@@ -2501,6 +2542,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   // needs no second approver. `capabilities: null` clears an org back to the
   // unrestricted legacy envelope — PlatformAdmin only, deliberate.
   app.patch("/orgs/:id/capabilities", { schema: S.patchOrgCapabilities, ...auth }, async (request, reply) => {
+    if (platformGovernanceRefused(request, reply)) return reply;
     const claims = request.user as TokenClaims;
     if (claims.role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only the Platform Admin may set organization capabilities" });
     const { id } = request.params as { id: string };
@@ -2728,8 +2770,15 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         scopes, expiresAt, createdBy: claims.id,
       });
     } catch (err) {
-      // No orphan service user without the key that is its only reason to exist
-      // (mirrors the DID-mint rollback inside createOrgMember).
+      // Partial rollback, and deliberately partial. Removing the user is what
+      // matters: without it a service account would linger that nothing can ever
+      // authenticate as. Its membership VC and the `member-added` audit entry
+      // are LEFT BEHIND — this is NOT the same as the DID-mint rollback inside
+      // createOrgMember, which runs before either exists. Deleting them would be
+      // worse: the audit log is hash-chained (auditEntryHash/prevHash), so
+      // removing an entry breaks verification of every entry after it, and an
+      // issued credential is append-only by design. Reachable only if the key
+      // insert fails — realistically a prefix collision at ~2^-47.
       await deps.users.remove(made.user.id);
       throw err;
     }
@@ -2849,6 +2898,12 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return cred;
   }
 
+  // EN-B: the three holder-lifecycle routes below are DELIBERATELY UNSCOPED.
+  // They act only on a credential the caller ALREADY holds and confer no
+  // authority over anyone else: accepting/rejecting/asking-for-changes changes
+  // the caller's own acceptance state. Contrast POST /verification-requests/:id/
+  // consent, which is scoped `credentials:read` because it DISCLOSES those
+  // credentials to a third-party verifier.
   app.post("/me/credentials/:id/accept", { schema: S.acceptCredential, ...auth }, async (request, reply) => {
     const cred = await holderCredentialInState(request, reply, ["pending", "changes_requested"]);
     if (!cred) return reply;
@@ -3198,7 +3253,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return vreqView(r);
   });
 
-  app.post("/verification-requests/:id/consent", { schema: S.consentVerificationRequest, ...auth }, async (request, reply) => {
+  app.post("/verification-requests/:id/consent", { schema: S.consentVerificationRequest, ...authScoped("credentials:read") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const { id } = request.params as { id: string };
     const { credentialIds } = request.body as { credentialIds: string[] };
@@ -3372,13 +3427,13 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return target;
   }
 
-  app.post("/users/:id/identity/challenge", { schema: S.identityChallenge, ...auth }, async (request, reply) => {
+  app.post("/users/:id/identity/challenge", { schema: S.identityChallenge, ...authScoped("users:onboard") }, async (request, reply) => {
     const target = await manageableTarget(request, reply);
     if (!target) return reply;
     return deps.challenges.issue(target.id);
   });
 
-  app.post("/users/:id/identity/verify", { schema: S.identityVerify, ...auth }, async (request, reply) => {
+  app.post("/users/:id/identity/verify", { schema: S.identityVerify, ...authScoped("users:onboard") }, async (request, reply) => {
     const target = await manageableTarget(request, reply);
     if (!target) return reply;
     const { presentation } = request.body as { presentation: string };
@@ -3458,7 +3513,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   // balances and matures the asset. Redemption is gated on the `burn`
   // capability up front, so an Issuer (no burn) is rejected before any money
   // moves; coupons work for an Issuer.
-  app.post("/assets/:id/cashflows/:cfId/execute", { schema: S.executeCashflow, ...auth }, async (request, reply) => {
+  app.post("/assets/:id/cashflows/:cfId/execute", { schema: S.executeCashflow, ...authScoped("assets:transfer") }, async (request, reply) => {
     const asset = await scopedAsset(request, reply, "act");
     if (!asset) return reply;
     const actor = actorOf(request);
@@ -3565,6 +3620,32 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const p = await scopedProposal(request, reply);
     if (!p) return reply;
     const claims = request.user as TokenClaims;
+    // EN-B: THE OTHER HALF OF THE SCOPE MAP.
+    // Every scoped mutating route on this platform returns 202 + a proposal —
+    // the operation itself happens HERE, on final approval. Gating only the
+    // routes that DRAFT would therefore gate nothing: a key with any scope at
+    // all could approve an issuance it was refused permission to request.
+    // So the required scope is derived from the proposal's KIND (declared on the
+    // handler, a required field so a future kind cannot be added without an
+    // answer) and enforced before any state changes — no approval is recorded,
+    // nothing is executed, and an under-scoped key learns nothing about the
+    // proposal beyond what `scopedProposal` already let it see.
+    // This applies to REJECT too: rejecting runs compensation (fee refunds,
+    // asset state changes), which is just as much a decision.
+    const machineKey = request.apiKey;
+    if (machineKey) {
+      const required = proposalKind(p.kind).apiScope;
+      if (required === null) {
+        return reply.code(403).send({ error: "MACHINE_PRINCIPAL", message: `an API key may not decide '${p.kind}' proposals` });
+      }
+      if (!scopeAllows(machineKey.scopes, required)) {
+        return reply.code(403).send({
+          error: "INSUFFICIENT_SCOPE",
+          message: `this API key lacks the '${required}' scope required to decide a '${p.kind}' proposal`,
+          details: { required, granted: machineKey.scopes },
+        });
+      }
+    }
     if (p.status !== "pending") return reply.code(409).send({ error: "PROPOSAL_NOT_PENDING", message: `proposal is ${p.status}` });
     if (claims.id === p.proposerId) return reply.code(403).send({ error: "SELF_APPROVAL", message: "the proposer may not decide their own proposal" });
     if (!(await proposalKind(p.kind).canApprove(deps, claims, p))) {
@@ -3621,6 +3702,10 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   // Only desk operators (issue-capable) and auditors may read stored documents —
   // these hold sensitive off-ledger invoice evidence, not public assets.
   const canReadDoc = (role: Role): boolean => deps.rbac.can(role, "issue") || role === "Auditor";
+  // EN-B: DELIBERATELY UNSCOPED. An upload stores opaque bytes readable only by
+  // issue-capable roles and an Auditor; it grants nothing on its own, and every
+  // act that USES a document (staging an invoice, issuing against it) is scoped.
+  // Body size is already capped, so an unscoped key cannot use it to grow.
   app.post("/documents", { schema: S.uploadDocument, bodyLimit: DOC_UPLOAD_BODY_LIMIT, ...auth }, async (request, reply) => {
     const actor = actorOf(request);
     if (!deps.rbac.can(actor.role, "issue")) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to upload documents" });

@@ -22,6 +22,11 @@ export const API_SCOPES = [
   "users:read",
   "users:onboard",
   "org:read",
+  // Authoring/provisioning configuration: use cases, templates, and the
+  // one-step provisioner. Distinct from `users:onboard` because provisioning
+  // creates an ORG and a USE CASE, not people — conflating them would let a key
+  // granted "may onboard users" reshape the deployment's configuration.
+  "usecases:provision",
 ] as const;
 export type ApiScope = (typeof API_SCOPES)[number];
 

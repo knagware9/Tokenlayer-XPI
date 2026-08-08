@@ -1,11 +1,12 @@
 import { sign as edSign } from "node:crypto";
-import { generateDidKey, type Role } from "@tokenlayer/core";
+import { allProposalKinds } from "../src/proposal-kinds.js";
+import { API_SCOPES, generateDidKey, type Role } from "@tokenlayer/core";
 import bcrypt from "bcryptjs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { cachedVerification, invalidateVerifiedPrefix, mintSecret, rememberVerification, verifiedPrefixCacheStats } from "../src/api-keys.js";
 import { requirePrincipal } from "../src/http/support.js";
 import { MemoryApiKeyRepository, MemoryUserRepository } from "../src/persistence/memory.js";
-import { auth, buildTestAppWithRepos, loginAs, onboardUser, V1, type TestAppHandle } from "./helpers.js";
+import { ACCOUNTS, auth, buildTestAppWithRepos, loginAs, onboardUser, V1, type TestAppHandle } from "./helpers.js";
 
 describe("MemoryApiKeyRepository", () => {
   it("creates, finds by prefix and id, touches lastUsedAt and revokes", async () => {
@@ -867,11 +868,16 @@ describe("verified-prefix cache (EN-B task B4)", () => {
   });
 
   /**
-   * The cache's three-part binding, unit-tested. A prefix collision between two
-   * live rows is impossible through the repos (`prefix` is unique in both), so
-   * the only way to pin "an entry is bound to its key row, not just its prefix"
-   * is at this level — and it is the property the route-level rotation and
-   * revocation tests above are ultimately relying on.
+   * DO NOT DELETE: this is the ONLY test pinning the `secretHash` conjunct in
+   * `cachedVerification`. Removing that conjunct leaves every route-level test
+   * — including the rotation one directly above — GREEN, because the rotate
+   * route also changes the prefix and explicitly invalidates the old entry, so
+   * both mask it. Verified by mutation, twice, independently. It looks like
+   * redundant coverage and is not.
+   *
+   * A prefix collision between two live rows is impossible through the repos
+   * (`prefix` is unique in both), so this level is the only place the binding
+   * "an entry belongs to its key ROW, not just its prefix" can be observed.
    */
   it("an entry is bound to the key id, the row's secretHash AND the presented secret", async () => {
     const minted = await mintSecret(TEST_ROUNDS);
@@ -891,5 +897,296 @@ describe("verified-prefix cache (EN-B task B4)", () => {
 
     invalidateVerifiedPrefix(prefix);
     expect(cachedVerification(prefix, minted.secret, key)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task B4 — spec-review follow-ups. Three routes reachable by a key that the
+// scope map missed, and the maker-checker EXECUTE half that every scoped
+// issuance route defers to.
+// ---------------------------------------------------------------------------
+
+const PROVISION = `${V1}/credential-use-cases/provision`;
+
+describe("provisioning is not a back door to human credentials (H1)", () => {
+  it("a KEY cannot create desk users — that is three plaintext human passwords", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await platformAdmin(h);
+    const orgId = await makeOrg(h, admin, "Desk Password University");
+    // Even the strongest possible key: `*` scopes on an OrgAdmin service user.
+    const seeded = await seedServiceKey(h, { role: "OrgAdmin", orgId, scopes: ["*"] });
+
+    const res = await h.app.inject({
+      method: "POST", url: PROVISION, headers: auth(seeded.secret),
+      payload: {
+        templateKey: "education-certificate",
+        params: { issuerOrgName: "Desk Password University", jurisdiction: "IN" },
+        provisioning: { createDeskUsers: true, deskEmailDomain: "deskpw.edu" },
+      },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toMatchObject({ error: "MACHINE_PRINCIPAL" });
+    // Not one human account was minted, so no password ever reached the machine.
+    for (const role of ["issuer", "holder", "verifier"]) {
+      expect(await h.users.findByEmail(`${role}@deskpw.edu`)).toBeNull();
+    }
+
+    // A HUMAN OrgAdmin of the same org still provisions desk users normally.
+    const orgAdmin = await makeOrgAdmin(h, admin, orgId, "deskpw.admin@x.dev");
+    const human = await h.app.inject({
+      method: "POST", url: PROVISION, headers: auth(orgAdmin),
+      payload: {
+        templateKey: "education-certificate",
+        params: { issuerOrgName: "Desk Password University", jurisdiction: "IN" },
+        provisioning: { createDeskUsers: true, deskEmailDomain: "deskpw.edu" },
+      },
+    });
+    expect(human.statusCode).toBe(201);
+    expect((human.json() as { deskUsers: unknown[] }).deskUsers).toHaveLength(3);
+  });
+
+  it("provisioning without desk users still needs the usecases:provision scope", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await platformAdmin(h);
+    const orgId = await makeOrg(h, admin, "Scope Check University");
+    const body = {
+      templateKey: "education-certificate",
+      params: { issuerOrgName: "Scope Check University", jurisdiction: "IN" },
+      provisioning: { createDeskUsers: false },
+    };
+
+    const denied = await seedServiceKey(h, { role: "OrgAdmin", orgId, scopes: ["org:read"] });
+    const no = await h.app.inject({ method: "POST", url: PROVISION, headers: auth(denied.secret), payload: body });
+    expect(no.statusCode).toBe(403);
+    expect(no.json()).toMatchObject({ error: "INSUFFICIENT_SCOPE", details: { required: "usecases:provision" } });
+
+    const allowed = await seedServiceKey(h, { role: "OrgAdmin", orgId, scopes: ["usecases:provision"] });
+    const yes = await h.app.inject({ method: "POST", url: PROVISION, headers: auth(allowed.secret), payload: body });
+    expect(yes.statusCode).toBe(201);
+    expect((yes.json() as { deskUsers: unknown[] }).deskUsers).toEqual([]);
+  });
+});
+
+describe("assets:issue is not bypassable through the invoice register (H2)", () => {
+  it("tokenize is gated exactly like POST /assets", async () => {
+    const h = await buildTestAppWithRepos();
+    const readOnly = await seedServiceKey(h, { role: "PlatformAdmin", scopes: ["assets:read"] });
+    const issuer = await seedServiceKey(h, { role: "PlatformAdmin", scopes: ["assets:issue"] });
+    const tokenize = (credential: string) => h.app.inject({
+      method: "POST", url: `${V1}/use-cases/invoice-tokenization/invoices/tokenize`, headers: auth(credential),
+      payload: { ids: ["inv_none"], chainId: "fabric", treasuryAccount: ACCOUNTS.ALICE },
+    });
+
+    // Same key, same authority — the two doors onto issueAssetCore must agree.
+    const direct = await h.app.inject({
+      method: "POST", url: `${V1}/assets`, headers: auth(readOnly.secret),
+      payload: { useCaseKey: "invoice-tokenization", name: "T", symbol: "T", chainId: "fabric", metadata: {} },
+    });
+    expect(direct.statusCode).toBe(403);
+    expect(direct.json()).toMatchObject({ error: "INSUFFICIENT_SCOPE", details: { required: "assets:issue" } });
+
+    const blocked = await tokenize(readOnly.secret);
+    expect(blocked.statusCode).toBe(403);
+    expect(blocked.json()).toMatchObject({ error: "INSUFFICIENT_SCOPE", details: { required: "assets:issue" } });
+
+    // The properly-scoped key gets PAST the scope gate (into the route body).
+    expect((await tokenize(issuer.secret)).json().error).not.toBe("INSUFFICIENT_SCOPE");
+  });
+
+  it("the staging siblings are scoped too — nothing enters the register unscoped", async () => {
+    const h = await buildTestAppWithRepos();
+    const readOnly = await seedServiceKey(h, { role: "PlatformAdmin", scopes: ["assets:read"] });
+    const base = `${V1}/use-cases/invoice-tokenization/invoices`;
+    const writes = await Promise.all([
+      h.app.inject({ method: "POST", url: `${base}/import`, headers: auth(readOnly.secret), payload: { rows: [] } }),
+      h.app.inject({ method: "POST", url: `${base}/pull-erp`, headers: auth(readOnly.secret), payload: {} }),
+      h.app.inject({ method: "POST", url: base, headers: auth(readOnly.secret), payload: { metadata: {} } }),
+      h.app.inject({ method: "DELETE", url: `${base}/inv_none`, headers: auth(readOnly.secret) }),
+    ]);
+    for (const res of writes) {
+      expect(res.statusCode).toBe(403);
+      expect(res.json()).toMatchObject({ error: "INSUFFICIENT_SCOPE", details: { required: "assets:issue" } });
+    }
+    // The READ is allowed by the read scope.
+    expect((await h.app.inject({ method: "GET", url: base, headers: auth(readOnly.secret) })).statusCode).toBe(200);
+  });
+});
+
+describe("maker-checker approval is scope-gated (H3)", () => {
+  /** Draft an issuance proposal as a HUMAN, so a key can be the second approver. */
+  async function pendingIssuance(h: TestAppHandle): Promise<string> {
+    const admin = await platformAdmin(h);
+    const ucKey = await createCredUseCase(h, admin, `approve-uc-${Math.random().toString(36).slice(2, 8)}`);
+    const subject = await subjectWithDid(h);
+    const drafted = await issueWith(h, admin, ucKey, subject);
+    expect(drafted.statusCode).toBe(202);
+    return drafted.json().proposal.id as string;
+  }
+
+  const approve = (h: TestAppHandle, credential: string, proposalId: string) =>
+    h.app.inject({ method: "POST", url: `${V1}/proposals/${proposalId}/approve`, headers: auth(credential), payload: {} });
+
+  it("gating the DRAFT is worthless if the EXECUTE half is open", async () => {
+    const h = await buildTestAppWithRepos();
+    const proposalId = await pendingIssuance(h);
+    const wrongScope = await seedServiceKey(h, { role: "PlatformAdmin", scopes: ["org:read"] });
+
+    const denied = await approve(h, wrongScope.secret, proposalId);
+    expect(denied.statusCode).toBe(403);
+    expect(denied.json()).toMatchObject({ error: "INSUFFICIENT_SCOPE", details: { required: "credentials:issue" } });
+    // Nothing moved: no approval recorded, nothing executed.
+    const still = await h.app.inject({ method: "GET", url: `${V1}/proposals`, headers: auth(await platformAdmin(h)) });
+    const row = (still.json() as { id: string; status: string; approvals: unknown[] }[]).find((p) => p.id === proposalId);
+    expect(row).toMatchObject({ status: "pending" });
+    expect(row?.approvals).toHaveLength(0);
+  });
+
+  it("a correctly-scoped key IS a legitimate second approver", async () => {
+    const h = await buildTestAppWithRepos();
+    const proposalId = await pendingIssuance(h);
+    const rightScope = await seedServiceKey(h, { role: "PlatformAdmin", scopes: ["credentials:issue"] });
+
+    const res = await approve(h, rightScope.secret, proposalId);
+    expect(res.statusCode).toBe(200);
+    expect(res.json().proposal.status).toBe("executed");
+  });
+
+  it("rejecting is gated by the same scope as approving", async () => {
+    const h = await buildTestAppWithRepos();
+    const proposalId = await pendingIssuance(h);
+    const wrongScope = await seedServiceKey(h, { role: "PlatformAdmin", scopes: ["org:read"] });
+    const res = await h.app.inject({ method: "POST", url: `${V1}/proposals/${proposalId}/reject`, headers: auth(wrongScope.secret), payload: {} });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("INSUFFICIENT_SCOPE");
+  });
+
+  it("a governance kind has NO scope that can authorize it — a key is refused outright", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await platformAdmin(h);
+    const orgId = await makeOrg(h, admin, "Governance Org");
+    const orgAdmin = await makeOrgAdmin(h, admin, orgId, "gov.admin@x.dev");
+    const requested = await h.app.inject({
+      method: "POST", url: `${V1}/orgs/${orgId}/capabilities/request`, headers: auth(orgAdmin),
+      payload: { capabilities: { domains: ["identity"], roles: ["Issuer", "Holder", "Verifier"] } },
+    });
+    expect(requested.statusCode).toBe(202);
+    const proposalId = requested.json().proposal.id as string;
+
+    // `*` is the widest grant that exists, and it still cannot widen the
+    // envelope that bounds every key in the org.
+    const wildcard = await seedServiceKey(h, { role: "PlatformAdmin", scopes: ["*"] });
+    const res = await h.app.inject({ method: "POST", url: `${V1}/proposals/${proposalId}/approve`, headers: auth(wildcard.secret), payload: {} });
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toMatchObject({ error: "MACHINE_PRINCIPAL" });
+    expect((await h.app.inject({ method: "GET", url: `${V1}/orgs/${orgId}`, headers: auth(admin) })).json().capabilities).toBeNull();
+  });
+
+  it("EVERY registered proposal kind declares an apiScope — an unmapped kind fails closed", () => {
+    const kinds = allProposalKinds();
+    expect(kinds.length).toBeGreaterThan(10);
+    for (const k of kinds) {
+      // null = "no key may ever decide this"; otherwise it must be a real scope.
+      expect(k.apiScope === null || (API_SCOPES as readonly string[]).includes(k.apiScope)).toBe(true);
+    }
+  });
+});
+
+describe("platform governance is closed to machine principals", () => {
+  it("a key may not approve/reject an org, nor patch the envelope that bounds it", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await platformAdmin(h);
+    const orgId = await makeOrg(h, admin, "Governance Direct Org");
+    // The strongest key that can exist: `*` on a PlatformAdmin service user.
+    const wildcard = await seedServiceKey(h, { role: "PlatformAdmin", scopes: ["*"] });
+
+    const attempts = [
+      h.app.inject({ method: "POST", url: `${V1}/orgs/${orgId}/approve`, headers: auth(wildcard.secret), payload: {} }),
+      h.app.inject({ method: "POST", url: `${V1}/orgs/${orgId}/reject`, headers: auth(wildcard.secret), payload: { reason: "x" } }),
+      h.app.inject({
+        method: "PATCH", url: `${V1}/orgs/${orgId}/capabilities`, headers: auth(wildcard.secret),
+        payload: { capabilities: { domains: ["identity", "tokenization"], roles: ["Issuer", "Holder", "Verifier"] } },
+      }),
+    ];
+    for (const res of await Promise.all(attempts)) {
+      expect(res.statusCode).toBe(403);
+      expect(res.json().error).toBe("MACHINE_PRINCIPAL");
+    }
+    // Refusing this at the PROPOSAL path while leaving the direct PATCH open
+    // would have been the entire gate, bypassed — so pin the envelope unmoved.
+    expect((await h.app.inject({ method: "GET", url: `${V1}/orgs/${orgId}`, headers: auth(admin) })).json().capabilities).toBeNull();
+
+    // A human PlatformAdmin still patches it.
+    const human = await h.app.inject({
+      method: "PATCH", url: `${V1}/orgs/${orgId}/capabilities`, headers: auth(admin),
+      payload: { capabilities: { domains: ["identity"], roles: ["Issuer"] } },
+    });
+    expect(human.statusCode).toBe(200);
+  });
+});
+
+describe("the failure bound cannot deny a legitimate key indefinitely (M4)", () => {
+  it("a cold key over budget gets a reserved hash attempt and recovers", async () => {
+    const h = await buildTestAppWithRepos({ apiKeyFailedAttemptMax: 2, apiKeyReserveIntervalMs: 150 });
+    const seeded = await seedServiceKey(h);
+    const wrong = `${seeded.secret.slice(0, "tl_live_".length + 8)}${"X".repeat(14)}`;
+
+    for (let i = 0; i < 2; i++) {
+      expect((await h.app.inject({ method: "GET", url: `${V1}/me`, headers: auth(wrong) })).statusCode).toBe(401);
+    }
+    // Immediately over budget: still refused without hashing (the DoS bound holds).
+    expect((await h.app.inject({ method: "GET", url: `${V1}/me`, headers: auth(seeded.secret) })).statusCode).toBe(401);
+
+    // One reserved attempt per interval means an attacker holding the public
+    // prefix cannot keep a live integration off the air — it recovers on retry.
+    await new Promise((r) => setTimeout(r, 200));
+    expect((await h.app.inject({ method: "GET", url: `${V1}/me`, headers: auth(seeded.secret) })).statusCode).toBe(200);
+  });
+
+  it("the cache TTL slides on use, so a busy key never goes cold on a timer", () => {
+    const minted = { hash: "$2a$10$stub", secret: "tl_live_slidingttlsecret000" };
+    const key = { id: "ak_sliding", secretHash: minted.hash };
+    const prefix = `slide-${Math.random().toString(36).slice(2, 8)}`;
+    const t0 = Date.now();
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(t0);
+      rememberVerification(prefix, minted.secret, key);
+      // Two hits, each 40s apart: an ABSOLUTE 60s TTL would have expired between
+      // them, dropping a busy key back onto bcrypt (and onto the failure bound).
+      vi.setSystemTime(t0 + 40_000);
+      expect(cachedVerification(prefix, minted.secret, key)).toBe(true);
+      vi.setSystemTime(t0 + 80_000);
+      expect(cachedVerification(prefix, minted.secret, key)).toBe(true);
+      // Idle past the window from the LAST use: now it is cold.
+      vi.setSystemTime(t0 + 141_000);
+      expect(cachedVerification(prefix, minted.secret, key)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+      invalidateVerifiedPrefix(prefix);
+    }
+  });
+});
+
+describe("liveness checks the cache must never mask", () => {
+  it("a key that EXPIRES underneath a hot cache stops working", async () => {
+    const h = await buildTestAppWithRepos();
+    const seeded = await seedServiceKey(h, { expiresAt: new Date(Date.now() + 1200).toISOString() });
+    expect((await h.app.inject({ method: "GET", url: `${V1}/me`, headers: auth(seeded.secret) })).statusCode).toBe(200);
+    expect((await h.app.inject({ method: "GET", url: `${V1}/me`, headers: auth(seeded.secret) })).statusCode).toBe(200); // hot
+
+    await new Promise((r) => setTimeout(r, 1400));
+    // Expiry is read off the LIVE row before the cache is consulted.
+    expect((await h.app.inject({ method: "GET", url: `${V1}/me`, headers: auth(seeded.secret) })).statusCode).toBe(401);
+  });
+
+  it("a service user DEACTIVATED underneath a hot cache stops working", async () => {
+    const h = await buildTestAppWithRepos();
+    const seeded = await seedServiceKey(h);
+    expect((await h.app.inject({ method: "GET", url: `${V1}/me`, headers: auth(seeded.secret) })).statusCode).toBe(200);
+    expect((await h.app.inject({ method: "GET", url: `${V1}/me`, headers: auth(seeded.secret) })).statusCode).toBe(200); // hot
+
+    await h.users.update(seeded.userId, { active: false });
+    // The cache only ever skips bcrypt — the principal is still re-read every request.
+    expect((await h.app.inject({ method: "GET", url: `${V1}/me`, headers: auth(seeded.secret) })).statusCode).toBe(401);
   });
 });

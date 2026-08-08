@@ -87,6 +87,12 @@ export interface AppDeps {
    */
   apiKeyFailedAttemptMax?: number;
   /**
+   * Minimum gap between bcrypt attempts for an OVER-BUDGET key prefix (default
+   * 5000ms). This reserve is what stops the failed-attempt bound from becoming a
+   * denial of service against a legitimate cold key.
+   */
+  apiKeyReserveIntervalMs?: number;
+  /**
    * Platform fee account (address) receiving marketplace/issuance fees. When
    * absent, fees are disabled (treated as 0) regardless of use-case config.
    */

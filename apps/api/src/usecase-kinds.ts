@@ -20,6 +20,8 @@ const orgScopedView = async (_deps: AppDeps, claims: TokenClaims, p: ProposalRec
 
 export const createUseCaseKind: ProposalKindHandler = {
   kind: "create-use-case",
+  // Creating + deploying a use case is configuration authoring.
+  apiScope: "usecases:provision",
   canView: orgScopedView,
   canApprove: orgScopedView,
   async execute(ctx, _proposer, p) {

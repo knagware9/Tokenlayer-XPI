@@ -116,6 +116,7 @@ async function main(): Promise<void> {
     loginRateLimitMax: env.loginRateLimitMax,
     apiKeyRateLimitMax: env.apiKeyRateLimitMax,
     apiKeyFailedAttemptMax: env.apiKeyFailedAttemptMax,
+    apiKeyReserveIntervalMs: env.apiKeyReserveIntervalMs,
     registry,
   };
   const platformOrg = await ensurePlatformIssuerOrg(deps);

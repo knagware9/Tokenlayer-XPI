@@ -24,6 +24,12 @@ export interface OrgCapabilityChangePayload {
 
 export const orgCapabilityChangeKind: ProposalKindHandler = {
   kind: "org-capability-change",
+  // NO KEY, EVER. This proposal rewrites the EN-A capability envelope, which is
+  // the outer bound on everything a key may do; letting a machine principal
+  // approve it would let a key participate in widening its own ceiling. There is
+  // no scope that could honestly authorize that, so it refuses rather than
+  // mapping to one.
+  apiScope: null,
   canView: orgScopedView,
   // Only the platform grants capabilities — a second OrgAdmin of the same org
   // may view the request but not approve it (SELF_APPROVAL already blocks the

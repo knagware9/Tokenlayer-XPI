@@ -54,6 +54,10 @@ describe("validateScopes", () => {
 describe("API_SCOPES", () => {
   it("every scope is resource:action drawn from the closed resource set the validator uses", () => {
     for (const s of API_SCOPES) expect(s).toMatch(/^[a-z]+:[a-z]+$/);
-    expect([...API_SCOPE_RESOURCES].sort()).toEqual(["assets", "credentials", "org", "users", "verifications"]);
+    // Inventory assertion: extend it when the vocabulary legitimately grows.
+    // "usecases" was added for EN-B's `usecases:provision` (configuration
+    // authoring — use cases, templates, orgs, the one-step provisioner), which
+    // `users:onboard` would have described dishonestly.
+    expect([...API_SCOPE_RESOURCES].sort()).toEqual(["assets", "credentials", "org", "usecases", "users", "verifications"]);
   });
 });

@@ -40,7 +40,7 @@ export const TEST_MARKET_ESCROW = "0xcd3B766CCDd6AE721141F452C550Ca635964ce71";
 /** A second seeded PlatformAdmin (test-only) — the SoD checker for null-scope / brand-new-use-case onboarding proposals the sole admin proposes. */
 export const PLATFORM_ADMIN_2 = { email: "admin2@tokenlayer.dev", password: "admin123" } as const;
 
-export interface TestAppOptions { loginRateLimitMax?: number; apiKeyRateLimitMax?: number; apiKeyFailedAttemptMax?: number; platformFeeAccount?: string; marketEscrowAccount?: string; trustedKycIssuers?: string[]; devIssuerSeed?: string; isProduction?: boolean; didMasterConfigured?: boolean; registry?: IdentityRegistry; enabledDomains?: string[] }
+export interface TestAppOptions { loginRateLimitMax?: number; apiKeyRateLimitMax?: number; apiKeyFailedAttemptMax?: number; apiKeyReserveIntervalMs?: number; platformFeeAccount?: string; marketEscrowAccount?: string; trustedKycIssuers?: string[]; devIssuerSeed?: string; isProduction?: boolean; didMasterConfigured?: boolean; registry?: IdentityRegistry; enabledDomains?: string[] }
 
 /**
  * The app plus the repositories tests need to reach directly — used where a
@@ -101,8 +101,13 @@ export async function buildTestAppWithRepos(opts: TestAppOptions = {}): Promise<
     devIssuerSeed: opts.devIssuerSeed, isProduction: opts.isProduction,
     currencies: loadCurrencies(), jwtSecret: "test-secret", publicApiUrl: "http://test.local/api/v1",
     loginRateLimitMax: opts.loginRateLimitMax ?? 100000,
-    apiKeyRateLimitMax: opts.apiKeyRateLimitMax,
+    // As with loginRateLimitMax: the suite makes many key requests per instance,
+    // so the production default (600/min) would eventually fail a test file for
+    // reasons that look nothing like its subject. Tests that are ABOUT the limit
+    // set it low explicitly.
+    apiKeyRateLimitMax: opts.apiKeyRateLimitMax ?? 100000,
     apiKeyFailedAttemptMax: opts.apiKeyFailedAttemptMax,
+    apiKeyReserveIntervalMs: opts.apiKeyReserveIntervalMs,
     platformFeeAccount: opts.platformFeeAccount,
     // Enabled by default so market routes are testable; an explicit
     // `marketEscrowAccount: undefined` disables the market (503s).
