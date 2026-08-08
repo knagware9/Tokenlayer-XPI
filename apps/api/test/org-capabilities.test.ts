@@ -325,6 +325,7 @@ describe("capability enforcement (EN-A task A4)", () => {
     await app.inject({ method: "PATCH", url: `${V1}/orgs/${legacy.orgId}/capabilities`, headers: auth(platform), payload: { capabilities: ID_ISSUER } });
     const appr = await app.inject({ method: "POST", url: `${V1}/proposals/${draft.json().proposal.id}/approve`, headers: auth(platform), payload: {} });
     expect(appr.json().proposal.status).toBe("failed");
+    expect(appr.json().proposal.error).toContain("ORG_CAPABILITY_MISSING"); // failed for THIS reason, not e.g. NO_DEPLOYABLE_CHAIN
     const list = (await app.inject({ method: "GET", url: `${V1}/use-cases`, headers: auth(platform) })).json() as { key: string }[];
     expect(list.some((u) => u.key === "legacy-notes")).toBe(false);
   });
@@ -415,6 +416,7 @@ describe("capability enforcement (EN-A task A4)", () => {
     expect(first.json().proposal.status).toBe("pending"); // 1 of 2 — nothing executed yet
     const second = await app.inject({ method: "POST", url: `${V1}/proposals/${prop.json().proposal.id}/approve`, headers: auth(admin2), payload: {} });
     expect(second.json().proposal.status).toBe("failed"); // executor re-check bites
+    expect(second.json().proposal.error).toContain("ORG_CAPABILITY_MISSING");
   });
 
   it("gate 2 executor — use-case issuance propose → tighten → approval fails instead of issuing", async () => {
@@ -432,6 +434,7 @@ describe("capability enforcement (EN-A task A4)", () => {
 
     const appr = await app.inject({ method: "POST", url: `${V1}/proposals/${prop.json().proposal.id}/approve`, headers: auth(platform), payload: {} });
     expect(appr.json().proposal.status).toBe("failed");
+    expect(appr.json().proposal.error).toContain("ORG_CAPABILITY_MISSING");
   });
 
   it("gate 2 executor (batch) — batch draft → tighten → approval fails the WHOLE batch (config-level, no per-row rows)", async () => {
@@ -449,6 +452,7 @@ describe("capability enforcement (EN-A task A4)", () => {
 
     const appr = await app.inject({ method: "POST", url: `${V1}/proposals/${draft.json().proposal.id}/approve`, headers: auth(platform), payload: {} });
     expect(appr.json().proposal.status).toBe("failed"); // thrown BEFORE the row loop — no partial issuance
+    expect(appr.json().proposal.error).toContain("ORG_CAPABILITY_MISSING");
     // The subject holds nothing from the failed batch.
     const subjTok = await loginAs(app, subject.email, "secret1");
     const held = (await app.inject({ method: "GET", url: `${V1}/me/credentials`, headers: auth(subjTok) })).json() as { type: string[] }[];

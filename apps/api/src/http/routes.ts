@@ -551,9 +551,10 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     } catch (err) {
       return reply.code(400).send({ error: "INVALID_CREDENTIAL_USECASE", message: (err as Error).message });
     }
-    const violation = await credentialUseCaseCapabilityViolation({ ...def, ownerOrgId: def.ownerOrgId ?? existing.ownerOrgId ?? null }, known);
+    const ownerOrgId = def.ownerOrgId ?? existing.ownerOrgId ?? null;
+    const violation = await credentialUseCaseCapabilityViolation({ ...def, ownerOrgId }, known);
     if (violation) return orgCapabilityMissing(reply, violation.org, violation.missing);
-    const updated = await deps.credentialUseCases.update(key, { ...def, ownerOrgId: def.ownerOrgId ?? existing.ownerOrgId ?? null });
+    const updated = await deps.credentialUseCases.update(key, { ...def, ownerOrgId });
     await deps.audit.append({ actorId: claims.id, action: "credential-usecase-updated" as LifecycleAction, payload: { key } });
     return reply.code(200).send(updated);
   });
@@ -726,11 +727,13 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     def = { ...def, issuer: { kind: "org", orgId: org.id } };
 
     // EN-A: provisioning makes `org` BOTH the owner and the bound issuer of an
-    // IDENTITY use case — its envelope needs the identity domain and the Issuer
-    // role. Checked here (org record already in hand) so the rebind path below
-    // is covered too, not just fresh creates.
-    if (!orgDomainEnabled(org.capabilities, "identity")) return orgCapabilityMissing(reply, org, "identity");
+    // IDENTITY use case — its envelope needs the Issuer role and the identity
+    // domain (checked in that order, matching credentialUseCaseCapabilityViolation,
+    // so an org missing both always sees the same capability named). Checked here
+    // (org record already in hand) so the rebind path below is covered too, not
+    // just fresh creates.
     if (!orgRoleEnabled(org.capabilities, "Issuer")) return orgCapabilityMissing(reply, org, "Issuer");
+    if (!orgDomainEnabled(org.capabilities, "identity")) return orgCapabilityMissing(reply, org, "identity");
 
     // 4. Create the use case, or rebind an existing one (idempotent unless failIfExists).
     let useCase;
