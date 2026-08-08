@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ApiError, api } from "../api.js";
 import { useRoute } from "../router.js";
-import type { CompanyCategory, OrgType } from "../types.js";
+import { ORG_DOMAINS, ORG_OPERATING_ROLES, type CompanyCategory, type OrgCapabilities, type OrgDomain, type OrgOperatingRole, type OrgType } from "../types.js";
 import { Logo } from "./Logo.js";
 import { Icon } from "./ui.js";
 
@@ -23,7 +23,22 @@ const CATEGORIES: { value: CompanyCategory; label: string }[] = [
   { value: "section-8", label: "Section 8" },
 ];
 
-const STEPS = ["Company", "Administrator", "Review"] as const;
+const STEPS = ["Company", "Administrator", "Capabilities", "Review"] as const;
+const CAPABILITY_STEP = 2;
+
+// The requested capability envelope (EN-A). Everything is pre-checked: a company
+// signing up asks for the full envelope by default and narrows it deliberately.
+const DOMAIN_LABELS: Record<OrgDomain, string> = { tokenization: "Tokenization", identity: "Identity" };
+const ROLE_LABELS: Record<OrgOperatingRole, string> = { Issuer: "Issuer", Holder: "Holder", Verifier: "Verifier" };
+const DOMAIN_HINTS: Record<OrgDomain, string> = {
+  tokenization: "Configure tokenization use cases and issue assets on-chain.",
+  identity: "Operate credential use cases — issue, hold, and verify credentials.",
+};
+const ROLE_HINTS: Record<OrgOperatingRole, string> = {
+  Issuer: "Issue credentials and assets in your organization's name.",
+  Holder: "Hold credentials and assets in the organization wallet.",
+  Verifier: "Request and verify credential presentations from others.",
+};
 
 interface Form {
   name: string;
@@ -57,6 +72,13 @@ export function Signup(): JSX.Element {
   const [cinDoc, setCinDoc] = useState<{ id: string; sha256: string; name: string } | null>(null);
   const [gstinDoc, setGstinDoc] = useState<{ id: string; sha256: string; name: string } | null>(null);
   const [docBusy, setDocBusy] = useState<"cin" | "gstin" | null>(null);
+  // Kept out of `Form` (whose `set` helper is for string-valued inputs only).
+  const [caps, setCaps] = useState<OrgCapabilities>({ domains: [...ORG_DOMAINS], roles: [...ORG_OPERATING_ROLES] });
+
+  const toggleDomain = (d: OrgDomain) => (): void =>
+    setCaps((c) => ({ ...c, domains: c.domains.includes(d) ? c.domains.filter((x) => x !== d) : [...c.domains, d] }));
+  const toggleRole = (r: OrgOperatingRole) => (): void =>
+    setCaps((c) => ({ ...c, roles: c.roles.includes(r) ? c.roles.filter((x) => x !== r) : [...c.roles, r] }));
 
   const set = <K extends keyof Form>(k: K) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setF((prev) => ({ ...prev, [k]: e.target.value as Form[K] }));
@@ -76,6 +98,10 @@ export function Signup(): JSX.Element {
       if (!f.adminName.trim()) return "Administrator name is required";
       if (!f.adminEmail.trim()) return "Administrator email is required";
       if (f.password.length < 8) return "Password must be at least 8 characters";
+    }
+    if (s === CAPABILITY_STEP) {
+      if (caps.domains.length === 0) return "Select at least one domain";
+      if (caps.roles.length === 0) return "Select at least one operating role";
     }
     return null;
   }
@@ -132,6 +158,9 @@ export function Signup(): JSX.Element {
           },
         },
         admin: { name: f.adminName.trim(), email: f.adminEmail.trim(), password: f.password },
+        // Always an explicit envelope from the wizard — the reviewer approves it
+        // along with the KYB details. (Omitting the key is the legacy path.)
+        capabilities: caps,
       });
       setDone(true);
     } catch (err) {
@@ -291,7 +320,26 @@ export function Signup(): JSX.Element {
                     </div>
                   )}
 
-                  {step === 2 && (
+                  {step === CAPABILITY_STEP && (
+                    <div className="space-y-5">
+                      <p className="text-sm text-slate-500 -mt-1">
+                        Choose what your organization will do on the platform. The platform administrator
+                        approves this envelope along with your KYB details — you can request a change later.
+                      </p>
+                      <CheckGroup
+                        title="Domains"
+                        hint="At least one domain is required."
+                        options={ORG_DOMAINS.map((d) => ({ key: d, label: DOMAIN_LABELS[d], hint: DOMAIN_HINTS[d], checked: caps.domains.includes(d), onToggle: toggleDomain(d) }))}
+                      />
+                      <CheckGroup
+                        title="Operating roles"
+                        hint="At least one role is required."
+                        options={ORG_OPERATING_ROLES.map((r) => ({ key: r, label: ROLE_LABELS[r], hint: ROLE_HINTS[r], checked: caps.roles.includes(r), onToggle: toggleRole(r) }))}
+                      />
+                    </div>
+                  )}
+
+                  {step === STEPS.length - 1 && (
                     <div className="space-y-5">
                       <ReviewSection title="Company">
                         <Row label="Legal name" value={f.name} />
@@ -310,6 +358,10 @@ export function Signup(): JSX.Element {
                       <ReviewSection title="Administrator">
                         <Row label="Full name" value={f.adminName} />
                         <Row label="Email" value={f.adminEmail} />
+                      </ReviewSection>
+                      <ReviewSection title="Capabilities">
+                        <Row label="Domains" value={caps.domains.map((d) => DOMAIN_LABELS[d]).join(", ") || "—"} />
+                        <Row label="Operating roles" value={caps.roles.map((r) => ROLE_LABELS[r]).join(", ") || "—"} />
                       </ReviewSection>
                     </div>
                   )}
@@ -358,6 +410,33 @@ function Field({ label, className, children }: { label: React.ReactNode; classNa
     <div className={className}>
       <label className="block text-xs font-medium text-slate-600 mb-1.5">{label}</label>
       {children}
+    </div>
+  );
+}
+
+/** A titled group of labelled checkboxes — one per capability in an envelope half. */
+function CheckGroup({ title, hint, options }: {
+  title: string;
+  hint: string;
+  options: { key: string; label: string; hint: string; checked: boolean; onToggle: () => void }[];
+}): JSX.Element {
+  return (
+    <div className="rounded-xl border border-slate-200/80 overflow-hidden">
+      <div className="bg-slate-50 px-4 py-2 flex items-baseline justify-between">
+        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</span>
+        <span className="text-[11px] text-slate-400">{hint}</span>
+      </div>
+      <div className="divide-y divide-slate-100">
+        {options.map((o) => (
+          <label key={o.key} className="flex items-start gap-3 px-4 py-2.5 cursor-pointer hover:bg-slate-50/60">
+            <input type="checkbox" checked={o.checked} onChange={o.onToggle} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
+            <span className="min-w-0">
+              <span className="block text-sm font-medium text-slate-800">{o.label}</span>
+              <span className="block text-xs text-slate-500">{o.hint}</span>
+            </span>
+          </label>
+        ))}
+      </div>
     </div>
   );
 }

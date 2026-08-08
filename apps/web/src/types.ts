@@ -1,5 +1,20 @@
 export type Role = "PlatformAdmin" | "OrgAdmin" | "UseCaseAdmin" | "Issuer" | "Trader" | "Buyer" | "Auditor" | "Holder" | "Verifier";
 
+// ---- EN-A: organization capability envelope --------------------------------
+// Mirrors @tokenlayer/core's org-capabilities. `null` anywhere an envelope is
+// expected means the UNRESTRICTED LEGACY envelope (org predates EN-A) — render
+// it as "unrestricted (legacy)", never as "no capabilities". An explicit
+// envelope with empty arrays is fully restrictive: [] ≠ null.
+export const ORG_DOMAINS = ["tokenization", "identity"] as const;
+export type OrgDomain = (typeof ORG_DOMAINS)[number];
+export const ORG_OPERATING_ROLES = ["Issuer", "Holder", "Verifier"] as const;
+export type OrgOperatingRole = (typeof ORG_OPERATING_ROLES)[number];
+
+export interface OrgCapabilities {
+  domains: OrgDomain[];
+  roles: OrgOperatingRole[];
+}
+
 export interface SessionUser {
   id: string;
   email: string;
@@ -9,6 +24,8 @@ export interface SessionUser {
   orgId?: string | null;
   did?: string | null;
   useCaseDomain?: "tokenization" | "identity" | null;
+  /** The signed-in user's org envelope; null (or absent) = unrestricted legacy. */
+  orgCapabilities?: OrgCapabilities | null;
 }
 
 export type TokenStandard = "ERC-20" | "ERC-721" | "ERC-3643";
@@ -335,6 +352,8 @@ export interface Organization {
   status: string;
   companyProfile?: CompanyProfile | null;
   credentials?: { id: string; type: string; issuerDid: string; issuedAt: string; revoked: boolean }[];
+  /** EN-A capability envelope; null = unrestricted legacy. Absent on pre-EN-A responses. */
+  capabilities?: OrgCapabilities | null;
   createdAt?: string;
 }
 
