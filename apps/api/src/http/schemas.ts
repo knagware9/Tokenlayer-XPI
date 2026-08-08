@@ -478,7 +478,8 @@ export const S: Record<string, FastifySchema> = {
           user: { type: "object", additionalProperties: true },
         },
       },
-      ...errs(400, 401),
+      // 403 = SERVICE_ACCOUNT: a service user's key is its only way in.
+      ...errs(400, 401, 403),
     },
   },
   me: { tags: ["Auth"], summary: "Current session principal", security: bearer, response: { 200: { type: "object", additionalProperties: true }, ...errs(401) } },
@@ -500,7 +501,8 @@ export const S: Record<string, FastifySchema> = {
     tags: ["Auth"], summary: "Authenticate a QR login session by signing its challenge",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: { type: "object", additionalProperties: false, required: ["did", "signature"], properties: { did: { type: "string" }, signature: { type: "string" } } },
-    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 404, 410, 429) },
+    // 403 = SERVICE_ACCOUNT: the other JWT-minting path refuses service users too.
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404, 410, 429) },
   },
 
   chains: { tags: ["Catalog"], summary: "List configured chains/DLTs", security: bearer, response: { 200: { type: "array", items: { $ref: "Chain#" } }, ...errs(401) } },

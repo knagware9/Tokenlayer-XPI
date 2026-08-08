@@ -22,7 +22,7 @@ import { proposalKind } from "../proposal-kinds.js";
 import type { OnboardUserPayload } from "../user-kinds.js";
 import { resolveDid } from "../did-resolver.js";
 import { S } from "./schemas.js";
-import { actorOf, contextOf, isPositiveIntString, notFound, requireUser, scopedToCaller, type TokenClaims } from "./support.js";
+import { actorOf, contextOf, isPositiveIntString, notFound, requirePrincipal, scopedToCaller, type TokenClaims } from "./support.js";
 
 const NO_USE_CASE = "__none__"; // sentinel: a use-case key that matches no real use case (denies scoped users with no assigned use case)
 
@@ -94,7 +94,7 @@ function orgCapabilityMissing(reply: FastifyReply, org: OrganizationRecord, miss
 
 /** Registers every /api/v1 route on the given (prefixed) instance. */
 export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
-  const auth = { preHandler: requireUser(deps) };
+  const auth = { preHandler: requirePrincipal(deps) };
 
   // Per-instance in-memory login throttle (per IP): bounds credential-stuffing / brute force.
   const loginMax = deps.loginRateLimitMax ?? 10;
@@ -220,6 +220,11 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (!user.active) {
       return reply.code(401).send({ error: "ACCOUNT_SUSPENDED", message: "this account is suspended" });
     }
+    // A service user exists only to back an API key: it must never be drivable
+    // interactively, so its (random, unguessable) password hash is not a way in.
+    if (user.kind === "service") {
+      return reply.code(403).send({ error: "SERVICE_ACCOUNT", message: "this is a service account; authenticate with its API key" });
+    }
     const claims: TokenClaims = { id: user.id, email: user.email, role: user.role, useCaseKey: user.useCaseKey, orgId: user.orgId ?? null, did: user.did ?? null };
     const wallet = user.accountId ? await deps.accounts.findById(user.accountId) : null;
     const useCaseDomain = await resolveUseCaseDomain(user.useCaseKey);
@@ -305,6 +310,13 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     }
     const user = await deps.users.findById(key.userId);
     if (!user || !user.active) return reply.code(401).send({ error: "ACCOUNT_SUSPENDED", message: "account unavailable" });
+    // The SAME refusal as POST /auth/login, because this is the API's OTHER
+    // JWT-minting path. Without it a key holder could enrol a device key for its
+    // own service user and trade the key for a durable human session that
+    // outlives revocation of the key — an escalation, not a convenience.
+    if (user.kind === "service") {
+      return reply.code(403).send({ error: "SERVICE_ACCOUNT", message: "this is a service account; authenticate with its API key" });
+    }
     const claims: TokenClaims = { id: user.id, email: user.email, role: user.role, useCaseKey: user.useCaseKey, orgId: user.orgId ?? null, did: user.did ?? null };
     const token = app.jwt.sign(claims);
     if (!deps.qrLogin.authenticate(id, { userId: user.id, token })) return reply.code(410).send({ error: "SESSION_EXPIRED", message: "session no longer pending" });

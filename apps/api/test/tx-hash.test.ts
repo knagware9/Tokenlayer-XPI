@@ -21,6 +21,7 @@ import { createMemoryChallengeStore } from "../src/identity-challenges.js";
 import { createKeystore } from "../src/keystore.js";
 import {
   MemoryAccountRepository,
+  MemoryApiKeyRepository,
   MemoryAssetRepository,
   MemoryAuditAnchorRepository,
   MemoryAuditRepository,
@@ -74,7 +75,7 @@ async function buildAppWithDeps(registry?: IdentityRegistry): Promise<TestApp> {
     cash: new MemoryCashRepository(), listings: new MemoryListingRepository(), documents: new MemoryDocumentRepository(),
     cashflows: new MemoryCashflowRepository(), proposals: new MemoryProposalRepository(),
     organizations: new MemoryOrganizationRepository(), credentials, verificationRequests: new MemoryVerificationRequestRepository(),
-    stagedInvoices: new MemoryStagedInvoiceRepository(), keystore: createKeystore("11".repeat(32)), didMasterConfigured: true,
+    stagedInvoices: new MemoryStagedInvoiceRepository(), apiKeys: new MemoryApiKeyRepository(), keystore: createKeystore("11".repeat(32)), didMasterConfigured: true,
     challenges: createMemoryChallengeStore(), loginKeys: new MemoryLoginKeyRepository(), qrLogin: createMemoryQrLoginStore(),
     publicWebUrl: "http://localhost:5173", enabledDomains: ["tokenization", "identity"],
     currencies: loadCurrencies(), jwtSecret: "test-secret", publicApiUrl: "http://test.local/api/v1",

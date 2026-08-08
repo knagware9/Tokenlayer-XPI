@@ -8,6 +8,7 @@ import type { Keystore } from "./keystore.js";
 import type { QrLoginStore } from "./qr-login-sessions.js";
 import type {
   AccountRepository,
+  ApiKeyRepository,
   AssetRepository,
   AuditAnchorRepository,
   AuditRepository,
@@ -49,6 +50,8 @@ export interface AppDeps {
   credentials: CredentialRepository;
   verificationRequests: VerificationRequestRepository;
   stagedInvoices: StagedInvoiceRepository;
+  /** Machine credentials (EN-B): the auth seam resolves `tl_live_…` bearers through this. */
+  apiKeys: ApiKeyRepository;
   keystore: Keystore;
   /** True iff DID_MASTER_KEY was explicitly configured (production must set it). */
   didMasterConfigured: boolean;
