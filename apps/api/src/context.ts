@@ -78,6 +78,14 @@ export interface AppDeps {
   isProduction?: boolean;
   /** Max login attempts per IP per 15-min window (default 10). */
   loginRateLimitMax?: number;
+  /** Max requests per API KEY per minute (default 600) — 429 RATE_LIMITED past it. */
+  apiKeyRateLimitMax?: number;
+  /**
+   * Max FAILED key verifications per prefix per minute (default 20) before the
+   * prefix is refused without any bcrypt work. Prefixes are public, so this is
+   * what stops a stranger burning the event loop with garbage secrets.
+   */
+  apiKeyFailedAttemptMax?: number;
   /**
    * Platform fee account (address) receiving marketplace/issuance fees. When
    * absent, fees are disabled (treated as 0) regardless of use-case config.

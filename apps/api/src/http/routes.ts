@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { AssetRecord, CashflowRecord, CompanyProfile, CredentialRecord, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord } from "../persistence/types.js";
+import type { ApiKeyRecord, AssetRecord, CashflowRecord, CompanyProfile, CredentialRecord, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, issueCredential, issuerBindingAllows, normalizeUseCaseDefinition, ORG_OPERATING_ROLES, orgDomainEnabled, orgRoleEnabled, PolicyError, presentCredential, presentCredentials, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateCredentialUseCase, validateMetadata, validateOrgCapabilities, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type OrgOperatingRole, type OrgType, type Role, type UseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
+import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, issueCredential, issuerBindingAllows, normalizeUseCaseDefinition, ORG_OPERATING_ROLES, orgDomainEnabled, orgRoleEnabled, PolicyError, presentCredential, presentCredentials, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateCredentialUseCase, validateMetadata, validateOrgCapabilities, validateScopes, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ApiScope, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type OrgOperatingRole, type OrgType, type Role, type UseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
 import qrcode from "qrcode";
 import type { AppDeps } from "../context.js";
 import { renderCredentialCertificate } from "../certificate.js";
@@ -21,8 +21,9 @@ import { assetBalancesOf, coded, CodedError, dropPayerShare, executeCashflowCore
 import { proposalKind } from "../proposal-kinds.js";
 import type { OnboardUserPayload } from "../user-kinds.js";
 import { resolveDid } from "../did-resolver.js";
+import { API_KEY_BCRYPT_ROUNDS, invalidateVerifiedPrefix, mintSecret } from "../api-keys.js";
 import { S } from "./schemas.js";
-import { actorOf, claimsOf, contextOf, isPositiveIntString, notFound, requirePrincipal, scopedToCaller, type TokenClaims } from "./support.js";
+import { actorOf, claimsOf, contextOf, isPositiveIntString, machinePrincipal, notFound, requirePrincipal, requireScope, scopedToCaller, type TokenClaims } from "./support.js";
 
 const NO_USE_CASE = "__none__"; // sentinel: a use-case key that matches no real use case (denies scoped users with no assigned use case)
 
@@ -94,7 +95,16 @@ function orgCapabilityMissing(reply: FastifyReply, org: OrganizationRecord, miss
 
 /** Registers every /api/v1 route on the given (prefixed) instance. */
 export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
-  const auth = { preHandler: requirePrincipal(deps) };
+  // ONE preHandler instance: it owns the per-key rate-limit and failed-attempt
+  // counters, so every route must share it rather than build its own.
+  const principal = requirePrincipal(deps);
+  const auth = { preHandler: principal };
+  /**
+   * `auth` plus an API-key scope gate. A JWT request passes the gate
+   * unconditionally (see requireScope) — this ONLY narrows machine callers, so
+   * composing it onto a route can never change human behaviour.
+   */
+  const authScoped = (required: ApiScope) => ({ preHandler: [principal, requireScope(required)] });
 
   // Per-instance in-memory login throttle (per IP): bounds credential-stuffing / brute force.
   const loginMax = deps.loginRateLimitMax ?? 10;
@@ -845,9 +855,28 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   // claims.useCaseKey matches this use case's key) — they operate issuance for
   // the use case WITHOUT being the cryptographic issuer; the VC is still signed
   // by the use case's bound issuer org (issuerOrg resolution below is unchanged).
-  async function resolveIssuer(reply: FastifyReply, claims: TokenClaims, def: Awaited<ReturnType<typeof deps.credentialUseCases.get>>, key: string) {
+  async function resolveIssuer(request: FastifyRequest, reply: FastifyReply, def: Awaited<ReturnType<typeof deps.credentialUseCases.get>>, key: string) {
+    const claims = request.user as TokenClaims;
     const isPlatformAdmin = claims.role === "PlatformAdmin";
     const scopedOperator = (claims.role === "UseCaseAdmin" || claims.role === "Issuer") && claims.useCaseKey === key;
+    // EN-B use-time binding re-check, FOR MACHINE PRINCIPALS ONLY.
+    // A scoped desk operator is authorized by role + useCaseKey alone, so EN-A
+    // deliberately left an already-minted desk working after its use case's
+    // issuer binding was later edited (recorded non-retroactivity: an
+    // interactive operator would otherwise be locked out mid-session with no
+    // explanation, and a human is watched by their org). A KEY runs unattended
+    // for months, so the same staleness becomes an org still issuing through a
+    // binding that was moved away from it. Hence: re-verify against the CURRENT
+    // config when the caller is a key, and leave human sessions exactly as they
+    // were. An org-less desk operator has no binding to re-check and is skipped.
+    if (scopedOperator && machinePrincipal(request) && claims.orgId) {
+      const bound = def!.ownerOrgId === claims.orgId
+        || issuerBindingAllows(def!.issuer, { callerOrgId: claims.orgId, isPlatformAdmin });
+      if (!bound) {
+        reply.code(403).send({ error: "ISSUER_NOT_PERMITTED", message: "your organization is no longer bound to this use case's issuer" });
+        return null;
+      }
+    }
     if (!scopedOperator) {
       if (claims.role !== "PlatformAdmin" && claims.role !== "OrgAdmin") {
         reply.code(403).send({ error: "FORBIDDEN", message: "only a Platform Admin or an Org Admin may issue credentials" });
@@ -876,11 +905,10 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   }
 
   app.get("/credential-use-cases/:key/eligible-holders", { schema: S.eligibleHolders, ...auth }, async (request, reply) => {
-    const claims = request.user as TokenClaims;
     const { key } = request.params as { key: string };
     const def = await deps.credentialUseCases.get(key);
     if (!def) return notFound(reply, `credential use case '${key}' not found`);
-    const resolved = await resolveIssuer(reply, claims, def, key); // same gate as issuing
+    const resolved = await resolveIssuer(request, reply, def, key); // same gate as issuing
     if (!resolved) return;
     const out: { kind: "user" | "org"; id: string; label: string; did: string; subLabel: string | null }[] = [];
     const users = await deps.users.list();
@@ -905,13 +933,13 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return out;
   });
 
-  app.post("/credential-use-cases/:key/credentials", { schema: S.issueUsecaseCredential, ...auth }, async (request, reply) => {
+  app.post("/credential-use-cases/:key/credentials", { schema: S.issueUsecaseCredential, ...authScoped("credentials:issue") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const { key } = request.params as { key: string };
     const b = request.body as { credentialType: string; subjectUserId?: string; subjectOrgId?: string; claims: Record<string, unknown> };
     const def = await deps.credentialUseCases.get(key);
     if (!def) return notFound(reply, `credential use case '${key}' not found`);
-    const resolved = await resolveIssuer(reply, claims, def, key);
+    const resolved = await resolveIssuer(request, reply, def, key);
     if (!resolved) return;
     const { issuerOrg } = resolved;
 
@@ -960,13 +988,13 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   // Subjects are addressed by EMAIL (not subjectUserId/subjectOrgId as the
   // single route allows) and are resolved at EXECUTION time, so a not-yet-
   // onboarded holder fails only its own row instead of the whole batch.
-  app.post("/credential-use-cases/:key/credentials/batch", { schema: S.issueUsecaseCredentialsBatch, ...auth }, async (request, reply) => {
+  app.post("/credential-use-cases/:key/credentials/batch", { schema: S.issueUsecaseCredentialsBatch, ...authScoped("credentials:issue") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const { key } = request.params as { key: string };
     const b = request.body as { credentialType: string; rows: { subjectEmail: string; claims: Record<string, unknown> }[] };
     const def = await deps.credentialUseCases.get(key);
     if (!def) return notFound(reply, `credential use case '${key}' not found`);
-    const resolved = await resolveIssuer(reply, claims, def, key); // same gate as the single route
+    const resolved = await resolveIssuer(request, reply, def, key); // same gate as the single route
     if (!resolved) return;
     const { issuerOrg } = resolved;
 
@@ -1162,7 +1190,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return { ok: true, status: 201, body: { asset: finalAsset, txHash: result.txHash, ...(issuanceFeeCharged ? { issuanceFee: issuanceFeeCharged } : {}) } };
   }
 
-  app.post("/assets", { schema: S.issueAsset, ...auth }, async (request, reply) => {
+  app.post("/assets", { schema: S.issueAsset, ...authScoped("assets:issue") }, async (request, reply) => {
     const b = request.body as { useCaseKey: string; name: string; chainId: string; metadata?: Record<string, unknown>; treasuryAccount?: string; initialSupply?: string; sale?: { unitPrice: string; currency: string; treasuryAccount: string } };
     const r = await issueAssetCore({ claims: request.user as TokenClaims, actor: actorOf(request), request, ...b });
     return r.ok ? reply.code(r.status).send(r.body) : reply.code(r.status).send({ error: r.error, message: r.message });
@@ -1274,7 +1302,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return reply.code(200).send({ results });
   });
 
-  app.get("/assets", { schema: S.listAssets, ...auth }, async (request) => {
+  app.get("/assets", { schema: S.listAssets, ...authScoped("assets:read") }, async (request) => {
     const claims = request.user as TokenClaims;
     const q = request.query as { useCaseKey?: string; chainId?: string; status?: string; limit: number; offset: number };
     const useCaseKey = claims.role === "PlatformAdmin" ? q.useCaseKey : claims.useCaseKey ?? NO_USE_CASE;
@@ -1295,14 +1323,14 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return { data, pagination: { limit: q.limit, offset: q.offset, total } };
   });
 
-  app.get("/assets/:id", { schema: S.getAsset, ...auth }, async (request, reply) => {
+  app.get("/assets/:id", { schema: S.getAsset, ...authScoped("assets:read") }, async (request, reply) => {
     const asset = await scopedAsset(request, reply, "read");
     if (!asset) return reply;
     const totalSupply = await deps.engine.totalSupply(actorOf(request), contextOf(asset)).catch(() => null);
     return { ...asset, totalSupply };
   });
 
-  app.get("/assets/:id/accounts", { schema: S.assetAccounts, ...auth }, async (request, reply) => {
+  app.get("/assets/:id/accounts", { schema: S.assetAccounts, ...authScoped("assets:read") }, async (request, reply) => {
     const asset = await scopedAsset(request, reply, "read");
     if (!asset) return reply;
     const claims = request.user as TokenClaims;
@@ -1328,7 +1356,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       .map(({ id, ...rest }) => rest);
   });
 
-  app.get("/assets/:id/tokens", { schema: S.assetTokens, ...auth }, async (request, reply) => {
+  app.get("/assets/:id/tokens", { schema: S.assetTokens, ...authScoped("assets:read") }, async (request, reply) => {
     const asset = await scopedAsset(request, reply, "read");
     if (!asset) return reply;
     if (asset.tokenType !== "nonfungible") return [];
@@ -1492,7 +1520,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   });
 
   // --- lifecycle actions --------------------------------------------------
-  app.post("/assets/:id/actions/:action", { schema: S.action, ...auth }, async (request, reply) => {
+  app.post("/assets/:id/actions/:action", { schema: S.action, ...authScoped("assets:transfer") }, async (request, reply) => {
     const { action } = request.params as { action: string };
     const asset = await scopedAsset(request, reply, "act");
     if (!asset) return reply;
@@ -1558,7 +1586,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   });
 
   // --- marketplace: buy (DvP) ---------------------------------------------
-  app.post("/assets/:id/buy", { schema: S.buy, ...auth }, async (request, reply) => {
+  app.post("/assets/:id/buy", { schema: S.buy, ...authScoped("assets:transfer") }, async (request, reply) => {
     const asset = await deps.assets.get((request.params as { id: string }).id);
     if (!asset) return notFound(reply, "asset not found");
     if (!scopedToCaller(request.user as TokenClaims, asset.useCaseKey)) return notFound(reply, "asset not found");
@@ -1694,7 +1722,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return { listing, asset };
   }
 
-  app.post("/assets/:id/listings", { schema: S.createListing, ...auth }, async (request, reply) => {
+  app.post("/assets/:id/listings", { schema: S.createListing, ...authScoped("assets:transfer") }, async (request, reply) => {
     if (marketDisabled(reply)) return reply;
     const escrow = deps.marketEscrowAccount!;
     const asset = await scopedAsset(request, reply, "read"); // 404 pattern, like /buy
@@ -1754,7 +1782,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return reply.code(201).send(listing);
   });
 
-  app.get("/assets/:id/listings", { schema: S.listListings, ...auth }, async (request, reply) => {
+  app.get("/assets/:id/listings", { schema: S.listListings, ...authScoped("assets:read") }, async (request, reply) => {
     if (marketDisabled(reply)) return reply;
     const asset = await scopedAsset(request, reply, "read");
     if (!asset) return reply;
@@ -1767,7 +1795,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       .map((l) => ({ id: l.id, seller: l.seller, quantity: l.quantity, unitPrice: l.unitPrice, currency: l.currency, createdAt: l.createdAt }));
   });
 
-  app.post("/listings/:id/take", { schema: S.takeListing, ...auth }, async (request, reply) => {
+  app.post("/listings/:id/take", { schema: S.takeListing, ...authScoped("assets:transfer") }, async (request, reply) => {
     if (marketDisabled(reply)) return reply;
     const escrow = deps.marketEscrowAccount!;
     const scoped = await scopedListing(request, reply);
@@ -1872,7 +1900,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return reply.code(200).send({ listing: updated, txHash: receipt.txHash, ...(BigInt(fee) > 0n && feeAccount ? { fee: { amount: fee, account: feeAccount } } : {}) });
   });
 
-  app.delete("/listings/:id", { schema: S.cancelListing, ...auth }, async (request, reply) => {
+  app.delete("/listings/:id", { schema: S.cancelListing, ...authScoped("assets:transfer") }, async (request, reply) => {
     if (marketDisabled(reply)) return reply;
     const escrow = deps.marketEscrowAccount!;
     const scoped = await scopedListing(request, reply);
@@ -1918,7 +1946,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return reply.code(204).send();
   });
 
-  app.get("/assets/:id/trades", { schema: S.assetTrades, ...auth }, async (request, reply) => {
+  app.get("/assets/:id/trades", { schema: S.assetTrades, ...authScoped("assets:read") }, async (request, reply) => {
     if (marketDisabled(reply)) return reply;
     const asset = await scopedAsset(request, reply, "read");
     if (!asset) return reply;
@@ -1982,14 +2010,14 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   });
 
   // --- users (scoped provisioning) ----------------------------------------
-  app.get("/users", { schema: S.listUsers, ...auth }, async (request, reply) => {
+  app.get("/users", { schema: S.listUsers, ...authScoped("users:read") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     if (!canManageUsers(claims.role)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to manage users" });
     const rows = await deps.users.list(claims.role === "PlatformAdmin" ? undefined : claims.useCaseKey ?? NO_USE_CASE);
     return rows.map((u) => ({ id: u.id, email: u.email, role: u.role, useCaseKey: u.useCaseKey, accountId: u.accountId, active: u.active, kycStatus: u.kycStatus, kyc: u.kyc }));
   });
 
-  app.post("/users", { schema: S.createUser, ...auth }, async (request, reply) => {
+  app.post("/users", { schema: S.createUser, ...authScoped("users:onboard") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const b = request.body as { email: string; password: string; role: Role; useCaseKey?: string; walletAddress?: string; kyc?: KycDetails };
     const targetUseCaseKey = claims.role === "PlatformAdmin" ? (b.useCaseKey || null) : claims.useCaseKey;
@@ -2076,7 +2104,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   // every row. Draft-time validation is all-or-nothing (any row problem ⇒ 400,
   // no proposal at all); execution is row-independent (one row's failure
   // never aborts the others — see onboardUserBatchKind).
-  app.post("/users/batch", { schema: S.createUsersBatch, ...auth }, async (request, reply) => {
+  app.post("/users/batch", { schema: S.createUsersBatch, ...authScoped("users:onboard") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const { rows } = request.body as { rows: { email: string; password: string; role: Role; useCaseKey?: string; walletAddress?: string; kyc?: KycDetails }[] };
     const tokKeys = (await deps.useCases.list()).map((u) => u.key);
@@ -2161,6 +2189,15 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const sameScope = claims.role === "PlatformAdmin" || (canManageUsers(claims.role) && target.useCaseKey === claims.useCaseKey && target.role !== "UseCaseAdmin");
     if (!sameScope) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to edit that user" });
     const patch: { passwordHash?: string; active?: boolean; kycStatus?: KycStatus } = {};
+    // A machine principal may not set a password on an EXISTING account. That is
+    // account takeover of a human, and it hands the machine an interactive
+    // session that survives revocation of the key that created it — the same
+    // durability class as the device-login-key refusal. Creating a NEW user is
+    // different and stays allowed: it is a delegable business operation, and the
+    // `users:onboard` scope must be granted explicitly for it.
+    if (typeof b.password === "string" && machinePrincipal(request)) {
+      return reply.code(403).send({ error: "MACHINE_PRINCIPAL", message: "an API key cannot set a user's password" });
+    }
     if (typeof b.password === "string") patch.passwordHash = bcrypt.hashSync(b.password, BCRYPT_ROUNDS);
     if (typeof b.active === "boolean") patch.active = b.active;
     if (b.kycStatus === "approved" || b.kycStatus === "rejected") patch.kycStatus = b.kycStatus;
@@ -2358,7 +2395,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return { ...orgView(o), credentials: held.map((c) => ({ id: c.id, type: c.type, issuerDid: c.issuerDid, issuedAt: c.issuedAt, revoked: c.revoked })) };
   }
 
-  app.get("/orgs", { schema: S.listOrgs, ...auth }, async (request, reply) => {
+  app.get("/orgs", { schema: S.listOrgs, ...authScoped("org:read") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     let rows;
     if (claims.role === "PlatformAdmin") {
@@ -2370,7 +2407,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return Promise.all(rows.map(orgViewWithCreds));
   });
 
-  app.get("/orgs/:id", { schema: S.getOrg, ...auth }, async (request, reply) => {
+  app.get("/orgs/:id", { schema: S.getOrg, ...authScoped("org:read") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const { id } = request.params as { id: string };
     if (!orgScoped(claims, id)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to view that organization" });
@@ -2501,14 +2538,28 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return mintOrgMembership(deps, org, user, role, { linkOrgId: true });
   }
 
-  app.post("/orgs/:id/users", { schema: S.createMember, ...auth }, async (request, reply) => {
-    const claims = request.user as TokenClaims;
-    const { id } = request.params as { id: string };
-    const b = request.body as { email: string; password: string; role: Role; useCaseKey?: string; walletAddress?: string; kyc?: KycDetails };
-    if (!orgScoped(claims, id)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to add members to that organization" });
-    if (!canCreateOrgMember(claims.role, b.role)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to create that member role" });
+  interface OrgMemberInput { email: string; password: string; role: Role; useCaseKey?: string; walletAddress?: string; kyc?: KycDetails }
+
+  /**
+   * Create an org member: every gate (org scope, `canCreateOrgMember`, the EN-A
+   * envelope filter, the EN-A Verifier binding check), then the user row, then
+   * the sub-DID + membership VC, then the audit entry. Returns null once the
+   * error reply has been sent.
+   *
+   * `kind` is a PARAMETER, not a constant. An API key's service user is minted
+   * through exactly this path so all of the above applies to it — and if the
+   * kind were hardcoded to "human" here, every service user would be a human
+   * account and the `SERVICE_ACCOUNT` login refusal would be a silent no-op: a
+   * guard that looks present and does nothing. `api-keys.test.ts` proves the
+   * minted user is actually refused at /auth/login.
+   */
+  async function createOrgMember(
+    reply: FastifyReply, claims: TokenClaims, id: string, b: OrgMemberInput, kind: UserRecord["kind"],
+  ): Promise<{ org: OrganizationRecord; user: UserRecord; did: string } | null> {
+    if (!orgScoped(claims, id)) { reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to add members to that organization" }); return null; }
+    if (!canCreateOrgMember(claims.role, b.role)) { reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to create that member role" }); return null; }
     const org = await deps.organizations.get(id);
-    if (!org) return notFound(reply, "organization not found");
+    if (!org) { notFound(reply, "organization not found"); return null; }
     // "" is normalized to null ONCE, before any gate reads it, so an empty-string
     // key can never slip past a truthiness-guarded check downstream (the standing
     // ""-vs-null gate-bypass lesson); every use below reads `memberUseCaseKey`.
@@ -2517,7 +2568,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     // entirely (platform override).
     if (claims.role !== "PlatformAdmin") {
       const missing = await orgMemberCapabilityViolation(org, b.role, memberUseCaseKey);
-      if (missing) return orgCapabilityMissing(reply, org, missing);
+      if (missing) { orgCapabilityMissing(reply, org, missing); return null; }
     }
     // EN-A review fix: A4 widened this route's role enum to the org-internal
     // Holder/Verifier roles, and the key below is stored VERBATIM. A `Verifier`
@@ -2535,29 +2586,30 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (memberUseCaseKey && (b.role === "Verifier" || b.role === "Holder")) {
       const domain = await resolveUseCaseDomain(memberUseCaseKey);
       // Same code the sibling POST /users route uses for an unknown key.
-      if (!domain) return reply.code(404).send({ error: "USE_CASE_NOT_FOUND", message: `no use case '${memberUseCaseKey}'` });
+      if (!domain) { reply.code(404).send({ error: "USE_CASE_NOT_FOUND", message: `no use case '${memberUseCaseKey}'` }); return null; }
       if (b.role === "Verifier" && domain === "identity" && claims.role !== "PlatformAdmin") {
         const def = await deps.credentialUseCases.get(memberUseCaseKey);
         // A vanished def (TOCTOU against resolveUseCaseDomain's listing) fails
         // CLOSED rather than open — the key named a use case that no longer exists.
-        if (!def) return reply.code(404).send({ error: "USE_CASE_NOT_FOUND", message: `no use case '${memberUseCaseKey}'` });
+        if (!def) { reply.code(404).send({ error: "USE_CASE_NOT_FOUND", message: `no use case '${memberUseCaseKey}'` }); return null; }
         if (def.ownerOrgId !== org.id && !verifierBindingAllows(def.verifier, org.id)) {
           // A BINDING failure, not a capability one — distinct error, and it
           // bites for a legacy (null-envelope) org too.
-          return reply.code(403).send({
+          reply.code(403).send({
             error: "ORG_NOT_BOUND",
             message: `organization '${org.name}' is neither the owner nor a bound verifier of credential use case '${memberUseCaseKey}'`,
             details: { orgId: org.id, useCaseKey: memberUseCaseKey },
           });
+          return null;
         }
       }
     }
-    if (await deps.users.findByEmail(b.email)) return reply.code(400).send({ error: "EMAIL_TAKEN", message: "email already registered" });
+    if (await deps.users.findByEmail(b.email)) { reply.code(400).send({ error: "EMAIL_TAKEN", message: "email already registered" }); return null; }
     let accountId: string | null = null;
     if (b.walletAddress) accountId = (await deps.accounts.upsert(b.walletAddress, b.email)).id;
     const created = await deps.users.create({
       email: b.email, passwordHash: await bcrypt.hash(b.password, BCRYPT_ROUNDS), role: b.role,
-      useCaseKey: memberUseCaseKey, accountId, active: true, kycStatus: "pending", kyc: b.kyc ?? null, orgId: id, kind: "human",
+      useCaseKey: memberUseCaseKey, accountId, active: true, kycStatus: "pending", kyc: b.kyc ?? null, orgId: id, kind,
     });
     let did: string;
     try {
@@ -2566,11 +2618,20 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       await deps.users.remove(created.id); // no orphan user without a DID/VC
       throw err;
     }
-    await deps.audit.append({ actorId: claims.id, action: "member-added" as LifecycleAction, payload: { orgId: id, userId: created.id, did, role: b.role } });
-    return reply.code(201).send({ id: created.id, email: created.email, role: created.role, useCaseKey: created.useCaseKey, orgId: id, did, membershipVc: true });
+    await deps.audit.append({ actorId: claims.id, action: "member-added" as LifecycleAction, payload: { orgId: id, userId: created.id, did, role: b.role, kind } });
+    return { org, user: created, did };
+  }
+
+  app.post("/orgs/:id/users", { schema: S.createMember, ...authScoped("users:onboard") }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    const b = request.body as OrgMemberInput;
+    const made = await createOrgMember(reply, claims, id, b, "human");
+    if (!made) return;
+    return reply.code(201).send({ id: made.user.id, email: made.user.email, role: made.user.role, useCaseKey: made.user.useCaseKey, orgId: id, did: made.did, membershipVc: true });
   });
 
-  app.get("/orgs/:id/members", { schema: S.listMembers, ...auth }, async (request, reply) => {
+  app.get("/orgs/:id/members", { schema: S.listMembers, ...authScoped("org:read") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const { id } = request.params as { id: string };
     if (!orgScoped(claims, id)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to view that organization's members" });
@@ -2578,6 +2639,160 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (!org) return notFound(reply, "organization not found");
     const members = await deps.users.listByOrg(id);
     return members.map((u) => ({ id: u.id, email: u.email, role: u.role, useCaseKey: u.useCaseKey, did: u.did ?? null, active: u.active, kycStatus: u.kycStatus }));
+  });
+
+  // --- API keys (EN-B) ----------------------------------------------------
+  // Machine credentials for an org. Every route here is org-scoped (OrgAdmin on
+  // their own org, PlatformAdmin anywhere) and refuses a MACHINE principal — see
+  // the guard's comment for why a key must never mint or rotate another key.
+
+  /** Public projection. NEVER carries `secretHash`, and never the secret. */
+  function apiKeyView(k: ApiKeyRecord, boundUser: UserRecord | null) {
+    // Same fail-closed reading of `expiresAt` the auth path uses: an unparseable
+    // stamp shows as expired rather than as "no expiry".
+    const expired = k.expiresAt !== null && !(Date.parse(k.expiresAt) > Date.now());
+    return {
+      id: k.id, orgId: k.orgId, userId: k.userId, name: k.name, prefix: k.prefix, scopes: k.scopes,
+      role: boundUser?.role ?? null, useCaseKey: boundUser?.useCaseKey ?? null,
+      status: k.revokedAt !== null ? "revoked" : expired ? "expired" : "active",
+      lastUsedAt: k.lastUsedAt, expiresAt: k.expiresAt, revokedAt: k.revokedAt, revokedBy: k.revokedBy,
+      createdBy: k.createdBy, createdAt: k.createdAt,
+    };
+  }
+
+  const viewKey = async (k: ApiKeyRecord) => apiKeyView(k, await deps.users.findById(k.userId));
+
+  /**
+   * Common guard for the four key routes: refuse machine principals, then apply
+   * org scope. Returns the org, or null once the reply has been sent.
+   *
+   * A KEY MAY NOT MANAGE KEYS. Scopes are supposed to only ever narrow, but an
+   * OrgAdmin-roled key could mint a SECOND key with `*` and so hand itself
+   * grants its own scope list withheld — the one path by which a key's scopes
+   * could widen. It would also produce a credential outliving the revocation of
+   * the key that made it. Key lifecycle stays a human act (same reasoning as the
+   * device-login-key refusal on POST /me/login-keys).
+   */
+  async function apiKeyScope(request: FastifyRequest, reply: FastifyReply, id: string): Promise<OrganizationRecord | null> {
+    if (machinePrincipal(request)) {
+      reply.code(403).send({ error: "MACHINE_PRINCIPAL", message: "an API key cannot manage API keys" });
+      return null;
+    }
+    const claims = request.user as TokenClaims;
+    if (!orgScoped(claims, id)) {
+      reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to manage that organization's API keys" });
+      return null;
+    }
+    const org = await deps.organizations.get(id);
+    if (!org) { notFound(reply, "organization not found"); return null; }
+    return org;
+  }
+
+  /** Load a key that genuinely belongs to `orgId` (404 otherwise — no cross-org probing). */
+  async function orgKey(reply: FastifyReply, orgId: string, keyId: string): Promise<ApiKeyRecord | null> {
+    const k = await deps.apiKeys.findById(keyId);
+    if (!k || k.orgId !== orgId) { notFound(reply, "api key not found"); return null; }
+    return k;
+  }
+
+  app.post("/orgs/:id/api-keys", { schema: S.createApiKey, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    const b = request.body as { name: string; role: Role; useCaseKey?: string; scopes: unknown; expiresAt?: string };
+    if (!(await apiKeyScope(request, reply, id))) return;
+    const scopes = validateScopes(b.scopes); // 400 INVALID_SCOPES on anything unknown
+    const expiresAt = b.expiresAt ?? null;
+    if (expiresAt !== null && !(Date.parse(expiresAt) > Date.now())) {
+      return reply.code(400).send({ error: "INVALID_EXPIRY", message: "expiresAt must be a future timestamp" });
+    }
+    // The bound principal is an ordinary org member minted through the ordinary
+    // member path — so canCreateOrgMember, the EN-A envelope filter and the EN-A
+    // binding check all judge this key's authority at creation, and a key can
+    // never be stronger than a member its creator could have added by hand.
+    // `kind: "service"` is what makes it unable to log in interactively.
+    const slug = b.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 24) || "key";
+    const made = await createOrgMember(reply, claims, id, {
+      email: `svc-${slug}-${randomUUID().slice(0, 8)}@service.tokenlayer.local`,
+      // A service account has no usable password: this value is random, never
+      // returned, and /auth/login refuses `kind === "service"` regardless.
+      password: `${randomUUID()}${randomUUID()}`,
+      role: b.role, useCaseKey: b.useCaseKey,
+    }, "service");
+    if (!made) return;
+
+    const minted = await mintSecret(API_KEY_BCRYPT_ROUNDS);
+    let key: ApiKeyRecord;
+    try {
+      key = await deps.apiKeys.create({
+        orgId: id, userId: made.user.id, name: b.name, prefix: minted.prefix, secretHash: minted.hash,
+        scopes, expiresAt, createdBy: claims.id,
+      });
+    } catch (err) {
+      // No orphan service user without the key that is its only reason to exist
+      // (mirrors the DID-mint rollback inside createOrgMember).
+      await deps.users.remove(made.user.id);
+      throw err;
+    }
+    // id + name + scopes are the audit trail. The SECRET is never audited,
+    // logged, or returned by any read route — this response is its only life.
+    await deps.audit.append({
+      actorId: claims.id, action: "api-key-created" as LifecycleAction,
+      payload: { orgId: id, keyId: key.id, name: key.name, scopes: key.scopes, userId: made.user.id, role: b.role },
+    });
+    return reply.code(201).send({ key: apiKeyView(key, made.user), secret: minted.secret });
+  });
+
+  app.get("/orgs/:id/api-keys", { schema: S.listApiKeys, ...auth }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    if (!(await apiKeyScope(request, reply, id))) return;
+    return Promise.all((await deps.apiKeys.listByOrg(id)).map(viewKey));
+  });
+
+  app.post("/orgs/:id/api-keys/:keyId/rotate", { schema: S.rotateApiKey, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { id, keyId } = request.params as { id: string; keyId: string };
+    if (!(await apiKeyScope(request, reply, id))) return;
+    const key = await orgKey(reply, id, keyId);
+    if (!key) return;
+    if (key.revokedAt !== null) return reply.code(409).send({ error: "KEY_REVOKED", message: "a revoked key cannot be rotated" });
+
+    const minted = await mintSecret(API_KEY_BCRYPT_ROUNDS);
+    const rotated = await deps.apiKeys.rotate(key.id, { prefix: minted.prefix, secretHash: minted.hash });
+    // The cache is keyed to the row's secretHash, so the old entry could never
+    // match the rotated row anyway; dropping BOTH prefixes is belt and braces.
+    invalidateVerifiedPrefix(key.prefix);
+    invalidateVerifiedPrefix(minted.prefix);
+    await deps.audit.append({
+      actorId: claims.id, action: "api-key-rotated" as LifecycleAction,
+      payload: { orgId: id, keyId: key.id, name: key.name, scopes: key.scopes },
+    });
+    return reply.code(200).send({ key: await viewKey(rotated), secret: minted.secret });
+  });
+
+  app.delete("/orgs/:id/api-keys/:keyId", { schema: S.revokeApiKey, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { id, keyId } = request.params as { id: string; keyId: string };
+    if (!(await apiKeyScope(request, reply, id))) return;
+    const key = await orgKey(reply, id, keyId);
+    if (!key) return;
+    if (key.revokedAt !== null) return reply.code(200).send({ key: await viewKey(key) }); // idempotent
+
+    const revoked = await deps.apiKeys.revoke(key.id, { by: claims.id, at: new Date().toISOString() });
+    invalidateVerifiedPrefix(key.prefix);
+    // A service user exists only to back keys: once its last live key is gone it
+    // must not remain a usable principal (the auth path rejects inactive users).
+    const live = (await deps.apiKeys.listByOrg(id)).filter(
+      (k) => k.userId === key.userId && k.revokedAt === null && !(k.expiresAt !== null && !(Date.parse(k.expiresAt) > Date.now())),
+    );
+    const boundUser = await deps.users.findById(key.userId);
+    if (live.length === 0 && boundUser && boundUser.kind === "service" && boundUser.active) {
+      await deps.users.update(key.userId, { active: false });
+    }
+    await deps.audit.append({
+      actorId: claims.id, action: "api-key-revoked" as LifecycleAction,
+      payload: { orgId: id, keyId: key.id, name: key.name, deactivatedUser: live.length === 0 ? key.userId : null },
+    });
+    return reply.code(200).send({ key: await viewKey(revoked) });
   });
 
   // PUBLIC W3C DID resolution — a DID document is public key material; same
@@ -2607,7 +2822,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return { ...res.didDocument, registration };
   });
 
-  app.get("/me/credentials", { schema: S.myCredentials, ...auth }, async (request) => {
+  app.get("/me/credentials", { schema: S.myCredentials, ...authScoped("credentials:read") }, async (request) => {
     const claims = request.user as TokenClaims;
     if (!claims.did) return [];
     return mapHeld(await deps.credentials.listByHolder(claims.did));
@@ -2671,7 +2886,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       selfIssuedOnly: !!d.selfIssuedOnly, claimSchema: d.claimSchema,
     })));
 
-  app.post("/credentials/requests", { schema: S.requestCredential, ...auth }, async (request, reply) => {
+  app.post("/credentials/requests", { schema: S.requestCredential, ...authScoped("credentials:issue") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const b = request.body as { type: string; subjectUserId: string; claims: Record<string, unknown>; issuerOrgId?: string };
     if (claims.role !== "PlatformAdmin" && claims.role !== "OrgAdmin") {
@@ -2709,7 +2924,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return reply.code(202).send({ proposal });
   });
 
-  app.post("/credentials/:id/revoke", { schema: S.revokeCredential, ...auth }, async (request, reply) => {
+  app.post("/credentials/:id/revoke", { schema: S.revokeCredential, ...authScoped("credentials:revoke") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const { id } = request.params as { id: string };
     const { reason } = request.body as { reason: string };
@@ -2843,7 +3058,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     };
   });
 
-  app.get("/orgs/:id/credentials", { schema: S.orgCredentials, ...auth }, async (request, reply) => {
+  app.get("/orgs/:id/credentials", { schema: S.orgCredentials, ...authScoped("credentials:read") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const { id } = request.params as { id: string };
     if (!orgScoped(claims, id)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to view that organization's credentials" });
@@ -2855,7 +3070,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     }));
   });
 
-  app.get("/orgs/:id/wallet", { schema: S.orgWallet, ...auth }, async (request, reply) => {
+  app.get("/orgs/:id/wallet", { schema: S.orgWallet, ...authScoped("credentials:read") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const { id } = request.params as { id: string };
     if (!orgScoped(claims, id)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to view that organization's wallet" });
@@ -2876,7 +3091,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     };
   }
 
-  app.post("/verification-requests", { schema: S.createVerificationRequest, ...auth }, async (request, reply) => {
+  app.post("/verification-requests", { schema: S.createVerificationRequest, ...authScoped("verifications:request") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const b = request.body as { holderDid: string; requestedTypes: string[]; purpose: string; credentialUseCaseKey?: string };
 
@@ -2892,6 +3107,19 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       }
       const def = await deps.credentialUseCases.get(key);
       if (!def) return notFound(reply, `credential use case '${key}' not found`);
+      // EN-B use-time binding re-check, FOR MACHINE PRINCIPALS ONLY — the mirror
+      // of the one in resolveIssuer, and for the same reason: a Verifier desk is
+      // authorized by role + useCaseKey alone, and EN-A deliberately kept an
+      // already-minted desk working after its use case's verifier binding
+      // changed. An unattended key must not outlive that config change; an
+      // interactive desk keeps today's behaviour. An org-less desk operator has
+      // no binding to re-check and is skipped.
+      if (machinePrincipal(request) && claims.orgId) {
+        const bound = def.ownerOrgId === claims.orgId || verifierBindingAllows(def.verifier, claims.orgId);
+        if (!bound) {
+          return reply.code(403).send({ error: "VERIFIER_NOT_PERMITTED", message: "your organization is no longer bound to this use case's verifier" });
+        }
+      }
       const names = new Set(def.credentialTypes.map((t) => t.name));
       if (!b.requestedTypes.every((t) => names.has(t))) {
         return reply.code(400).send({ error: "TYPES_NOT_IN_USECASE", message: "a requested type is not part of this use case" });
@@ -2947,7 +3175,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return reply.code(201).send(vreqView(rec));
   });
 
-  app.get("/me/verification-requests", { schema: S.myVerificationRequests, ...auth }, async (request) => {
+  app.get("/me/verification-requests", { schema: S.myVerificationRequests, ...authScoped("verifications:read") }, async (request) => {
     const claims = request.user as TokenClaims;
     if (!claims.did) return [];
     const rows = await deps.verificationRequests.listByHolder(claims.did);
@@ -2960,7 +3188,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     }));
   });
 
-  app.get("/verification-requests/:id", { schema: S.getVerificationRequest, ...auth }, async (request, reply) => {
+  app.get("/verification-requests/:id", { schema: S.getVerificationRequest, ...authScoped("verifications:read") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const { id } = request.params as { id: string };
     const r = await deps.verificationRequests.get(id);
@@ -3024,7 +3252,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return vreqView(updated);
   });
 
-  app.get("/verification-requests/:id/verify", { schema: S.verifyVerificationRequest, ...auth }, async (request, reply) => {
+  app.get("/verification-requests/:id/verify", { schema: S.verifyVerificationRequest, ...authScoped("verifications:verify") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const { id } = request.params as { id: string };
     const r = await deps.verificationRequests.get(id);

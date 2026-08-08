@@ -1,6 +1,6 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { PolicyError, type Actor, type AssetContext, type Role } from "@tokenlayer/core";
-import { prefixOf, secretMatches } from "../api-keys.js";
+import { PolicyError, scopeAllows, type Actor, type ApiScope, type AssetContext, type Role } from "@tokenlayer/core";
+import { cachedVerification, prefixOf, rememberVerification, secretMatches } from "../api-keys.js";
 import type { ApiKeyRepository, AssetRecord, UserRecord, UserRepository } from "../persistence/types.js";
 
 export interface TokenClaims {
@@ -55,6 +55,13 @@ export function contextOf(asset: AssetRecord): AssetContext {
  */
 const LAST_USED_THROTTLE_MS = 60_000;
 
+/** Per-key request budget window, and the window failed verifications age out of. */
+const RATE_WINDOW_MS = 60_000;
+const FAILED_WINDOW_MS = 60_000;
+/** Defaults; both are overridable through AppDeps (tests dial them down). */
+const DEFAULT_RATE_MAX = 600;
+const DEFAULT_FAILED_MAX = 20;
+
 /** The raw credential from `Authorization: Bearer …`, or null when absent/malformed. */
 function bearerOf(header: string | undefined): string | null {
   if (!header) return null;
@@ -99,7 +106,41 @@ function isExpired(expiresAt: string | null): boolean {
  * role/use-case from the source of truth, so a demoted or re-scoped principal
  * takes effect immediately rather than persisting in a stale token.
  */
-export function requirePrincipal(deps: { users: UserRepository; apiKeys: ApiKeyRepository }) {
+export function requirePrincipal(deps: {
+  users: UserRepository;
+  apiKeys: ApiKeyRepository;
+  /** Per-key requests per minute (default 600). */
+  apiKeyRateLimitMax?: number;
+  /** Failed verifications per prefix per minute before the prefix is refused unhashed (default 20). */
+  apiKeyFailedAttemptMax?: number;
+}) {
+  const rateMax = deps.apiKeyRateLimitMax ?? DEFAULT_RATE_MAX;
+  const failedMax = deps.apiKeyFailedAttemptMax ?? DEFAULT_FAILED_MAX;
+  // Per-INSTANCE, in-process counters — the same honest limitation the login
+  // throttle documents: this bounds one process, not a cluster.
+  const rateHits = new Map<string, { count: number; resetAt: number }>();
+  const failedHits = new Map<string, { count: number; resetAt: number }>();
+
+  /** Fixed-window counter shared by both budgets. Returns the running count. */
+  function bump(store: Map<string, { count: number; resetAt: number }>, k: string, windowMs: number): { count: number; resetAt: number } {
+    const now = Date.now();
+    const e = store.get(k);
+    if (!e || now > e.resetAt) {
+      const fresh = { count: 1, resetAt: now + windowMs };
+      store.set(k, fresh);
+      return fresh;
+    }
+    e.count += 1;
+    return e;
+  }
+
+  /** True when `k` has already spent `max` in the current (unexpired) window. */
+  function overBudget(store: Map<string, { count: number; resetAt: number }>, k: string, max: number): boolean {
+    if (max <= 0) return false;
+    const e = store.get(k);
+    return !!e && e.resetAt > Date.now() && e.count >= max;
+  }
+
   return async function (request: FastifyRequest, reply: FastifyReply): Promise<void> {
     const raw = bearerOf(request.headers.authorization);
     const prefix = raw === null ? null : prefixOf(raw);
@@ -131,22 +172,51 @@ export function requirePrincipal(deps: { users: UserRepository; apiKeys: ApiKeyR
       await rejectUnauthenticated(reply);
       return;
     }
-    // COST, KNOWN AND DEFERRED TO B4: the prefix is public by design (see
-    // api-keys.ts), so anyone who reads one off the UI can send
-    // `tl_live_<prefix>` + garbage and force a full bcrypt compare per request
-    // — ~200ms at BCRYPT_ROUNDS=12, and bcryptjs is pure JS, so concurrency
-    // does not help. Nothing throttles this preHandler today (`loginThrottled`
-    // covers only /auth/login and the QR route), and B4's per-key rate limit is
-    // applied only AFTER successful verification, so it does not bound failures.
-    // B4 owns the mitigation: a dedicated lower cost factor for high-entropy key
-    // secrets, the verified-prefix cache, and a bound on FAILED attempts per prefix.
-    if (!(await secretMatches(raw, key.secretHash))) {
-      await rejectUnauthenticated(reply);
-      return;
+    // THE COST PROBLEM, AND ITS THREE ANSWERS.
+    // A prefix is public by design (it is displayed in the UI), so anyone can
+    // send `tl_live_<known-prefix>` + garbage and try to force a full bcrypt
+    // compare per request. bcryptjs is pure JS and CPU-bound, so concurrency
+    // does not help and the event loop is what suffers.
+    //   1. API_KEY_BCRYPT_ROUNDS (10, not 12) — see api-keys.ts: the secret's
+    //      ~131 bits, not the work factor, is what defeats an offline attack.
+    //   2. The verified-prefix cache, consulted FIRST so a hot legitimate key
+    //      never pays bcrypt and — deliberately — is never locked out by (3).
+    //   3. A bound on FAILED verifications per prefix, below.
+    // Order matters: cache hit → serve; else failure budget → refuse unhashed;
+    // else hash. The reverse order would let an attacker knock a live key off
+    // the air by burning its budget.
+    const cached = cachedVerification(prefix, raw, key);
+    if (!cached) {
+      // TRADEOFF, ACCEPTED AND BOUNDED: once a prefix's failure budget is spent
+      // the window refuses even the RIGHT secret for a COLD key (one absent
+      // from the cache). Unbounded CPU burn is the worse failure — it takes the
+      // whole process down for every tenant, not one key for one minute.
+      if (overBudget(failedHits, prefix, failedMax)) {
+        await rejectUnauthenticated(reply);
+        return;
+      }
+      if (!(await secretMatches(raw, key.secretHash))) {
+        bump(failedHits, prefix, FAILED_WINDOW_MS);
+        await rejectUnauthenticated(reply);
+        return;
+      }
+      rememberVerification(prefix, raw, key);
+      failedHits.delete(prefix); // a real verification clears the prefix's failure history
     }
     const user = await deps.users.findById(key.userId);
     if (!user || !user.active) {
       await rejectUnauthenticated(reply);
+      return;
+    }
+    // Per-key budget, counted only for CREDENTIALS THAT VERIFIED — an attacker
+    // holding a prefix but not the secret must not be able to spend the real
+    // integration's allowance. Per instance, like the login throttle.
+    const budget = bump(rateHits, key.id, RATE_WINDOW_MS);
+    if (rateMax > 0 && budget.count > rateMax) {
+      await reply
+        .code(429)
+        .header("Retry-After", String(Math.max(1, Math.ceil((budget.resetAt - Date.now()) / 1000))))
+        .send({ error: "RATE_LIMITED", message: "this API key has exceeded its request rate limit" });
       return;
     }
     request.user = claimsOf(user);
@@ -161,6 +231,41 @@ export function requirePrincipal(deps: { users: UserRepository; apiKeys: ApiKeyR
       await deps.apiKeys.touchLastUsed(key.id, new Date(now).toISOString());
     }
   };
+}
+
+/**
+ * Composed onto a route AFTER `requirePrincipal`, narrowing what a key may do.
+ *
+ * A JWT request carries no key, so it passes unconditionally: scopes are a
+ * property of keys, not of people, and there is nothing to narrow. This is also
+ * why `requireScope` can never WIDEN anything — it only ever subtracts from what
+ * the bound service user's role and the org's EN-A envelope already allow, both
+ * of which still run inside the route.
+ */
+export function requireScope(required: ApiScope) {
+  return async function (request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    const key = request.apiKey;
+    if (!key) return;
+    if (!scopeAllows(key.scopes, required)) {
+      await reply.code(403).send({
+        error: "INSUFFICIENT_SCOPE",
+        message: `this API key lacks the '${required}' scope`,
+        details: { required, granted: key.scopes },
+      });
+    }
+  };
+}
+
+/**
+ * Refuse a machine principal outright. Used where an API key could mint a
+ * DURABLE human credential that outlives the key's own revocation — a device
+ * login key, another API key, or a password on an existing account.
+ * Gates on `request.apiKey` (the in-request machine signal), never on the bound
+ * user's `kind`: TokenClaims deliberately carries no `kind`, and this is
+ * strictly broader anyway, covering a key bound to a human user too.
+ */
+export function machinePrincipal(request: FastifyRequest): boolean {
+  return request.apiKey !== undefined;
 }
 
 /** Convenience 404 in the standard envelope. */

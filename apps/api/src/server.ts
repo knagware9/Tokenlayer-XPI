@@ -114,6 +114,8 @@ async function main(): Promise<void> {
     platformFeeAccount: env.platformFeeAccount,
     marketEscrowAccount: env.marketEscrowAccount,
     loginRateLimitMax: env.loginRateLimitMax,
+    apiKeyRateLimitMax: env.apiKeyRateLimitMax,
+    apiKeyFailedAttemptMax: env.apiKeyFailedAttemptMax,
     registry,
   };
   const platformOrg = await ensurePlatformIssuerOrg(deps);

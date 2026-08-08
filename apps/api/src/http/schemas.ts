@@ -1101,6 +1101,45 @@ export const S: Record<string, FastifySchema> = {
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403, 404) },
   },
+
+  // --- API keys (EN-B). Loose response objects throughout: the key view carries
+  // nested/nullable fields a typed schema would silently strip, and the SECRET
+  // must survive serialization on create/rotate — it exists nowhere else.
+  createApiKey: {
+    tags: ["API Keys"], summary: "Mint an org API key (secret returned once, never again)", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    body: {
+      type: "object", additionalProperties: false, required: ["name", "role", "scopes"],
+      properties: {
+        name: { type: "string", minLength: 1 },
+        // Same enum as createMember: an out-of-rank role is a 403 from
+        // canCreateOrgMember (authorization), not a 400 (validation).
+        role: { type: "string", enum: ["PlatformAdmin", "OrgAdmin", "UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor", "Holder", "Verifier"] },
+        useCaseKey: { type: "string" },
+        // Loose: the route runs core's validateScopes for the real validation
+        // (400 INVALID_SCOPES), so the vocabulary lives in exactly one place.
+        scopes: { type: "array", items: { type: "string" } },
+        expiresAt: { type: "string" },
+      },
+    },
+    response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
+  },
+  listApiKeys: {
+    tags: ["API Keys"], summary: "List an organization's API keys (never the secret)", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403, 404) },
+  },
+  rotateApiKey: {
+    tags: ["API Keys"], summary: "Rotate an API key's secret (the old one dies immediately)", security: bearer,
+    params: { type: "object", required: ["id", "keyId"], properties: { id: { type: "string" }, keyId: { type: "string" } } },
+    body: { type: "object", additionalProperties: false, properties: {} },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404, 409) },
+  },
+  revokeApiKey: {
+    tags: ["API Keys"], summary: "Revoke an API key (soft — the row stays as the audit trail)", security: bearer,
+    params: { type: "object", required: ["id", "keyId"], properties: { id: { type: "string" }, keyId: { type: "string" } } },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404) },
+  },
   myCredentials: { tags: ["Identity"], summary: "Credentials held by the caller", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401) } },
   identityDashboard: {
     tags: ["Identity"], summary: "Scoped identity operations dashboard (credential lifecycle + verification aggregates)", security: bearer,

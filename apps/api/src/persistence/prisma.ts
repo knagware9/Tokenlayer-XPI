@@ -1033,8 +1033,11 @@ export class PrismaApiKeyRepository implements ApiKeyRepository {
     return r ? toApiKey(r) : null;
   }
   /** Revoked/expired keys are deliberately NOT filtered — they are the audit trail. */
-  async listByOrg(orgId: string): Promise<ApiKeyRecord[]> {
+  async listByOrg(orgId: string | null): Promise<ApiKeyRecord[]> {
     return (await prisma.apiKey.findMany({ where: { orgId }, orderBy: { createdAt: "desc" } })).map(toApiKey);
+  }
+  async rotate(id: string, input: { prefix: string; secretHash: string }): Promise<ApiKeyRecord> {
+    return toApiKey(await prisma.apiKey.update({ where: { id }, data: { prefix: input.prefix, secretHash: input.secretHash } }));
   }
   async touchLastUsed(id: string, at: string): Promise<void> {
     await prisma.apiKey.update({ where: { id }, data: { lastUsedAt: new Date(at) } });

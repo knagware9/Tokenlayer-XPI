@@ -171,6 +171,14 @@ export class MemoryAuditRepository implements AuditRepository {
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     return paginate(matched, page);
   }
+  /**
+   * Every entry, oldest first. Deliberately NOT part of `AuditRepository`: it is
+   * an in-memory introspection affordance for tests (against Prisma one queries
+   * the database directly), so the interface stays the read shape routes use.
+   */
+  async list(): Promise<AuditEntryRecord[]> {
+    return [...this.entries];
+  }
 }
 
 function paginate<T>(rows: T[], page: Page): Paged<T> {
@@ -675,10 +683,23 @@ export class MemoryApiKeyRepository implements ApiKeyRepository {
     return this.byId.get(keyId) ?? null;
   }
   /** Revoked/expired keys are deliberately NOT filtered — they are the audit trail. */
-  async listByOrg(orgId: string): Promise<ApiKeyRecord[]> {
+  async listByOrg(orgId: string | null): Promise<ApiKeyRecord[]> {
     return [...this.byId.values()]
       .filter((k) => k.orgId === orgId)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+  async rotate(keyId: string, input: { prefix: string; secretHash: string }): Promise<ApiKeyRecord> {
+    const rec = this.byId.get(keyId);
+    if (!rec) throw new Error(`unknown api key '${keyId}'`);
+    // Same unique-prefix parity the create path enforces.
+    for (const k of this.byId.values()) {
+      if (k.id !== keyId && k.prefix === input.prefix) {
+        throw Object.assign(new Error("Unique constraint failed on (prefix)"), { code: "P2002" });
+      }
+    }
+    rec.prefix = input.prefix;
+    rec.secretHash = input.secretHash;
+    return rec;
   }
   async touchLastUsed(keyId: string, at: string): Promise<void> {
     const rec = this.byId.get(keyId);

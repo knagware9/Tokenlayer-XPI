@@ -577,8 +577,19 @@ export interface ApiKeyRepository {
   /**
    * Every key of the org, newest first — INCLUDING revoked and expired ones:
    * they are the audit trail of what was ever granted, so nothing is filtered.
+   *
+   * `null` lists PLATFORM-owned keys (the `orgId: null` rows). Without this the
+   * null-org affordance would be write-only — a key nothing could ever
+   * enumerate, which is a worse thing to own than no affordance at all. The
+   * HTTP surface never mints one (a PlatformAdmin uses the platform org's real
+   * id), so this is the seed/operator path.
    */
-  listByOrg(orgId: string): Promise<ApiKeyRecord[]>;
+  listByOrg(orgId: string | null): Promise<ApiKeyRecord[]>;
+  /**
+   * Replace the secret in place: same row, same id/scopes/bound user, new
+   * `prefix` + `secretHash`. The old secret dies the instant this returns.
+   */
+  rotate(id: string, input: { prefix: string; secretHash: string }): Promise<ApiKeyRecord>;
   /** Last-use stamp; callers throttle the write (see the design's compare-then-write). */
   touchLastUsed(id: string, at: string): Promise<void>;
   /** Soft revoke: sets `revokedAt`/`revokedBy`, keeping the row for the audit trail. */

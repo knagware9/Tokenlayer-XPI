@@ -40,7 +40,7 @@ export const TEST_MARKET_ESCROW = "0xcd3B766CCDd6AE721141F452C550Ca635964ce71";
 /** A second seeded PlatformAdmin (test-only) — the SoD checker for null-scope / brand-new-use-case onboarding proposals the sole admin proposes. */
 export const PLATFORM_ADMIN_2 = { email: "admin2@tokenlayer.dev", password: "admin123" } as const;
 
-export interface TestAppOptions { loginRateLimitMax?: number; platformFeeAccount?: string; marketEscrowAccount?: string; trustedKycIssuers?: string[]; devIssuerSeed?: string; isProduction?: boolean; didMasterConfigured?: boolean; registry?: IdentityRegistry; enabledDomains?: string[] }
+export interface TestAppOptions { loginRateLimitMax?: number; apiKeyRateLimitMax?: number; apiKeyFailedAttemptMax?: number; platformFeeAccount?: string; marketEscrowAccount?: string; trustedKycIssuers?: string[]; devIssuerSeed?: string; isProduction?: boolean; didMasterConfigured?: boolean; registry?: IdentityRegistry; enabledDomains?: string[] }
 
 /**
  * The app plus the repositories tests need to reach directly — used where a
@@ -53,6 +53,7 @@ export interface TestAppHandle {
   apiKeys: MemoryApiKeyRepository;
   loginKeys: MemoryLoginKeyRepository;
   organizations: MemoryOrganizationRepository;
+  audit: MemoryAuditRepository;
 }
 
 export async function buildTestApp(opts: TestAppOptions = {}): Promise<FastifyInstance> {
@@ -100,6 +101,8 @@ export async function buildTestAppWithRepos(opts: TestAppOptions = {}): Promise<
     devIssuerSeed: opts.devIssuerSeed, isProduction: opts.isProduction,
     currencies: loadCurrencies(), jwtSecret: "test-secret", publicApiUrl: "http://test.local/api/v1",
     loginRateLimitMax: opts.loginRateLimitMax ?? 100000,
+    apiKeyRateLimitMax: opts.apiKeyRateLimitMax,
+    apiKeyFailedAttemptMax: opts.apiKeyFailedAttemptMax,
     platformFeeAccount: opts.platformFeeAccount,
     // Enabled by default so market routes are testable; an explicit
     // `marketEscrowAccount: undefined` disables the market (503s).
@@ -107,7 +110,7 @@ export async function buildTestAppWithRepos(opts: TestAppOptions = {}): Promise<
     registry: opts.registry,
   };
   await ensurePlatformIssuerOrg(deps);
-  return { app: await buildApp(deps), users, apiKeys, loginKeys, organizations };
+  return { app: await buildApp(deps), users, apiKeys, loginKeys, organizations, audit };
 }
 
 /** All v1 API routes live under this prefix. */
