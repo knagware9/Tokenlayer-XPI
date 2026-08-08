@@ -2486,10 +2486,14 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (!canCreateOrgMember(claims.role, b.role)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to create that member role" });
     const org = await deps.organizations.get(id);
     if (!org) return notFound(reply, "organization not found");
+    // "" is normalized to null ONCE, before any gate reads it, so an empty-string
+    // key can never slip past a truthiness-guarded check downstream (the standing
+    // ""-vs-null gate-bypass lesson); every use below reads `memberUseCaseKey`.
+    const memberUseCaseKey = b.useCaseKey || null;
     // EN-A member-add filter (shared with POST /users). A PlatformAdmin bypasses
     // entirely (platform override).
     if (claims.role !== "PlatformAdmin") {
-      const missing = await orgMemberCapabilityViolation(org, b.role, b.useCaseKey ?? null);
+      const missing = await orgMemberCapabilityViolation(org, b.role, memberUseCaseKey);
       if (missing) return orgCapabilityMissing(reply, org, missing);
     }
     // EN-A review fix: A4 widened this route's role enum to the org-internal
@@ -2505,19 +2509,22 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     // holderPolicy at issuance time), so a Holder member's key grants nothing.
     // A TOKENIZATION key is likewise harmless: the desk-verifier branch only
     // ever resolves the credential-use-case catalog. Both stay ungated.
-    if (b.useCaseKey && (b.role === "Verifier" || b.role === "Holder")) {
-      const domain = await resolveUseCaseDomain(b.useCaseKey);
+    if (memberUseCaseKey && (b.role === "Verifier" || b.role === "Holder")) {
+      const domain = await resolveUseCaseDomain(memberUseCaseKey);
       // Same code the sibling POST /users route uses for an unknown key.
-      if (!domain) return reply.code(404).send({ error: "USE_CASE_NOT_FOUND", message: `no use case '${b.useCaseKey}'` });
+      if (!domain) return reply.code(404).send({ error: "USE_CASE_NOT_FOUND", message: `no use case '${memberUseCaseKey}'` });
       if (b.role === "Verifier" && domain === "identity" && claims.role !== "PlatformAdmin") {
-        const def = await deps.credentialUseCases.get(b.useCaseKey);
-        if (def && def.ownerOrgId !== org.id && !verifierBindingAllows(def.verifier, org.id)) {
+        const def = await deps.credentialUseCases.get(memberUseCaseKey);
+        // A vanished def (TOCTOU against resolveUseCaseDomain's listing) fails
+        // CLOSED rather than open — the key named a use case that no longer exists.
+        if (!def) return reply.code(404).send({ error: "USE_CASE_NOT_FOUND", message: `no use case '${memberUseCaseKey}'` });
+        if (def.ownerOrgId !== org.id && !verifierBindingAllows(def.verifier, org.id)) {
           // A BINDING failure, not a capability one — distinct error, and it
           // bites for a legacy (null-envelope) org too.
           return reply.code(403).send({
             error: "ORG_NOT_BOUND",
-            message: `organization '${org.name}' is neither the owner nor a bound verifier of credential use case '${b.useCaseKey}'`,
-            details: { orgId: org.id, useCaseKey: b.useCaseKey },
+            message: `organization '${org.name}' is neither the owner nor a bound verifier of credential use case '${memberUseCaseKey}'`,
+            details: { orgId: org.id, useCaseKey: memberUseCaseKey },
           });
         }
       }
@@ -2527,7 +2534,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (b.walletAddress) accountId = (await deps.accounts.upsert(b.walletAddress, b.email)).id;
     const created = await deps.users.create({
       email: b.email, passwordHash: await bcrypt.hash(b.password, BCRYPT_ROUNDS), role: b.role,
-      useCaseKey: b.useCaseKey ?? null, accountId, active: true, kycStatus: "pending", kyc: b.kyc ?? null, orgId: id,
+      useCaseKey: memberUseCaseKey, accountId, active: true, kycStatus: "pending", kyc: b.kyc ?? null, orgId: id,
     });
     let did: string;
     try {
