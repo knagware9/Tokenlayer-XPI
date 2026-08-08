@@ -6,7 +6,7 @@
  * proposals; a second OrgAdmin cannot exist without PlatformAdmin action, so
  * approval is effectively platform-gated (the sole proposer is blocked by SoD).
  */
-import type { UseCaseDefinition } from "@tokenlayer/core";
+import { orgDomainEnabled, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "./context.js";
 import { coded } from "./executors.js";
 import type { TokenClaims } from "./http/support.js";
@@ -29,6 +29,16 @@ export const createUseCaseKind: ProposalKindHandler = {
     // credential use cases alike).
     if (await ctx.deps.useCases.has(def.key)) throw coded(409, "USECASE_EXISTS", `use case '${def.key}' already exists`);
     if (await ctx.deps.credentialUseCases.has(def.key)) throw coded(409, "KEY_TAKEN", `use-case key '${def.key}' already exists`);
+    // EN-A: the owning org must STILL have the tokenization domain — its
+    // envelope may have been tightened between propose and approve (the drafting
+    // route's friendly 403 is only a snapshot). A null (legacy) envelope passes;
+    // a vanished org fails nothing new here (ownership is not existence-checked).
+    if (def.ownerOrgId) {
+      const owner = await ctx.deps.organizations.get(def.ownerOrgId).catch(() => null);
+      if (owner && !orgDomainEnabled(owner.capabilities, "tokenization")) {
+        throw coded(403, "ORG_CAPABILITY_MISSING", `organization '${owner.name}' does not have the 'tokenization' capability`);
+      }
+    }
     const available = new Set(ctx.deps.chains.list().map((c) => c.id));
     // Deploy + persist via the shared helper so the NO_DEPLOYABLE_CHAIN surface
     // stays identical to the PlatformAdmin direct-create path.

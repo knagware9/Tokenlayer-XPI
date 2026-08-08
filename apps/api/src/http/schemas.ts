@@ -1082,8 +1082,10 @@ export const S: Record<string, FastifySchema> = {
         password: { type: "string", minLength: 6 },
         // "PlatformAdmin" is deliberately allowed through validation so that
         // `canCreateOrgMember` rejects the escalation with a 403 (authorization),
-        // rather than the schema masking it as a 400 (validation).
-        role: { type: "string", enum: ["PlatformAdmin", "OrgAdmin", "UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"] },
+        // rather than the schema masking it as a 400 (validation). Holder/Verifier
+        // are org-internal roles (core ORG_INTERNAL_ROLES) — EN-A's member-add
+        // envelope filter gates them, so the schema must let them through.
+        role: { type: "string", enum: ["PlatformAdmin", "OrgAdmin", "UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor", "Holder", "Verifier"] },
         useCaseKey: { type: "string" },
         walletAddress: { type: "string" },
         kyc: { type: "object", additionalProperties: false, properties: { legalName: { type: "string" }, country: { type: "string" }, idType: { type: "string" }, idNumber: { type: "string" }, documentRef: { type: "string" } } },

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { describe, expect, it } from "vitest";
 import { MemoryOrganizationRepository } from "../src/persistence/memory.js";
-import { buildTestApp, loginAs, V1 } from "./helpers.js";
+import { auth, buildTestApp, loginAs, onboardUser, V1 } from "./helpers.js";
 
 describe("Organization.capabilities persistence (EN-A task A2)", () => {
   it("create stores an explicit envelope; setCapabilities replaces it; null round-trips", async () => {
@@ -32,43 +32,46 @@ describe("Organization.capabilities persistence (EN-A task A2)", () => {
   });
 });
 
-describe("capability acquisition (EN-A task A3)", () => {
-  const PDF = Buffer.from("%PDF-1.4 fake cin certificate").toString("base64");
-  const ENVELOPE = { domains: ["identity"], roles: ["Issuer", "Verifier"] };
+// --- shared corporate-signup fixtures (used by the A3 + A4 describes) -------
 
-  interface RegOpts { name: string; cin: string; email: string; capabilities?: unknown }
+const PDF = Buffer.from("%PDF-1.4 fake cin certificate").toString("base64");
 
-  /** Upload a KYB doc then self-register an org (optionally with a capability envelope). */
-  async function registerOrg(app: FastifyInstance, opts: RegOpts) {
-    const up = await app.inject({ method: "POST", url: `${V1}/orgs/register/documents`, payload: { contentType: "application/pdf", dataBase64: PDF } });
-    expect(up.statusCode).toBe(201);
-    return app.inject({
-      method: "POST", url: `${V1}/orgs/register`,
-      payload: {
-        company: {
-          name: opts.name, orgType: "corporate", cin: opts.cin, pan: "AABCU9603R",
-          state: "Maharashtra", pincode: "400001", dateOfIncorporation: "2020-06-15",
-          category: "private-limited", companyStatus: "active",
-          documents: { cinCertificate: { id: (up.json() as { id: string }).id } },
-        },
-        admin: { name: "Caps Admin", email: opts.email, password: "corp-secret-1" },
-        ...(opts.capabilities !== undefined ? { capabilities: opts.capabilities } : {}),
+interface RegOpts { name: string; cin: string; email: string; capabilities?: unknown }
+
+/** Upload a KYB doc then self-register an org (optionally with a capability envelope). */
+async function registerOrg(app: FastifyInstance, opts: RegOpts) {
+  const up = await app.inject({ method: "POST", url: `${V1}/orgs/register/documents`, payload: { contentType: "application/pdf", dataBase64: PDF } });
+  expect(up.statusCode).toBe(201);
+  return app.inject({
+    method: "POST", url: `${V1}/orgs/register`,
+    payload: {
+      company: {
+        name: opts.name, orgType: "corporate", cin: opts.cin, pan: "AABCU9603R",
+        state: "Maharashtra", pincode: "400001", dateOfIncorporation: "2020-06-15",
+        category: "private-limited", companyStatus: "active",
+        documents: { cinCertificate: { id: (up.json() as { id: string }).id } },
       },
-    });
-  }
+      admin: { name: "Caps Admin", email: opts.email, password: "corp-secret-1" },
+      ...(opts.capabilities !== undefined ? { capabilities: opts.capabilities } : {}),
+    },
+  });
+}
 
-  /** register → PlatformAdmin approve → OrgAdmin login. */
-  async function approvedOrg(app: FastifyInstance, platform: string, opts: RegOpts) {
-    const res = await registerOrg(app, opts);
-    expect(res.statusCode).toBe(202);
-    const orgId = res.json().organizationId as string;
-    const appr = await app.inject({ method: "POST", url: `${V1}/orgs/${orgId}/approve`, headers: { authorization: `Bearer ${platform}` }, payload: {} });
-    expect(appr.statusCode).toBe(200);
-    return { orgId, adminTok: await loginAs(app, opts.email, "corp-secret-1") };
-  }
+/** register → PlatformAdmin approve → OrgAdmin login. */
+async function approvedOrg(app: FastifyInstance, platform: string, opts: RegOpts) {
+  const res = await registerOrg(app, opts);
+  expect(res.statusCode).toBe(202);
+  const orgId = res.json().organizationId as string;
+  const appr = await app.inject({ method: "POST", url: `${V1}/orgs/${orgId}/approve`, headers: { authorization: `Bearer ${platform}` }, payload: {} });
+  expect(appr.statusCode).toBe(200);
+  return { orgId, adminTok: await loginAs(app, opts.email, "corp-secret-1") };
+}
 
-  const getOrg = async (app: FastifyInstance, token: string, id: string) =>
-    (await app.inject({ method: "GET", url: `${V1}/orgs/${id}`, headers: { authorization: `Bearer ${token}` } })).json();
+const getOrg = async (app: FastifyInstance, token: string, id: string) =>
+  (await app.inject({ method: "GET", url: `${V1}/orgs/${id}`, headers: { authorization: `Bearer ${token}` } })).json();
+
+describe("capability acquisition (EN-A task A3)", () => {
+  const ENVELOPE = { domains: ["identity"], roles: ["Issuer", "Verifier"] };
 
   it("register WITH capabilities → pending org stores them; approval carries them into the active org", async () => {
     const app = await buildTestApp();
@@ -162,5 +165,213 @@ describe("capability acquisition (EN-A task A3)", () => {
     expect(login.json().user.orgCapabilities).toEqual(ENVELOPE);
     const adminLogin = await app.inject({ method: "POST", url: `${V1}/auth/login`, payload: { email: "admin@tokenlayer.dev", password: "admin123" } });
     expect(adminLogin.json().user.orgCapabilities).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A4 — the envelope BITES: enforcement at the eight org-action gates. Every
+// check is null-tolerant (a legacy org passes everything), so each negative
+// 403 ORG_CAPABILITY_MISSING is paired with a positive (in-envelope or legacy).
+// ---------------------------------------------------------------------------
+describe("capability enforcement (EN-A task A4)", () => {
+  /** Identity-domain envelope with ONLY the Issuer role. */
+  const ID_ISSUER = { domains: ["identity"], roles: ["Issuer"] };
+  /** Tokenization-only envelope with every operating role. */
+  const TOK_FULL = { domains: ["tokenization"], roles: ["Issuer", "Holder", "Verifier"] };
+
+  const KYC_TYPE = {
+    name: "KycCredential", title: "KYC", validityDays: 365, requiredApprovals: 1,
+    claimSchema: { type: "object", required: ["legalName", "country"], properties: { legalName: { type: "string" }, country: { type: "string", pattern: "^[A-Z]{2}$" } } },
+  };
+  /** A minimal valid credential-use-case definition (platform issuer, open holder/verifier). */
+  const CUC = (key: string, over: Record<string, unknown> = {}) => ({
+    key, name: `UC ${key}`, credentialTypes: [KYC_TYPE],
+    issuer: { kind: "platform" }, holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
+    ...over,
+  });
+  /** A complete, schema-valid TOKENIZATION definition deployable in the test app (fabric). */
+  const TOK_DEF = (key: string) => ({
+    key, name: `Notes ${key}`, symbol: "NTS", tokenStandard: "ERC-20",
+    allowedChainIds: ["fabric"], defaultChainId: "fabric",
+    metadataSchema: { type: "object", properties: {} },
+    lifecycle: { mint: true, transfer: true, burn: true, freeze: true },
+    compliance: { allowlist: true, transferRestrictions: false },
+    roles: ["UseCaseAdmin", "Issuer"],
+  });
+
+  let n = 0;
+  /** register+approve an org with the given envelope (omit for a legacy null org). */
+  async function envOrg(app: FastifyInstance, platform: string, capabilities?: unknown) {
+    n += 1;
+    const made = await approvedOrg(app, platform, {
+      name: `Enforce Co ${n}`, cin: `ENF-CIN-${n}`, email: `enf-${n}@x.dev`,
+      ...(capabilities !== undefined ? { capabilities } : {}),
+    });
+    return { ...made, name: `Enforce Co ${n}` };
+  }
+
+  function expectMissing(res: { statusCode: number; json: () => { error: string; details?: unknown } }, orgId: string, missing: string) {
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("ORG_CAPABILITY_MISSING");
+    expect(res.json().details).toEqual({ orgId, missing });
+  }
+
+  it("gate 1 — issuer binding at config time: identity Issuer binds ok; tokenization-only org 403 (identity); role-less identity org 403 (Issuer)", async () => {
+    const app = await buildTestApp();
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const good = await envOrg(app, platform, ID_ISSUER);
+    const tok = await envOrg(app, platform, TOK_FULL);
+    const holderOnly = await envOrg(app, platform, { domains: ["identity"], roles: ["Holder"] });
+
+    const ok = await app.inject({ method: "POST", url: `${V1}/credential-use-cases`, headers: auth(platform), payload: CUC("bind-ok", { issuer: { kind: "org", orgId: good.orgId } }) });
+    expect(ok.statusCode).toBe(201);
+
+    const wrongDomain = await app.inject({ method: "POST", url: `${V1}/credential-use-cases`, headers: auth(platform), payload: CUC("bind-dom", { issuer: { kind: "org", orgId: tok.orgId } }) });
+    expectMissing(wrongDomain, tok.orgId, "identity");
+
+    const wrongRole = await app.inject({ method: "POST", url: `${V1}/credential-use-cases`, headers: auth(platform), payload: CUC("bind-role", { issuer: { kind: "org", orgId: holderOnly.orgId } }) });
+    expectMissing(wrongRole, holderOnly.orgId, "Issuer");
+  });
+
+  it("gate 2 — issue-time defense in depth: bind while allowed → platform tightens → issuing now 403", async () => {
+    const app = await buildTestApp();
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const checker = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    const capped = await envOrg(app, platform, ID_ISSUER);
+
+    const made = await app.inject({ method: "POST", url: `${V1}/credential-use-cases`, headers: auth(platform), payload: CUC("did-uc", { issuer: { kind: "org", orgId: capped.orgId } }) });
+    expect(made.statusCode).toBe(201);
+    const subject = await onboardUser(app, platform, checker, {
+      email: "did-subj@x.dev", password: "secret1", role: "Buyer", useCaseKey: "invoice-tokenization",
+      walletAddress: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+    });
+    const issueBody = { credentialType: "KycCredential", subjectUserId: subject.id, claims: { legalName: "Acme Ltd", country: "IN" } };
+
+    // In-envelope: the bound org's OrgAdmin issues (202 proposal).
+    const before = await app.inject({ method: "POST", url: `${V1}/credential-use-cases/did-uc/credentials`, headers: auth(capped.adminTok), payload: issueBody });
+    expect(before.statusCode).toBe(202);
+
+    // The platform tightens the envelope (Issuer removed) — the binding predates it.
+    const tighten = await app.inject({ method: "PATCH", url: `${V1}/orgs/${capped.orgId}/capabilities`, headers: auth(platform), payload: { capabilities: { domains: ["identity"], roles: [] } } });
+    expect(tighten.statusCode).toBe(200);
+
+    const after = await app.inject({ method: "POST", url: `${V1}/credential-use-cases/did-uc/credentials`, headers: auth(capped.adminTok), payload: issueBody });
+    expectMissing(after, capped.orgId, "Issuer");
+  });
+
+  it("gate 3 — verification request: org without Verifier 403; a capability change granting Verifier makes it succeed", async () => {
+    const app = await buildTestApp();
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const capped = await envOrg(app, platform, ID_ISSUER);
+    expect((await app.inject({ method: "POST", url: `${V1}/credential-use-cases`, headers: auth(platform), payload: CUC("verify-uc") })).statusCode).toBe(201);
+    const reqBody = { holderDid: "did:key:z6MkExampleHolder", requestedTypes: ["KycCredential"], purpose: "kyc check", credentialUseCaseKey: "verify-uc" };
+
+    const denied = await app.inject({ method: "POST", url: `${V1}/verification-requests`, headers: auth(capped.adminTok), payload: reqBody });
+    expectMissing(denied, capped.orgId, "Verifier");
+
+    // The org REQUESTS Verifier; the platform approves the org-capability-change.
+    const ask = await app.inject({ method: "POST", url: `${V1}/orgs/${capped.orgId}/capabilities/request`, headers: auth(capped.adminTok), payload: { capabilities: { domains: ["identity"], roles: ["Issuer", "Verifier"] } } });
+    expect(ask.statusCode).toBe(202);
+    const appr = await app.inject({ method: "POST", url: `${V1}/proposals/${ask.json().proposal.id}/approve`, headers: auth(platform), payload: {} });
+    expect(appr.statusCode).toBe(200);
+
+    const granted = await app.inject({ method: "POST", url: `${V1}/verification-requests`, headers: auth(capped.adminTok), payload: reqBody });
+    expect(granted.statusCode).toBe(201);
+  });
+
+  it("gate 4 — verifier binding at config time: listing a no-Verifier org 403; a legacy org lists fine", async () => {
+    const app = await buildTestApp();
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const capped = await envOrg(app, platform, ID_ISSUER); // no Verifier role
+    const legacy = await envOrg(app, platform);            // null envelope
+
+    const denied = await app.inject({ method: "POST", url: `${V1}/credential-use-cases`, headers: auth(platform), payload: CUC("vb-bad", { verifier: { kind: "orgs", orgIds: [legacy.orgId, capped.orgId] } }) });
+    expectMissing(denied, capped.orgId, "Verifier");
+
+    const ok = await app.inject({ method: "POST", url: `${V1}/credential-use-cases`, headers: auth(platform), payload: CUC("vb-ok", { verifier: { kind: "orgs", orgIds: [legacy.orgId] } }) });
+    expect(ok.statusCode).toBe(201);
+  });
+
+  it("gate 5 — org as holder (subjectOrgId): no-Holder org 403; legacy org 202", async () => {
+    const app = await buildTestApp();
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const capped = await envOrg(app, platform, ID_ISSUER); // no Holder role
+    const legacy = await envOrg(app, platform);
+    expect((await app.inject({ method: "POST", url: `${V1}/credential-use-cases`, headers: auth(platform), payload: CUC("hold-uc") })).statusCode).toBe(201);
+    const claims = { legalName: "Holdco", country: "IN" };
+
+    const denied = await app.inject({ method: "POST", url: `${V1}/credential-use-cases/hold-uc/credentials`, headers: auth(platform), payload: { credentialType: "KycCredential", subjectOrgId: capped.orgId, claims } });
+    expectMissing(denied, capped.orgId, "Holder");
+
+    const ok = await app.inject({ method: "POST", url: `${V1}/credential-use-cases/hold-uc/credentials`, headers: auth(platform), payload: { credentialType: "KycCredential", subjectOrgId: legacy.orgId, claims } });
+    expect(ok.statusCode).toBe(202);
+  });
+
+  it("gate 6 — org-owned tokenization use case: identity-only org 403 at draft; tokenization org drafts; tightening fails the pending proposal at execute", async () => {
+    const app = await buildTestApp();
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+
+    const idOnly = await envOrg(app, platform, ID_ISSUER);
+    const denied = await app.inject({ method: "POST", url: `${V1}/use-cases`, headers: auth(idOnly.adminTok), payload: TOK_DEF("cap-notes") });
+    expectMissing(denied, idOnly.orgId, "tokenization");
+
+    // In-envelope + legacy positives, then the executor's defense in depth:
+    const tokOrg = await envOrg(app, platform, TOK_FULL);
+    expect((await app.inject({ method: "POST", url: `${V1}/use-cases`, headers: auth(tokOrg.adminTok), payload: TOK_DEF("tok-notes") })).statusCode).toBe(202);
+    const legacy = await envOrg(app, platform);
+    const draft = await app.inject({ method: "POST", url: `${V1}/use-cases`, headers: auth(legacy.adminTok), payload: TOK_DEF("legacy-notes") });
+    expect(draft.statusCode).toBe(202);
+    // The envelope tightens while the proposal is pending — approval must FAIL it, not deploy.
+    await app.inject({ method: "PATCH", url: `${V1}/orgs/${legacy.orgId}/capabilities`, headers: auth(platform), payload: { capabilities: ID_ISSUER } });
+    const appr = await app.inject({ method: "POST", url: `${V1}/proposals/${draft.json().proposal.id}/approve`, headers: auth(platform), payload: {} });
+    expect(appr.json().proposal.status).toBe("failed");
+    const list = (await app.inject({ method: "GET", url: `${V1}/use-cases`, headers: auth(platform) })).json() as { key: string }[];
+    expect(list.some((u) => u.key === "legacy-notes")).toBe(false);
+  });
+
+  it("gate 7 — org-owned identity use case: tokenization-only owner 403 (create AND provision); identity owner 201", async () => {
+    const app = await buildTestApp();
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const tok = await envOrg(app, platform, TOK_FULL);
+    const idOrg = await envOrg(app, platform, ID_ISSUER);
+
+    const denied = await app.inject({ method: "POST", url: `${V1}/credential-use-cases`, headers: auth(platform), payload: CUC("own-bad", { ownerOrgId: tok.orgId }) });
+    expectMissing(denied, tok.orgId, "identity");
+
+    const ok = await app.inject({ method: "POST", url: `${V1}/credential-use-cases`, headers: auth(platform), payload: CUC("own-ok", { ownerOrgId: idOrg.orgId }) });
+    expect(ok.statusCode).toBe(201);
+
+    // Provisioning binds the org as owner + issuer of an IDENTITY use case.
+    const prov = await app.inject({ method: "POST", url: `${V1}/credential-use-cases/provision`, headers: auth(tok.adminTok), payload: { templateKey: "education-certificate", params: { issuerOrgName: tok.name }, provisioning: { createDeskUsers: false } } });
+    expectMissing(prov, tok.orgId, "identity");
+  });
+
+  it("gate 8 — member-add filter: in-envelope 201; out-of-role 403; out-of-domain 403; PlatformAdmin bypass 201; legacy org unrestricted 201", async () => {
+    const app = await buildTestApp();
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    expect((await app.inject({ method: "POST", url: `${V1}/credential-use-cases`, headers: auth(platform), payload: CUC("desk-uc") })).statusCode).toBe(201);
+    const capped = await envOrg(app, platform, ID_ISSUER); // identity domain, Issuer role only
+    const legacy = await envOrg(app, platform);
+    const member = (over: Record<string, unknown>) => ({ email: `m-${++n}@x.dev`, password: "secret1", ...over });
+
+    // In-envelope: an Issuer member scoped to an identity use case.
+    const inEnv = await app.inject({ method: "POST", url: `${V1}/orgs/${capped.orgId}/users`, headers: auth(capped.adminTok), payload: member({ role: "Issuer", useCaseKey: "desk-uc" }) });
+    expect(inEnv.statusCode).toBe(201);
+
+    // Out-of-role: the envelope has no Verifier.
+    const outRole = await app.inject({ method: "POST", url: `${V1}/orgs/${capped.orgId}/users`, headers: auth(capped.adminTok), payload: member({ role: "Verifier" }) });
+    expectMissing(outRole, capped.orgId, "Verifier");
+
+    // Out-of-domain: an in-envelope role scoped to a TOKENIZATION use case.
+    const outDomain = await app.inject({ method: "POST", url: `${V1}/orgs/${capped.orgId}/users`, headers: auth(capped.adminTok), payload: member({ role: "Issuer", useCaseKey: "invoice-tokenization" }) });
+    expectMissing(outDomain, capped.orgId, "tokenization");
+
+    // PlatformAdmin bypasses the envelope entirely (platform override).
+    const bypass = await app.inject({ method: "POST", url: `${V1}/orgs/${capped.orgId}/users`, headers: auth(platform), payload: member({ role: "Verifier" }) });
+    expect(bypass.statusCode).toBe(201);
+
+    // A legacy (null-envelope) org is unrestricted.
+    const legacyAdd = await app.inject({ method: "POST", url: `${V1}/orgs/${legacy.orgId}/users`, headers: auth(legacy.adminTok), payload: member({ role: "Verifier", useCaseKey: "invoice-tokenization" }) });
+    expect(legacyAdd.statusCode).toBe(201);
   });
 });
