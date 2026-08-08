@@ -29,6 +29,14 @@ function summarize(p: Proposal): string {
   if (p.kind === "onboard-user-batch") return `onboard ${(pl.rows as unknown[] | undefined)?.length ?? "?"} users${p.useCaseKey ? ` — ${p.useCaseKey}` : ""}`;
   if (p.kind === "issue-usecase-credential-batch") return `issue ${(pl.rows as unknown[] | undefined)?.length ?? "?"} × ${String(pl.credentialType ?? "credential")} — ${String(pl.useCaseKey ?? "")}`;
   if (p.kind === "revoke-user-identity") return `revoke a user's identity — ${String(pl.reason ?? "no reason given")}`;
+  if (p.kind === "org-capability-change") {
+    const caps = pl.capabilities as { domains?: string[]; roles?: string[] } | undefined;
+    const domains = caps?.domains?.length ? caps.domains.join(" · ") : "no domains";
+    const roles = caps?.roles?.length ? caps.roles.join(", ") : "no roles";
+    // The panel has no org roster to hand — the short id keeps this to one request.
+    const orgId = String(pl.orgId ?? p.orgId ?? "");
+    return `capability change${orgId ? ` for org ${orgId.slice(0, 8)}…` : ""} — ${domains} · ${roles}`;
+  }
   if (p.kind === "create-use-case") return `configure use case ${String(pl.name ?? pl.key ?? "")} (${String(pl.symbol ?? "")})`;
   if (p.kind === "issue") {
     const supply = pl.initialSupply as string | undefined;

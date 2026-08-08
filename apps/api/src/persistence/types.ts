@@ -1,4 +1,4 @@
-import type { Role, TokenStandard, TokenType, LifecycleAction, OrgType, UseCaseDefinition, UseCaseSource, CredentialUseCaseDefinition, UseCaseTemplate } from "@tokenlayer/core";
+import type { Role, TokenStandard, TokenType, LifecycleAction, OrgType, OrgCapabilities, UseCaseDefinition, UseCaseSource, CredentialUseCaseDefinition, UseCaseTemplate } from "@tokenlayer/core";
 
 export type { OrgType };
 
@@ -385,6 +385,8 @@ export interface OrganizationRecord {
   verifiedAt: string | null;
   /** Present for self-registered corporates; null for platform-created orgs. */
   companyProfile: CompanyProfile | null;
+  /** EN-A capability envelope; null = unrestricted legacy (predates EN-A or path didn't choose). */
+  capabilities: OrgCapabilities | null;
   createdAt: string;
 }
 
@@ -398,6 +400,7 @@ export interface OrganizationRepository {
   list(): Promise<OrganizationRecord[]>;
   setVerified(id: string, verified: boolean, verifiedAt: string | null): Promise<OrganizationRecord>;
   setStatus(id: string, status: OrgStatus): Promise<OrganizationRecord>;
+  setCapabilities(id: string, caps: OrgCapabilities | null): Promise<OrganizationRecord>;
   remove(id: string): Promise<void>;
 }
 

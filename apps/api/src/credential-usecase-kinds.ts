@@ -5,7 +5,7 @@
  * claim schema + validity come from the CredentialUseCase config, not the
  * closed catalog.
  */
-import { credentialUseCaseType, holderPolicyAllows } from "@tokenlayer/core";
+import { credentialUseCaseType, holderPolicyAllows, orgRoleEnabled } from "@tokenlayer/core";
 import type { AppDeps } from "./context.js";
 import { coded } from "./executors.js";
 import { issueCredentialFor } from "./credential-issuance.js";
@@ -38,6 +38,13 @@ export const issueUsecaseCredentialKind: ProposalKindHandler = {
     const spec = credentialUseCaseType(def, pl.credentialType); // throws UNKNOWN_CREDENTIAL_TYPE
     const org = await ctx.deps.organizations.get(pl.issuerOrgId);
     if (!org) throw coded(404, "NOT_FOUND", "issuing organization missing");
+    // EN-A execution-time re-check (mirrors resolveIssuer's defense in depth):
+    // the envelope may tighten between propose and approve. Only an org-bound
+    // issuer is gated — platform-issuer use cases sign as the platform.
+    // (coded() carries no details object — orgId rides in the message.)
+    if (def.issuer.kind === "org" && !orgRoleEnabled(org.capabilities, "Issuer")) {
+      throw coded(403, "ORG_CAPABILITY_MISSING", `organization '${org.name}' (${org.id}) does not have the 'Issuer' capability`);
+    }
     await issueCredentialFor(ctx.deps, {
       issuerOrg: org, subjectDid: pl.subjectDid, type: spec.name, claims: pl.claims,
       validityDays: spec.validityDays, credentialUseCaseKey: def.key, proposalId: p.id,
@@ -84,6 +91,12 @@ export const issueUsecaseCredentialBatchKind: ProposalKindHandler = {
     const spec = credentialUseCaseType(def, pl.credentialType); // throws UNKNOWN_CREDENTIAL_TYPE
     const org = await deps.organizations.get(pl.issuerOrgId);
     if (!org) throw coded(404, "NOT_FOUND", "issuing organization missing");
+    // EN-A execution-time re-check — CONFIG-level, thrown before the row loop:
+    // a missing Issuer capability fails the WHOLE batch (it is not a per-row
+    // subject problem), exactly like a vanished use case or unknown type above.
+    if (def.issuer.kind === "org" && !orgRoleEnabled(org.capabilities, "Issuer")) {
+      throw coded(403, "ORG_CAPABILITY_MISSING", `organization '${org.name}' (${org.id}) does not have the 'Issuer' capability`);
+    }
 
     const rows: CredentialBatchRowResult[] = [];
     for (let i = 0; i < pl.rows.length; i++) {

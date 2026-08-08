@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AssetRecord, CashflowRecord, CompanyProfile, CredentialRecord, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, issueCredential, issuerBindingAllows, normalizeUseCaseDefinition, PolicyError, presentCredential, presentCredentials, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateCredentialUseCase, validateMetadata, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type OrgType, type Role, type UseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
+import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, issueCredential, issuerBindingAllows, normalizeUseCaseDefinition, ORG_OPERATING_ROLES, orgDomainEnabled, orgRoleEnabled, PolicyError, presentCredential, presentCredentials, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateCredentialUseCase, validateMetadata, validateOrgCapabilities, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type OrgOperatingRole, type OrgType, type Role, type UseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
 import qrcode from "qrcode";
 import type { AppDeps } from "../context.js";
 import { renderCredentialCertificate } from "../certificate.js";
@@ -77,7 +77,19 @@ function devKeyFromSeed(seed: string) {
 
 // Public projection of an org — NEVER includes didSeedEncrypted.
 function orgView(o: OrganizationRecord) {
-  return { id: o.id, name: o.name, orgType: o.orgType, registrationId: o.registrationId, jurisdiction: o.jurisdiction, did: o.did, verified: o.verified, status: o.status, companyProfile: o.companyProfile, createdAt: o.createdAt };
+  return { id: o.id, name: o.name, orgType: o.orgType, registrationId: o.registrationId, jurisdiction: o.jurisdiction, did: o.did, verified: o.verified, status: o.status, companyProfile: o.companyProfile, capabilities: o.capabilities, createdAt: o.createdAt };
+}
+
+// EN-A: uniform 403 for an act outside an org's capability envelope. `missing`
+// names the absent capability — a domain ("tokenization"/"identity") or an
+// operating role ("Issuer"/"Holder"/"Verifier"). Only ever sent for an org with
+// an EXPLICIT envelope: the null (legacy) envelope passes every predicate.
+function orgCapabilityMissing(reply: FastifyReply, org: OrganizationRecord, missing: string) {
+  return reply.code(403).send({
+    error: "ORG_CAPABILITY_MISSING",
+    message: `organization '${org.name}' does not have the '${missing}' capability`,
+    details: { orgId: org.id, missing },
+  });
 }
 
 /** Registers every /api/v1 route on the given (prefixed) instance. */
@@ -170,6 +182,31 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     }) ?? null;
   }
 
+  /**
+   * EN-A member-add filter: an ENVELOPED org only takes on members whose role
+   * and use-case domain fit its envelope. Returns the missing capability (an
+   * operating role or a domain) or null when the add is in-envelope. A legacy
+   * org (null envelope) is unrestricted; roles outside the three operating
+   * roles (Trader/Buyer/UseCaseAdmin/...) gate on domain only; an unknown key
+   * resolves to no domain and stays ungated here (unchanged legacy behavior).
+   *
+   * Shared by BOTH member-creating routes — POST /orgs/:id/users and the
+   * `claims.orgId` branch of POST /users — so an org member cannot route
+   * around the envelope by using the other door. Callers apply the
+   * PlatformAdmin bypass themselves (platform override).
+   */
+  async function orgMemberCapabilityViolation(org: OrganizationRecord, role: Role, useCaseKey: string | null): Promise<string | null> {
+    if (org.capabilities === null) return null;
+    if ((ORG_OPERATING_ROLES as readonly string[]).includes(role) && !orgRoleEnabled(org.capabilities, role as OrgOperatingRole)) {
+      return role;
+    }
+    if (useCaseKey) {
+      const domain = await resolveUseCaseDomain(useCaseKey);
+      if (domain && !orgDomainEnabled(org.capabilities, domain)) return domain;
+    }
+    return null;
+  }
+
   // --- auth ---------------------------------------------------------------
   app.post("/auth/login", { schema: S.login }, async (request, reply) => {
     if (loginThrottled(request.ip)) {
@@ -186,16 +223,20 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const claims: TokenClaims = { id: user.id, email: user.email, role: user.role, useCaseKey: user.useCaseKey, orgId: user.orgId ?? null, did: user.did ?? null };
     const wallet = user.accountId ? await deps.accounts.findById(user.accountId) : null;
     const useCaseDomain = await resolveUseCaseDomain(user.useCaseKey);
-    return { token: app.jwt.sign(claims), user: { ...claims, walletAddress: wallet?.address ?? null, useCaseDomain } };
+    // The org's capability envelope rides the session (like useCaseDomain): the
+    // web builds its SessionUser from login/qr-poll, never /me.
+    const org = user.orgId ? await deps.organizations.get(user.orgId) : null;
+    return { token: app.jwt.sign(claims), user: { ...claims, walletAddress: wallet?.address ?? null, useCaseDomain, orgCapabilities: org?.capabilities ?? null } };
   });
 
   app.get("/me", { schema: S.me, ...auth }, async (request) => {
     const base = actorOf(request);
     const claims = request.user as TokenClaims;
     const useCaseDomain = await resolveUseCaseDomain(claims.useCaseKey);
+    const org = claims.orgId ? await deps.organizations.get(claims.orgId) : null;
     // useCaseKey mirrors the login response so a scoped desk operator's session
     // principal is self-describing (role + scope + domain) from /me alone.
-    return { ...base, useCaseKey: claims.useCaseKey ?? null, useCaseDomain };
+    return { ...base, useCaseKey: claims.useCaseKey ?? null, useCaseDomain, orgCapabilities: org?.capabilities ?? null };
   });
 
   app.get("/config", { schema: S.config, ...auth }, async () => ({ domains: deps.enabledDomains }));
@@ -243,7 +284,8 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         const wallet = user?.accountId ? await deps.accounts.findById(user.accountId) : null;
         const claims = user ? { id: user.id, email: user.email, role: user.role, useCaseKey: user.useCaseKey, orgId: user.orgId ?? null, did: user.did ?? null } : null;
         const useCaseDomain = user ? await resolveUseCaseDomain(user.useCaseKey) : null;
-        return { status: "authenticated", token: done.token, user: claims ? { ...claims, walletAddress: wallet?.address ?? null, useCaseDomain } : null };
+        const org = user?.orgId ? await deps.organizations.get(user.orgId) : null;
+        return { status: "authenticated", token: done.token, user: claims ? { ...claims, walletAddress: wallet?.address ?? null, useCaseDomain, orgCapabilities: org?.capabilities ?? null } : null };
       }
     }
     return { status: sess.status };
@@ -325,6 +367,13 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     // PlatformAdmin to approve — the deploy happens on approval, not here.
     if (claims.role === "OrgAdmin") {
       if (await deps.useCases.has(definition.key)) return reply.code(409).send({ error: "USECASE_EXISTS", message: `use case '${definition.key}' already exists` });
+      // EN-A friendly early gate: OWNING a tokenization use case requires the
+      // tokenization domain. The create-use-case executor re-checks at approval
+      // time (the envelope may tighten while the proposal is pending).
+      const ownOrg = await deps.organizations.get(claims.orgId as string).catch(() => null);
+      if (ownOrg && !orgDomainEnabled(ownOrg.capabilities, "tokenization")) {
+        return orgCapabilityMissing(reply, ownOrg, "tokenization");
+      }
       const owned = { ...definition, ownerOrgId: claims.orgId as string };
       const proposal = await deps.proposals.create({
         useCaseKey: null, orgId: claims.orgId as string, assetId: null, kind: "create-use-case",
@@ -449,6 +498,50 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return cuc;
   });
 
+  // Load every org a credential-use-case definition references (bound issuer,
+  // specific holders, listed verifiers) — the RECORDS, not just ids, so the same
+  // fetch serves existence validation and the EN-A envelope checks below.
+  async function referencedOrgs(def: CredentialUseCaseDefinition): Promise<Map<string, OrganizationRecord>> {
+    const ids = new Set<string>();
+    if (def.issuer.kind === "org") ids.add(def.issuer.orgId);
+    if (def.holderPolicy.who === "specific") def.holderPolicy.orgIds.forEach((i) => ids.add(i));
+    if (def.verifier.kind === "orgs") def.verifier.orgIds.forEach((i) => ids.add(i));
+    const out = new Map<string, OrganizationRecord>();
+    for (const id of ids) {
+      const o = await deps.organizations.get(id).catch(() => null);
+      if (o) out.set(id, o);
+    }
+    return out;
+  }
+
+  // EN-A config-time envelope gates for a credential-use-case definition: a
+  // bound issuer org must be an identity-domain Issuer, every LISTED verifier
+  // org a Verifier, and an owner org identity-domained. Null envelopes (legacy
+  // orgs) pass every predicate. Returns the first violation, or null when the
+  // definition fits every referenced org's envelope.
+  async function credentialUseCaseCapabilityViolation(
+    def: CredentialUseCaseDefinition, orgs: Map<string, OrganizationRecord>,
+  ): Promise<{ org: OrganizationRecord; missing: string } | null> {
+    if (def.issuer.kind === "org") {
+      const issuer = orgs.get(def.issuer.orgId);
+      if (issuer && !orgRoleEnabled(issuer.capabilities, "Issuer")) return { org: issuer, missing: "Issuer" };
+      if (issuer && !orgDomainEnabled(issuer.capabilities, "identity")) return { org: issuer, missing: "identity" };
+    }
+    if (def.verifier.kind === "orgs") {
+      for (const id of def.verifier.orgIds) {
+        const verifier = orgs.get(id);
+        if (verifier && !orgRoleEnabled(verifier.capabilities, "Verifier")) return { org: verifier, missing: "Verifier" };
+      }
+    }
+    if (def.ownerOrgId) {
+      // The owner is not part of the validator's referenced-id set (ownership is
+      // not existence-checked today) — fetch it only for the envelope check.
+      const owner = orgs.get(def.ownerOrgId) ?? (await deps.organizations.get(def.ownerOrgId).catch(() => null));
+      if (owner && !orgDomainEnabled(owner.capabilities, "identity")) return { org: owner, missing: "identity" };
+    }
+    return null;
+  }
+
   app.post("/credential-use-cases", { schema: S.createCredentialUseCase, ...auth }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     if (claims.role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only a platform admin may author credential use cases" });
@@ -456,18 +549,15 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (await deps.credentialUseCases.has(def.key) || await deps.useCases.has(def.key)) {
       return reply.code(409).send({ error: "KEY_TAKEN", message: `use-case key '${def.key}' already exists` });
     }
-    // Resolve org existence up-front (validator is sync): collect referenced ids.
-    const ids = new Set<string>();
-    if (def.issuer.kind === "org") ids.add(def.issuer.orgId);
-    if (def.holderPolicy.who === "specific") def.holderPolicy.orgIds.forEach((i) => ids.add(i));
-    if (def.verifier.kind === "orgs") def.verifier.orgIds.forEach((i) => ids.add(i));
-    const known = new Set<string>();
-    for (const id of ids) if (await deps.organizations.get(id).catch(() => null)) known.add(id);
+    // Resolve org existence up-front (validator is sync).
+    const known = await referencedOrgs(def);
     try {
       validateCredentialUseCase(def, { orgExists: (id) => known.has(id) });
     } catch (err) {
       return reply.code(400).send({ error: "INVALID_CREDENTIAL_USECASE", message: (err as Error).message });
     }
+    const violation = await credentialUseCaseCapabilityViolation(def, known);
+    if (violation) return orgCapabilityMissing(reply, violation.org, violation.missing);
     const created = await deps.credentialUseCases.create({ ...def, ownerOrgId: def.ownerOrgId ?? null });
     await deps.audit.append({ actorId: claims.id, action: "credential-usecase-created" as LifecycleAction, payload: { key: def.key } });
     return reply.code(201).send(created);
@@ -480,18 +570,16 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const existing = await deps.credentialUseCases.get(key);
     if (!existing) return notFound(reply, "credential use case not found");
     const def = { ...(request.body as CredentialUseCaseDefinition), key };
-    const ids = new Set<string>();
-    if (def.issuer.kind === "org") ids.add(def.issuer.orgId);
-    if (def.holderPolicy.who === "specific") def.holderPolicy.orgIds.forEach((i) => ids.add(i));
-    if (def.verifier.kind === "orgs") def.verifier.orgIds.forEach((i) => ids.add(i));
-    const known = new Set<string>();
-    for (const id of ids) if (await deps.organizations.get(id).catch(() => null)) known.add(id);
+    const known = await referencedOrgs(def);
     try {
       validateCredentialUseCase(def, { orgExists: (id) => known.has(id) });
     } catch (err) {
       return reply.code(400).send({ error: "INVALID_CREDENTIAL_USECASE", message: (err as Error).message });
     }
-    const updated = await deps.credentialUseCases.update(key, { ...def, ownerOrgId: def.ownerOrgId ?? existing.ownerOrgId ?? null });
+    const ownerOrgId = def.ownerOrgId ?? existing.ownerOrgId ?? null;
+    const violation = await credentialUseCaseCapabilityViolation({ ...def, ownerOrgId }, known);
+    if (violation) return orgCapabilityMissing(reply, violation.org, violation.missing);
+    const updated = await deps.credentialUseCases.update(key, { ...def, ownerOrgId });
     await deps.audit.append({ actorId: claims.id, action: "credential-usecase-updated" as LifecycleAction, payload: { key } });
     return reply.code(200).send(updated);
   });
@@ -559,17 +647,14 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (await deps.credentialUseCases.has(def.key) || await deps.useCases.has(def.key)) {
       throw coded(409, "KEY_TAKEN", `use-case key '${def.key}' already exists`);
     }
-    const ids = new Set<string>();
-    if (def.issuer.kind === "org") ids.add(def.issuer.orgId);
-    if (def.holderPolicy.who === "specific") def.holderPolicy.orgIds.forEach((i) => ids.add(i));
-    if (def.verifier.kind === "orgs") def.verifier.orgIds.forEach((i) => ids.add(i));
-    const known = new Set<string>();
-    for (const id of ids) if (await deps.organizations.get(id).catch(() => null)) known.add(id);
+    const known = await referencedOrgs(def);
     try {
       validateCredentialUseCase(def, { orgExists: (id) => known.has(id) });
     } catch (err) {
       throw coded(400, "INVALID_CREDENTIAL_USECASE", (err as Error).message);
     }
+    const violation = await credentialUseCaseCapabilityViolation({ ...def, ownerOrgId }, known);
+    if (violation) throw coded(403, "ORG_CAPABILITY_MISSING", `organization '${violation.org.name}' (${violation.org.id}) does not have the '${violation.missing}' capability`);
     const created = await deps.credentialUseCases.create({ ...def, ownerOrgId });
     await deps.audit.append({ actorId, action: "credential-usecase-created" as LifecycleAction, payload: { key: def.key } });
     return created;
@@ -666,6 +751,15 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     }
     def = { ...def, issuer: { kind: "org", orgId: org.id } };
 
+    // EN-A: provisioning makes `org` BOTH the owner and the bound issuer of an
+    // IDENTITY use case — its envelope needs the Issuer role and the identity
+    // domain (checked in that order, matching credentialUseCaseCapabilityViolation,
+    // so an org missing both always sees the same capability named). Checked here
+    // (org record already in hand) so the rebind path below is covered too, not
+    // just fresh creates.
+    if (!orgRoleEnabled(org.capabilities, "Issuer")) return orgCapabilityMissing(reply, org, "Issuer");
+    if (!orgDomainEnabled(org.capabilities, "identity")) return orgCapabilityMissing(reply, org, "identity");
+
     // 4. Create the use case, or rebind an existing one (idempotent unless failIfExists).
     let useCase;
     let created = false;
@@ -749,6 +843,13 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       reply.code(400).send({ error: "ISSUER_ORG_MISSING", message: "the configured issuer organization does not exist" });
       return null;
     }
+    // EN-A defense in depth: the org binding may predate a capability
+    // tightening, so re-check the envelope at issue time, every time.
+    // (Platform-issuer use cases are exempt — the platform org is the signer.)
+    if (def!.issuer.kind === "org" && !orgRoleEnabled(issuerOrg.capabilities, "Issuer")) {
+      orgCapabilityMissing(reply, issuerOrg, "Issuer");
+      return null;
+    }
     return { issuerOrg };
   }
 
@@ -771,6 +872,10 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const orgs = await deps.organizations.list();
     for (const o of orgs) {
       if (!o.did) continue;
+      // EN-A: the picker must not offer an org that issuance would then 403 —
+      // holding a credential needs the Holder role (same check as the
+      // subjectOrgId branch below). A legacy null envelope passes.
+      if (!orgRoleEnabled(o.capabilities, "Holder")) continue;
       if (holderPolicyAllows(def.holderPolicy, { id: o.id, orgType: o.orgType })) {
         out.push({ kind: "org", id: o.id, label: o.name, did: o.did, subLabel: o.orgType });
       }
@@ -809,6 +914,8 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       const org = await deps.organizations.get(b.subjectOrgId!);
       if (!org) return notFound(reply, "subject organization not found");
       if (!org.did) return reply.code(400).send({ error: "SUBJECT_HAS_NO_DID", message: "the subject organization has no DID" });
+      // EN-A: an enveloped org may only HOLD credentials with the Holder role.
+      if (!orgRoleEnabled(org.capabilities, "Holder")) return orgCapabilityMissing(reply, org, "Holder");
       subjectDid = org.did; holderOrg = { id: org.id, orgType: org.orgType }; subjectRef.subjectOrgId = org.id;
     }
     if (!holderPolicyAllows(def.holderPolicy, holderOrg)) {
@@ -1891,6 +1998,18 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     // sub-DID + membership VC (mirrors POST /orgs/:id/users) — org-member
     // onboarding stays direct.
     if (claims.orgId) {
+      const org = await deps.organizations.get(claims.orgId);
+      // EN-A review fix: this door creates an org member (sub-DID + membership
+      // VC) exactly like POST /orgs/:id/users, so it must run the SAME
+      // member-add envelope filter — otherwise an org-member UseCaseAdmin could
+      // mint out-of-envelope members here. Same PlatformAdmin bypass; a legacy
+      // (null-envelope) org still passes untouched. No binding check is needed
+      // for a Verifier target: a non-PlatformAdmin caller's target key is
+      // pinned to their OWN `claims.useCaseKey`, never attacker-chosen.
+      if (org && claims.role !== "PlatformAdmin") {
+        const missing = await orgMemberCapabilityViolation(org, b.role, targetUseCaseKey);
+        if (missing) return orgCapabilityMissing(reply, org, missing);
+      }
       let accountId: string | null = null;
       if (b.walletAddress) accountId = (await deps.accounts.upsert(b.walletAddress, b.email)).id;
       const created = await deps.users.create({
@@ -1904,7 +2023,6 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         kyc: b.kyc ?? null,
       });
       let mintedDid: string | null = null;
-      const org = await deps.organizations.get(claims.orgId);
       if (org) {
         try {
           mintedDid = await mintMembership(org, created, b.role);
@@ -2069,7 +2187,12 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         documents: { cinCertificate: { id: string }; gstinCertificate?: { id: string } };
       };
       admin: { name: string; email: string; password: string };
+      capabilities?: unknown;
     };
+    // Validate the requested capability envelope FIRST — throws
+    // PolicyError("INVALID_CAPABILITIES") → 400 via the shared error handler
+    // (same pattern as validateMetadata). Absent ⇒ null: unrestricted legacy.
+    const capabilities = b.capabilities !== undefined ? validateOrgCapabilities(b.capabilities) : null;
     if (await deps.organizations.findByName(b.company.name)) return reply.code(409).send({ error: "NAME_TAKEN", message: "an organization with that name already exists" });
     // The CIN is the statutory registration number — dedupe on it.
     if (await deps.organizations.findByRegistrationId(b.company.cin)) return reply.code(409).send({ error: "REGISTRATION_TAKEN", message: "an organization with that CIN already exists" });
@@ -2101,6 +2224,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       name: b.company.name, orgType: b.company.orgType, registrationId: b.company.cin,
       jurisdiction: "IN", did, didSeedEncrypted,
       status: "pending", verified: false, verifiedAt: null, companyProfile,
+      capabilities, // the validated requested envelope — part of what the reviewer approves
     });
     try {
       await deps.users.create({
@@ -2147,6 +2271,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const org = await deps.organizations.create({
       name, orgType, registrationId: opts.registrationId ?? null, jurisdiction: opts.jurisdiction ?? null,
       did, didSeedEncrypted, status: "active", verified: true, verifiedAt: new Date().toISOString(), companyProfile: null,
+      capabilities: null, // platform-created orgs stay unrestricted legacy until an envelope is set
     });
     await deps.audit.append({ actorId: opts.actorId ?? "provisioning", action: "org-created" as LifecycleAction, payload: { orgId: org.id, name: org.name, did: org.did } });
     return org;
@@ -2312,6 +2437,41 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return reply.code(200).send({ id: rejected.id, status: "rejected" });
   });
 
+  // Direct capability grant (EN-A): the platform is the granting authority and
+  // needs no second approver. `capabilities: null` clears an org back to the
+  // unrestricted legacy envelope — PlatformAdmin only, deliberate.
+  app.patch("/orgs/:id/capabilities", { schema: S.patchOrgCapabilities, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    if (claims.role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only the Platform Admin may set organization capabilities" });
+    const { id } = request.params as { id: string };
+    const org = await deps.organizations.get(id);
+    if (!org) return notFound(reply, "organization not found");
+    const b = request.body as { capabilities: unknown };
+    // Throws PolicyError("INVALID_CAPABILITIES") → 400 via the shared handler.
+    const caps = b.capabilities === null ? null : validateOrgCapabilities(b.capabilities);
+    const updated = await deps.organizations.setCapabilities(org.id, caps);
+    await deps.audit.append({ actorId: claims.id, action: "org-capabilities-set" as LifecycleAction, payload: { orgId: org.id, capabilities: caps } });
+    return orgView(updated);
+  });
+
+  // Org-requested capability change (EN-A): the org's own OrgAdmin proposes a
+  // new envelope; only a PlatformAdmin approval applies it (see org-kinds.ts).
+  app.post("/orgs/:id/capabilities/request", { schema: S.requestOrgCapabilities, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    if (!orgScoped(claims, id)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to request capabilities for that organization" });
+    const org = await deps.organizations.get(id);
+    if (!org) return notFound(reply, "organization not found");
+    const b = request.body as { capabilities: unknown };
+    const capabilities = validateOrgCapabilities(b.capabilities); // 400 INVALID_CAPABILITIES on bad input
+    const proposal = await deps.proposals.create({
+      useCaseKey: null, orgId: org.id, assetId: null, kind: "org-capability-change",
+      payload: { orgId: org.id, capabilities },
+      proposerId: claims.id, proposerLabel: claims.email, required: 1,
+    });
+    return reply.code(202).send({ proposal });
+  });
+
   // Mint a sub-DID + OrganizationMembership VC for `user` under `org` (links the
   // user's tenancy orgId). Shared logic lives in mintOrgMembership.
   async function mintMembership(org: OrganizationRecord, user: UserRecord, role: Role): Promise<string> {
@@ -2326,12 +2486,55 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (!canCreateOrgMember(claims.role, b.role)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to create that member role" });
     const org = await deps.organizations.get(id);
     if (!org) return notFound(reply, "organization not found");
+    // "" is normalized to null ONCE, before any gate reads it, so an empty-string
+    // key can never slip past a truthiness-guarded check downstream (the standing
+    // ""-vs-null gate-bypass lesson); every use below reads `memberUseCaseKey`.
+    const memberUseCaseKey = b.useCaseKey || null;
+    // EN-A member-add filter (shared with POST /users). A PlatformAdmin bypasses
+    // entirely (platform override).
+    if (claims.role !== "PlatformAdmin") {
+      const missing = await orgMemberCapabilityViolation(org, b.role, memberUseCaseKey);
+      if (missing) return orgCapabilityMissing(reply, org, missing);
+    }
+    // EN-A review fix: A4 widened this route's role enum to the org-internal
+    // Holder/Verifier roles, and the key below is stored VERBATIM. A `Verifier`
+    // member is authorized downstream (POST /verification-requests, and the
+    // request-visibility check) purely by `role + useCaseKey` — never by the
+    // org's binding — so a foreign credential-use-case key here would be a
+    // cross-org escalation. Resolve the key and require the org to be
+    // legitimately attached before minting such a member.
+    //
+    // `Holder` deliberately gets NO attachment check: no route authorizes on
+    // `role === "Holder"` (holder eligibility is decided by the use case's
+    // holderPolicy at issuance time), so a Holder member's key grants nothing.
+    // A TOKENIZATION key is likewise harmless: the desk-verifier branch only
+    // ever resolves the credential-use-case catalog. Both stay ungated.
+    if (memberUseCaseKey && (b.role === "Verifier" || b.role === "Holder")) {
+      const domain = await resolveUseCaseDomain(memberUseCaseKey);
+      // Same code the sibling POST /users route uses for an unknown key.
+      if (!domain) return reply.code(404).send({ error: "USE_CASE_NOT_FOUND", message: `no use case '${memberUseCaseKey}'` });
+      if (b.role === "Verifier" && domain === "identity" && claims.role !== "PlatformAdmin") {
+        const def = await deps.credentialUseCases.get(memberUseCaseKey);
+        // A vanished def (TOCTOU against resolveUseCaseDomain's listing) fails
+        // CLOSED rather than open — the key named a use case that no longer exists.
+        if (!def) return reply.code(404).send({ error: "USE_CASE_NOT_FOUND", message: `no use case '${memberUseCaseKey}'` });
+        if (def.ownerOrgId !== org.id && !verifierBindingAllows(def.verifier, org.id)) {
+          // A BINDING failure, not a capability one — distinct error, and it
+          // bites for a legacy (null-envelope) org too.
+          return reply.code(403).send({
+            error: "ORG_NOT_BOUND",
+            message: `organization '${org.name}' is neither the owner nor a bound verifier of credential use case '${memberUseCaseKey}'`,
+            details: { orgId: org.id, useCaseKey: memberUseCaseKey },
+          });
+        }
+      }
+    }
     if (await deps.users.findByEmail(b.email)) return reply.code(400).send({ error: "EMAIL_TAKEN", message: "email already registered" });
     let accountId: string | null = null;
     if (b.walletAddress) accountId = (await deps.accounts.upsert(b.walletAddress, b.email)).id;
     const created = await deps.users.create({
       email: b.email, passwordHash: await bcrypt.hash(b.password, BCRYPT_ROUNDS), role: b.role,
-      useCaseKey: b.useCaseKey ?? null, accountId, active: true, kycStatus: "pending", kyc: b.kyc ?? null, orgId: id,
+      useCaseKey: memberUseCaseKey, accountId, active: true, kycStatus: "pending", kyc: b.kyc ?? null, orgId: id,
     });
     let did: string;
     try {
@@ -2462,6 +2665,11 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (!def.allowedIssuerOrgTypes.includes(org.orgType)) {
       return reply.code(403).send({ error: "ISSUER_NOT_PERMITTED", message: `an org of type '${org.orgType}' may not issue '${def.type}'` });
     }
+    // EN-A (ninth gate): closed-catalog issuance is an Issuer act like any
+    // other. ROLE check only — the catalog predates the domain split and its
+    // types (KYC, AccreditedInvestor, …) serve tokenization flows too, so no
+    // domain is required. Null (legacy) envelopes pass untouched.
+    if (!orgRoleEnabled(org.capabilities, "Issuer")) return orgCapabilityMissing(reply, org, "Issuer");
     const subject = await deps.users.findById(b.subjectUserId);
     if (!subject) return notFound(reply, "subject user not found");
     if (def.selfIssuedOnly && subject.orgId !== org.id) {
@@ -2698,6 +2906,12 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       // Legacy generic flow: still requires a verifier org-type.
       return reply.code(403).send({ error: "NOT_A_VERIFIER", message: "your organization is not a verifier" });
     }
+
+    // EN-A: verifying is an identity-domain act requiring the Verifier role —
+    // checked after the binding/orgType gates on BOTH paths (a legacy null
+    // envelope passes both predicates untouched).
+    if (!orgRoleEnabled(org.capabilities, "Verifier")) return orgCapabilityMissing(reply, org, "Verifier");
+    if (!orgDomainEnabled(org.capabilities, "identity")) return orgCapabilityMissing(reply, org, "identity");
 
     const rec = await deps.verificationRequests.create({
       verifierOrgId: org.id, holderDid: b.holderDid, requestedTypes: b.requestedTypes, purpose: b.purpose,

@@ -52,6 +52,11 @@ All checks are **only enforced when `capabilities !== null`** (the predicates ma
 | Org **owns a tokenization use case** | `create-use-case` proposal kind executor + gated wizard route | org has `tokenization` |
 | Org **owns an identity use case** | credential-use-case create with `ownerOrgId` / provisioning rebind for that org | org has `identity` |
 | OrgAdmin **adds a member** | `POST /orgs/:id/users` after `canCreateOrgMember` | member's role within the envelope: target role `Issuer`/`Holder`/`Verifier` requires that org role; the member's `useCaseKey` domain (via `useCaseDomainOf`) requires that domain. Roles outside the three (Trader/Buyer/Auditor/UseCaseAdmin) gate on domain only. `canCreateOrgMember` itself stays untouched (core purity + platform override intact — PlatformAdmin bypasses the envelope check entirely). |
+| Org issues a **legacy catalog credential** (ninth gate, found in review) | `POST /credentials/requests` (the pre-ID-A closed-catalog path, which never touches `resolveIssuer`) | issuing org has `Issuer` (role only — catalog credentials predate the domain split and serve tokenization KYC flows) |
+
+Additionally, the issuance **executors** (`issue-credential`, `issue-usecase-credential`, `issue-usecase-credential-batch`) re-check the issuer org's envelope at execution time — a propose → tighten → approve race fails the proposal instead of issuing, matching the `create-use-case` executor's treatment.
+
+**Scope decision (recorded in review):** use-case-scoped DESK users (the ID-F/G operators with `orgId: null`, e.g. a provisioned Verifier desk) act as platform-scoped principals, not as the org — the envelope does not gate them. An org whose provisioning created a Verifier desk keeps that desk working even without the org `Verifier` role; the envelope governs acts performed *as the organization* (org-path verification, org-signed issuance, org-held credentials). Provisioning itself is gated (identity + Issuer), which bounds how such desks come into being.
 
 Deliberately NOT enforced in v1: retroactive effects. Tightening an envelope does not revoke existing credentials, unbind existing use cases, or deactivate existing members — it stops *new* acts. (The dashboard/wallets keep showing history; a cleanup ceremony is a later item if ever needed.)
 

@@ -44,6 +44,7 @@ export async function ensureNamedOrg(
     verified: true,
     verifiedAt: new Date().toISOString(),
     companyProfile: null,
+    capabilities: null, // platform boot org keeps the unrestricted legacy envelope
   });
   if (deps.registry) await ensureDidRegistered(deps.registry, did);
   return org;

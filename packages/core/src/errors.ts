@@ -19,7 +19,8 @@ export type PolicyErrorCode =
   | "UNKNOWN_CREDENTIAL_TYPE"
   | "INVALID_TEMPLATE"
   | "INVALID_TEMPLATE_PARAMS"
-  | "UNKNOWN_TEMPLATE";
+  | "UNKNOWN_TEMPLATE"
+  | "INVALID_CAPABILITIES";
 
 /** Raised when a request violates RBAC, lifecycle, or compliance policy. */
 export class PolicyError extends Error {

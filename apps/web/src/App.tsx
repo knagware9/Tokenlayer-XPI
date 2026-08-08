@@ -26,7 +26,7 @@ import { VerificationRequests } from "./components/VerificationRequests.js";
 import { SectionHeader } from "./components/ui.js";
 import { can, canManageUsers } from "./rbac.js";
 import { DOMAINS, DOMAIN_KEYS, type DomainKey, loadActiveDomain, saveActiveDomain, itemsForDomain, availableDomains } from "./domains.js";
-import type { ChainInfo, CredentialUseCase, UseCase } from "./types.js";
+import type { ChainInfo, CredentialUseCase, OrgOperatingRole, UseCase } from "./types.js";
 
 export function App(): JSX.Element {
   const { token, user, logout } = useAuth();
@@ -210,6 +210,14 @@ export function App(): JSX.Element {
   const activeUseCaseObj = useCases.find((u) => u.key === activeUseCase);
   const showInvoices = isInvoiceUseCase(activeUseCaseObj) && can(user.role, "issue");
 
+  // EN-A capability envelope — applied to the OrgAdmin console only. `null`
+  // (legacy) makes every check below a no-op, so a legacy org's nav is
+  // byte-identical to before. A PlatformAdmin bypasses org capabilities
+  // server-side, and scoped desk operators are already clamped by their own
+  // role + use case, so neither is narrowed here.
+  const envelope = isOrgAdmin ? user.orgCapabilities ?? null : null;
+  const orgCan = (role: OrgOperatingRole): boolean => envelope === null || envelope.roles.includes(role);
+
   const items: NavItem[] = [
     ...(isPlatform ? [{ id: "back", label: "← All use cases", icon: "arrow" as const }] : []),
     { id: "dashboard", label: isOrgAdmin ? "Configure Use Case" : "Dashboard", icon: isOrgAdmin ? "code" : "spark" },
@@ -218,14 +226,17 @@ export function App(): JSX.Element {
     { id: "approvals", label: "Approvals", icon: "check" },
     ...(canManageUsers(user.role) ? [{ id: "users", label: "User Management", icon: "users" as const }] : []),
     ...(isPlatform || isOrgAdmin ? [{ id: "organizations", label: "Organizations", icon: "users" as const }] : []),
-    ...(isPlatform || isOrgAdmin ? [{ id: "verify", label: "Verification", icon: "shield" as const }] : []),
+    ...((isPlatform || isOrgAdmin) && orgCan("Verifier") ? [{ id: "verify", label: "Verification", icon: "shield" as const }] : []),
     ...(isPlatform || isOrgAdmin ? [{ id: "identity", label: "Identity", icon: "shield" as const }] : []),
     ...(isPlatform || isOrgAdmin ? [{ id: "identity-dashboard", label: "Identity Dashboard", icon: "spark" as const }] : []),
-    ...(isOrgAdmin ? [{ id: "org-wallet", label: "Organization Wallet", icon: "coins" as const }] : []),
+    ...(isOrgAdmin && orgCan("Holder") ? [{ id: "org-wallet", label: "Organization Wallet", icon: "coins" as const }] : []),
     ...pinned,
   ];
 
-  const branchDomains = availableDomains(items, enabledDomains);
+  // Intersect the deployment's enabled domains with the org's envelope BEFORE
+  // availableDomains, so an identity-only org never sees a Tokenization switcher.
+  const capDomains = envelope === null ? enabledDomains : enabledDomains.filter((d) => envelope.domains.includes(d));
+  const branchDomains = availableDomains(items, capDomains);
   const effDomain = branchDomains.some((d) => d.key === activeDomain) ? activeDomain : (branchDomains[0]?.key ?? activeDomain);
   const visible = itemsForDomain(items, effDomain);
   const deskIds = visible.map((i) => i.id).filter((id) => id !== "back" && id !== "logout");

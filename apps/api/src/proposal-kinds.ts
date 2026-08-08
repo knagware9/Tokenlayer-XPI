@@ -18,6 +18,7 @@ import { coded, executeCashflowCore, executeIssueActivation, runGatedAction } fr
 import type { TokenClaims } from "./http/support.js";
 import { scopedToCaller } from "./http/support.js";
 import type { ProposalRecord } from "./persistence/types.js";
+import { orgCapabilityChangeKind } from "./org-kinds.js";
 import { onboardUserBatchKind, onboardUserKind, revokeUserIdentityKind } from "./user-kinds.js";
 import { createUseCaseKind } from "./usecase-kinds.js";
 
@@ -161,3 +162,7 @@ registerProposalKind(revokeUserIdentityKind);
 // use case; a PlatformAdmin approval creates + deploys it. Same registry, same
 // no-runtime-cycle TYPE-only import pattern as the kinds above.
 registerProposalKind(createUseCaseKind);
+
+// Org-scoped capability-change kind (EN-A): an OrgAdmin requests a new envelope;
+// only a PlatformAdmin may approve. Same registry, same TYPE-only import pattern.
+registerProposalKind(orgCapabilityChangeKind);

@@ -1028,6 +1028,9 @@ export const S: Record<string, FastifySchema> = {
           type: "object", additionalProperties: false, required: ["name", "email", "password"],
           properties: { name: { type: "string", minLength: 1 }, email: { type: "string" }, password: { type: "string", minLength: 8 } },
         },
+        // Requested capability envelope (EN-A). Loose here — the route runs
+        // validateOrgCapabilities for the real (member-level) validation.
+        capabilities: { type: "object", additionalProperties: true },
       },
     },
     response: { 202: { type: "object", additionalProperties: true }, ...errs(400, 409, 429) },
@@ -1050,6 +1053,25 @@ export const S: Record<string, FastifySchema> = {
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404) },
   },
+  patchOrgCapabilities: {
+    tags: ["Organizations"], summary: "Set (or clear with null) an org's capability envelope (PlatformAdmin)", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    body: {
+      type: "object", additionalProperties: false, required: ["capabilities"],
+      // Loose object-or-null: the route runs validateOrgCapabilities for the real validation.
+      properties: { capabilities: { type: ["object", "null"], additionalProperties: true } },
+    },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
+  },
+  requestOrgCapabilities: {
+    tags: ["Organizations"], summary: "Request a capability-envelope change (OrgAdmin; PlatformAdmin approval applies it)", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    body: {
+      type: "object", additionalProperties: false, required: ["capabilities"],
+      properties: { capabilities: { type: "object", additionalProperties: true } },
+    },
+    response: { 202: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
+  },
   createMember: {
     tags: ["Organizations"], summary: "Add a member (sub-DID + membership VC)", security: bearer,
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
@@ -1060,8 +1082,10 @@ export const S: Record<string, FastifySchema> = {
         password: { type: "string", minLength: 6 },
         // "PlatformAdmin" is deliberately allowed through validation so that
         // `canCreateOrgMember` rejects the escalation with a 403 (authorization),
-        // rather than the schema masking it as a 400 (validation).
-        role: { type: "string", enum: ["PlatformAdmin", "OrgAdmin", "UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor"] },
+        // rather than the schema masking it as a 400 (validation). Holder/Verifier
+        // are org-internal roles (core ORG_INTERNAL_ROLES) — EN-A's member-add
+        // envelope filter gates them, so the schema must let them through.
+        role: { type: "string", enum: ["PlatformAdmin", "OrgAdmin", "UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor", "Holder", "Verifier"] },
         useCaseKey: { type: "string" },
         walletAddress: { type: "string" },
         kyc: { type: "object", additionalProperties: false, properties: { legalName: { type: "string" }, country: { type: "string" }, idType: { type: "string" }, idNumber: { type: "string" }, documentRef: { type: "string" } } },

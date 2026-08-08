@@ -1,4 +1,4 @@
-import type { AccountState, ActivityEvent, AnalyticsSummary, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, ChainInfo, ChainStatus, CompanyCategory, ContractCode, CredentialStatusInfo, CredentialTypeInfo, CredentialTypeSpec, CredentialUseCase, DidDocument, EligibleHolder, HeldCredential, IdentityDashboardData, IdentityRegistryInfo, IdentityResult, InvoiceRowResult, IssuedCredential, Listing, LoginKeyInfo, OrgMember, OrgType, Organization, Portfolio, ProvisionResult, Proposal, QrLoginPoll, QrLoginStart, Role, SessionUser, StagedInvoice, TokenInfo, TokenStandard, TokenizeResult, Trade, UseCase, UseCaseTemplate, UseCaseTemplateMeta, VerificationRequest, VerificationResult } from "./types.js";
+import type { AccountState, ActivityEvent, AnalyticsSummary, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, ChainInfo, ChainStatus, CompanyCategory, ContractCode, CredentialStatusInfo, CredentialTypeInfo, CredentialTypeSpec, CredentialUseCase, DidDocument, EligibleHolder, HeldCredential, IdentityDashboardData, IdentityRegistryInfo, IdentityResult, InvoiceRowResult, IssuedCredential, Listing, LoginKeyInfo, OrgCapabilities, OrgMember, OrgType, Organization, Portfolio, ProvisionResult, Proposal, QrLoginPoll, QrLoginStart, Role, SessionPrincipal, SessionUser, StagedInvoice, TokenInfo, TokenStandard, TokenizeResult, Trade, UseCase, UseCaseTemplate, UseCaseTemplateMeta, VerificationRequest, VerificationResult } from "./types.js";
 
 export interface Currency { code: string; label: string; }
 export interface CashBalance { currency: string; address: string; amount: string; }
@@ -89,6 +89,9 @@ export const api = {
       documents: { cinCertificate: { id: string }; gstinCertificate?: { id: string } };
     };
     admin: { name: string; email: string; password: string };
+    /** EN-A: the requested capability envelope. OMIT the key for an unrestricted
+     * legacy org — an explicit null is rejected by the request schema. */
+    capabilities?: OrgCapabilities;
   }) => request<{ organizationId: string; status: string }>("/orgs/register", null, { method: "POST", body: JSON.stringify(body) }),
   // Public: upload a KYB certificate before registering (no auth, throttled).
   uploadKybDocument: (contentType: string, dataBase64: string) =>
@@ -195,6 +198,9 @@ export const api = {
   identityChallenge: (token: string, userId: string) => request<{ challenge: string; expiresAt: string }>(`/users/${userId}/identity/challenge`, token, { method: "POST", body: JSON.stringify({}) }),
   identityVerify: (token: string, userId: string, presentation: string) => request<IdentityResult>(`/users/${userId}/identity/verify`, token, { method: "POST", body: JSON.stringify({ presentation }) }),
   identityMint: (token: string, body: { subjectDid?: string; holderSeed?: string; claims: Record<string, unknown>; challenge: string }) => request<{ presentation: string; holderDid: string; issuerDid: string }>(`/identity/mint`, token, { method: "POST", body: JSON.stringify(body) }),
+  // The live session principal. Returns LESS than SessionUser (no email/orgId/
+  // did/walletAddress) — callers merge it over the stored user, never replace.
+  me: (token: string) => request<SessionPrincipal>("/me", token),
   mePortfolio: (token: string) => request<Portfolio>("/me/portfolio", token),
   meActivity: (token: string) => request<ActivityEvent[]>("/me/activity", token),
   orgs: (token: string) => request<Organization[]>("/orgs", token),
@@ -207,6 +213,13 @@ export const api = {
   createOrg: (token: string, body: { name: string; orgType: OrgType; registrationId?: string; jurisdiction?: string }) =>
     request<Organization>("/orgs", token, { method: "POST", body: JSON.stringify(body) }),
   org: (token: string, id: string) => request<Organization>(`/orgs/${encodeURIComponent(id)}`, token),
+  // EN-A capability envelope. PATCH is the PlatformAdmin's direct grant (`null`
+  // clears back to unrestricted legacy); the request route is the OrgAdmin's
+  // 202 → { proposal } path, applied only once a PlatformAdmin approves it.
+  setOrgCapabilities: (token: string, id: string, capabilities: OrgCapabilities | null) =>
+    request<Organization>(`/orgs/${encodeURIComponent(id)}/capabilities`, token, { method: "PATCH", body: JSON.stringify({ capabilities }) }),
+  requestOrgCapabilities: (token: string, id: string, capabilities: OrgCapabilities) =>
+    request<{ proposal: Proposal }>(`/orgs/${encodeURIComponent(id)}/capabilities/request`, token, { method: "POST", body: JSON.stringify({ capabilities }) }),
   orgMembers: (token: string, id: string) => request<OrgMember[]>(`/orgs/${encodeURIComponent(id)}/members`, token),
   createMember: (token: string, id: string, body: { email: string; password: string; role: string; useCaseKey?: string; walletAddress?: string }) =>
     request<{ id: string; did: string; membershipVc: boolean }>(`/orgs/${encodeURIComponent(id)}/users`, token, { method: "POST", body: JSON.stringify(body) }),

@@ -3,10 +3,11 @@
  * gated by the credential type's own maker-checker depth. These are ORG scoped —
  * unlike token kinds, which are use-case scoped.
  */
-import { credentialTypeDef } from "@tokenlayer/core";
+import { credentialTypeDef, orgRoleEnabled } from "@tokenlayer/core";
 import type { AppDeps } from "./context.js";
 import { coded } from "./executors.js";
 import { issueCredentialFor, revokeCredentialById } from "./credential-issuance.js";
+import { PLATFORM_ORG_NAME } from "./platform-org.js";
 import type { TokenClaims } from "./http/support.js";
 import type { ProposalKindHandler } from "./proposal-kinds.js";
 import type { ProposalRecord } from "./persistence/types.js";
@@ -34,6 +35,13 @@ export const issueCredentialKind: ProposalKindHandler = {
     const pl = p.payload as unknown as IssueCredentialPayload;
     const org = await ctx.deps.organizations.get(pl.issuerOrgId);
     if (!org) throw coded(404, "NOT_FOUND", "issuing organization missing");
+    // EN-A execution-time re-check: the envelope may have been tightened
+    // between propose and approve. The platform org is exempt — platform
+    // issuance (KYB ceremony, onboarding KYC) signs as the platform itself.
+    // (coded() carries no details object — orgId rides in the message.)
+    if (org.name !== PLATFORM_ORG_NAME && !orgRoleEnabled(org.capabilities, "Issuer")) {
+      throw coded(403, "ORG_CAPABILITY_MISSING", `organization '${org.name}' (${org.id}) does not have the 'Issuer' capability`);
+    }
     await issueCredentialFor(ctx.deps, {
       issuerOrg: org, subjectDid: pl.subjectDid, type: pl.type, claims: pl.claims,
       validityDays: credentialTypeDef(pl.type).validityDays, proposalId: p.id,
