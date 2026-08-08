@@ -250,6 +250,16 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   app.post("/me/login-keys", { schema: S.enrollLoginKey, ...auth }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const b = request.body as { did: string; label: string };
+    // A machine principal has no device to enrol, and enrolment would leave a
+    // durable artifact the org never sees: a LoginKey row holding a private key
+    // the caller alone controls, surviving revocation of the API key and absent
+    // from the Developers surface (which lists API keys, not login keys). Gate
+    // on request.apiKey — the in-request machine signal — NOT on the user's
+    // kind: TokenClaims deliberately carries no `kind`, and this is strictly
+    // broader anyway, also covering a key bound to a human user.
+    if (request.apiKey !== undefined) {
+      return reply.code(403).send({ error: "MACHINE_PRINCIPAL", message: "an API key cannot enrol a device login key" });
+    }
     if (!/^did:key:z[1-9A-HJ-NP-Za-km-z]+$/.test(b.did)) return reply.code(400).send({ error: "BAD_DID", message: "expected a did:key ed25519" });
     if (await deps.loginKeys.getByDid(b.did)) return reply.code(409).send({ error: "KEY_ENROLLED", message: "this device key is already enrolled" });
     const rec = await deps.loginKeys.create({ userId: claims.id, did: b.did, label: b.label });

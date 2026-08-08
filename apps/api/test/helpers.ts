@@ -51,6 +51,7 @@ export interface TestAppHandle {
   app: FastifyInstance;
   users: MemoryUserRepository;
   apiKeys: MemoryApiKeyRepository;
+  loginKeys: MemoryLoginKeyRepository;
   organizations: MemoryOrganizationRepository;
 }
 
@@ -79,6 +80,7 @@ export async function buildTestAppWithRepos(opts: TestAppOptions = {}): Promise<
   const verificationRequests = new MemoryVerificationRequestRepository();
   const stagedInvoices = new MemoryStagedInvoiceRepository();
   const apiKeys = new MemoryApiKeyRepository();
+  const loginKeys = new MemoryLoginKeyRepository();
   const keystore = createKeystore("11".repeat(32));
   // seedDefaults now creates the second PlatformAdmin (admin2@tokenlayer.dev) so
   // gated onboarding of a brand-new use case's FIRST UseCaseAdmin (and any
@@ -94,7 +96,7 @@ export async function buildTestAppWithRepos(opts: TestAppOptions = {}): Promise<
   const deps: AppDeps = {
     useCases, credentialUseCases, credentialTemplates, rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents, cashflows, proposals,
     organizations, credentials, verificationRequests, stagedInvoices, apiKeys, keystore, didMasterConfigured: opts.didMasterConfigured ?? true,
-    challenges: createMemoryChallengeStore(), loginKeys: new MemoryLoginKeyRepository(), qrLogin: createMemoryQrLoginStore(), publicWebUrl: "http://localhost:5173", enabledDomains: opts.enabledDomains ?? ["tokenization", "identity"], trustedKycIssuers: opts.trustedKycIssuers,
+    challenges: createMemoryChallengeStore(), loginKeys, qrLogin: createMemoryQrLoginStore(), publicWebUrl: "http://localhost:5173", enabledDomains: opts.enabledDomains ?? ["tokenization", "identity"], trustedKycIssuers: opts.trustedKycIssuers,
     devIssuerSeed: opts.devIssuerSeed, isProduction: opts.isProduction,
     currencies: loadCurrencies(), jwtSecret: "test-secret", publicApiUrl: "http://test.local/api/v1",
     loginRateLimitMax: opts.loginRateLimitMax ?? 100000,
@@ -105,7 +107,7 @@ export async function buildTestAppWithRepos(opts: TestAppOptions = {}): Promise<
     registry: opts.registry,
   };
   await ensurePlatformIssuerOrg(deps);
-  return { app: await buildApp(deps), users, apiKeys, organizations };
+  return { app: await buildApp(deps), users, apiKeys, loginKeys, organizations };
 }
 
 /** All v1 API routes live under this prefix. */

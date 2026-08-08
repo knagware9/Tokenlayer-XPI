@@ -491,7 +491,8 @@ export const S: Record<string, FastifySchema> = {
   enrollLoginKey: {
     tags: ["Auth"], summary: "Enrol a device login key (public did:key)", security: bearer,
     body: { type: "object", additionalProperties: false, required: ["did", "label"], properties: { did: { type: "string" }, label: { type: "string", minLength: 1 } } },
-    response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 409) },
+    // 403 = MACHINE_PRINCIPAL: an API key has no device to enrol.
+    response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 409) },
   },
   listLoginKeys: { tags: ["Auth"], summary: "The caller's enrolled device login keys", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401) } },
   removeLoginKey: { tags: ["Auth"], summary: "Revoke a device login key", security: bearer, params: { type: "object", required: ["id"], properties: { id: { type: "string" } } }, response: { 204: { type: "null" }, ...errs(401, 404) } },

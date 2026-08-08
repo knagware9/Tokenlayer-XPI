@@ -219,16 +219,36 @@ describe("API key auth seam (EN-B task B3)", () => {
     expect(res.json()).toMatchObject({ error: "SERVICE_ACCOUNT" });
   });
 
-  it("a service user cannot trade its key for a JWT via the QR device-key path", async () => {
+  it("an API key cannot enrol a device login key", async () => {
+    const h = await buildTestAppWithRepos();
+    const seeded = await seedServiceKey(h);
+    const device = generateDidKey();
+
+    const asKey = await h.app.inject({
+      method: "POST", url: `${V1}/me/login-keys`, headers: auth(seeded.secret), payload: { did: device.did, label: "attacker device" },
+    });
+    expect(asKey.statusCode).toBe(403);
+    expect(asKey.json()).toMatchObject({ error: "MACHINE_PRINCIPAL" });
+    // Nothing durable was left behind for the org to never see.
+    expect(await h.loginKeys.listByUser(seeded.userId)).toEqual([]);
+
+    // The same route, same body, from a human session: still works.
+    const token = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const asHuman = await h.app.inject({
+      method: "POST", url: `${V1}/me/login-keys`, headers: auth(token), payload: { did: device.did, label: "my laptop" },
+    });
+    expect(asHuman.statusCode).toBe(201);
+  });
+
+  it("a service user cannot trade an enrolled device key for a JWT via the QR path", async () => {
     const h = await buildTestAppWithRepos();
     const seeded = await seedServiceKey(h);
 
-    // Enrol a device key AS the service user — using nothing but its API key.
+    // Enrol STRAIGHT THROUGH THE REPO, deliberately bypassing the route guard
+    // above: the two defences must be pinned independently, or removing the
+    // enrolment guard would leave this test passing for the wrong reason.
     const device = generateDidKey();
-    const enrol = await h.app.inject({
-      method: "POST", url: `${V1}/me/login-keys`, headers: auth(seeded.secret), payload: { did: device.did, label: "attacker device" },
-    });
-    expect(enrol.statusCode).toBe(201);
+    await h.loginKeys.create({ userId: seeded.userId, did: device.did, label: "attacker device" });
 
     const start = await h.app.inject({ method: "POST", url: `${V1}/auth/qr/start` });
     const { sessionId, challenge } = start.json() as { sessionId: string; challenge: string };
