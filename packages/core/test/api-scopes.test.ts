@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { API_SCOPES, scopeAllows, validateScopes } from "../src/api-scopes.js";
+import { API_SCOPES, API_SCOPE_RESOURCES, scopeAllows, validateScopes } from "../src/api-scopes.js";
 import { PolicyError } from "../src/errors.js";
 
 describe("scopeAllows", () => {
@@ -20,6 +20,12 @@ describe("scopeAllows", () => {
   it("an empty grant list allows nothing", () => {
     expect(scopeAllows([], "credentials:read")).toBe(false);
   });
+  it("a colonless required action matches NO wildcard — a scope must never widen", () => {
+    // "credentials".slice(0, -1) === "credential", so an unguarded resource
+    // split would let a different resource's wildcard cover it.
+    expect(scopeAllows(["credential:*"], "credentials" as never)).toBe(false);
+    expect(scopeAllows([":*"], "*" as never)).toBe(false);
+  });
 });
 
 describe("validateScopes", () => {
@@ -31,12 +37,23 @@ describe("validateScopes", () => {
     expect(() => validateScopes(["ledger:drop"])).toThrow(/unknown scope/);
     expect(() => validateScopes(["credentials:issue", "credentials:issue"])).toThrow(/duplicate/);
     expect(() => validateScopes("credentials:issue" as never)).toThrow(PolicyError);
+    expect(() => validateScopes("credentials:issue" as never)).toThrow(/must be an array/);
     expect(() => validateScopes([])).toThrow(/at least one/);
+  });
+  it("rejects a wildcard over a forged resource — the stem must be a known resource", () => {
+    expect(() => validateScopes(["ledger:*"])).toThrow(/unknown scope resource/);
+    expect(() => validateScopes([":*"])).toThrow(/unknown scope resource/);
+    expect(() => validateScopes(["*:*"])).toThrow(/unknown scope resource/);
+  });
+  it("rejects a non-string entry", () => {
+    expect(() => validateScopes([123])).toThrow(/must be strings/);
+    expect(() => validateScopes([123])).toThrow(PolicyError);
   });
 });
 
 describe("API_SCOPES", () => {
-  it("every scope is resource:action with a known resource", () => {
+  it("every scope is resource:action drawn from the closed resource set the validator uses", () => {
     for (const s of API_SCOPES) expect(s).toMatch(/^[a-z]+:[a-z]+$/);
+    expect([...API_SCOPE_RESOURCES].sort()).toEqual(["assets", "credentials", "org", "users", "verifications"]);
   });
 });

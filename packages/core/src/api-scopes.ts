@@ -25,30 +25,47 @@ export const API_SCOPES = [
 ] as const;
 export type ApiScope = (typeof API_SCOPES)[number];
 
-/** A grant is an exact scope, a `resource:*` wildcard, or the global `*`. */
-export type ApiScopeGrant = ApiScope | "*" | `${string}:*`;
+/** The resource half of each scope — the only legal `resource:*` stems. */
+type ApiScopeResource = ApiScope extends `${infer R}:${string}` ? R : never;
+
+/** The same closed set at runtime, built once: its inputs are module constants. */
+export const API_SCOPE_RESOURCES: ReadonlySet<string> = new Set(
+  API_SCOPES.map((s) => s.slice(0, s.indexOf(":"))),
+);
+
+/**
+ * A grant is an exact scope, a `resource:*` wildcard over a KNOWN resource, or
+ * the global `*`. The resource arm is derived from `API_SCOPES` rather than
+ * written as `${string}:*`, which would swallow the union and admit exactly the
+ * forged wildcards (`ledger:*`, `:*`) that `validateScopes` exists to reject.
+ */
+export type ApiScopeGrant = ApiScope | "*" | `${ApiScopeResource}:*`;
 
 export function scopeAllows(granted: readonly string[] | null, required: ApiScope): boolean {
   if (granted === null) return true;
   if (granted.includes("*")) return true;
   if (granted.includes(required)) return true;
-  const resource = required.slice(0, required.indexOf(":"));
-  return granted.includes(`${resource}:*`);
+  // A `required` with no colon has no resource, so no wildcard can cover it.
+  // Without this guard `indexOf` returns -1 and `slice(0, -1)` would drop the
+  // last character, letting a DIFFERENT resource's wildcard match ("credentials"
+  // vs "credential:*") — the one path by which a scope could WIDEN authority.
+  const i = required.indexOf(":");
+  if (i < 0) return false;
+  return granted.includes(`${required.slice(0, i)}:*`);
 }
 
-export function validateScopes(input: unknown): string[] {
+export function validateScopes(input: unknown): ApiScopeGrant[] {
   if (!Array.isArray(input)) throw new PolicyError("INVALID_SCOPES", "scopes must be an array");
   if (input.length === 0) throw new PolicyError("INVALID_SCOPES", "provide at least one scope");
-  const resources = new Set(API_SCOPES.map((s) => s.slice(0, s.indexOf(":"))));
   for (const s of input) {
     if (typeof s !== "string") throw new PolicyError("INVALID_SCOPES", "scopes must be strings");
     if (s === "*") continue;
     if (s.endsWith(":*")) {
-      if (!resources.has(s.slice(0, -2))) throw new PolicyError("INVALID_SCOPES", `unknown scope resource '${s}'`);
+      if (!API_SCOPE_RESOURCES.has(s.slice(0, -2))) throw new PolicyError("INVALID_SCOPES", `unknown scope resource '${s}'`);
       continue;
     }
     if (!(API_SCOPES as readonly string[]).includes(s)) throw new PolicyError("INVALID_SCOPES", `unknown scope '${s}'`);
   }
   if (new Set(input).size !== input.length) throw new PolicyError("INVALID_SCOPES", "scopes contain duplicates");
-  return [...input] as string[];
+  return [...input] as ApiScopeGrant[];
 }
