@@ -364,7 +364,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     }
   });
   app.get("/currencies", { schema: S.currencies, ...auth }, async () => deps.currencies);
-  app.get("/accounts", { schema: S.accounts, ...auth }, async (request) => scopedAccounts(request.user as TokenClaims));
+  app.get("/accounts", { schema: S.accounts, ...authScoped("assets:read") }, async (request) => scopedAccounts(request.user as TokenClaims));
 
   app.get("/use-cases", { schema: S.listUseCases, ...auth }, async (request) => {
     const claims = request.user as TokenClaims;
@@ -419,7 +419,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         payload: owned as unknown as Record<string, unknown>,
         proposerId: claims.id, proposerLabel: claims.email, required: 1,
       });
-      return reply.code(202).send({ proposal });
+      return reply.code(202).send({ proposal: proposalView(proposal) });
     }
     // PlatformAdmin: deploy the use case's contract on each allowed chain that is
     // available in the registry (fabric is always available in the simulated stack)
@@ -753,13 +753,25 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const params = b.params ?? {};
     const prov = b.provisioning ?? {};
     // A MACHINE PRINCIPAL MUST NEVER ASK FOR DESK USERS. Step 5 below creates
-    // three brand-new HUMAN accounts and returns their server-generated
-    // PLAINTEXT passwords in the response body — precisely the durable
-    // credential-minting the key path already refuses at POST /me/login-keys, at
-    // the key-management routes and at PATCH /users/:id's password. Those would
-    // be three interactive sessions outliving revocation of the key that asked
-    // for them and absent from the Developers surface. Refused HERE, before any
-    // org or use case is created, so a rejected call provisions nothing at all.
+    // three brand-new HUMAN accounts and returns their SERVER-GENERATED plaintext
+    // passwords in the response body. Refused HERE, before any org or use case is
+    // created, so a rejected call provisions nothing at all.
+    //
+    // WHY THIS DIFFERS FROM POST /orgs/:id/users, which a key holding
+    // `users:onboard` MAY use to create a human with a password:
+    //   1. THE PASSWORD'S ORIGIN. There the integrator SUPPLIES a password it
+    //      already chose for a human it already manages — it learns nothing it
+    //      did not bring. Here the SERVER mints credentials and discloses them to
+    //      whoever called; the key ends up holding secrets it never chose and
+    //      would otherwise never see. That is credential disclosure, not
+    //      delegated account creation.
+    //   2. INTENT. There, creating an account IS the request, behind a scope
+    //      whose name says exactly that, granted deliberately. Here three staffed
+    //      desks arrive as a SIDE EFFECT of asking for a use case — a key granted
+    //      `usecases:provision` is asking for configuration, and its org never
+    //      agreed to let it mint people.
+    // Both routes still audit, and both bind the new member to the org; the
+    // difference is who chose the secret and whether the org consented to it.
     if (prov.createDeskUsers && machinePrincipal(request)) {
       return reply.code(403).send({ error: "MACHINE_PRINCIPAL", message: "an API key cannot create desk users; provision them from a human session" });
     }
@@ -922,7 +934,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return { issuerOrg };
   }
 
-  app.get("/credential-use-cases/:key/eligible-holders", { schema: S.eligibleHolders, ...auth }, async (request, reply) => {
+  app.get("/credential-use-cases/:key/eligible-holders", { schema: S.eligibleHolders, ...authScoped("users:read") }, async (request, reply) => {
     const { key } = request.params as { key: string };
     const def = await deps.credentialUseCases.get(key);
     if (!def) return notFound(reply, `credential use case '${key}' not found`);
@@ -996,7 +1008,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       payload: { credentialUseCaseKey: key, credentialType: spec.name, subjectDid, ...subjectRef, claims: b.claims, issuerOrgId: issuerOrg.id },
       proposerId: claims.id, proposerLabel: claims.email, required: spec.requiredApprovals,
     });
-    return reply.code(202).send({ proposal });
+    return reply.code(202).send({ proposal: proposalView(proposal) });
   });
 
   // Batch credential issuance from parsed CSV rows: ONE maker-checker proposal
@@ -1040,7 +1052,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       actorId: claims.id, action: "credential-batch-proposed" as LifecycleAction,
       payload: { proposalId: proposal.id, useCaseKey: key, credentialType: spec.name, total: b.rows.length },
     });
-    return reply.code(202).send({ proposal });
+    return reply.code(202).send({ proposal: proposalView(proposal) });
   });
 
   // --- assets -------------------------------------------------------------
@@ -1181,7 +1193,9 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
           ...(sale ? { sale } : {}),
           ...(issuanceFeeCharged ? { issuanceFee: { ...issuanceFeeCharged, payer: feePayer } } : {}),
         });
-        return { ok: true, status: 202, body: { proposal, asset: await deps.assets.get(id) } };
+        // `gatedIssue` already established this use case gates "issue", so
+        // proposeIfGated cannot have returned null here.
+        return { ok: true, status: 202, body: { proposal: proposal ? proposalView(proposal) : null, asset: await deps.assets.get(id) } };
       }
       // Ungated: activate immediately — sale terms + allowlist treasury + mint supply.
       const created = await deps.assets.get(id);
@@ -1391,7 +1405,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return tokens.sort((a, b) => a.tokenId.localeCompare(b.tokenId, undefined, { numeric: true }));
   });
 
-  app.get("/assets/:id/audit", { schema: S.assetAudit, ...auth }, async (request, reply) => {
+  app.get("/assets/:id/audit", { schema: S.assetAudit, ...authScoped("assets:read") }, async (request, reply) => {
     const asset = await scopedAsset(request, reply, "read");
     if (!asset) return reply;
     const q = request.query as { limit: number; offset: number };
@@ -1422,13 +1436,13 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return { assetId, valid: base.valid, count: base.count, head: base.head, brokenAt: base.brokenAt, reason: base.reason ?? null, lastAnchor: anchor ? { seq: anchor.seq, hash: anchor.hash, txHash: anchor.txHash, chainId: anchor.chainId, at: anchor.createdAt } : null, anchorConsistent };
   }
 
-  app.get("/assets/:id/audit/verify", { schema: S.verifyAssetAudit, ...auth }, async (request, reply) => {
+  app.get("/assets/:id/audit/verify", { schema: S.verifyAssetAudit, ...authScoped("assets:read") }, async (request, reply) => {
     const asset = await scopedAsset(request, reply, "read");
     if (!asset) return reply;
     return verifyAsset(asset.id);
   });
 
-  app.get("/audit/verify", { schema: S.verifyAuditSummary, ...auth }, async (request) => {
+  app.get("/audit/verify", { schema: S.verifyAuditSummary, ...authScoped("assets:read") }, async (request) => {
     const claims = request.user as TokenClaims;
     const useCaseKey = claims.role === "PlatformAdmin" ? undefined : claims.useCaseKey ?? NO_USE_CASE;
     const { items } = await deps.assets.list({ useCaseKey }, { limit: 1000 });
@@ -1468,7 +1482,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   });
 
   // --- analytics ----------------------------------------------------------
-  app.get("/analytics", { schema: S.analytics, ...auth }, async (request) => {
+  app.get("/analytics", { schema: S.analytics, ...authScoped("assets:read") }, async (request) => {
     const claims = request.user as TokenClaims;
     const q = request.query as { useCaseKey?: string; days?: number };
     // Determine scope like /assets: PlatformAdmin sees the platform unless a
@@ -1510,7 +1524,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   // ID-N: scoped identity operations dashboard. Read-only aggregation — scope is
   // resolved here, all counting lives in the pure fold. No chain reads: revocation
   // comes from the DB flag exactly like every list projection.
-  app.get("/identity/dashboard", { schema: S.identityDashboard, ...auth }, async (request, reply) => {
+  app.get("/identity/dashboard", { schema: S.identityDashboard, ...authScoped("credentials:read") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const all = await deps.credentialUseCases.list();
     let scoped: typeof all;
@@ -1568,7 +1582,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       }
       const useCase = await deps.useCases.get(asset.useCaseKey);
       const proposal = await proposeIfGated(request, useCase, action, asset.id, { action, body: b });
-      if (proposal) return reply.code(202).send({ proposal });
+      if (proposal) return reply.code(202).send({ proposal: proposalView(proposal) });
     }
 
     let receipt;
@@ -1721,13 +1735,13 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return { wallet, useCaseKey: claims.role === "PlatformAdmin" ? undefined : claims.useCaseKey ?? NO_USE_CASE };
   }
 
-  app.get("/me/portfolio", { schema: S.mePortfolio, ...auth }, async (request, reply) => {
+  app.get("/me/portfolio", { schema: S.mePortfolio, ...authScoped("assets:read") }, async (request, reply) => {
     const scope = await investorScope(request, reply);
     if (!scope) return reply;
     return computePortfolio(deps, scope.wallet, scope.useCaseKey);
   });
 
-  app.get("/me/activity", { schema: S.meActivity, ...auth }, async (request, reply) => {
+  app.get("/me/activity", { schema: S.meActivity, ...authScoped("assets:read") }, async (request, reply) => {
     const scope = await investorScope(request, reply);
     if (!scope) return reply;
     return computeActivity(deps, scope.wallet, scope.useCaseKey);
@@ -2121,7 +2135,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       },
       proposerId: claims.id, proposerLabel: claims.email, required: 1,
     });
-    return reply.code(202).send({ proposal });
+    return reply.code(202).send({ proposal: proposalView(proposal) });
   });
 
   // Batch onboarding from parsed CSV rows: ONE maker-checker proposal covering
@@ -2190,7 +2204,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       actorId: claims.id, action: "user-batch-proposed" as LifecycleAction,
       payload: { proposalId: proposal.id, total: prepared.length },
     });
-    return reply.code(202).send({ proposal });
+    return reply.code(202).send({ proposal: proposalView(proposal) });
   });
 
   app.delete("/users/:id", { schema: S.deleteUser, ...authScoped("users:onboard") }, async (request, reply) => {
@@ -2213,12 +2227,16 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const sameScope = claims.role === "PlatformAdmin" || (canManageUsers(claims.role) && target.useCaseKey === claims.useCaseKey && target.role !== "UseCaseAdmin");
     if (!sameScope) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to edit that user" });
     const patch: { passwordHash?: string; active?: boolean; kycStatus?: KycStatus } = {};
-    // A machine principal may not set a password on an EXISTING account. That is
-    // account takeover of a human, and it hands the machine an interactive
-    // session that survives revocation of the key that created it — the same
-    // durability class as the device-login-key refusal. Creating a NEW user is
-    // different and stays allowed: it is a delegable business operation, and the
-    // `users:onboard` scope must be granted explicitly for it.
+    // A machine principal may not set a password on an EXISTING account: that is
+    // takeover of a human who already exists and whose credential the key had no
+    // part in choosing. Creating a NEW user with a caller-supplied password
+    // (POST /orgs/:id/users, scope `users:onboard`) stays allowed and IS
+    // deliberate — the integrator brings a secret it already owns for a person it
+    // already manages, which is delegable; seizing one it does not own is not.
+    // Yes, the created human can then log in and outlive the key. That is the
+    // accepted consequence of delegating onboarding at all: the same is true of
+    // any human an OrgAdmin onboards, the scope must be granted explicitly, and
+    // canCreateOrgMember still caps the new member's role below the caller's.
     if (typeof b.password === "string" && machinePrincipal(request)) {
       return reply.code(403).send({ error: "MACHINE_PRINCIPAL", message: "an API key cannot set a user's password" });
     }
@@ -2247,7 +2265,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       payload: { userId: id, reason },
       proposerId: claims.id, proposerLabel: claims.email, required: 1,
     });
-    return reply.code(202).send({ proposal });
+    return reply.code(202).send({ proposal: proposalView(proposal) });
   });
 
   // --- organizations -------------------------------------------------------
@@ -2571,7 +2589,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       payload: { orgId: org.id, capabilities },
       proposerId: claims.id, proposerLabel: claims.email, required: 1,
     });
-    return reply.code(202).send({ proposal });
+    return reply.code(202).send({ proposal: proposalView(proposal) });
   });
 
   // Mint a sub-DID + OrganizationMembership VC for `user` under `org` (links the
@@ -2976,7 +2994,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       payload: { type: def.type, subjectDid: subject.did, subjectUserId: subject.id, claims: b.claims, issuerOrgId: org.id },
       proposerId: claims.id, proposerLabel: claims.email, required: def.requiredApprovals,
     });
-    return reply.code(202).send({ proposal });
+    return reply.code(202).send({ proposal: proposalView(proposal) });
   });
 
   app.post("/credentials/:id/revoke", { schema: S.revokeCredential, ...authScoped("credentials:revoke") }, async (request, reply) => {
@@ -3014,7 +3032,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       payload: { credentialId: cred.id, reason },
       proposerId: claims.id, proposerLabel: claims.email, required,
     });
-    return reply.code(202).send({ proposal });
+    return reply.code(202).send({ proposal: proposalView(proposal) });
   });
 
   // PUBLIC — a verifier holding only the VC must be able to resolve its status.
@@ -3491,7 +3509,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return "scheduled";
   }
 
-  app.get("/assets/:id/cashflows", { schema: S.listCashflows, ...auth }, async (request, reply) => {
+  app.get("/assets/:id/cashflows", { schema: S.listCashflows, ...authScoped("assets:read") }, async (request, reply) => {
     const asset = await scopedAsset(request, reply, "read");
     if (!asset) return reply;
     const today = new Date().toISOString().slice(0, 10);
@@ -3570,7 +3588,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     // have already passed) as a pending proposal instead of paying out now.
     const useCase = await deps.useCases.get(asset.useCaseKey);
     const proposal = await proposeIfGated(request, useCase, "cashflow-execute", asset.id, { cfId: cf.id, from: payer });
-    if (proposal) return reply.code(202).send({ proposal });
+    if (proposal) return reply.code(202).send({ proposal: proposalView(proposal) });
 
     // Pro-rata payout + (redemption) burn/mature + markExecuted + audit — shared
     // with the maker-checker approval path (executed as the proposer there).
@@ -3600,18 +3618,72 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
   app.get("/proposals", { schema: S.listProposals, ...auth }, async (request) => {
     const claims = request.user as TokenClaims;
     const q = request.query as { status?: string; useCaseKey?: string };
-    if (claims.role === "PlatformAdmin") return deps.proposals.list(q.useCaseKey, q.status);
-    // A caller sees their use-case proposals AND their org's proposals. Both are
-    // indexed; the __none__ sentinel keeps an unscoped user from matching every
-    // null-useCaseKey (credential) proposal.
-    const byUseCase = await deps.proposals.list(claims.useCaseKey ?? NO_USE_CASE, q.status);
-    const byOrg = claims.orgId ? await deps.proposals.listByOrg(claims.orgId, q.status) : [];
-    const seen = new Set(byUseCase.map((p) => p.id));
-    return [...byUseCase, ...byOrg.filter((p) => !seen.has(p.id))];
+    const rows = claims.role === "PlatformAdmin"
+      ? await deps.proposals.list(q.useCaseKey, q.status)
+      // A caller sees their use-case proposals AND their org's proposals. Both are
+      // indexed; the __none__ sentinel keeps an unscoped user from matching every
+      // null-useCaseKey (credential) proposal.
+      : await (async () => {
+        const byUseCase = await deps.proposals.list(claims.useCaseKey ?? NO_USE_CASE, q.status);
+        const byOrg = claims.orgId ? await deps.proposals.listByOrg(claims.orgId, q.status) : [];
+        const seen = new Set(byUseCase.map((p) => p.id));
+        return [...byUseCase, ...byOrg.filter((p) => !seen.has(p.id))];
+      })();
+    return rows.filter((p) => decidableByPrincipal(request, p.kind)).map(proposalView);
   });
 
   // Run the finalized proposal's operation as the PROPOSER's identity (RBAC +
   // engine compliance re-apply to the proposer at execution time).
+  /**
+   * Credential material that must never leave the server, at ANY depth of a
+   * proposal payload. `onboard-user` parks a bcrypt hash of the new human's
+   * password in its payload (deliberately — plaintext must not enter the
+   * proposal store), and `onboard-user-batch` parks one PER ROW. A hash is an
+   * offline-crackable credential, and it is never evidence an approver needs, so
+   * it is stripped from every projection — for humans as well as keys. The
+   * executor reads the STORED record, not this view.
+   */
+  const REDACTED_PAYLOAD_KEYS = new Set(["passwordHash"]);
+  function redactPayload(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(redactPayload);
+    if (value && typeof value === "object") {
+      return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>)
+          .filter(([k]) => !REDACTED_PAYLOAD_KEYS.has(k))
+          .map(([k, v]) => [k, redactPayload(v)]),
+      );
+    }
+    return value;
+  }
+
+  /** The ONE projection of a proposal onto the wire. Every send site uses it. */
+  function proposalView(p: ProposalRecord): ProposalRecord {
+    return { ...p, payload: redactPayload(p.payload) as Record<string, unknown> };
+  }
+
+  /**
+   * May this principal DECIDE a proposal of `kind`? For a human: always (their
+   * role and the kind's own `canApprove` decide). For a key: only when its
+   * scopes cover the kind's declared `apiScope`.
+   *
+   * Used both to gate `decide()` and to FILTER the listing — a key that could
+   * never act on a proposal has no business reading its payload either. That
+   * link matters: the payload of an `onboard-user` proposal describes a human
+   * being (email, role, KYC country), and the listing is scoped by tenancy, not
+   * by kind, so without this any key with any scope read all of them.
+   */
+  function decidableByPrincipal(request: FastifyRequest, kind: string): boolean {
+    const key = request.apiKey;
+    if (!key) return true;
+    const required = proposalKind(kind).apiScope;
+    // `== null` catches undefined too. `apiScope` is a REQUIRED field, so an
+    // unanswered kind cannot compile — but types are not a runtime guard, and
+    // the stated intent is that an unanswered kind fails CLOSED. Make the
+    // runtime say the same thing.
+    if (required == null) return false;
+    return scopeAllows(key.scopes, required);
+  }
+
   async function executeProposal(request: FastifyRequest, p: ProposalRecord, proposer: Actor): Promise<void> {
     await proposalKind(p.kind).execute({ deps, log: request.log }, proposer, p);
   }
@@ -3633,18 +3705,18 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     // This applies to REJECT too: rejecting runs compensation (fee refunds,
     // asset state changes), which is just as much a decision.
     const machineKey = request.apiKey;
-    if (machineKey) {
+    if (machineKey && !decidableByPrincipal(request, p.kind)) {
       const required = proposalKind(p.kind).apiScope;
-      if (required === null) {
+      // `== null` (not `=== null`): an unanswered kind is refused outright, the
+      // same fail-closed reading `decidableByPrincipal` uses.
+      if (required == null) {
         return reply.code(403).send({ error: "MACHINE_PRINCIPAL", message: `an API key may not decide '${p.kind}' proposals` });
       }
-      if (!scopeAllows(machineKey.scopes, required)) {
-        return reply.code(403).send({
-          error: "INSUFFICIENT_SCOPE",
-          message: `this API key lacks the '${required}' scope required to decide a '${p.kind}' proposal`,
-          details: { required, granted: machineKey.scopes },
-        });
-      }
+      return reply.code(403).send({
+        error: "INSUFFICIENT_SCOPE",
+        message: `this API key lacks the '${required}' scope required to decide a '${p.kind}' proposal`,
+        details: { required, granted: machineKey.scopes },
+      });
     }
     if (p.status !== "pending") return reply.code(409).send({ error: "PROPOSAL_NOT_PENDING", message: `proposal is ${p.status}` });
     if (claims.id === p.proposerId) return reply.code(403).send({ error: "SELF_APPROVAL", message: "the proposer may not decide their own proposal" });
@@ -3658,7 +3730,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       if (!(await deps.proposals.claimDecided(p.id, "rejected"))) return reply.code(409).send({ error: "PROPOSAL_NOT_PENDING", message: "already decided" });
       const rejected = await deps.proposals.setStatus(p.id, "rejected");
       await proposalKind(p.kind).compensate?.({ deps, log: request.log }, p, "rejected");
-      return { proposal: rejected };
+      return { proposal: proposalView(rejected) };
     }
 
     let withApproval: ProposalRecord;
@@ -3670,7 +3742,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       }
       throw err;
     }
-    if (withApproval.approvals.length < withApproval.required) return { proposal: withApproval };
+    if (withApproval.approvals.length < withApproval.required) return { proposal: proposalView(withApproval) };
 
     // Threshold reached — CAS pending → approved so exactly one approval executes.
     if (!(await deps.proposals.claimDecided(p.id, "approved"))) {
@@ -3680,16 +3752,16 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (!proposerUser || !proposerUser.active) {
       // The captured issuance never activates — refund its fee (parity with reject).
       await proposalKind(p.kind).compensate?.({ deps, log: request.log }, p, "failed");
-      return { proposal: await deps.proposals.setStatus(p.id, "failed", "PROPOSER_INACTIVE") };
+      return { proposal: proposalView(await deps.proposals.setStatus(p.id, "failed", "PROPOSER_INACTIVE")) };
     }
     try {
       await executeProposal(request, p, { id: proposerUser.id, role: proposerUser.role });
-      return { proposal: await deps.proposals.setStatus(p.id, "executed") };
+      return { proposal: proposalView(await deps.proposals.setStatus(p.id, "executed")) };
     } catch (err) {
       const code = err instanceof CodedError ? err.code : err instanceof PolicyError ? err.code : "EXECUTION_FAILED";
       // A gated issuance that fails to activate keeps no fee (parity with reject).
       await proposalKind(p.kind).compensate?.({ deps, log: request.log }, p, "failed");
-      return { proposal: await deps.proposals.setStatus(p.id, "failed", `${code}: ${(err as Error).message}`) };
+      return { proposal: proposalView(await deps.proposals.setStatus(p.id, "failed", `${code}: ${(err as Error).message}`)) };
     }
   }
 
@@ -3712,7 +3784,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const doc = await storeUploadedDocument(deps.documents, request.body as { contentType: string; dataBase64: string });
     return reply.code(201).send({ id: doc.id, url: `/api/v1/documents/${doc.id}`, sha256: doc.sha256, size: doc.size });
   });
-  app.get("/documents/:id", { schema: S.getDocument, ...auth }, async (request, reply) => {
+  app.get("/documents/:id", { schema: S.getDocument, ...authScoped("assets:read") }, async (request, reply) => {
     const actor = actorOf(request);
     if (!canReadDoc(actor.role)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to read documents" });
     const { id } = request.params as { id: string };

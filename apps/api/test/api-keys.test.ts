@@ -1190,3 +1190,167 @@ describe("liveness checks the cache must never mask", () => {
     expect((await h.app.inject({ method: "GET", url: `${V1}/me`, headers: auth(seeded.secret) })).statusCode).toBe(401);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Re-proof review: the READ half of the surface. A scope map that only gates
+// mutations leaves every disclosure ungated — including proposal payloads,
+// which carry the bcrypt hash of a pending human's password.
+// ---------------------------------------------------------------------------
+
+describe("proposal payloads never leak credential material (read sweep)", () => {
+  /** A pending onboard-user proposal — its payload holds a real bcrypt hash. */
+  async function pendingOnboard(h: TestAppHandle): Promise<{ admin: string; proposalId: string }> {
+    const admin = await platformAdmin(h);
+    const res = await h.app.inject({
+      method: "POST", url: `${V1}/users`, headers: auth(admin),
+      payload: { email: "leak.target@x.dev", password: "leak-secret-1", role: "Buyer", useCaseKey: "invoice-tokenization" },
+    });
+    expect(res.statusCode).toBe(202);
+    return { admin, proposalId: res.json().proposal.id as string };
+  }
+
+  it("a key with an unrelated scope cannot see an onboard-user proposal at all", async () => {
+    const h = await buildTestAppWithRepos();
+    const { proposalId } = await pendingOnboard(h);
+    const unrelated = await seedServiceKey(h, { role: "PlatformAdmin", scopes: ["assets:read"] });
+
+    const listed = await h.app.inject({ method: "GET", url: `${V1}/proposals`, headers: auth(unrelated.secret) });
+    expect(listed.statusCode).toBe(200);
+    // A key sees only the proposals it could actually DECIDE — an `assets:read`
+    // key has no business reading a human onboarding's payload.
+    expect((listed.json() as { id: string }[]).map((p) => p.id)).not.toContain(proposalId);
+    expect(listed.payload).not.toContain("passwordHash");
+    expect(listed.payload).not.toContain("leak.target@x.dev");
+  });
+
+  it("a key that COULD decide it sees it — but never the password hash", async () => {
+    const h = await buildTestAppWithRepos();
+    const { proposalId } = await pendingOnboard(h);
+    const onboarder = await seedServiceKey(h, { role: "PlatformAdmin", scopes: ["users:onboard"] });
+
+    const listed = await h.app.inject({ method: "GET", url: `${V1}/proposals`, headers: auth(onboarder.secret) });
+    expect(listed.statusCode).toBe(200);
+    const row = (listed.json() as { id: string; payload: Record<string, unknown> }[]).find((p) => p.id === proposalId);
+    // Visible, and still described well enough to approve knowingly…
+    expect(row?.payload).toMatchObject({ email: "leak.target@x.dev", role: "Buyer" });
+    // …but the credential itself is gone. An offline-crackable hash is never
+    // approval evidence, so it is stripped for HUMANS too (below).
+    expect(row?.payload).not.toHaveProperty("passwordHash");
+  });
+
+  it("the hash is stripped for a human PlatformAdmin too, on list AND on decide", async () => {
+    const h = await buildTestAppWithRepos();
+    const { proposalId } = await pendingOnboard(h);
+    const admin2 = await loginAs(h.app, "admin2@tokenlayer.dev", "admin123");
+
+    const listed = await h.app.inject({ method: "GET", url: `${V1}/proposals`, headers: auth(admin2) });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.payload).not.toContain("passwordHash");
+
+    const decided = await h.app.inject({ method: "POST", url: `${V1}/proposals/${proposalId}/approve`, headers: auth(admin2), payload: {} });
+    expect(decided.statusCode).toBe(200);
+    expect(decided.json().proposal.status).toBe("executed");
+    expect(decided.payload).not.toContain("passwordHash");
+    // Stripping the projection must not break the executor — the onboarded user
+    // still exists with a working password.
+    expect(await loginAs(h.app, "leak.target@x.dev", "leak-secret-1")).toBeTruthy();
+  });
+
+  it("the 202 that DRAFTS a proposal does not echo the hash back either", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await platformAdmin(h);
+    const res = await h.app.inject({
+      method: "POST", url: `${V1}/users`, headers: auth(admin),
+      payload: { email: "echo.target@x.dev", password: "echo-secret-1", role: "Buyer", useCaseKey: "invoice-tokenization" },
+    });
+    expect(res.statusCode).toBe(202);
+    expect(res.payload).not.toContain("passwordHash");
+  });
+
+  it("a governance proposal is invisible to every key — no scope can decide it", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await platformAdmin(h);
+    const orgId = await makeOrg(h, admin, "Invisible Governance Org");
+    const orgAdmin = await makeOrgAdmin(h, admin, orgId, "invisible.admin@x.dev");
+    const requested = await h.app.inject({
+      method: "POST", url: `${V1}/orgs/${orgId}/capabilities/request`, headers: auth(orgAdmin),
+      payload: { capabilities: { domains: ["identity"], roles: ["Issuer"] } },
+    });
+    expect(requested.statusCode).toBe(202);
+    const proposalId = requested.json().proposal.id as string;
+
+    const wildcard = await seedServiceKey(h, { role: "PlatformAdmin", scopes: ["*"] });
+    const listed = await h.app.inject({ method: "GET", url: `${V1}/proposals`, headers: auth(wildcard.secret) });
+    expect((listed.json() as { id: string }[]).map((p) => p.id)).not.toContain(proposalId);
+    // The human PlatformAdmin who must decide it still sees it.
+    const human = await h.app.inject({ method: "GET", url: `${V1}/proposals`, headers: auth(admin) });
+    expect((human.json() as { id: string }[]).map((p) => p.id)).toContain(proposalId);
+  });
+
+  it("an unanswered apiScope refuses at RUNTIME, not just at compile time", async () => {
+    const h = await buildTestAppWithRepos();
+    const { proposalId } = await pendingOnboard(h);
+    const wildcard = await seedServiceKey(h, { role: "PlatformAdmin", scopes: ["*"] });
+    const handler = allProposalKinds().find((k) => k.kind === "onboard-user")!;
+    const declared = handler.apiScope;
+
+    // TypeScript makes `apiScope` required, but types are not a runtime guard:
+    // a JS caller, a stale build or a serialization round-trip can still present
+    // `undefined`. The refusal must key on "no answer", not on "null".
+    (handler as { apiScope: unknown }).apiScope = undefined;
+    try {
+      const res = await h.app.inject({ method: "POST", url: `${V1}/proposals/${proposalId}/approve`, headers: auth(wildcard.secret), payload: {} });
+      expect(res.statusCode).toBe(403);
+      expect(res.json().error).toBe("MACHINE_PRINCIPAL");
+    } finally {
+      (handler as { apiScope: unknown }).apiScope = declared;
+    }
+  });
+});
+
+describe("read routes are scope-gated (read sweep)", () => {
+  it("asset detail and aggregates need assets:read, not merely a key", async () => {
+    const h = await buildTestAppWithRepos();
+    const wrong = await seedServiceKey(h, { role: "PlatformAdmin", scopes: ["credentials:read"] });
+    const right = await seedServiceKey(h, { role: "PlatformAdmin", scopes: ["assets:read"] });
+    const reads = ["/analytics", "/accounts", "/audit/verify", "/me/portfolio", "/me/activity"];
+
+    for (const path of reads) {
+      const denied = await h.app.inject({ method: "GET", url: `${V1}${path}`, headers: auth(wrong.secret) });
+      expect({ path, code: denied.statusCode, error: denied.json().error })
+        .toEqual({ path, code: 403, error: "INSUFFICIENT_SCOPE" });
+      // The right scope gets PAST the gate and into the route body. Not every
+      // one of these answers 200 for a service user (the investor routes want a
+      // wallet the key's user has none of) — what is under test is the gate, and
+      // the JWT test below pins the 200s.
+      const allowed = await h.app.inject({ method: "GET", url: `${V1}${path}`, headers: auth(right.secret) });
+      expect({ path, error: allowed.json().error ?? null }).not.toEqual({ path, error: "INSUFFICIENT_SCOPE" });
+    }
+  });
+
+  it("the user roster behind eligible-holders needs users:read", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await platformAdmin(h);
+    const ucKey = await createCredUseCase(h, admin, "roster-uc");
+    await subjectWithDid(h);
+    const issueOnly = await seedServiceKey(h, { role: "PlatformAdmin", scopes: ["credentials:issue"] });
+    const withRoster = await seedServiceKey(h, { role: "PlatformAdmin", scopes: ["credentials:issue", "users:read"] });
+    const url = `${V1}/credential-use-cases/${ucKey}/eligible-holders`;
+
+    // The picker returns every DID-bearing user's email and org — a roster, not
+    // a credential act, so issuing does not imply reading it.
+    const denied = await h.app.inject({ method: "GET", url, headers: auth(issueOnly.secret) });
+    expect(denied.statusCode).toBe(403);
+    expect(denied.json()).toMatchObject({ error: "INSUFFICIENT_SCOPE", details: { required: "users:read" } });
+    expect((await h.app.inject({ method: "GET", url, headers: auth(withRoster.secret) })).statusCode).toBe(200);
+  });
+
+  it("a JWT session reads everything it could read before", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await platformAdmin(h);
+    for (const path of ["/analytics", "/accounts", "/audit/verify", "/me/portfolio", "/me/activity", "/proposals", "/identity/dashboard"]) {
+      const res = await h.app.inject({ method: "GET", url: `${V1}${path}`, headers: auth(admin) });
+      expect({ path, code: res.statusCode }).toEqual({ path, code: 200 });
+    }
+  });
+});
