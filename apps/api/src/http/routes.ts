@@ -628,7 +628,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       throw coded(400, "INVALID_CREDENTIAL_USECASE", (err as Error).message);
     }
     const violation = await credentialUseCaseCapabilityViolation({ ...def, ownerOrgId }, known);
-    if (violation) throw coded(403, "ORG_CAPABILITY_MISSING", `organization '${violation.org.name}' does not have the '${violation.missing}' capability`);
+    if (violation) throw coded(403, "ORG_CAPABILITY_MISSING", `organization '${violation.org.name}' (${violation.org.id}) does not have the '${violation.missing}' capability`);
     const created = await deps.credentialUseCases.create({ ...def, ownerOrgId });
     await deps.audit.append({ actorId, action: "credential-usecase-created" as LifecycleAction, payload: { key: def.key } });
     return created;
@@ -2595,6 +2595,11 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (!def.allowedIssuerOrgTypes.includes(org.orgType)) {
       return reply.code(403).send({ error: "ISSUER_NOT_PERMITTED", message: `an org of type '${org.orgType}' may not issue '${def.type}'` });
     }
+    // EN-A (ninth gate): closed-catalog issuance is an Issuer act like any
+    // other. ROLE check only — the catalog predates the domain split and its
+    // types (KYC, AccreditedInvestor, …) serve tokenization flows too, so no
+    // domain is required. Null (legacy) envelopes pass untouched.
+    if (!orgRoleEnabled(org.capabilities, "Issuer")) return orgCapabilityMissing(reply, org, "Issuer");
     const subject = await deps.users.findById(b.subjectUserId);
     if (!subject) return notFound(reply, "subject user not found");
     if (def.selfIssuedOnly && subject.orgId !== org.id) {

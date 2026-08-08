@@ -374,4 +374,84 @@ describe("capability enforcement (EN-A task A4)", () => {
     const legacyAdd = await app.inject({ method: "POST", url: `${V1}/orgs/${legacy.orgId}/users`, headers: auth(legacy.adminTok), payload: member({ role: "Verifier", useCaseKey: "invoice-tokenization" }) });
     expect(legacyAdd.statusCode).toBe(201);
   });
+
+  // --- gate 9 (review find): legacy closed-catalog issuance ----------------
+
+  /** Add a Trader member (NOT an operating role, no use-case key — in-envelope
+   *  even for a roles:[] org) so the org has a DID-bearing subject to name as
+   *  its AuthorizedSignatory. */
+  async function traderMember(app: FastifyInstance, orgId: string, adminTok: string): Promise<string> {
+    const r = await app.inject({ method: "POST", url: `${V1}/orgs/${orgId}/users`, headers: auth(adminTok), payload: { email: `sig-${++n}@x.dev`, password: "secret1", role: "Trader" } });
+    expect(r.statusCode).toBe(201);
+    return r.json().id as string;
+  }
+  const SIGNATORY = (subjectUserId: string) => ({ type: "AuthorizedSignatory", subjectUserId, claims: { role: "CFO", scope: "all" } });
+
+  it("gate 9 — legacy catalog issuance (POST /credentials/requests): roles:[] org 403; legacy org 202", async () => {
+    const app = await buildTestApp();
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const bare = await envOrg(app, platform, { domains: ["identity"], roles: [] });
+    const legacy = await envOrg(app, platform);
+
+    const denied = await app.inject({ method: "POST", url: `${V1}/credentials/requests`, headers: auth(bare.adminTok), payload: SIGNATORY(await traderMember(app, bare.orgId, bare.adminTok)) });
+    expectMissing(denied, bare.orgId, "Issuer");
+
+    const ok = await app.inject({ method: "POST", url: `${V1}/credentials/requests`, headers: auth(legacy.adminTok), payload: SIGNATORY(await traderMember(app, legacy.orgId, legacy.adminTok)) });
+    expect(ok.statusCode).toBe(202);
+  });
+
+  it("gate 9 executor — catalog propose → tighten → the EXECUTING approval fails the proposal", async () => {
+    const app = await buildTestApp();
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const admin2 = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    const org = await envOrg(app, platform); // legacy (unrestricted) at propose time
+
+    const prop = await app.inject({ method: "POST", url: `${V1}/credentials/requests`, headers: auth(org.adminTok), payload: SIGNATORY(await traderMember(app, org.orgId, org.adminTok)) });
+    expect(prop.statusCode).toBe(202); // AuthorizedSignatory: requiredApprovals 2
+
+    await app.inject({ method: "PATCH", url: `${V1}/orgs/${org.orgId}/capabilities`, headers: auth(platform), payload: { capabilities: { domains: ["identity"], roles: [] } } });
+
+    const first = await app.inject({ method: "POST", url: `${V1}/proposals/${prop.json().proposal.id}/approve`, headers: auth(platform), payload: {} });
+    expect(first.json().proposal.status).toBe("pending"); // 1 of 2 — nothing executed yet
+    const second = await app.inject({ method: "POST", url: `${V1}/proposals/${prop.json().proposal.id}/approve`, headers: auth(admin2), payload: {} });
+    expect(second.json().proposal.status).toBe("failed"); // executor re-check bites
+  });
+
+  it("gate 2 executor — use-case issuance propose → tighten → approval fails instead of issuing", async () => {
+    const app = await buildTestApp();
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const checker = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    const capped = await envOrg(app, platform, ID_ISSUER);
+    expect((await app.inject({ method: "POST", url: `${V1}/credential-use-cases`, headers: auth(platform), payload: CUC("exec-uc", { issuer: { kind: "org", orgId: capped.orgId } }) })).statusCode).toBe(201);
+    const subject = await onboardUser(app, platform, checker, { email: `exec-subj-${++n}@x.dev`, password: "secret1", role: "Buyer", useCaseKey: "invoice-tokenization", walletAddress: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8" });
+
+    const prop = await app.inject({ method: "POST", url: `${V1}/credential-use-cases/exec-uc/credentials`, headers: auth(capped.adminTok), payload: { credentialType: "KycCredential", subjectUserId: subject.id, claims: { legalName: "Acme Ltd", country: "IN" } } });
+    expect(prop.statusCode).toBe(202);
+
+    await app.inject({ method: "PATCH", url: `${V1}/orgs/${capped.orgId}/capabilities`, headers: auth(platform), payload: { capabilities: { domains: ["identity"], roles: [] } } });
+
+    const appr = await app.inject({ method: "POST", url: `${V1}/proposals/${prop.json().proposal.id}/approve`, headers: auth(platform), payload: {} });
+    expect(appr.json().proposal.status).toBe("failed");
+  });
+
+  it("gate 2 executor (batch) — batch draft → tighten → approval fails the WHOLE batch (config-level, no per-row rows)", async () => {
+    const app = await buildTestApp();
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const checker = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    const capped = await envOrg(app, platform, ID_ISSUER);
+    expect((await app.inject({ method: "POST", url: `${V1}/credential-use-cases`, headers: auth(platform), payload: CUC("batch-uc", { issuer: { kind: "org", orgId: capped.orgId } }) })).statusCode).toBe(201);
+    const subject = await onboardUser(app, platform, checker, { email: `batch-subj-${++n}@x.dev`, password: "secret1", role: "Buyer", useCaseKey: "invoice-tokenization", walletAddress: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8" });
+
+    const draft = await app.inject({ method: "POST", url: `${V1}/credential-use-cases/batch-uc/credentials/batch`, headers: auth(capped.adminTok), payload: { credentialType: "KycCredential", rows: [{ subjectEmail: subject.email, claims: { legalName: "Acme Ltd", country: "IN" } }] } });
+    expect(draft.statusCode).toBe(202);
+
+    await app.inject({ method: "PATCH", url: `${V1}/orgs/${capped.orgId}/capabilities`, headers: auth(platform), payload: { capabilities: { domains: ["identity"], roles: [] } } });
+
+    const appr = await app.inject({ method: "POST", url: `${V1}/proposals/${draft.json().proposal.id}/approve`, headers: auth(platform), payload: {} });
+    expect(appr.json().proposal.status).toBe("failed"); // thrown BEFORE the row loop — no partial issuance
+    // The subject holds nothing from the failed batch.
+    const subjTok = await loginAs(app, subject.email, "secret1");
+    const held = (await app.inject({ method: "GET", url: `${V1}/me/credentials`, headers: auth(subjTok) })).json() as { type: string[] }[];
+    expect(held.some((c) => c.type.includes("KycCredential"))).toBe(false);
+  });
 });

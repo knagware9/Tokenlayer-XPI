@@ -36,7 +36,8 @@ export const createUseCaseKind: ProposalKindHandler = {
     if (def.ownerOrgId) {
       const owner = await ctx.deps.organizations.get(def.ownerOrgId).catch(() => null);
       if (owner && !orgDomainEnabled(owner.capabilities, "tokenization")) {
-        throw coded(403, "ORG_CAPABILITY_MISSING", `organization '${owner.name}' does not have the 'tokenization' capability`);
+        // coded() carries no details object — orgId rides in the message.
+        throw coded(403, "ORG_CAPABILITY_MISSING", `organization '${owner.name}' (${owner.id}) does not have the 'tokenization' capability`);
       }
     }
     const available = new Set(ctx.deps.chains.list().map((c) => c.id));
