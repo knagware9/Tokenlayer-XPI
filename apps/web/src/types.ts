@@ -28,6 +28,19 @@ export interface SessionUser {
   orgCapabilities?: OrgCapabilities | null;
 }
 
+/**
+ * Exactly what `GET /me` returns — a STRICT SUBSET of SessionUser: no email,
+ * no orgId, no did, no walletAddress. Refreshing a session must therefore MERGE
+ * this over the stored user, never replace it.
+ */
+export interface SessionPrincipal {
+  id: string;
+  role: Role;
+  useCaseKey: string | null;
+  useCaseDomain?: "tokenization" | "identity" | null;
+  orgCapabilities?: OrgCapabilities | null;
+}
+
 export type TokenStandard = "ERC-20" | "ERC-721" | "ERC-3643";
 export type ChainFamily = "evm" | "fabric" | "canton" | "mock";
 

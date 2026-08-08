@@ -1,16 +1,12 @@
 import { useEffect, useState } from "react";
 import { ApiError, api } from "../api.js";
 import { useAuth } from "../auth.js";
+import { DOMAIN_LABELS, ROLE_LABELS, fullCapabilities, toggleCapability, validateEnvelope } from "../lib/capabilities.js";
 import { ORG_DOMAINS, ORG_OPERATING_ROLES, type CompanyCategory, type CredentialStatusInfo, type DidDocument, type KybDocumentRef, type OrgCapabilities, type OrgDomain, type OrgMember, type OrgOperatingRole, type OrgType, type Organization, type Role } from "../types.js";
 import { CredentialsPanel } from "./CredentialsPanel.js";
 import { Card, EmptyState, Pill, SectionHeader } from "./ui.js";
 
 const ORG_TYPES: OrgType[] = ["bank", "corporate", "msme", "government", "verifier"];
-
-const DOMAIN_LABELS: Record<OrgDomain, string> = { tokenization: "Tokenization", identity: "Identity" };
-
-/** The full envelope — what an org that has never been narrowed is seeded with. */
-const FULL_CAPABILITIES = (): OrgCapabilities => ({ domains: [...ORG_DOMAINS], roles: [...ORG_OPERATING_ROLES] });
 
 const CATEGORY_LABELS: Record<CompanyCategory, string> = {
   "private-limited": "Private Limited",
@@ -55,7 +51,7 @@ function CapabilityPills({ caps }: { caps: OrgCapabilities | null | undefined })
         : caps.domains.map((d) => <Pill key={d} tone="info">{DOMAIN_LABELS[d] ?? d}</Pill>)}
       {caps.roles.length === 0
         ? <Pill tone="warn">no roles</Pill>
-        : caps.roles.map((r) => <Pill key={r} tone="muted">{r}</Pill>)}
+        : caps.roles.map((r) => <Pill key={r} tone="muted">{ROLE_LABELS[r] ?? r}</Pill>)}
     </>
   );
 }
@@ -67,7 +63,6 @@ function CapabilityEditor({ value, onChange, disabled }: {
   onChange: (next: OrgCapabilities) => void;
   disabled?: boolean;
 }): JSX.Element {
-  const toggle = <T extends string>(list: T[], v: T): T[] => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
       <fieldset>
@@ -76,7 +71,7 @@ function CapabilityEditor({ value, onChange, disabled }: {
           <label key={d} className="flex items-center gap-2 py-1 text-sm text-slate-700 cursor-pointer">
             <input
               type="checkbox" disabled={disabled} checked={value.domains.includes(d)}
-              onChange={() => onChange({ ...value, domains: toggle<OrgDomain>(value.domains, d) })}
+              onChange={() => onChange({ ...value, domains: toggleCapability<OrgDomain>(value.domains, d) })}
               className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
             />
             {DOMAIN_LABELS[d]}
@@ -89,10 +84,10 @@ function CapabilityEditor({ value, onChange, disabled }: {
           <label key={r} className="flex items-center gap-2 py-1 text-sm text-slate-700 cursor-pointer">
             <input
               type="checkbox" disabled={disabled} checked={value.roles.includes(r)}
-              onChange={() => onChange({ ...value, roles: toggle<OrgOperatingRole>(value.roles, r) })}
+              onChange={() => onChange({ ...value, roles: toggleCapability<OrgOperatingRole>(value.roles, r) })}
               className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
             />
-            {r}
+            {ROLE_LABELS[r]}
           </label>
         ))}
       </fieldset>
@@ -108,18 +103,16 @@ function CapabilityEditor({ value, onChange, disabled }: {
  * re-seeds when the selection changes.
  */
 function OrgCapabilitiesCard({ org, onChanged }: { org: Organization; onChanged: () => void }): JSX.Element {
-  const { token, user } = useAuth();
+  const { token, user, refreshSession } = useAuth();
   const isPlatform = user?.role === "PlatformAdmin";
   const canRequest = user?.role === "OrgAdmin" && user.orgId === org.id;
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState<OrgCapabilities>(org.capabilities ?? FULL_CAPABILITIES());
+  const [draft, setDraft] = useState<OrgCapabilities>(org.capabilities ?? fullCapabilities());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
 
-  const invalid = draft.domains.length === 0
-    ? "Select at least one domain"
-    : draft.roles.length === 0 ? "Select at least one operating role" : null;
+  const invalid = validateEnvelope(draft);
 
   async function save(caps: OrgCapabilities | null): Promise<void> {
     if (!token) return;
@@ -129,6 +122,12 @@ function OrgCapabilitiesCard({ org, onChanged }: { org: Organization; onChanged:
       setEditing(false);
       setNote(caps === null ? "Cleared to the unrestricted legacy envelope." : "Capabilities updated.");
       onChanged();
+      // The envelope rides the session and drives the sidebar. Without this the
+      // nav keeps the login-time snapshot and disagrees with the card beside it
+      // (a reload would not help — it restores from localStorage). Best-effort:
+      // the grant itself already succeeded, so a refresh failure must not
+      // surface as if it had not.
+      await refreshSession().catch(() => undefined);
     } catch (err) {
       setError(errMessage(err, "Could not update capabilities"));
     } finally {
@@ -142,7 +141,9 @@ function OrgCapabilitiesCard({ org, onChanged }: { org: Organization; onChanged:
     try {
       await api.requestOrgCapabilities(token, org.id, draft);
       setEditing(false);
-      setNote("Change requested — pending approval by a platform administrator.");
+      // No refresh here: nothing has changed yet, and when it does it is a
+      // PlatformAdmin approving elsewhere — this session cannot observe it.
+      setNote("Change requested — pending approval by a platform administrator. Once granted, it takes effect for you at your next sign-in.");
     } catch (err) {
       setError(errMessage(err, "Could not request a capability change"));
     } finally {
@@ -159,7 +160,7 @@ function OrgCapabilitiesCard({ org, onChanged }: { org: Organization; onChanged:
         <CapabilityPills caps={org.capabilities} />
         {(isPlatform || canRequest) && (
           <button
-            onClick={() => { setEditing((v) => !v); setError(null); setNote(null); setDraft(org.capabilities ?? FULL_CAPABILITIES()); }}
+            onClick={() => { setEditing((v) => !v); setError(null); setNote(null); setDraft(org.capabilities ?? fullCapabilities()); }}
             className="ml-auto text-xs rounded border border-slate-300 text-slate-600 px-3 py-1.5 font-medium hover:bg-slate-50"
           >
             {editing ? "Cancel" : isPlatform ? "Edit" : "Request change"}

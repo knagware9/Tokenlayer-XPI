@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ApiError, api } from "../api.js";
+import { DOMAIN_LABELS, ROLE_LABELS, fullCapabilities, toggleCapability, validateEnvelope } from "../lib/capabilities.js";
 import { useRoute } from "../router.js";
 import { ORG_DOMAINS, ORG_OPERATING_ROLES, type CompanyCategory, type OrgCapabilities, type OrgDomain, type OrgOperatingRole, type OrgType } from "../types.js";
 import { Logo } from "./Logo.js";
@@ -24,12 +25,10 @@ const CATEGORIES: { value: CompanyCategory; label: string }[] = [
 ];
 
 const STEPS = ["Company", "Administrator", "Capabilities", "Review"] as const;
-const CAPABILITY_STEP = 2;
+const CAPABILITY_STEP = STEPS.indexOf("Capabilities");
 
-// The requested capability envelope (EN-A). Everything is pre-checked: a company
-// signing up asks for the full envelope by default and narrows it deliberately.
-const DOMAIN_LABELS: Record<OrgDomain, string> = { tokenization: "Tokenization", identity: "Identity" };
-const ROLE_LABELS: Record<OrgOperatingRole, string> = { Issuer: "Issuer", Holder: "Holder", Verifier: "Verifier" };
+// Wizard-only explanatory copy for the requested capability envelope (EN-A).
+// The labels, the seed, and the validation rule are shared — see lib/capabilities.
 const DOMAIN_HINTS: Record<OrgDomain, string> = {
   tokenization: "Configure tokenization use cases and issue assets on-chain.",
   identity: "Operate credential use cases — issue, hold, and verify credentials.",
@@ -73,12 +72,13 @@ export function Signup(): JSX.Element {
   const [gstinDoc, setGstinDoc] = useState<{ id: string; sha256: string; name: string } | null>(null);
   const [docBusy, setDocBusy] = useState<"cin" | "gstin" | null>(null);
   // Kept out of `Form` (whose `set` helper is for string-valued inputs only).
-  const [caps, setCaps] = useState<OrgCapabilities>({ domains: [...ORG_DOMAINS], roles: [...ORG_OPERATING_ROLES] });
+  // Pre-checked: a company asks for the full envelope and narrows it deliberately.
+  const [caps, setCaps] = useState<OrgCapabilities>(fullCapabilities);
 
   const toggleDomain = (d: OrgDomain) => (): void =>
-    setCaps((c) => ({ ...c, domains: c.domains.includes(d) ? c.domains.filter((x) => x !== d) : [...c.domains, d] }));
+    setCaps((c) => ({ ...c, domains: toggleCapability(c.domains, d) }));
   const toggleRole = (r: OrgOperatingRole) => (): void =>
-    setCaps((c) => ({ ...c, roles: c.roles.includes(r) ? c.roles.filter((x) => x !== r) : [...c.roles, r] }));
+    setCaps((c) => ({ ...c, roles: toggleCapability(c.roles, r) }));
 
   const set = <K extends keyof Form>(k: K) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setF((prev) => ({ ...prev, [k]: e.target.value as Form[K] }));
@@ -99,10 +99,7 @@ export function Signup(): JSX.Element {
       if (!f.adminEmail.trim()) return "Administrator email is required";
       if (f.password.length < 8) return "Password must be at least 8 characters";
     }
-    if (s === CAPABILITY_STEP) {
-      if (caps.domains.length === 0) return "Select at least one domain";
-      if (caps.roles.length === 0) return "Select at least one operating role";
-    }
+    if (s === CAPABILITY_STEP) return validateEnvelope(caps);
     return null;
   }
 

@@ -7,6 +7,10 @@ interface AuthState {
   user: SessionUser | null;
   login: (email: string, password: string) => Promise<void>;
   setSession: (token: string, user: SessionUser) => void;
+  /** Re-read the live principal from /me and merge it into the session. Call
+   * after something server-side changes the principal (e.g. a capability
+   * grant), so nav driven by the session stops disagreeing with the screen. */
+  refreshSession: () => Promise<void>;
   logout: () => void;
 }
 
@@ -38,6 +42,16 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
         setToken(token);
         setUser(user);
         localStorage.setItem(STORAGE_KEY, JSON.stringify({ token, user }));
+      },
+      async refreshSession() {
+        if (!token || !user) return;
+        // /me is a STRICT SUBSET of SessionUser (no email/orgId/did/
+        // walletAddress) — spread it OVER the stored user so the fields it
+        // does not return survive. Replacing wholesale would blank them.
+        const principal = await api.me(token);
+        const merged: SessionUser = { ...user, ...principal };
+        setUser(merged);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ token, user: merged }));
       },
       logout() {
         setToken(null);

@@ -15,7 +15,12 @@ export const DOMAINS: DomainDef[] = [
 export const NAV_DOMAIN: Record<string, DomainKey | "shared"> = {
   dashboard: "tokenization", "use-cases": "tokenization", create: "tokenization",
   assets: "tokenization", invoices: "tokenization", networks: "tokenization",
-  identity: "identity", verify: "identity", organizations: "identity", "org-wallet": "identity", "issue-credentials": "identity", "identity-dashboard": "identity",
+  identity: "identity", verify: "identity", "org-wallet": "identity", "issue-credentials": "identity", "identity-dashboard": "identity",
+  // Organizations is tenant management, not a domain surface — it belongs with
+  // profile/approvals/users. Domain-scoping it would strand a tokenization-only
+  // org: the Organizations screen carries the capability-request control, so
+  // hiding it there would leave no in-app way back from a narrowed envelope.
+  organizations: "shared",
   approvals: "shared", users: "shared", profile: "shared", credentials: "shared", back: "shared", logout: "shared",
 };
 
