@@ -3,6 +3,8 @@ import { auditGenesis, auditEntryHash, normalizeUseCaseDefinition, PolicyError, 
 import type {
   AccountRecord,
   AccountRepository,
+  ApiKeyRecord,
+  ApiKeyRepository,
   AssetFilter,
   AssetRecord,
   AssetRepository,
@@ -39,6 +41,7 @@ import type {
   CredentialUseCaseRepository,
   CredentialUseCaseTemplateRepository,
   UseCaseRepository,
+  UserKind,
   UserRecord,
   UserRepository,
   VerificationRequestRecord,
@@ -60,8 +63,8 @@ export class MemoryUserRepository implements UserRepository {
   async findById(userId: string): Promise<UserRecord | null> {
     return this.byId.get(userId) ?? null;
   }
-  async create(input: Omit<UserRecord, "id" | "createdAt">): Promise<UserRecord> {
-    const rec: UserRecord = { ...input, id: id("user"), createdAt: now() };
+  async create(input: Omit<UserRecord, "id" | "createdAt" | "kind"> & { kind?: UserKind }): Promise<UserRecord> {
+    const rec: UserRecord = { ...input, kind: input.kind ?? "human", id: id("user"), createdAt: now() };
     this.byId.set(rec.id, rec);
     return rec;
   }
@@ -639,6 +642,54 @@ export class MemoryStagedInvoiceRepository implements StagedInvoiceRepository {
   }
   async remove(invId: string): Promise<void> {
     this.byId.delete(invId);
+  }
+}
+
+export class MemoryApiKeyRepository implements ApiKeyRepository {
+  private readonly byId = new Map<string, ApiKeyRecord>();
+  async create(input: Omit<ApiKeyRecord, "id" | "createdAt" | "lastUsedAt" | "revokedAt" | "revokedBy">): Promise<ApiKeyRecord> {
+    // Mirror the DB's unique `prefix`: a duplicate would make findByPrefix
+    // ambiguous here while Prisma rejected it — exactly the divergence the
+    // memory/prisma parity rule exists to prevent.
+    for (const k of this.byId.values()) {
+      if (k.prefix === input.prefix) {
+        throw Object.assign(new Error("Unique constraint failed on (prefix)"), { code: "P2002" });
+      }
+    }
+    const rec: ApiKeyRecord = {
+      ...input,
+      scopes: [...input.scopes],
+      id: id("ak"),
+      createdAt: now(),
+      lastUsedAt: null,
+      revokedAt: null,
+      revokedBy: null,
+    };
+    this.byId.set(rec.id, rec);
+    return rec;
+  }
+  async findByPrefix(prefix: string): Promise<ApiKeyRecord | null> {
+    return [...this.byId.values()].find((k) => k.prefix === prefix) ?? null;
+  }
+  async findById(keyId: string): Promise<ApiKeyRecord | null> {
+    return this.byId.get(keyId) ?? null;
+  }
+  /** Revoked/expired keys are deliberately NOT filtered — they are the audit trail. */
+  async listByOrg(orgId: string): Promise<ApiKeyRecord[]> {
+    return [...this.byId.values()]
+      .filter((k) => k.orgId === orgId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+  async touchLastUsed(keyId: string, at: string): Promise<void> {
+    const rec = this.byId.get(keyId);
+    if (rec) rec.lastUsedAt = at;
+  }
+  async revoke(keyId: string, input: { by: string; at: string }): Promise<ApiKeyRecord> {
+    const rec = this.byId.get(keyId);
+    if (!rec) throw new Error(`unknown api key '${keyId}'`);
+    rec.revokedAt = input.at;
+    rec.revokedBy = input.by;
+    return rec;
   }
 }
 

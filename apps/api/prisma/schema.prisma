@@ -20,7 +20,31 @@ model User {
   did          String?
   orgId            String?  // owning organization id (null for legacy/platform users)
   didSeedEncrypted String?  // AES-256-GCM encrypted Ed25519 seed for this user's sub-DID
+  // "human" | "service" (EN-B). A service account is the principal an API key
+  // becomes; it has no usable password and cannot log in interactively.
+  kind         String   @default("human")
   createdAt    DateTime @default(now())
+}
+
+// An org-scoped machine credential (EN-B). The secret exists exactly once — in
+// the create/rotate response — so only its bcrypt hash and a public prefix are
+// stored: a leaked database yields no working credential.
+model ApiKey {
+  id         String    @id @default(cuid())
+  orgId      String?   // null = platform-owned key (PlatformAdmin-minted)
+  userId     String    // the bound SERVICE user this key authenticates as
+  name       String
+  prefix     String    @unique // first 8 chars of the secret — safe to display/index
+  secretHash String    // bcrypt of the full secret; the secret itself is never stored
+  scopes     String    // JSON string[]
+  expiresAt  DateTime?
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  revokedBy  String?
+  createdBy  String
+  createdAt  DateTime  @default(now())
+
+  @@index([orgId])
 }
 
 model Asset {

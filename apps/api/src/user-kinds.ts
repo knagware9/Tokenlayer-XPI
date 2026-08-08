@@ -54,7 +54,7 @@ async function onboardSingle(deps: AppDeps, proposer: Actor, pl: OnboardUserPayl
   if (pl.walletAddress) accountId = (await deps.accounts.upsert(pl.walletAddress, pl.email)).id;
   const created = await deps.users.create({
     email: pl.email, passwordHash: pl.passwordHash, role: pl.role, useCaseKey: pl.useCaseKey,
-    accountId, active: true, kycStatus: "pending", kyc: pl.kyc ?? null,
+    accountId, active: true, kycStatus: "pending", kyc: pl.kyc ?? null, kind: "human",
   });
   let issuedCredentialId: string | null = null;
   try {

@@ -2021,6 +2021,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         active: true,
         kycStatus: "pending",
         kyc: b.kyc ?? null,
+        kind: "human",
       });
       let mintedDid: string | null = null;
       if (org) {
@@ -2230,7 +2231,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       await deps.users.create({
         email: b.admin.email, passwordHash: await bcrypt.hash(b.admin.password, BCRYPT_ROUNDS),
         role: "OrgAdmin", useCaseKey: null, accountId: null, active: false,
-        kycStatus: "pending", kyc: { legalName: b.admin.name }, orgId: org.id,
+        kycStatus: "pending", kyc: { legalName: b.admin.name }, orgId: org.id, kind: "human",
       });
     } catch (err) {
       await deps.organizations.remove(org.id).catch(() => undefined); // roll back the orphaned pending org
@@ -2534,7 +2535,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (b.walletAddress) accountId = (await deps.accounts.upsert(b.walletAddress, b.email)).id;
     const created = await deps.users.create({
       email: b.email, passwordHash: await bcrypt.hash(b.password, BCRYPT_ROUNDS), role: b.role,
-      useCaseKey: memberUseCaseKey, accountId, active: true, kycStatus: "pending", kyc: b.kyc ?? null, orgId: id,
+      useCaseKey: memberUseCaseKey, accountId, active: true, kycStatus: "pending", kyc: b.kyc ?? null, orgId: id, kind: "human",
     });
     let did: string;
     try {
