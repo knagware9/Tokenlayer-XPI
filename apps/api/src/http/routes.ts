@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AssetRecord, CashflowRecord, CompanyProfile, CredentialRecord, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, issueCredential, issuerBindingAllows, normalizeUseCaseDefinition, PolicyError, presentCredential, presentCredentials, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateCredentialUseCase, validateMetadata, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type OrgType, type Role, type UseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
+import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, issueCredential, issuerBindingAllows, normalizeUseCaseDefinition, PolicyError, presentCredential, presentCredentials, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateCredentialUseCase, validateMetadata, validateOrgCapabilities, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type OrgType, type Role, type UseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
 import qrcode from "qrcode";
 import type { AppDeps } from "../context.js";
 import { renderCredentialCertificate } from "../certificate.js";
@@ -77,7 +77,7 @@ function devKeyFromSeed(seed: string) {
 
 // Public projection of an org — NEVER includes didSeedEncrypted.
 function orgView(o: OrganizationRecord) {
-  return { id: o.id, name: o.name, orgType: o.orgType, registrationId: o.registrationId, jurisdiction: o.jurisdiction, did: o.did, verified: o.verified, status: o.status, companyProfile: o.companyProfile, createdAt: o.createdAt };
+  return { id: o.id, name: o.name, orgType: o.orgType, registrationId: o.registrationId, jurisdiction: o.jurisdiction, did: o.did, verified: o.verified, status: o.status, companyProfile: o.companyProfile, capabilities: o.capabilities, createdAt: o.createdAt };
 }
 
 /** Registers every /api/v1 route on the given (prefixed) instance. */
@@ -186,16 +186,20 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const claims: TokenClaims = { id: user.id, email: user.email, role: user.role, useCaseKey: user.useCaseKey, orgId: user.orgId ?? null, did: user.did ?? null };
     const wallet = user.accountId ? await deps.accounts.findById(user.accountId) : null;
     const useCaseDomain = await resolveUseCaseDomain(user.useCaseKey);
-    return { token: app.jwt.sign(claims), user: { ...claims, walletAddress: wallet?.address ?? null, useCaseDomain } };
+    // The org's capability envelope rides the session (like useCaseDomain): the
+    // web builds its SessionUser from login/qr-poll, never /me.
+    const org = user.orgId ? await deps.organizations.get(user.orgId) : null;
+    return { token: app.jwt.sign(claims), user: { ...claims, walletAddress: wallet?.address ?? null, useCaseDomain, orgCapabilities: org?.capabilities ?? null } };
   });
 
   app.get("/me", { schema: S.me, ...auth }, async (request) => {
     const base = actorOf(request);
     const claims = request.user as TokenClaims;
     const useCaseDomain = await resolveUseCaseDomain(claims.useCaseKey);
+    const org = claims.orgId ? await deps.organizations.get(claims.orgId) : null;
     // useCaseKey mirrors the login response so a scoped desk operator's session
     // principal is self-describing (role + scope + domain) from /me alone.
-    return { ...base, useCaseKey: claims.useCaseKey ?? null, useCaseDomain };
+    return { ...base, useCaseKey: claims.useCaseKey ?? null, useCaseDomain, orgCapabilities: org?.capabilities ?? null };
   });
 
   app.get("/config", { schema: S.config, ...auth }, async () => ({ domains: deps.enabledDomains }));
@@ -243,7 +247,8 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         const wallet = user?.accountId ? await deps.accounts.findById(user.accountId) : null;
         const claims = user ? { id: user.id, email: user.email, role: user.role, useCaseKey: user.useCaseKey, orgId: user.orgId ?? null, did: user.did ?? null } : null;
         const useCaseDomain = user ? await resolveUseCaseDomain(user.useCaseKey) : null;
-        return { status: "authenticated", token: done.token, user: claims ? { ...claims, walletAddress: wallet?.address ?? null, useCaseDomain } : null };
+        const org = user?.orgId ? await deps.organizations.get(user.orgId) : null;
+        return { status: "authenticated", token: done.token, user: claims ? { ...claims, walletAddress: wallet?.address ?? null, useCaseDomain, orgCapabilities: org?.capabilities ?? null } : null };
       }
     }
     return { status: sess.status };
@@ -2069,7 +2074,12 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         documents: { cinCertificate: { id: string }; gstinCertificate?: { id: string } };
       };
       admin: { name: string; email: string; password: string };
+      capabilities?: unknown;
     };
+    // Validate the requested capability envelope FIRST — throws
+    // PolicyError("INVALID_CAPABILITIES") → 400 via the shared error handler
+    // (same pattern as validateMetadata). Absent ⇒ null: unrestricted legacy.
+    const capabilities = b.capabilities !== undefined ? validateOrgCapabilities(b.capabilities) : null;
     if (await deps.organizations.findByName(b.company.name)) return reply.code(409).send({ error: "NAME_TAKEN", message: "an organization with that name already exists" });
     // The CIN is the statutory registration number — dedupe on it.
     if (await deps.organizations.findByRegistrationId(b.company.cin)) return reply.code(409).send({ error: "REGISTRATION_TAKEN", message: "an organization with that CIN already exists" });
@@ -2101,7 +2111,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       name: b.company.name, orgType: b.company.orgType, registrationId: b.company.cin,
       jurisdiction: "IN", did, didSeedEncrypted,
       status: "pending", verified: false, verifiedAt: null, companyProfile,
-      capabilities: null, // A3 wires the registrant's chosen envelope; null keeps A2 behavior-neutral
+      capabilities, // the validated requested envelope — part of what the reviewer approves
     });
     try {
       await deps.users.create({
@@ -2312,6 +2322,41 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const rejected = await deps.organizations.setStatus(org.id, "rejected");
     await deps.audit.append({ actorId: claims.id, action: "org-rejected" as LifecycleAction, payload: { orgId: org.id, reason } });
     return reply.code(200).send({ id: rejected.id, status: "rejected" });
+  });
+
+  // Direct capability grant (EN-A): the platform is the granting authority and
+  // needs no second approver. `capabilities: null` clears an org back to the
+  // unrestricted legacy envelope — PlatformAdmin only, deliberate.
+  app.patch("/orgs/:id/capabilities", { schema: S.patchOrgCapabilities, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    if (claims.role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only the Platform Admin may set organization capabilities" });
+    const { id } = request.params as { id: string };
+    const org = await deps.organizations.get(id);
+    if (!org) return notFound(reply, "organization not found");
+    const b = request.body as { capabilities: unknown };
+    // Throws PolicyError("INVALID_CAPABILITIES") → 400 via the shared handler.
+    const caps = b.capabilities === null ? null : validateOrgCapabilities(b.capabilities);
+    const updated = await deps.organizations.setCapabilities(org.id, caps);
+    await deps.audit.append({ actorId: claims.id, action: "org-capabilities-set" as LifecycleAction, payload: { orgId: org.id, capabilities: caps } });
+    return orgView(updated);
+  });
+
+  // Org-requested capability change (EN-A): the org's own OrgAdmin proposes a
+  // new envelope; only a PlatformAdmin approval applies it (see org-kinds.ts).
+  app.post("/orgs/:id/capabilities/request", { schema: S.requestOrgCapabilities, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    if (!orgScoped(claims, id)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to request capabilities for that organization" });
+    const org = await deps.organizations.get(id);
+    if (!org) return notFound(reply, "organization not found");
+    const b = request.body as { capabilities: unknown };
+    const capabilities = validateOrgCapabilities(b.capabilities); // 400 INVALID_CAPABILITIES on bad input
+    const proposal = await deps.proposals.create({
+      useCaseKey: null, orgId: org.id, assetId: null, kind: "org-capability-change",
+      payload: { orgId: org.id, capabilities },
+      proposerId: claims.id, proposerLabel: claims.email, required: 1,
+    });
+    return reply.code(202).send({ proposal });
   });
 
   // Mint a sub-DID + OrganizationMembership VC for `user` under `org` (links the

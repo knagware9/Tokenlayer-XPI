@@ -1028,6 +1028,9 @@ export const S: Record<string, FastifySchema> = {
           type: "object", additionalProperties: false, required: ["name", "email", "password"],
           properties: { name: { type: "string", minLength: 1 }, email: { type: "string" }, password: { type: "string", minLength: 8 } },
         },
+        // Requested capability envelope (EN-A). Loose here — the route runs
+        // validateOrgCapabilities for the real (member-level) validation.
+        capabilities: { type: "object", additionalProperties: true },
       },
     },
     response: { 202: { type: "object", additionalProperties: true }, ...errs(400, 409, 429) },
@@ -1049,6 +1052,25 @@ export const S: Record<string, FastifySchema> = {
     tags: ["Organizations"], summary: "Get an organization by id", security: bearer,
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404) },
+  },
+  patchOrgCapabilities: {
+    tags: ["Organizations"], summary: "Set (or clear with null) an org's capability envelope (PlatformAdmin)", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    body: {
+      type: "object", additionalProperties: false, required: ["capabilities"],
+      // Loose object-or-null: the route runs validateOrgCapabilities for the real validation.
+      properties: { capabilities: { type: ["object", "null"], additionalProperties: true } },
+    },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
+  },
+  requestOrgCapabilities: {
+    tags: ["Organizations"], summary: "Request a capability-envelope change (OrgAdmin; PlatformAdmin approval applies it)", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    body: {
+      type: "object", additionalProperties: false, required: ["capabilities"],
+      properties: { capabilities: { type: "object", additionalProperties: true } },
+    },
+    response: { 202: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
   },
   createMember: {
     tags: ["Organizations"], summary: "Add a member (sub-DID + membership VC)", security: bearer,
