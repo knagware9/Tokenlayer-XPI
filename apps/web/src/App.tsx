@@ -6,6 +6,7 @@ import { ApprovalsPanel } from "./components/ApprovalsPanel.js";
 import { AppShell, type NavItem } from "./components/AppShell.js";
 import { AssetManagement, isInvoiceUseCase } from "./components/AssetManagement.js";
 import { Dashboard } from "./components/Dashboard.js";
+import { Developers } from "./components/Developers.js";
 import { Home } from "./components/Home.js";
 import { IdentityDashboard } from "./components/IdentityDashboard.js";
 import { IdentityHome } from "./components/IdentityHome.js";
@@ -141,6 +142,7 @@ export function App(): JSX.Element {
       { id: "use-cases", label: "Use Cases", icon: "doc" },
       { id: "create", label: "Create Use Case", icon: "code" },
       { id: "organizations", label: "Organizations", icon: "users" },
+      { id: "developers", label: "Developers", icon: "code" },
       { id: "approvals", label: "Approvals", icon: "check" },
       { id: "verify", label: "Verification", icon: "shield" },
       { id: "identity", label: "Identity", icon: "shield" },
@@ -155,12 +157,13 @@ export function App(): JSX.Element {
     const branchDomains = availableDomains(items, enabledDomains);
     const effDomain = branchDomains.some((d) => d.key === activeDomain) ? activeDomain : (branchDomains[0]?.key ?? activeDomain);
     const visible = itemsForDomain(items, effDomain);
-    const knownIds = [...Object.keys(platViews), "profile", "credentials", "identity-dashboard"];
+    const knownIds = [...Object.keys(platViews), "profile", "credentials", "identity-dashboard", "developers"];
     const activeId = knownIds.includes(view) && itemsForDomain([{ id: view }], effDomain).length ? view : DOMAINS.find((d) => d.key === effDomain)!.defaultView;
     const panel =
       activeId === "profile" ? <MyProfile onSelect={setView} />
       : activeId === "credentials" ? <MyIdentity />
       : activeId === "identity-dashboard" ? <IdentityDashboard />
+      : activeId === "developers" ? <Developers />
       : <PlatformHome useCases={useCases} chains={chains} onReloadUseCases={reloadUseCases} view={platViews[activeId] ?? "overview"} />;
     return <AppShell items={visible} active={activeId} onSelect={handleSelect} domains={branchDomains} activeDomain={effDomain} onDomainChange={onDomainChange}>{panel}</AppShell>;
   }
@@ -226,6 +229,7 @@ export function App(): JSX.Element {
     { id: "approvals", label: "Approvals", icon: "check" },
     ...(canManageUsers(user.role) ? [{ id: "users", label: "User Management", icon: "users" as const }] : []),
     ...(isPlatform || isOrgAdmin ? [{ id: "organizations", label: "Organizations", icon: "users" as const }] : []),
+    ...(isPlatform || isOrgAdmin ? [{ id: "developers", label: "Developers", icon: "code" as const }] : []),
     ...((isPlatform || isOrgAdmin) && orgCan("Verifier") ? [{ id: "verify", label: "Verification", icon: "shield" as const }] : []),
     ...(isPlatform || isOrgAdmin ? [{ id: "identity", label: "Identity", icon: "shield" as const }] : []),
     ...(isPlatform || isOrgAdmin ? [{ id: "identity-dashboard", label: "Identity Dashboard", icon: "spark" as const }] : []),
@@ -262,6 +266,8 @@ export function App(): JSX.Element {
     panel = <UserManagement useCaseKey={activeUseCase} useCases={useCases} />;
   } else if (activeId === "organizations") {
     panel = <Organizations />;
+  } else if (activeId === "developers") {
+    panel = <Developers />;
   } else if (activeId === "verify") {
     panel = <VerificationRequests />;
   } else if (activeId === "identity") {
