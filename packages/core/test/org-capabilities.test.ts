@@ -23,15 +23,17 @@ describe("org capability predicates", () => {
 });
 
 describe("validateOrgCapabilities", () => {
-  it("accepts a well-formed envelope (incl. empty arrays)", () => {
+  it("accepts a well-formed envelope (incl. empty arrays) and returns it", () => {
     expect(() => validateOrgCapabilities({ domains: ["tokenization", "identity"], roles: ["Issuer"] })).not.toThrow();
     expect(() => validateOrgCapabilities({ domains: [], roles: [] })).not.toThrow();
+    expect(validateOrgCapabilities({ domains: ["identity"], roles: [] })).toEqual({ domains: ["identity"], roles: [] });
   });
   it("rejects unknown values, duplicates, and non-arrays", () => {
-    expect(() => validateOrgCapabilities({ domains: ["defi"], roles: [] } as never)).toThrow(PolicyError);
-    expect(() => validateOrgCapabilities({ domains: ["identity", "identity"], roles: [] } as never)).toThrow(PolicyError);
-    expect(() => validateOrgCapabilities({ domains: ["identity"], roles: ["Admin"] } as never)).toThrow(PolicyError);
-    expect(() => validateOrgCapabilities({ domains: "identity", roles: [] } as never)).toThrow(PolicyError);
-    expect(() => validateOrgCapabilities(null as never)).toThrow(PolicyError);
+    expect(() => validateOrgCapabilities({ domains: ["defi"], roles: [] })).toThrow(PolicyError);
+    expect(() => validateOrgCapabilities({ domains: ["defi"], roles: [] })).toThrow(/unknown domains entry/);
+    expect(() => validateOrgCapabilities({ domains: ["identity", "identity"], roles: [] })).toThrow(/duplicates/);
+    expect(() => validateOrgCapabilities({ domains: ["identity"], roles: ["Admin"] })).toThrow(/unknown roles entry/);
+    expect(() => validateOrgCapabilities({ domains: "identity", roles: [] })).toThrow(/must be an array/);
+    expect(() => validateOrgCapabilities(null)).toThrow(/must be an object/);
   });
 });

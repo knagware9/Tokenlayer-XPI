@@ -30,18 +30,18 @@ export function validateOrgCapabilities(input: unknown): OrgCapabilities {
     throw new PolicyError("INVALID_CAPABILITIES", "capabilities must be an object with domains and roles arrays");
   }
   const { domains, roles } = input as { domains?: unknown; roles?: unknown };
-  const checkList = (value: unknown, allowed: readonly string[], label: string): string[] => {
+  const checkList = <T extends string>(value: unknown, allowed: readonly T[], label: string): T[] => {
     if (!Array.isArray(value)) throw new PolicyError("INVALID_CAPABILITIES", `${label} must be an array`);
     for (const v of value) {
-      if (typeof v !== "string" || !allowed.includes(v)) {
+      if (typeof v !== "string" || !(allowed as readonly string[]).includes(v)) {
         throw new PolicyError("INVALID_CAPABILITIES", `unknown ${label} entry '${String(v)}'`);
       }
     }
     if (new Set(value).size !== value.length) throw new PolicyError("INVALID_CAPABILITIES", `${label} contains duplicates`);
-    return value as string[];
+    return [...value] as T[];
   };
   return {
-    domains: checkList(domains, ORG_DOMAINS, "domains") as OrgDomain[],
-    roles: checkList(roles, ORG_OPERATING_ROLES, "roles") as OrgOperatingRole[],
+    domains: checkList(domains, ORG_DOMAINS, "domains"),
+    roles: checkList(roles, ORG_OPERATING_ROLES, "roles"),
   };
 }
