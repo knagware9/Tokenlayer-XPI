@@ -2101,6 +2101,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       name: b.company.name, orgType: b.company.orgType, registrationId: b.company.cin,
       jurisdiction: "IN", did, didSeedEncrypted,
       status: "pending", verified: false, verifiedAt: null, companyProfile,
+      capabilities: null, // A3 wires the registrant's chosen envelope; null keeps A2 behavior-neutral
     });
     try {
       await deps.users.create({
@@ -2147,6 +2148,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const org = await deps.organizations.create({
       name, orgType, registrationId: opts.registrationId ?? null, jurisdiction: opts.jurisdiction ?? null,
       did, didSeedEncrypted, status: "active", verified: true, verifiedAt: new Date().toISOString(), companyProfile: null,
+      capabilities: null, // platform-created orgs stay unrestricted legacy until an envelope is set
     });
     await deps.audit.append({ actorId: opts.actorId ?? "provisioning", action: "org-created" as LifecycleAction, payload: { orgId: org.id, name: org.name, did: org.did } });
     return org;

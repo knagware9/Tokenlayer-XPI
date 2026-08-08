@@ -7,6 +7,7 @@ import {
   normalizeUseCaseDefinition,
   PolicyError,
   type LifecycleAction,
+  type OrgCapabilities,
   type Role,
   type TokenStandard,
   type TokenType,
@@ -764,12 +765,13 @@ export class PrismaCashRepository implements CashRepository {
 const toOrg = (r: {
   id: string; name: string; orgType: string; registrationId: string | null; jurisdiction: string | null;
   did: string; didSeedEncrypted: string; status: string; verified: boolean; verifiedAt: Date | null;
-  companyProfile: string | null; createdAt: Date;
+  companyProfile: string | null; capabilities: string | null; createdAt: Date;
 }): OrganizationRecord => ({
   id: r.id, name: r.name, orgType: r.orgType as OrgType, registrationId: r.registrationId, jurisdiction: r.jurisdiction,
   did: r.did, didSeedEncrypted: r.didSeedEncrypted, status: r.status as OrgStatus, verified: r.verified,
   verifiedAt: r.verifiedAt ? r.verifiedAt.toISOString() : null,
   companyProfile: r.companyProfile ? (JSON.parse(r.companyProfile) as CompanyProfile) : null,
+  capabilities: r.capabilities ? (JSON.parse(r.capabilities) as OrgCapabilities) : null,
   createdAt: r.createdAt.toISOString(),
 });
 
@@ -780,6 +782,7 @@ export class PrismaOrganizationRepository implements OrganizationRepository {
         ...input,
         verifiedAt: input.verifiedAt ? new Date(input.verifiedAt) : null,
         companyProfile: input.companyProfile ? JSON.stringify(input.companyProfile) : null,
+        capabilities: input.capabilities ? JSON.stringify(input.capabilities) : null,
       },
     }));
   }
@@ -807,6 +810,9 @@ export class PrismaOrganizationRepository implements OrganizationRepository {
   }
   async setStatus(id: string, status: OrgStatus): Promise<OrganizationRecord> {
     return toOrg(await prisma.organization.update({ where: { id }, data: { status } }));
+  }
+  async setCapabilities(id: string, caps: OrgCapabilities | null): Promise<OrganizationRecord> {
+    return toOrg(await prisma.organization.update({ where: { id }, data: { capabilities: caps ? JSON.stringify(caps) : null } }));
   }
   async remove(id: string): Promise<void> {
     await prisma.organization.delete({ where: { id } });

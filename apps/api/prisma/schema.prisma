@@ -235,6 +235,7 @@ model Organization {
   verified         Boolean  @default(false)
   verifiedAt       DateTime?
   companyProfile   String? // JSON-encoded CompanyProfile (India KYB details), self-registered corporates only
+  capabilities     String? // EN-A: JSON OrgCapabilities envelope; null = unrestricted legacy
   createdAt        DateTime @default(now())
 
   @@index([status])

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { auditGenesis, auditEntryHash, normalizeUseCaseDefinition, PolicyError, type UseCaseDefinition, type CredentialUseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
+import { auditGenesis, auditEntryHash, normalizeUseCaseDefinition, PolicyError, type OrgCapabilities, type UseCaseDefinition, type CredentialUseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
 import type {
   AccountRecord,
   AccountRepository,
@@ -498,6 +498,12 @@ export class MemoryOrganizationRepository implements OrganizationRepository {
     const rec = this.byId.get(orgId);
     if (!rec) throw new Error(`unknown org '${orgId}'`);
     rec.status = status;
+    return rec;
+  }
+  async setCapabilities(orgId: string, caps: OrgCapabilities | null): Promise<OrganizationRecord> {
+    const rec = this.byId.get(orgId);
+    if (!rec) throw new Error(`unknown org '${orgId}'`);
+    rec.capabilities = caps;
     return rec;
   }
   async remove(orgId: string): Promise<void> {
