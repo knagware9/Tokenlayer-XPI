@@ -3,7 +3,8 @@ import { generateDidKey, type Role } from "@tokenlayer/core";
 import bcrypt from "bcryptjs";
 import { describe, expect, it } from "vitest";
 import { mintSecret } from "../src/api-keys.js";
-import { MemoryApiKeyRepository } from "../src/persistence/memory.js";
+import { requirePrincipal } from "../src/http/support.js";
+import { MemoryApiKeyRepository, MemoryUserRepository } from "../src/persistence/memory.js";
 import { auth, buildTestAppWithRepos, loginAs, V1, type TestAppHandle } from "./helpers.js";
 
 describe("MemoryApiKeyRepository", () => {
@@ -189,6 +190,14 @@ describe("API key auth seam (EN-B task B3)", () => {
     expect(bodies[0]).toEqual({ error: "UNAUTHORIZED", message: "missing or invalid bearer token" });
   });
 
+  it("an unparseable expiresAt fails CLOSED — a corrupt row cannot keep a key alive", async () => {
+    const h = await buildTestAppWithRepos();
+    const seeded = await seedServiceKey(h, { expiresAt: "not-a-date" });
+    const res = await h.app.inject({ method: "GET", url: `${V1}/me`, headers: auth(seeded.secret) });
+    // Date.parse gives NaN; treating that as "no expiry" would be fail-open.
+    expect(res.statusCode).toBe(401);
+  });
+
   it("a rejected key never stamps lastUsedAt", async () => {
     const h = await buildTestAppWithRepos();
     const seeded = await seedServiceKey(h);
@@ -259,6 +268,50 @@ describe("API key auth seam (EN-B task B3)", () => {
     // or the key becomes a durable human session that survives its own revocation.
     expect(res.statusCode).toBe(403);
     expect(res.json()).toMatchObject({ error: "SERVICE_ACCOUNT" });
+  });
+
+  /**
+   * `request.apiKey` has no consumer until B4's requireScope, and a Fastify
+   * hook cannot observe it (global preHandlers run BEFORE the route-level one
+   * that sets it). So drive the preHandler directly — it is a plain function.
+   */
+  it("populates request.apiKey for a key request, leaves it undefined for a JWT, and hands routes a COPY of the scopes", async () => {
+    const users = new MemoryUserRepository();
+    const apiKeys = new MemoryApiKeyRepository();
+    const preHandler = requirePrincipal({ users, apiKeys });
+
+    const human = await users.create({
+      email: "human@tokenlayer.dev", passwordHash: "x", role: "PlatformAdmin", useCaseKey: null,
+      accountId: null, active: true, kycStatus: "approved", kyc: null, kind: "human",
+    });
+    const svc = await users.create({
+      email: "svc@tokenlayer.dev", passwordHash: "x", role: "PlatformAdmin", useCaseKey: null,
+      accountId: null, active: true, kycStatus: "approved", kyc: null, kind: "service",
+    });
+    const minted = await mintSecret(TEST_ROUNDS);
+    const key = await apiKeys.create({
+      orgId: null, userId: svc.id, name: "k", prefix: minted.prefix, secretHash: minted.hash,
+      scopes: ["credentials:issue", "credentials:read"], expiresAt: null, createdBy: "test",
+    });
+
+    const replyStub = { code: () => replyStub, send: async () => {} } as never;
+    const reqFor = (credential: string, onJwtVerify?: () => void): never =>
+      ({ headers: { authorization: `Bearer ${credential}` }, jwtVerify: async () => onJwtVerify?.() }) as never;
+
+    const keyReq = reqFor(minted.secret);
+    await preHandler(keyReq, replyStub);
+    expect((keyReq as { apiKey?: unknown }).apiKey).toEqual({ id: key.id, scopes: ["credentials:issue", "credentials:read"] });
+    expect((keyReq as { user?: unknown }).user).toMatchObject({ id: svc.id, role: "PlatformAdmin" });
+
+    const jwtReq = reqFor("a.jwt.token", function (this: void) { (jwtReq as { user?: unknown }).user = { id: human.id }; });
+    await preHandler(jwtReq, replyStub);
+    expect((jwtReq as { apiKey?: unknown }).apiKey).toBeUndefined();
+    expect((jwtReq as { user?: unknown }).user).toMatchObject({ id: human.id });
+
+    // The scopes handed to routes are a COPY — a route mutating them must not
+    // rewrite what the store believes was granted.
+    ((keyReq as { apiKey: { scopes: string[] } }).apiKey).scopes.push("*");
+    expect((await apiKeys.findById(key.id))?.scopes).toEqual(["credentials:issue", "credentials:read"]);
   });
 
   it("a human user with the same password still logs in", async () => {

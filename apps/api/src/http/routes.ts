@@ -22,7 +22,7 @@ import { proposalKind } from "../proposal-kinds.js";
 import type { OnboardUserPayload } from "../user-kinds.js";
 import { resolveDid } from "../did-resolver.js";
 import { S } from "./schemas.js";
-import { actorOf, contextOf, isPositiveIntString, notFound, requirePrincipal, scopedToCaller, type TokenClaims } from "./support.js";
+import { actorOf, claimsOf, contextOf, isPositiveIntString, notFound, requirePrincipal, scopedToCaller, type TokenClaims } from "./support.js";
 
 const NO_USE_CASE = "__none__"; // sentinel: a use-case key that matches no real use case (denies scoped users with no assigned use case)
 
@@ -225,7 +225,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (user.kind === "service") {
       return reply.code(403).send({ error: "SERVICE_ACCOUNT", message: "this is a service account; authenticate with its API key" });
     }
-    const claims: TokenClaims = { id: user.id, email: user.email, role: user.role, useCaseKey: user.useCaseKey, orgId: user.orgId ?? null, did: user.did ?? null };
+    const claims: TokenClaims = claimsOf(user);
     const wallet = user.accountId ? await deps.accounts.findById(user.accountId) : null;
     const useCaseDomain = await resolveUseCaseDomain(user.useCaseKey);
     // The org's capability envelope rides the session (like useCaseDomain): the
@@ -297,7 +297,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       if (done?.token && done.userId) {
         const user = await deps.users.findById(done.userId);
         const wallet = user?.accountId ? await deps.accounts.findById(user.accountId) : null;
-        const claims = user ? { id: user.id, email: user.email, role: user.role, useCaseKey: user.useCaseKey, orgId: user.orgId ?? null, did: user.did ?? null } : null;
+        const claims: TokenClaims | null = user ? claimsOf(user) : null;
         const useCaseDomain = user ? await resolveUseCaseDomain(user.useCaseKey) : null;
         const org = user?.orgId ? await deps.organizations.get(user.orgId) : null;
         return { status: "authenticated", token: done.token, user: claims ? { ...claims, walletAddress: wallet?.address ?? null, useCaseDomain, orgCapabilities: org?.capabilities ?? null } : null };
@@ -327,7 +327,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (user.kind === "service") {
       return reply.code(403).send({ error: "SERVICE_ACCOUNT", message: "this is a service account; authenticate with its API key" });
     }
-    const claims: TokenClaims = { id: user.id, email: user.email, role: user.role, useCaseKey: user.useCaseKey, orgId: user.orgId ?? null, did: user.did ?? null };
+    const claims: TokenClaims = claimsOf(user);
     const token = app.jwt.sign(claims);
     if (!deps.qrLogin.authenticate(id, { userId: user.id, token })) return reply.code(410).send({ error: "SESSION_EXPIRED", message: "session no longer pending" });
     await deps.loginKeys.touch(key.id, new Date().toISOString());

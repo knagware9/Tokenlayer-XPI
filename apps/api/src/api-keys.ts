@@ -10,7 +10,12 @@ import bcrypt from "bcryptjs";
 export const KEY_PREFIX_MARKER = "tl_live_";
 /** Chars of the secret body kept in the clear, for display and the indexed lookup. */
 const PREFIX_LEN = 8;
-/** 22 base62 chars ≈ 131 bits — far beyond guessable, and short enough to copy. */
+/**
+ * 22 base62 chars. The `% ALPHABET.length` below is slightly biased (256 is not
+ * a multiple of 62), costing 0.1 bits: ~130.9 bits of entropy rather than a
+ * clean ~131, with a worst-case min-entropy of ~124.9. Unexploitable at that
+ * magnitude, so the simpler code stands.
+ */
 const BODY_LEN = 22;
 const ALPHABET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 

@@ -1,7 +1,7 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { PolicyError, type Actor, type AssetContext, type Role } from "@tokenlayer/core";
 import { prefixOf, secretMatches } from "../api-keys.js";
-import type { ApiKeyRepository, AssetRecord, UserRepository } from "../persistence/types.js";
+import type { ApiKeyRepository, AssetRecord, UserRecord, UserRepository } from "../persistence/types.js";
 
 export interface TokenClaims {
   id: string;
@@ -26,6 +26,18 @@ declare module "fastify" {
   interface FastifyRequest {
     apiKey?: ApiKeyPrincipal;
   }
+}
+
+/**
+ * The ONE place a session principal is built from a user row. Every gate in the
+ * app — RBAC, maker-checker, the nine EN-A envelope checks — reads this shape
+ * and nothing else, so a field that goes missing at one construction site is a
+ * silent authorization difference between the paths. `satisfies TokenClaims`
+ * does NOT catch that: the optional members make a partial object still assign.
+ * Hence one function, used by both auth branches and every JWT-minting route.
+ */
+export function claimsOf(user: Pick<UserRecord, "id" | "email" | "role" | "useCaseKey" | "orgId" | "did">): TokenClaims {
+  return { id: user.id, email: user.email, role: user.role, useCaseKey: user.useCaseKey, orgId: user.orgId ?? null, did: user.did ?? null };
 }
 
 export function actorOf(request: FastifyRequest): Actor {
@@ -93,13 +105,14 @@ export function requirePrincipal(deps: { users: UserRepository; apiKeys: ApiKeyR
     const prefix = raw === null ? null : prefixOf(raw);
 
     // --- JWT path: unchanged from before EN-B ------------------------------
-    // (`raw === null` is implied by `prefix === null`; naming it narrows the type.)
+    // `prefix === null` already covers `raw === null`; the first disjunct is
+    // redundant at runtime and kept only so TS narrows `raw` to string below.
     if (raw === null || prefix === null) {
       request.apiKey = undefined;
       try {
         await request.jwtVerify();
       } catch {
-        await reply.code(401).send({ error: "UNAUTHORIZED", message: "missing or invalid bearer token" });
+        await rejectUnauthenticated(reply);
         return;
       }
       const claims = request.user as TokenClaims;
@@ -108,7 +121,7 @@ export function requirePrincipal(deps: { users: UserRepository; apiKeys: ApiKeyR
         await reply.code(401).send({ error: "UNAUTHORIZED", message: "session is no longer valid" });
         return;
       }
-      request.user = { id: user.id, email: user.email, role: user.role, useCaseKey: user.useCaseKey, orgId: user.orgId ?? null, did: user.did ?? null } satisfies TokenClaims;
+      request.user = claimsOf(user);
       return;
     }
 
@@ -118,6 +131,15 @@ export function requirePrincipal(deps: { users: UserRepository; apiKeys: ApiKeyR
       await rejectUnauthenticated(reply);
       return;
     }
+    // COST, KNOWN AND DEFERRED TO B4: the prefix is public by design (see
+    // api-keys.ts), so anyone who reads one off the UI can send
+    // `tl_live_<prefix>` + garbage and force a full bcrypt compare per request
+    // — ~200ms at BCRYPT_ROUNDS=12, and bcryptjs is pure JS, so concurrency
+    // does not help. Nothing throttles this preHandler today (`loginThrottled`
+    // covers only /auth/login and the QR route), and B4's per-key rate limit is
+    // applied only AFTER successful verification, so it does not bound failures.
+    // B4 owns the mitigation: a dedicated lower cost factor for high-entropy key
+    // secrets, the verified-prefix cache, and a bound on FAILED attempts per prefix.
     if (!(await secretMatches(raw, key.secretHash))) {
       await rejectUnauthenticated(reply);
       return;
@@ -127,7 +149,7 @@ export function requirePrincipal(deps: { users: UserRepository; apiKeys: ApiKeyR
       await rejectUnauthenticated(reply);
       return;
     }
-    request.user = { id: user.id, email: user.email, role: user.role, useCaseKey: user.useCaseKey, orgId: user.orgId ?? null, did: user.did ?? null } satisfies TokenClaims;
+    request.user = claimsOf(user);
     // Copy the scopes: the memory repo hands back its live array, and a route
     // must never be able to mutate what the store believes was granted.
     request.apiKey = { id: key.id, scopes: [...key.scopes] };
