@@ -457,7 +457,31 @@ export const components: Record<string, unknown>[] = [
 const errs = (...codes: number[]): Record<string, unknown> =>
   Object.fromEntries(codes.map((c) => [c, { $ref: "Error#" }]));
 
-const bearer = [{ bearerAuth: [] }];
+/**
+ * EN-D1: WHICH CREDENTIAL A ROUTE ACCEPTS IS A FACT THE SERVER ALREADY KNOWS.
+ *
+ * `authScoped("x")` in routes.ts IS the statement "an API key may call this,
+ * with scope x"; plain `...auth` is the statement "a key gets no scope-level
+ * permission here, and the route may refuse it outright". These two constants
+ * are the document's half of that same statement, and
+ * `openapi-contract.test.ts` fails the build when the halves disagree — the
+ * whole point being that until EN-D1 all 121 routes advertised `bearerAuth`
+ * alone, telling every integrator that machine access did not exist while the
+ * server served it happily.
+ *
+ * Pick by the GATE, never by intuition: `authScoped(...)` ⇒ eitherCredential,
+ * anything else ⇒ humanOnly, and a genuinely public route gets no `security`
+ * key at all.
+ */
+/** One OpenAPI security requirement: a scheme name mapped to its (here always
+ * empty) scope list. Annotated explicitly because inference would otherwise
+ * give `eitherCredential` a union element type with optional members, which
+ * FastifySchema's index-signature form rejects. */
+type SecurityRequirement = Record<string, readonly string[]>;
+/** A human session only. A key may authenticate, but this route will refuse or re-gate it. */
+const humanOnly: SecurityRequirement[] = [{ bearerAuth: [] }];
+/** Either credential. Use for any route carrying `authScoped(...)`. */
+const eitherCredential: SecurityRequirement[] = [{ bearerAuth: [] }, { apiKeyAuth: [] }];
 
 /** Per-route schemas, referenced from routes.ts. Typed as FastifySchema so the
  * framework does not over-narrow reply status codes from the literal objects. */
@@ -482,20 +506,26 @@ export const S: Record<string, FastifySchema> = {
       ...errs(400, 401, 403),
     },
   },
-  me: { tags: ["Auth"], summary: "Current session principal", security: bearer, response: { 200: { type: "object", additionalProperties: true }, ...errs(401) } },
+  me: { tags: ["Auth"], summary: "Current session principal", security: humanOnly,
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(401) } },
   config: {
-    tags: ["Config"], summary: "Deployment configuration (enabled domains)", security: bearer,
+    tags: ["Config"], summary: "Deployment configuration (enabled domains)", security: humanOnly,
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401) },
   },
 
   enrollLoginKey: {
-    tags: ["Auth"], summary: "Enrol a device login key (public did:key)", security: bearer,
+    tags: ["Auth"], summary: "Enrol a device login key (public did:key)", security: humanOnly,
+    description:
+      "Session-only. An API key is refused with **403 `MACHINE_PRINCIPAL`**: a key has no device, and enrolling a " +
+      "durable device credential is a human act.",
     body: { type: "object", additionalProperties: false, required: ["did", "label"], properties: { did: { type: "string" }, label: { type: "string", minLength: 1 } } },
     // 403 = MACHINE_PRINCIPAL: an API key has no device to enrol.
     response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 409) },
   },
-  listLoginKeys: { tags: ["Auth"], summary: "The caller's enrolled device login keys", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401) } },
-  removeLoginKey: { tags: ["Auth"], summary: "Revoke a device login key", security: bearer, params: { type: "object", required: ["id"], properties: { id: { type: "string" } } }, response: { 204: { type: "null" }, ...errs(401, 404) } },
+  listLoginKeys: { tags: ["Auth"], summary: "The caller's enrolled device login keys", security: humanOnly,
+    response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401) } },
+  removeLoginKey: { tags: ["Auth"], summary: "Revoke a device login key", security: humanOnly,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } }, response: { 204: { type: "null" }, ...errs(401, 404) } },
   qrStart: { tags: ["Auth"], summary: "Begin a passwordless QR login session", response: { 200: { type: "object", additionalProperties: true } } },
   qrPoll: { tags: ["Auth"], summary: "Poll a QR login session", params: { type: "object", required: ["id"], properties: { id: { type: "string" } } }, response: { 200: { type: "object", additionalProperties: true }, ...errs(404) } },
   qrAuthenticate: {
@@ -506,46 +536,62 @@ export const S: Record<string, FastifySchema> = {
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404, 410, 429) },
   },
 
-  chains: { tags: ["Catalog"], summary: "List configured chains/DLTs", security: bearer, response: { 200: { type: "array", items: { $ref: "Chain#" } }, ...errs(401) } },
+  chains: { tags: ["Catalog"], summary: "List configured chains/DLTs", security: humanOnly,
+    response: { 200: { type: "array", items: { $ref: "Chain#" } }, ...errs(401) } },
   chainStatus: {
-    tags: ["Catalog"], summary: "Probe one chain's live status (on-demand health check)", security: bearer,
+    tags: ["Catalog"], summary: "Probe one chain's live status (on-demand health check)", security: humanOnly,
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: { 200: { $ref: "ChainStatus#" }, ...errs(401, 404) },
   },
-  currencies: { tags: ["Catalog"], summary: "List supported settlement currencies", security: bearer, response: { 200: { type: "array", items: { $ref: "Currency#" } }, ...errs(401) } },
-  accounts: { tags: ["Catalog"], summary: "List demo accounts", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401) } },
+  currencies: { tags: ["Catalog"], summary: "List supported settlement currencies", security: humanOnly,
+    response: { 200: { type: "array", items: { $ref: "Currency#" } }, ...errs(401) } },
+  accounts: { tags: ["Catalog"], summary: "List demo accounts", security: eitherCredential,
+    description: "Requires the `assets:read` scope. Lists the demo settlement accounts.",
+    response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401) } },
 
-  listUseCases: { tags: ["Use Cases"], summary: "List use cases", security: bearer, response: { 200: { type: "array", items: { $ref: "UseCase#" } }, ...errs(401) } },
+  listUseCases: { tags: ["Use Cases"], summary: "List use cases", security: humanOnly,
+    response: { 200: { type: "array", items: { $ref: "UseCase#" } }, ...errs(401) } },
   getUseCase: {
-    tags: ["Use Cases"], summary: "Get a use case by key", security: bearer,
+    tags: ["Use Cases"], summary: "Get a use case by key", security: humanOnly,
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     response: { 200: { $ref: "UseCase#" }, ...errs(401, 404) },
   },
   createUseCase: {
-    tags: ["Use Cases"], summary: "Create a use case (PlatformAdmin)", security: bearer,
+    tags: ["Use Cases"], summary: "Create a use case (PlatformAdmin)", security: eitherCredential,
+    description:
+      "Requires the `usecases:provision` scope. Creates a tokenization use case — the contract template, the chains " +
+      "it may deploy on, and the compliance and fee configuration every asset issued under it inherits. Deploying " +
+      "it is a separate call.",
     body: { $ref: "UseCase#" },
     response: { 201: { $ref: "UseCase#" }, ...errs(400, 401, 403) },
   },
   updateUseCase: {
-    tags: ["Use Cases"], summary: "Update a use case (PlatformAdmin)", security: bearer,
+    tags: ["Use Cases"], summary: "Update a use case (PlatformAdmin)", security: eitherCredential,
+    description:
+      "Requires the `usecases:provision` scope. Replaces a use case's configuration. Contracts already deployed are " +
+      "untouched; the change governs what happens next.",
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     body: { $ref: "UseCase#" },
     response: { 200: { $ref: "UseCase#" }, ...errs(400, 401, 403, 404) },
   },
   deployUseCase: {
-    tags: ["Use Cases"], summary: "Deploy a use case's contract on one allowed chain (PlatformAdmin)", security: bearer,
+    tags: ["Use Cases"], summary: "Deploy a use case's contract on one allowed chain (PlatformAdmin)", security: eitherCredential,
+    description:
+      "Requires the `usecases:provision` scope. Deploys this use case's contract on one of its allowed chains and " +
+      "records the address. A chain that cannot be reached answers **502** and leaves the deployment pending — " +
+      "retry is safe.",
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     body: { type: "object", additionalProperties: false, required: ["chainId"], properties: { chainId: { type: "string" } } },
     response: { 200: { $ref: "UseCase#" }, ...errs(400, 401, 403, 404, 502) },
   },
   useCaseCode: {
-    tags: ["Use Cases"], summary: "Contract code backing a use case on one allowed chain", security: bearer,
+    tags: ["Use Cases"], summary: "Contract code backing a use case on one allowed chain", security: humanOnly,
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     querystring: { type: "object", additionalProperties: false, required: ["chainId"], properties: { chainId: { type: "string" } } },
     response: { 200: { $ref: "ContractCode#" }, ...errs(400, 401, 404) },
   },
   previewUseCaseCode: {
-    tags: ["Use Cases"], summary: "Preview the contract code for a not-yet-created use case (wizard review step)", security: bearer,
+    tags: ["Use Cases"], summary: "Preview the contract code for a not-yet-created use case (wizard review step)", security: humanOnly,
     body: {
       type: "object",
       additionalProperties: false,
@@ -561,41 +607,52 @@ export const S: Record<string, FastifySchema> = {
     response: { 200: { $ref: "ContractCode#" }, ...errs(400, 401) },
   },
 
-  credentialTemplates: { tags: ["Credential Use Cases"], summary: "Editable starter credential-type templates", security: bearer, response: { 200: { type: "object", additionalProperties: true }, ...errs(401) } },
-  listCredentialUseCases: { tags: ["Credential Use Cases"], summary: "List credential use cases", security: bearer, response: { 200: { type: "array", items: { $ref: "CredentialUseCase#" } }, ...errs(401) } },
+  credentialTemplates: { tags: ["Credential Use Cases"], summary: "Editable starter credential-type templates", security: humanOnly,
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(401) } },
+  listCredentialUseCases: { tags: ["Credential Use Cases"], summary: "List credential use cases", security: humanOnly,
+    response: { 200: { type: "array", items: { $ref: "CredentialUseCase#" } }, ...errs(401) } },
   getCredentialUseCase: {
-    tags: ["Credential Use Cases"], summary: "Get a credential use case by key", security: bearer,
+    tags: ["Credential Use Cases"], summary: "Get a credential use case by key", security: humanOnly,
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     response: { 200: { $ref: "CredentialUseCase#" }, ...errs(401, 404) },
   },
   createCredentialUseCase: {
-    tags: ["Credential Use Cases"], summary: "Create a credential use case (PlatformAdmin)", security: bearer,
+    tags: ["Credential Use Cases"], summary: "Create a credential use case (PlatformAdmin)", security: eitherCredential,
+    description:
+      "Requires the `usecases:provision` scope — the same scope as its tokenization counterpart, because " +
+      "configuring who may issue a credential is the same kind of authority as configuring who may mint a token.",
     body: { type: "object", additionalProperties: true, required: ["key", "name", "credentialTypes", "issuer", "holderPolicy", "verifier"] },
     response: { 201: { $ref: "CredentialUseCase#" }, ...errs(400, 401, 403, 409) },
   },
   updateCredentialUseCase: {
-    tags: ["Credential Use Cases"], summary: "Update a credential use case (PlatformAdmin)", security: bearer,
+    tags: ["Credential Use Cases"], summary: "Update a credential use case (PlatformAdmin)", security: eitherCredential,
+    description:
+      "Requires the `usecases:provision` scope. Patches a credential use case's configuration: its credential " +
+      "types, holder policy, and verifier.",
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     body: { type: "object", additionalProperties: true },
     response: { 200: { $ref: "CredentialUseCase#" }, ...errs(400, 401, 403, 404) },
   },
 
   listUseCaseTemplates: {
-    tags: ["Credential Use Cases"], summary: "List the credential-use-case template catalog (built-in + saved)", security: bearer,
+    tags: ["Credential Use Cases"], summary: "List the credential-use-case template catalog (built-in + saved)", security: humanOnly,
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401) },
   },
   getUseCaseTemplate: {
-    tags: ["Credential Use Cases"], summary: "Get a credential-use-case template by key (built-in or saved)", security: bearer,
+    tags: ["Credential Use Cases"], summary: "Get a credential-use-case template by key (built-in or saved)", security: humanOnly,
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 404) },
   },
   createUseCaseTemplate: {
-    tags: ["Credential Use Cases"], summary: "Save a custom credential-use-case template (PlatformAdmin/OrgAdmin)", security: bearer,
+    tags: ["Credential Use Cases"], summary: "Save a custom credential-use-case template (PlatformAdmin/OrgAdmin)", security: eitherCredential,
+    description:
+      "Requires the `usecases:provision` scope. Saves a reusable credential-use-case template. A template is " +
+      "authoring input and confers nothing until it is instantiated.",
     body: { type: "object", additionalProperties: true, required: ["key", "name", "category", "parameters", "body"] },
     response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 409) },
   },
   previewUseCaseTemplate: {
-    tags: ["Credential Use Cases"], summary: "Preview the CredentialUseCaseDefinition a template instantiates to, given param values", security: bearer,
+    tags: ["Credential Use Cases"], summary: "Preview the CredentialUseCaseDefinition a template instantiates to, given param values", security: humanOnly,
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     body: { type: "object", additionalProperties: true, properties: { params: { type: "object", additionalProperties: true } } },
     // 400 is overridden (not the shared Error# ref) so `problems` — an array of
@@ -604,7 +661,11 @@ export const S: Record<string, FastifySchema> = {
     response: { 200: { type: "object", additionalProperties: true }, 400: { type: "object", additionalProperties: true }, ...errs(401, 404) },
   },
   provisionUseCase: {
-    tags: ["Credential Use Cases"], summary: "One-step enterprise provisioning from a template: ensure the issuer org, instantiate the bound credential use case, and optionally create scoped desk users (PlatformAdmin; OrgAdmin scoped to their own org)", security: bearer,
+    tags: ["Credential Use Cases"], summary: "One-step enterprise provisioning from a template: ensure the issuer org, instantiate the bound credential use case, and optionally create scoped desk users (PlatformAdmin; OrgAdmin scoped to their own org)", security: eitherCredential,
+    description:
+      "Requires the `usecases:provision` scope. One call ensures the issuer organization, instantiates the " +
+      "template's credential use case, and optionally creates scoped desk users — whose one-time passwords appear " +
+      "in **this response only** and are never retrievable again.",
     body: {
       type: "object", additionalProperties: true, required: ["templateKey", "params"],
       properties: {
@@ -626,7 +687,11 @@ export const S: Record<string, FastifySchema> = {
   },
 
   issueAsset: {
-    tags: ["Assets"], summary: "Issue (tokenize) a new asset", security: bearer,
+    tags: ["Assets"], summary: "Issue (tokenize) a new asset", security: eitherCredential,
+    description:
+      "Requires the `assets:issue` scope. Mints the asset on the configured chain and returns it with the " +
+      "transaction hash. This is one of two doors onto issuance; `POST /use-cases/{key}/invoices/tokenize` is the " +
+      "other, and carries the same scope on purpose.",
     body: {
       type: "object",
       required: ["useCaseKey", "name", "chainId"],
@@ -665,7 +730,10 @@ export const S: Record<string, FastifySchema> = {
     },
   },
   listAssets: {
-    tags: ["Assets"], summary: "List assets (filter + paginate)", security: bearer,
+    tags: ["Assets"], summary: "List assets (filter + paginate)", security: eitherCredential,
+    description:
+      "Requires the `assets:read` scope. Filtered and paginated. Results are already narrowed to the caller's " +
+      "use-case scope — a key never sees more than the service user it is bound to.",
     querystring: {
       type: "object",
       properties: {
@@ -679,22 +747,30 @@ export const S: Record<string, FastifySchema> = {
     response: { 200: { $ref: "AssetList#" }, ...errs(401) },
   },
   getAsset: {
-    tags: ["Assets"], summary: "Get an asset (with on-chain total supply)", security: bearer,
+    tags: ["Assets"], summary: "Get an asset (with on-chain total supply)", security: eitherCredential,
+    description:
+      "Requires the `assets:read` scope. Includes total supply read live from the ledger, not from the platform's " +
+      "copy.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: { 200: { $ref: "Asset#" }, ...errs(401, 404) },
   },
   assetAccounts: {
-    tags: ["Assets"], summary: "Holders: per-account balance + compliance state", security: bearer,
+    tags: ["Assets"], summary: "Holders: per-account balance + compliance state", security: eitherCredential,
+    description:
+      "Requires the `assets:read` scope. Per-holder balances and compliance state. Holder data is exactly why reads " +
+      "are scoped here at all.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: { 200: { type: "array", items: { $ref: "AccountState#" } }, ...errs(401, 404) },
   },
   assetTokens: {
-    tags: ["Assets"], summary: "NFT tokens for a non-fungible asset", security: bearer,
+    tags: ["Assets"], summary: "NFT tokens for a non-fungible asset", security: eitherCredential,
+    description: "Requires the `assets:read` scope. The individual tokens of a non-fungible asset.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: { 200: { type: "array", items: { $ref: "TokenInfo#" } }, ...errs(401, 404) },
   },
   assetAudit: {
-    tags: ["Assets"], summary: "Paginated audit trail for an asset", security: bearer,
+    tags: ["Assets"], summary: "Paginated audit trail for an asset", security: eitherCredential,
+    description: "Requires the `assets:read` scope. The asset's append-only audit trail, paginated.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     querystring: {
       type: "object",
@@ -706,7 +782,10 @@ export const S: Record<string, FastifySchema> = {
     response: { 200: { $ref: "AuditList#" }, ...errs(401, 404) },
   },
   action: {
-    tags: ["Lifecycle"], summary: "Perform a lifecycle action on an asset", security: bearer,
+    tags: ["Lifecycle"], summary: "Perform a lifecycle action on an asset", security: eitherCredential,
+    description:
+      "Requires the `assets:transfer` scope. Which action is actually permitted is decided by the use case's " +
+      "compliance rules and the caller's role — the scope bounds a key, it never grants an action.",
     params: {
       type: "object",
       required: ["id", "action"],
@@ -740,7 +819,10 @@ export const S: Record<string, FastifySchema> = {
   },
 
   analytics: {
-    tags: ["Analytics"], summary: "Scope-aware dashboard summary (assets + audit + chains)", security: bearer,
+    tags: ["Analytics"], summary: "Scope-aware dashboard summary (assets + audit + chains)", security: eitherCredential,
+    description:
+      "Requires the `assets:read` scope. Aggregates over exactly the assets the caller may already read, so it " +
+      "discloses nothing a direct read would refuse.",
     querystring: {
       type: "object",
       properties: {
@@ -752,7 +834,10 @@ export const S: Record<string, FastifySchema> = {
   },
 
   buy: {
-    tags: ["Marketplace"], summary: "Buyer-initiated DvP purchase", security: bearer,
+    tags: ["Marketplace"], summary: "Buyer-initiated DvP purchase", security: eitherCredential,
+    description:
+      "Requires the `assets:transfer` scope. Buyer-initiated delivery-versus-payment purchase; cash and tokens move " +
+      "together or not at all.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: {
       type: "object",
@@ -766,7 +851,10 @@ export const S: Record<string, FastifySchema> = {
   },
 
   createListing: {
-    tags: ["Marketplace"], summary: "List tokens for sale (moves them into escrow)", security: bearer,
+    tags: ["Marketplace"], summary: "List tokens for sale (moves them into escrow)", security: eitherCredential,
+    description:
+      "Requires the `assets:transfer` scope. The listed tokens move into escrow immediately, which is why this is a " +
+      "transfer scope and not a read one: a listing is a movement, not an advertisement.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: {
       type: "object",
@@ -781,7 +869,10 @@ export const S: Record<string, FastifySchema> = {
     response: { 201: { $ref: "Listing#" }, ...errs(400, 401, 403, 404, 503) },
   },
   listListings: {
-    tags: ["Marketplace"], summary: "Open sell listings for an asset (price asc)", security: bearer,
+    tags: ["Marketplace"], summary: "Open sell listings for an asset (price asc)", security: eitherCredential,
+    description:
+      "Requires the `assets:read` scope. Open sell listings, cheapest first. Reading the book needs no trading " +
+      "scope; taking a listing does.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: {
       200: {
@@ -804,7 +895,10 @@ export const S: Record<string, FastifySchema> = {
     },
   },
   takeListing: {
-    tags: ["Marketplace"], summary: "Take (buy from) a listing — escrowed DvP with fee split", security: bearer,
+    tags: ["Marketplace"], summary: "Take (buy from) a listing — escrowed DvP with fee split", security: eitherCredential,
+    description:
+      "Requires the `assets:transfer` scope. Escrowed delivery-versus-payment against an open listing, with the " +
+      "configured fee split applied.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: {
       type: "object",
@@ -834,12 +928,14 @@ export const S: Record<string, FastifySchema> = {
     },
   },
   cancelListing: {
-    tags: ["Marketplace"], summary: "Cancel a listing (returns remaining tokens to the seller)", security: bearer,
+    tags: ["Marketplace"], summary: "Cancel a listing (returns remaining tokens to the seller)", security: eitherCredential,
+    description: "Requires the `assets:transfer` scope. Returns the remaining escrowed tokens to the seller.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: { 204: { type: "null" }, ...errs(400, 401, 403, 404, 503) },
   },
   assetTrades: {
-    tags: ["Marketplace"], summary: "Recent trades for an asset (from the audit stream, newest first)", security: bearer,
+    tags: ["Marketplace"], summary: "Recent trades for an asset (from the audit stream, newest first)", security: eitherCredential,
+    description: "Requires the `assets:read` scope. Recent trades for an asset, derived from the audit stream, newest first.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: {
       200: {
@@ -864,7 +960,10 @@ export const S: Record<string, FastifySchema> = {
   },
 
   listCashflows: {
-    tags: ["Cashflows"], summary: "An asset's cashflow schedule with derived status + next-payout preview", security: bearer,
+    tags: ["Cashflows"], summary: "An asset's cashflow schedule with derived status + next-payout preview", security: eitherCredential,
+    description:
+      "Requires the `assets:read` scope. The schedule with status derived at read time: `due` and `overdue` are " +
+      "computed from the due date, never stored.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: {
       200: {
@@ -896,7 +995,10 @@ export const S: Record<string, FastifySchema> = {
   },
 
   executeCashflow: {
-    tags: ["Cashflows"], summary: "Execute a cashflow — pro-rata cash payout; redemption burns balances + matures the asset", security: bearer,
+    tags: ["Cashflows"], summary: "Execute a cashflow — pro-rata cash payout; redemption burns balances + matures the asset", security: eitherCredential,
+    description:
+      "Requires the `assets:transfer` scope. Pays the scheduled cashflow pro rata to holders; a redemption " +
+      "additionally burns balances and matures the asset.",
     params: { type: "object", required: ["id", "cfId"], properties: { id: { type: "string" }, cfId: { type: "string" } } },
     body: {
       type: "object",
@@ -915,7 +1017,10 @@ export const S: Record<string, FastifySchema> = {
   },
 
   listProposals: {
-    tags: ["Proposals"], summary: "List maker-checker proposals (use-case scoped)", security: bearer,
+    tags: ["Proposals"], summary: "List maker-checker proposals (use-case scoped)", security: humanOnly,
+    description:
+      "Documented as session-only because a key's view is narrowed at runtime rather than by a scope: a key " +
+      "principal sees only the proposals it could itself decide, and payloads are redacted for every caller.",
     querystring: {
       type: "object",
       additionalProperties: false,
@@ -924,7 +1029,11 @@ export const S: Record<string, FastifySchema> = {
     response: { 200: { type: "array", items: { $ref: "Proposal#" } }, ...errs(401) },
   },
   decideProposal: {
-    tags: ["Proposals"], summary: "Approve or reject a proposal (segregation of duties: never the proposer)", security: bearer,
+    tags: ["Proposals"], summary: "Approve or reject a proposal (segregation of duties: never the proposer)", security: humanOnly,
+    description:
+      "Carries no static scope because the scope required is derived from the PROPOSAL'S KIND at decision time: a " +
+      "key may decide only the kinds its own scopes already let it propose. Rejecting is gated exactly as approving " +
+      "is — declining is a decision too.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: { type: "object", additionalProperties: false, properties: {} },
     response: {
@@ -934,31 +1043,47 @@ export const S: Record<string, FastifySchema> = {
   },
 
   verifyAssetAudit: {
-    tags: ["Audit"], summary: "Verify an asset's audit hash chain + on-ledger anchor", security: bearer,
+    tags: ["Audit"], summary: "Verify an asset's audit hash chain + on-ledger anchor", security: eitherCredential,
+    description:
+      "Requires the `assets:read` scope. Recomputes the asset's audit hash chain and compares it against the anchor " +
+      "written on-ledger.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 404) },
   },
   verifyAuditSummary: {
-    tags: ["Audit"], summary: "Platform audit-integrity roll-up (per-asset chain + anchor)", security: bearer,
+    tags: ["Audit"], summary: "Platform audit-integrity roll-up (per-asset chain + anchor)", security: eitherCredential,
+    description:
+      "Requires the `assets:read` scope. The same integrity check as the per-asset one, rolled up across the " +
+      "platform.",
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401) },
   },
   anchorAudit: {
-    tags: ["Audit"], summary: "Anchor each in-scope asset's audit chain head on-ledger", security: bearer,
+    tags: ["Audit"], summary: "Anchor each in-scope asset's audit chain head on-ledger", security: humanOnly,
+    description:
+      "Unscoped deliberately: it writes an integrity anchor on-chain and confers no authority over anything. It is " +
+      "bounded by the caller's role and by the per-key rate limit.",
     body: { type: "object", additionalProperties: false, properties: {} },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403) },
   },
 
   mePortfolio: {
-    tags: ["Investor"], summary: "The caller's holdings, cash, and totals", security: bearer,
+    tags: ["Investor"], summary: "The caller's holdings, cash, and totals", security: eitherCredential,
+    description:
+      "Requires the `assets:read` scope. The holdings, cash, and totals of the principal the credential belongs to " +
+      "— for a key, that is its bound service user, not the whole organization.",
     response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401) },
   },
   meActivity: {
-    tags: ["Investor"], summary: "The caller's personal activity feed", security: bearer,
+    tags: ["Investor"], summary: "The caller's personal activity feed", security: eitherCredential,
+    description: "Requires the `assets:read` scope. The bound principal's own activity feed.",
     response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(400, 401) },
   },
 
   creditCash: {
-    tags: ["Cash"], summary: "Fund an account with CBDC / cash (Issuer / admin only)", security: bearer,
+    tags: ["Cash"], summary: "Fund an account with CBDC / cash (Issuer / admin only)", security: eitherCredential,
+    description:
+      "Requires the `assets:transfer` scope **and** an Issuer or admin role. The scope only narrows what a key may " +
+      "do; it never confers the role, so a key bound to a Trader cannot fund accounts however it is scoped.",
     body: {
       type: "object",
       additionalProperties: false,
@@ -973,7 +1098,8 @@ export const S: Record<string, FastifySchema> = {
   },
 
   cashBalances: {
-    tags: ["Cash"], summary: "Query CBDC / cash balances for an address", security: bearer,
+    tags: ["Cash"], summary: "Query CBDC / cash balances for an address", security: eitherCredential,
+    description: "Requires the `assets:read` scope. CBDC / cash balances for one address.",
     querystring: {
       type: "object",
       properties: {
@@ -987,7 +1113,11 @@ export const S: Record<string, FastifySchema> = {
   },
 
   createOrg: {
-    tags: ["Organizations"], summary: "Create an organization + parent DID (PlatformAdmin)", security: bearer,
+    tags: ["Organizations"], summary: "Create an organization + parent DID (PlatformAdmin)", security: eitherCredential,
+    description:
+      "Requires the `usecases:provision` scope. Creates an organization and its parent DID. Note the asymmetry: a " +
+      "key may create a tenant, but may never widen the capability envelope that bounds its own — `PATCH " +
+      "/orgs/{id}/capabilities` refuses machine principals outright.",
     body: {
       type: "object", additionalProperties: false, required: ["name", "orgType"],
       properties: {
@@ -1038,26 +1168,38 @@ export const S: Record<string, FastifySchema> = {
     },
     response: { 202: { type: "object", additionalProperties: true }, ...errs(400, 409, 429) },
   },
-  listOrgs: { tags: ["Organizations"], summary: "List organizations in scope", security: bearer, querystring: { type: "object", properties: { status: { type: "string" } } }, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403) } },
+  listOrgs: { tags: ["Organizations"], summary: "List organizations in scope", security: eitherCredential,
+    description: "Requires the `org:read` scope. Organizations within the caller's existing scope.",
+    querystring: { type: "object", properties: { status: { type: "string" } } }, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403) } },
   approveOrg: {
-    tags: ["Organizations"], summary: "Approve a pending org (registers its DID on-chain, activates the admin)", security: bearer,
+    tags: ["Organizations"], summary: "Approve a pending org (registers its DID on-chain, activates the admin)", security: humanOnly,
+    description:
+      "Session-only. An API key is refused with **403 `MACHINE_PRINCIPAL`**: admitting a tenant is platform " +
+      "governance, not integration.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: { type: "object", additionalProperties: false, properties: {} },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404, 409, 502) },
   },
   rejectOrg: {
-    tags: ["Organizations"], summary: "Reject a pending org", security: bearer,
+    tags: ["Organizations"], summary: "Reject a pending org", security: humanOnly,
+    description:
+      "Session-only. An API key is refused with **403 `MACHINE_PRINCIPAL`**: admitting a tenant is platform " +
+      "governance, not integration.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: { type: "object", additionalProperties: false, required: ["reason"], properties: { reason: { type: "string", minLength: 1 } } },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404, 409) },
   },
   getOrg: {
-    tags: ["Organizations"], summary: "Get an organization by id", security: bearer,
+    tags: ["Organizations"], summary: "Get an organization by id", security: eitherCredential,
+    description: "Requires the `org:read` scope. The projection never includes the organization's encrypted DID seed.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404) },
   },
   patchOrgCapabilities: {
-    tags: ["Organizations"], summary: "Set (or clear with null) an org's capability envelope (PlatformAdmin)", security: bearer,
+    tags: ["Organizations"], summary: "Set (or clear with null) an org's capability envelope (PlatformAdmin)", security: humanOnly,
+    description:
+      "Session-only. An API key is refused with **403 `MACHINE_PRINCIPAL`** — a key may never raise the capability " +
+      "envelope that bounds it.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: {
       type: "object", additionalProperties: false, required: ["capabilities"],
@@ -1067,7 +1209,10 @@ export const S: Record<string, FastifySchema> = {
     response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
   },
   requestOrgCapabilities: {
-    tags: ["Organizations"], summary: "Request a capability-envelope change (OrgAdmin; PlatformAdmin approval applies it)", security: bearer,
+    tags: ["Organizations"], summary: "Request a capability-envelope change (OrgAdmin; PlatformAdmin approval applies it)", security: humanOnly,
+    description:
+      "Drafts a capability change only. It applies through an approval that no API key may give, so a key can ask " +
+      "for a wider envelope but can never grant itself one.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: {
       type: "object", additionalProperties: false, required: ["capabilities"],
@@ -1076,7 +1221,10 @@ export const S: Record<string, FastifySchema> = {
     response: { 202: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
   },
   createMember: {
-    tags: ["Organizations"], summary: "Add a member (sub-DID + membership VC)", security: bearer,
+    tags: ["Organizations"], summary: "Add a member (sub-DID + membership VC)", security: eitherCredential,
+    description:
+      "Requires the `users:onboard` scope. Adds a member with their own sub-DID and a membership credential issued " +
+      "by the organization.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: {
       type: "object", additionalProperties: false, required: ["email", "password", "role"],
@@ -1097,7 +1245,8 @@ export const S: Record<string, FastifySchema> = {
     response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
   },
   listMembers: {
-    tags: ["Organizations"], summary: "List an organization's members", security: bearer,
+    tags: ["Organizations"], summary: "List an organization's members", security: eitherCredential,
+    description: "Requires the `org:read` scope. The organization's members and their roles.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403, 404) },
   },
@@ -1106,7 +1255,10 @@ export const S: Record<string, FastifySchema> = {
   // nested/nullable fields a typed schema would silently strip, and the SECRET
   // must survive serialization on create/rotate — it exists nowhere else.
   createApiKey: {
-    tags: ["API Keys"], summary: "Mint an org API key (secret returned once, never again)", security: bearer,
+    tags: ["API Keys"], summary: "Mint an org API key (secret returned once, never again)", security: humanOnly,
+    description:
+      "Session-only. An API key is refused with **403 `MACHINE_PRINCIPAL`** — minting a key is the one path by " +
+      "which a machine principal could widen itself, so only a human session may take it.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: {
       type: "object", additionalProperties: false, required: ["name", "role", "scopes"],
@@ -1125,18 +1277,23 @@ export const S: Record<string, FastifySchema> = {
     response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
   },
   listApiKeys: {
-    tags: ["API Keys"], summary: "List an organization's API keys (never the secret)", security: bearer,
+    tags: ["API Keys"], summary: "List an organization's API keys (never the secret)", security: humanOnly,
+    description:
+      "Session-only. An API key is refused with **403 `MACHINE_PRINCIPAL`**: a key may not enumerate the " +
+      "organization's keys.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403, 404) },
   },
   rotateApiKey: {
-    tags: ["API Keys"], summary: "Rotate an API key's secret (the old one dies immediately)", security: bearer,
+    tags: ["API Keys"], summary: "Rotate an API key's secret (the old one dies immediately)", security: humanOnly,
+    description: "Session-only. An API key is refused with **403 `MACHINE_PRINCIPAL`** — key lifecycle is a human act.",
     params: { type: "object", required: ["id", "keyId"], properties: { id: { type: "string" }, keyId: { type: "string" } } },
     body: { type: "object", additionalProperties: false, properties: {} },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404, 409) },
   },
   revokeApiKey: {
-    tags: ["API Keys"], summary: "Revoke an API key (soft — the row stays as the audit trail)", security: bearer,
+    tags: ["API Keys"], summary: "Revoke an API key (soft — the row stays as the audit trail)", security: humanOnly,
+    description: "Session-only. An API key is refused with **403 `MACHINE_PRINCIPAL`** — key lifecycle is a human act.",
     params: { type: "object", required: ["id", "keyId"], properties: { id: { type: "string" }, keyId: { type: "string" } } },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404) },
   },
@@ -1150,7 +1307,10 @@ export const S: Record<string, FastifySchema> = {
   // is not an authorization boundary, and `webhookView` (not this schema) is
   // what keeps `secretEncrypted` out of a body.
   createWebhook: {
-    tags: ["Webhooks"], summary: "Register a webhook endpoint (signing secret returned once, never again)", security: bearer,
+    tags: ["Webhooks"], summary: "Register a webhook endpoint (signing secret returned once, never again)", security: eitherCredential,
+    description:
+      "Requires the `webhooks:write` scope. The signing secret is returned in **this response only** and is never " +
+      "retrievable afterwards — store it before you acknowledge the call, or rotate to get a new one.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: {
       type: "object", additionalProperties: false, required: ["url", "eventTypes"],
@@ -1166,12 +1326,19 @@ export const S: Record<string, FastifySchema> = {
     response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
   },
   listWebhooks: {
-    tags: ["Webhooks"], summary: "List an organization's webhook endpoints (never the secret)", security: bearer,
+    tags: ["Webhooks"], summary: "List an organization's webhook endpoints (never the secret)", security: eitherCredential,
+    description:
+      "Requires the `webhooks:read` scope. The signing secret is never returned here — it is shown once at " +
+      "registration, and thereafter only a rotation produces a new one.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404) },
   },
   updateWebhook: {
-    tags: ["Webhooks"], summary: "Update a webhook endpoint (re-enabling clears its failure bookkeeping)", security: bearer,
+    tags: ["Webhooks"], summary: "Update a webhook endpoint (re-enabling clears its failure bookkeeping)", security: eitherCredential,
+    description:
+      "Requires the `webhooks:write` scope. Re-enabling an endpoint clears its failure bookkeeping, so a previously " +
+      "auto-disabled endpoint starts again with a clean count. Send `null` to CLEAR the description or the use-case " +
+      "filter.",
     params: { type: "object", required: ["id", "whId"], properties: { id: { type: "string" }, whId: { type: "string" } } },
     body: {
       type: "object", additionalProperties: false,
@@ -1189,30 +1356,41 @@ export const S: Record<string, FastifySchema> = {
     response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
   },
   rotateWebhookSecret: {
-    tags: ["Webhooks"], summary: "Rotate a webhook signing secret (the old one stops verifying immediately)", security: bearer,
+    tags: ["Webhooks"], summary: "Rotate a webhook signing secret (the old one stops verifying immediately)", security: eitherCredential,
+    description:
+      "Requires the `webhooks:write` scope. The new secret is returned once. The old one stops verifying " +
+      "immediately, so cut the receiver over deliberately rather than expecting an overlap window.",
     params: { type: "object", required: ["id", "whId"], properties: { id: { type: "string" }, whId: { type: "string" } } },
     body: { type: "object", additionalProperties: false, properties: {} },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404) },
   },
   deleteWebhook: {
-    tags: ["Webhooks"], summary: "Delete a webhook endpoint (soft — deliveries stop immediately)", security: bearer,
+    tags: ["Webhooks"], summary: "Delete a webhook endpoint (soft — deliveries stop immediately)", security: eitherCredential,
+    description: "Requires the `webhooks:write` scope. A soft delete: deliveries stop immediately.",
     params: { type: "object", required: ["id", "whId"], properties: { id: { type: "string" }, whId: { type: "string" } } },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404) },
   },
   testWebhook: {
-    tags: ["Webhooks"], summary: "Send a synthetic ping to one endpoint", security: bearer,
+    tags: ["Webhooks"], summary: "Send a synthetic ping to one endpoint", security: eitherCredential,
+    description:
+      "Requires the `webhooks:write` scope. Answers **202** as soon as the ping is queued, before it is delivered — " +
+      "read the endpoint's deliveries to see how it went.",
     params: { type: "object", required: ["id", "whId"], properties: { id: { type: "string" }, whId: { type: "string" } } },
     body: { type: "object", additionalProperties: false, properties: {} },
     response: { 202: { type: "object", additionalProperties: true }, ...errs(401, 403, 404, 409) },
   },
   listWebhookDeliveries: {
-    tags: ["Webhooks"], summary: "Recent delivery attempts for one endpoint", security: bearer,
+    tags: ["Webhooks"], summary: "Recent delivery attempts for one endpoint", security: eitherCredential,
+    description: "Requires the `webhooks:read` scope. The recent delivery attempts for one endpoint, with their outcomes.",
     params: { type: "object", required: ["id", "whId"], properties: { id: { type: "string" }, whId: { type: "string" } } },
     querystring: { type: "object", additionalProperties: false, properties: { limit: { type: "string" } } },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404) },
   },
   replayWebhookDelivery: {
-    tags: ["Webhooks"], summary: "Requeue one delivery for another attempt", security: bearer,
+    tags: ["Webhooks"], summary: "Requeue one delivery for another attempt", security: eitherCredential,
+    description:
+      "Requires the `webhooks:write` scope. Replay is a write, not a read, because it causes a newly signed request " +
+      "to leave the platform.",
     params: {
       type: "object", required: ["id", "whId", "dId"],
       properties: { id: { type: "string" }, whId: { type: "string" }, dId: { type: "string" } },
@@ -1221,7 +1399,10 @@ export const S: Record<string, FastifySchema> = {
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404) },
   },
   listEvents: {
-    tags: ["Webhooks"], summary: "Cursor read of the durable event log (the catch-up path for a missed delivery)", security: bearer,
+    tags: ["Webhooks"], summary: "Cursor read of the durable event log (the catch-up path for a missed delivery)", security: eitherCredential,
+    description:
+      "Requires the `webhooks:read` scope. A cursor read of the durable event log — the catch-up path for a " +
+      "delivery you missed, and the reason an integration can stay correct without receiving every webhook.",
     querystring: {
       type: "object", additionalProperties: false,
       properties: { after: { type: "string" }, type: { type: "string" }, limit: { type: "string" } },
@@ -1229,33 +1410,38 @@ export const S: Record<string, FastifySchema> = {
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401) },
   },
 
-  myCredentials: { tags: ["Identity"], summary: "Credentials held by the caller", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401) } },
+  myCredentials: { tags: ["Identity"], summary: "Credentials held by the caller", security: eitherCredential,
+    description: "Requires the `credentials:read` scope. The credentials held by the principal the credential belongs to.",
+    response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401) } },
   identityDashboard: {
-    tags: ["Identity"], summary: "Scoped identity operations dashboard (credential lifecycle + verification aggregates)", security: bearer,
+    tags: ["Identity"], summary: "Scoped identity operations dashboard (credential lifecycle + verification aggregates)", security: eitherCredential,
+    description:
+      "Requires the `credentials:read` scope. Aggregates the credential lifecycle and verification activity already " +
+      "inside the caller's scope.",
     // Loose 200: the nested fold output would be silently stripped by
     // fast-json-stringify under a typed schema (the standing lesson).
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403) },
   },
   acceptCredential: {
-    tags: ["Credentials"], summary: "Holder accepts a pending credential", security: bearer,
+    tags: ["Credentials"], summary: "Holder accepts a pending credential", security: humanOnly,
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: { type: "object", additionalProperties: false, properties: { note: { type: "string" } } },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 404, 409) },
   },
   rejectHeldCredential: {
-    tags: ["Credentials"], summary: "Holder rejects a pending credential (revokes it)", security: bearer,
+    tags: ["Credentials"], summary: "Holder rejects a pending credential (revokes it)", security: humanOnly,
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: { type: "object", additionalProperties: false, properties: { note: { type: "string" } } },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 404, 409) },
   },
   requestCredentialChanges: {
-    tags: ["Credentials"], summary: "Holder requests changes on a pending credential", security: bearer,
+    tags: ["Credentials"], summary: "Holder requests changes on a pending credential", security: humanOnly,
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: { type: "object", additionalProperties: false, required: ["note"], properties: { note: { type: "string", minLength: 1 } } },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 404, 409) },
   },
   didDocument: {
-    tags: ["Identity"], summary: "Resolve a did:key into a W3C DID document", security: bearer,
+    tags: ["Identity"], summary: "Resolve a did:key into a W3C DID document", security: humanOnly,
     params: { type: "object", required: ["did"], properties: { did: { type: "string" } } },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401) },
   },
@@ -1265,9 +1451,14 @@ export const S: Record<string, FastifySchema> = {
     response: { 200: { type: "object", additionalProperties: true } },
   },
 
-  credentialTypes: { tags: ["Credentials"], summary: "The credential-type catalog", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401) } },
+  credentialTypes: { tags: ["Credentials"], summary: "The credential-type catalog", security: humanOnly,
+    response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401) } },
   requestCredential: {
-    tags: ["Credentials"], summary: "Request a credential (gated by the type's approval depth)", security: bearer,
+    tags: ["Credentials"], summary: "Request a credential (gated by the type's approval depth)", security: eitherCredential,
+    description:
+      "Requires the `credentials:issue` scope. Returns **202 with a proposal** — nothing is issued until the " +
+      "credential type's approval depth is satisfied by other authorized principals. Each approver needs this same " +
+      "scope.",
     body: {
       type: "object", additionalProperties: false, required: ["type", "subjectUserId", "claims"],
       properties: {
@@ -1280,7 +1471,10 @@ export const S: Record<string, FastifySchema> = {
     response: { 202: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
   },
   issueUsecaseCredential: {
-    tags: ["Credentials"], summary: "Issue a configured credential type (gated by the type's approval depth)", security: bearer,
+    tags: ["Credentials"], summary: "Issue a configured credential type (gated by the type's approval depth)", security: eitherCredential,
+    description:
+      "Requires the `credentials:issue` scope. Returns **202 with a proposal** — the credential is not issued until " +
+      "a second authorized principal approves it (see Proposals). The approver needs the same scope.",
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     body: {
       type: "object", additionalProperties: false, required: ["credentialType", "claims"],
@@ -1294,7 +1488,11 @@ export const S: Record<string, FastifySchema> = {
     response: { 202: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
   },
   issueUsecaseCredentialsBatch: {
-    tags: ["Credentials"], summary: "Batch-issue a configured credential type from parsed CSV rows (one maker-checker proposal; draft-time all-or-nothing, execution-time per-row)", security: bearer,
+    tags: ["Credentials"], summary: "Batch-issue a configured credential type from parsed CSV rows (one maker-checker proposal; draft-time all-or-nothing, execution-time per-row)", security: eitherCredential,
+    description:
+      "Requires the `credentials:issue` scope. Returns **202 with one proposal for the whole batch**. Rows are " +
+      "validated all-or-nothing at draft time (a **400** carries the per-row report); after approval each row " +
+      "succeeds or fails on its own.",
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     body: {
       type: "object", additionalProperties: false, required: ["credentialType", "rows"],
@@ -1323,7 +1521,10 @@ export const S: Record<string, FastifySchema> = {
     },
   },
   eligibleHolders: {
-    tags: ["Credentials"], summary: "Users eligible to hold a credential of this use case", security: bearer,
+    tags: ["Credentials"], summary: "Users eligible to hold a credential of this use case", security: eitherCredential,
+    description:
+      "Requires the `users:read` scope rather than a credential scope: what it discloses is a list of people, not " +
+      "of credentials.",
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     response: {
       200: { type: "array", items: { type: "object", additionalProperties: true } },
@@ -1331,7 +1532,10 @@ export const S: Record<string, FastifySchema> = {
     },
   },
   revokeCredential: {
-    tags: ["Credentials"], summary: "Revoke a credential (gated; reason required)", security: bearer,
+    tags: ["Credentials"], summary: "Revoke a credential (gated; reason required)", security: eitherCredential,
+    description:
+      "Requires the `credentials:revoke` scope — deliberately separate from `credentials:issue`, so an integration " +
+      "that issues cannot also un-issue. Returns **202 with a proposal**, and a `reason` is mandatory.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: { type: "object", additionalProperties: false, required: ["reason"], properties: { reason: { type: "string", minLength: 1 } } },
     response: { 202: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404, 409) },
@@ -1347,22 +1551,29 @@ export const S: Record<string, FastifySchema> = {
     response: { ...errs(404) },
   },
   identityRegistry: {
-    tags: ["Identity"], summary: "The deployed on-chain identity registries (null when none)", security: bearer,
+    tags: ["Identity"], summary: "The deployed on-chain identity registries (null when none)", security: humanOnly,
     response: { 200: { type: "object", nullable: true, additionalProperties: true }, ...errs(401) },
   },
   orgCredentials: {
-    tags: ["Credentials"], summary: "Credentials issued by an organization", security: bearer,
+    tags: ["Credentials"], summary: "Credentials issued by an organization", security: eitherCredential,
+    description: "Requires the `credentials:read` scope. Credentials this organization has issued.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403, 404) },
   },
   orgWallet: {
-    tags: ["Identity"], summary: "Credentials held by an organization (entity wallet)", security: bearer,
+    tags: ["Identity"], summary: "Credentials held by an organization (entity wallet)", security: eitherCredential,
+    description:
+      "Requires the `credentials:read` scope. Credentials the organization itself holds — its entity wallet, as " +
+      "distinct from what it has issued.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403, 404) },
   },
 
   createVerificationRequest: {
-    tags: ["Verification"], summary: "A verifier org requests a credential presentation", security: bearer,
+    tags: ["Verification"], summary: "A verifier org requests a credential presentation", security: eitherCredential,
+    description:
+      "Requires the `verifications:request` scope. Asks a holder to present credentials; nothing is disclosed until " +
+      "that holder consents.",
     body: {
       type: "object", additionalProperties: false, required: ["holderDid", "requestedTypes", "purpose"],
       properties: {
@@ -1374,32 +1585,52 @@ export const S: Record<string, FastifySchema> = {
     },
     response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403) },
   },
-  myVerificationRequests: { tags: ["Verification"], summary: "The caller's inbound verification requests", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401) } },
+  myVerificationRequests: { tags: ["Verification"], summary: "The caller's inbound verification requests", security: eitherCredential,
+    description: "Requires the `verifications:read` scope. The requests addressed to the principal the credential belongs to.",
+    response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401) } },
   getVerificationRequest: {
-    tags: ["Verification"], summary: "One verification request (holder or verifier org)", security: bearer,
+    tags: ["Verification"], summary: "One verification request (holder or verifier org)", security: eitherCredential,
+    description:
+      "Requires the `verifications:read` scope. Readable by the holder and by the requesting verifier organization " +
+      "— but never carries the verifier's RESULT, which needs `verifications:verify`.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 404) },
   },
   consentVerificationRequest: {
-    tags: ["Verification"], summary: "Holder consents, selecting credentials to disclose", security: bearer,
+    tags: ["Verification"], summary: "Holder consents, selecting credentials to disclose", security: eitherCredential,
+    description:
+      "Requires the `credentials:read` scope, not a verification scope: the holder is choosing which of their OWN " +
+      "credentials to disclose, so it is gated as a read of those credentials.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: { type: "object", additionalProperties: false, required: ["credentialIds"], properties: { credentialIds: { type: "array", items: { type: "string" }, minItems: 1 } } },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404, 409, 410) },
   },
   rejectVerificationRequest: {
-    tags: ["Verification"], summary: "Holder declines a verification request", security: bearer,
+    tags: ["Verification"], summary: "Holder declines a verification request", security: humanOnly,
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404, 409) },
   },
   verifyVerificationRequest: {
-    tags: ["Verification"], summary: "The verifier runs verification on the consented presentation", security: bearer,
+    tags: ["Verification"], summary: "The verifier runs verification on the consented presentation", security: eitherCredential,
+    description:
+      "Requires the `verifications:verify` scope. Runs verification over the consented presentation and returns the " +
+      "result. It is separate from `verifications:read` because the result is a stronger disclosure than the " +
+      "request.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404, 409) },
   },
 
-  listUsers: { tags: ["Users"], summary: "List users in scope", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403) } },
+  listUsers: { tags: ["Users"], summary: "List users in scope", security: eitherCredential,
+    description:
+      "Requires the `users:read` scope. Users within the caller's existing scope — the scope narrows that set, it " +
+      "never widens it.",
+    response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403) } },
   createUser: {
-    tags: ["Users"], summary: "Create a user (scoped)", security: bearer,
+    tags: ["Users"], summary: "Create a user (scoped)", security: eitherCredential,
+    description:
+      "Requires the `users:onboard` scope. Returns **201** when onboarding is direct, or **202 with a proposal** " +
+      "where the organization runs maker-checker — in which case no account exists until a second authorized " +
+      "principal approves it. The approver needs this same scope.",
     body: {
       type: "object",
       required: ["email", "password", "role"],
@@ -1419,7 +1650,11 @@ export const S: Record<string, FastifySchema> = {
     response: { 201: { type: "object", additionalProperties: true }, 202: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
   },
   createUsersBatch: {
-    tags: ["Users"], summary: "Batch-onboard users from parsed CSV rows (one maker-checker proposal; draft-time all-or-nothing, execution-time per-row)", security: bearer,
+    tags: ["Users"], summary: "Batch-onboard users from parsed CSV rows (one maker-checker proposal; draft-time all-or-nothing, execution-time per-row)", security: eitherCredential,
+    description:
+      "Requires the `users:onboard` scope. Returns **202 with a single proposal covering every row**. Validation is " +
+      "all-or-nothing at draft time — one bad row fails the whole request and the **400** carries the per-row " +
+      "report — while execution after approval is per-row.",
     body: {
       type: "object", additionalProperties: false, required: ["rows"],
       properties: {
@@ -1454,13 +1689,20 @@ export const S: Record<string, FastifySchema> = {
     },
   },
   revokeUserIdentity: {
-    tags: ["Users"], summary: "Revoke a user's identity (gated; reason required)", security: bearer,
+    tags: ["Users"], summary: "Revoke a user's identity (gated; reason required)", security: eitherCredential,
+    description:
+      "Requires the `users:onboard` scope. Returns **202 with a proposal** — the identity stands until a second " +
+      "authorized principal approves the revocation. A `reason` is mandatory and is recorded with it.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: { type: "object", additionalProperties: false, required: ["reason"], properties: { reason: { type: "string", minLength: 1 } } },
     response: { 202: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404, 409) },
   },
   uploadDocument: {
-    tags: ["Documents"], summary: "Upload a document (base64); returns its URL + sha256", security: bearer,
+    tags: ["Documents"], summary: "Upload a document (base64); returns its URL + sha256", security: humanOnly,
+    description:
+      "Unscoped deliberately: it stores opaque bytes and confers no authority — reading a document back needs " +
+      "`assets:read`, and every act that USES one is separately scoped. It is not a storage bound: there is no " +
+      "per-key quota.",
     body: {
       type: "object",
       required: ["contentType", "dataBase64"],
@@ -1492,13 +1734,21 @@ export const S: Record<string, FastifySchema> = {
     },
   },
   getDocument: {
-    tags: ["Documents"], summary: "Fetch a document's bytes by id", security: bearer,
+    tags: ["Documents"], summary: "Fetch a document's bytes by id", security: eitherCredential,
+    description:
+      "Requires the `assets:read` scope. Uploading a document is deliberately unscoped — the bytes are opaque and " +
+      "confer nothing — but reading one back is not.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: { ...errs(401, 404) },
   },
-  deleteUser: { tags: ["Users"], summary: "Remove a user (scoped)", security: bearer, params: { type: "object", required: ["id"], properties: { id: { type: "string" } } }, response: { 204: { type: "null" }, ...errs(401, 403, 404) } },
+  deleteUser: { tags: ["Users"], summary: "Remove a user (scoped)", security: eitherCredential,
+    description:
+      "Requires the `users:onboard` scope: removing a principal is the same authority as creating one, so it is not " +
+      "separately scoped.",
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } }, response: { 204: { type: "null" }, ...errs(401, 403, 404) } },
   updateUser: {
-    tags: ["Users"], summary: "Edit a user (reset password / suspend) — scoped", security: bearer,
+    tags: ["Users"], summary: "Edit a user (reset password / suspend) — scoped", security: eitherCredential,
+    description: "Requires the `users:onboard` scope. Resets a password or suspends an account.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: {
       type: "object",
@@ -1508,24 +1758,33 @@ export const S: Record<string, FastifySchema> = {
   },
 
   identityChallenge: {
-    tags: ["Identity"], summary: "Issue a verification challenge for a user", security: bearer,
+    tags: ["Identity"], summary: "Issue a verification challenge for a user", security: eitherCredential,
+    description: "Requires the `users:onboard` scope. Issues the nonce the user's wallet must sign.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404) },
   },
   identityVerify: {
-    tags: ["Identity"], summary: "Verify a DID/VC presentation and set KYC", security: bearer,
+    tags: ["Identity"], summary: "Verify a DID/VC presentation and set KYC", security: eitherCredential,
+    description: "Requires the `users:onboard` scope. Verifies the signed presentation and sets the user's KYC state.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: { type: "object", required: ["presentation"], properties: { presentation: { type: "string" } } },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
   },
   identityMint: {
-    tags: ["Identity"], summary: "Dev: mint a demo VP", security: bearer,
+    tags: ["Identity"], summary: "Dev: mint a demo VP", security: humanOnly,
+    description:
+      "Development-only demo minter. Absent in production — it answers **404** unless `DEV_ISSUER_SEED` is " +
+      "configured.",
     body: { type: "object", additionalProperties: true },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
   },
 
   importInvoices: {
-    tags: ["Invoice Register"], summary: "Stage a batch of invoice rows (upload)", security: bearer,
+    tags: ["Invoice Register"], summary: "Stage a batch of invoice rows (upload)", security: eitherCredential,
+    description:
+      "Requires the `assets:issue` scope. Stages invoice rows in the register. Nothing is minted here — tokenizing " +
+      "is a separate, explicitly selective call — but staging is the first half of issuance, so it is gated as " +
+      "issuance.",
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     body: {
       type: "object", required: ["rows"],
@@ -1534,13 +1793,17 @@ export const S: Record<string, FastifySchema> = {
     response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404, 409) },
   },
   pullErp: {
-    tags: ["Invoice Register"], summary: "Stage invoices pulled from the bundled ERP export", security: bearer,
+    tags: ["Invoice Register"], summary: "Stage invoices pulled from the bundled ERP export", security: eitherCredential,
+    description:
+      "Requires the `assets:issue` scope. Stages invoices read from the bundled ERP export into the same register, " +
+      "for the same later tokenize step.",
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     body: { type: "object", additionalProperties: true },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404, 409) },
   },
   addInvoice: {
-    tags: ["Invoice Register"], summary: "Stage a single manually-keyed invoice", security: bearer,
+    tags: ["Invoice Register"], summary: "Stage a single manually-keyed invoice", security: eitherCredential,
+    description: "Requires the `assets:issue` scope. Stages one manually-keyed invoice in the register.",
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     body: {
       type: "object", required: ["metadata"],
@@ -1549,18 +1812,25 @@ export const S: Record<string, FastifySchema> = {
     response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404, 409) },
   },
   listInvoices: {
-    tags: ["Invoice Register"], summary: "List staged/tokenized invoices for a use case", security: bearer,
+    tags: ["Invoice Register"], summary: "List staged/tokenized invoices for a use case", security: eitherCredential,
+    description: "Requires the `assets:read` scope. Staged and already-tokenized rows in a use case's invoice register.",
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     querystring: { type: "object", additionalProperties: false, properties: { status: { type: "string", enum: ["staged", "tokenized"] } } },
     response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(400, 401, 403, 404) },
   },
   deleteInvoice: {
-    tags: ["Invoice Register"], summary: "Delete a staged invoice (tokenized ones are guarded)", security: bearer,
+    tags: ["Invoice Register"], summary: "Delete a staged invoice (tokenized ones are guarded)", security: eitherCredential,
+    description:
+      "Requires the `assets:issue` scope. Removes a staged row. Rows that have already been tokenized are refused — " +
+      "once an asset exists, the asset is the record.",
     params: { type: "object", required: ["key", "id"], properties: { key: { type: "string" }, id: { type: "string" } } },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404, 409) },
   },
   tokenizeInvoices: {
-    tags: ["Invoice Register"], summary: "Selectively tokenize staged invoices into assets", security: bearer,
+    tags: ["Invoice Register"], summary: "Selectively tokenize staged invoices into assets", security: eitherCredential,
+    description:
+      "Requires the `assets:issue` scope. Mints assets from the staged rows you name. It calls the same core as " +
+      "`POST /assets`, so it carries the same scope: a second door onto issuance must not be a cheaper one.",
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     body: {
       type: "object", required: ["ids", "chainId", "treasuryAccount"],
