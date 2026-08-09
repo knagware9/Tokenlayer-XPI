@@ -3,6 +3,7 @@ import { auditGenesis, auditEntryHash, normalizeUseCaseDefinition, PolicyError, 
 import type {
   AccountRecord,
   AccountRepository,
+  ApiKeyCreateInput,
   ApiKeyRecord,
   ApiKeyRepository,
   AssetFilter,
@@ -20,6 +21,7 @@ import type {
   CredentialRepository,
   DocumentRecord,
   DocumentRepository,
+  EventAppendInput,
   EventRecord,
   EventRepository,
   ListingRecord,
@@ -51,6 +53,7 @@ import type {
   VerificationStatus,
   WebhookDeliveryRecord,
   WebhookDeliveryRepository,
+  WebhookEndpointCreateInput,
   WebhookEndpointRecord,
   WebhookEndpointRepository,
 } from "./types.js";
@@ -208,14 +211,14 @@ export class MemoryUseCaseRepository implements UseCaseRepository {
     return [...this.byKey.values()];
   }
   async create(raw: UseCaseDefinition): Promise<UseCaseDefinition> {
-    const def = normalizeUseCaseDefinition(raw);
+    const def = { ...normalizeUseCaseDefinition(raw), sandbox: raw.sandbox === true };
     if (this.byKey.has(def.key)) throw new PolicyError("INVALID_USECASE", `use case '${def.key}' already exists`, { key: def.key });
     this.byKey.set(def.key, def);
     return def;
   }
   async update(key: string, raw: UseCaseDefinition): Promise<UseCaseDefinition> {
     if (!this.byKey.has(key)) throw new PolicyError("UNKNOWN_USECASE", `unknown use case '${key}'`, { key });
-    const def = normalizeUseCaseDefinition({ ...raw, key });
+    const def = { ...normalizeUseCaseDefinition({ ...raw, key }), sandbox: raw.sandbox === true };
     this.byKey.set(key, def);
     return def;
   }
@@ -224,7 +227,8 @@ export class MemoryUseCaseRepository implements UseCaseRepository {
 export class MemoryCredentialUseCaseRepository implements CredentialUseCaseRepository {
   private store = new Map<string, CredentialUseCaseDefinition>();
   async create(def: CredentialUseCaseDefinition): Promise<CredentialUseCaseDefinition> {
-    this.store.set(def.key, { ...def }); return { ...def };
+    const rec = { ...def, sandbox: def.sandbox === true };
+    this.store.set(rec.key, rec); return { ...rec };
   }
   async get(key: string): Promise<CredentialUseCaseDefinition | null> {
     const d = this.store.get(key); return d ? { ...d } : null;
@@ -232,7 +236,8 @@ export class MemoryCredentialUseCaseRepository implements CredentialUseCaseRepos
   async has(key: string): Promise<boolean> { return this.store.has(key); }
   async list(): Promise<CredentialUseCaseDefinition[]> { return [...this.store.values()].map((d) => ({ ...d })); }
   async update(key: string, def: CredentialUseCaseDefinition): Promise<CredentialUseCaseDefinition> {
-    this.store.set(key, { ...def }); return { ...def };
+    const rec = { ...def, sandbox: def.sandbox === true };
+    this.store.set(key, rec); return { ...rec };
   }
 }
 
@@ -661,7 +666,7 @@ export class MemoryStagedInvoiceRepository implements StagedInvoiceRepository {
 
 export class MemoryApiKeyRepository implements ApiKeyRepository {
   private readonly byId = new Map<string, ApiKeyRecord>();
-  async create(input: Omit<ApiKeyRecord, "id" | "createdAt" | "lastUsedAt" | "revokedAt" | "revokedBy">): Promise<ApiKeyRecord> {
+  async create(input: ApiKeyCreateInput): Promise<ApiKeyRecord> {
     // Mirror the DB's unique `prefix`: a duplicate would make findByPrefix
     // ambiguous here while Prisma rejected it — exactly the divergence the
     // memory/prisma parity rule exists to prevent.
@@ -678,6 +683,9 @@ export class MemoryApiKeyRepository implements ApiKeyRepository {
       lastUsedAt: null,
       revokedAt: null,
       revokedBy: null,
+      // The DB default, restated: an omitted mode is a LIVE key, so every key
+      // minted before EN-D2 keeps behaving exactly as it did.
+      mode: input.mode ?? "live",
     };
     this.byId.set(rec.id, rec);
     return rec;
@@ -756,13 +764,15 @@ export class MemoryEventRepository implements EventRepository {
   private clone(r: EventRecord): EventRecord {
     return { ...r, data: { ...r.data } };
   }
-  async append(input: Omit<EventRecord, "seq" | "id" | "occurredAt"> & { occurredAt?: string }): Promise<EventRecord> {
+  async append(input: EventAppendInput): Promise<EventRecord> {
     const rec: EventRecord = {
       ...input,
       data: { ...input.data },
       seq: this.nextSeq++,
       id: `evt_${randomUUID().replace(/-/g, "").slice(0, 20)}`,
       occurredAt: input.occurredAt ?? now(),
+      // The DB default, restated — see ApiKeyRecord.mode.
+      mode: input.mode ?? "live",
     };
     this.rows.push(rec);
     return this.clone(rec);
@@ -786,7 +796,7 @@ export class MemoryWebhookEndpointRepository implements WebhookEndpointRepositor
   private clone(r: WebhookEndpointRecord): WebhookEndpointRecord {
     return { ...r, eventTypes: [...r.eventTypes] };
   }
-  async create(input: Omit<WebhookEndpointRecord, "id" | "createdAt" | "status" | "disabledReason" | "disabledAt" | "consecutiveFailures" | "consecutiveGuardFailures" | "failingSince" | "deletedAt" | "lastDeliveryAt">): Promise<WebhookEndpointRecord> {
+  async create(input: WebhookEndpointCreateInput): Promise<WebhookEndpointRecord> {
     const rec: WebhookEndpointRecord = {
       ...input,
       eventTypes: [...input.eventTypes],
@@ -802,6 +812,8 @@ export class MemoryWebhookEndpointRepository implements WebhookEndpointRepositor
       deletedAt: null,
       createdAt: now(),
       lastDeliveryAt: null,
+      // The DB default, restated — see ApiKeyRecord.mode.
+      mode: input.mode ?? "live",
     };
     this.byId.set(rec.id, rec);
     return this.clone(rec);

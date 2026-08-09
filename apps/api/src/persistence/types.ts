@@ -1,4 +1,4 @@
-import type { Role, TokenStandard, TokenType, LifecycleAction, OrgType, OrgCapabilities, UseCaseDefinition, UseCaseSource, CredentialUseCaseDefinition, UseCaseTemplate } from "@tokenlayer/core";
+import type { Role, TokenStandard, TokenType, LifecycleAction, OrgType, OrgCapabilities, ResourceMode, UseCaseDefinition, UseCaseSource, CredentialUseCaseDefinition, UseCaseTemplate } from "@tokenlayer/core";
 
 export type { OrgType };
 
@@ -566,11 +566,27 @@ export interface ApiKeyRecord {
   revokedBy: string | null;
   createdBy: string;
   createdAt: string;
+  /**
+   * EN-D2. `"test"` = a `tl_test_` key, which may act only on sandbox use cases;
+   * `"live"` = the ordinary key. Always concrete on a record — an omitted `mode`
+   * on create becomes `"live"`, matching the DB default that leaves every key
+   * minted before EN-D2 a live key. NEVER mutated after create: rotating or
+   * revoking a key cannot move it between the two worlds.
+   */
+  mode: ResourceMode;
 }
 
+/**
+ * Lifecycle columns (`lastUsedAt`/`revokedAt`/`revokedBy`) are repo-managed and start null.
+ * `mode` is optional and defaults to `"live"` — the zero-migration default. Named
+ * so the interface and BOTH implementations share one definition: a per-class
+ * restatement is how a signature silently drifts (and test files are not
+ * typechecked here, so nothing else would notice).
+ */
+export type ApiKeyCreateInput = Omit<ApiKeyRecord, "id" | "createdAt" | "lastUsedAt" | "revokedAt" | "revokedBy" | "mode"> & { mode?: ResourceMode };
+
 export interface ApiKeyRepository {
-  /** Lifecycle columns (`lastUsedAt`/`revokedAt`/`revokedBy`) are repo-managed and start null. */
-  create(input: Omit<ApiKeyRecord, "id" | "createdAt" | "lastUsedAt" | "revokedAt" | "revokedBy">): Promise<ApiKeyRecord>;
+  create(input: ApiKeyCreateInput): Promise<ApiKeyRecord>;
   /** The single indexed lookup the auth path does before any hash work. */
   findByPrefix(prefix: string): Promise<ApiKeyRecord | null>;
   findById(id: string): Promise<ApiKeyRecord | null>;
@@ -613,10 +629,19 @@ export interface EventRecord {
   subjectId: string | null;
   data: Record<string, unknown>;
   occurredAt: string;
+  /**
+   * EN-D2. The mode of the use case this fact came from, denormalised onto the
+   * row so the stream can be filtered without a join (D2-5 does the filtering).
+   * `"live"` for everything emitted before EN-D2, via the DB default.
+   */
+  mode: ResourceMode;
 }
 
+/** `mode` is optional and defaults to `"live"` — the zero-migration default. */
+export type EventAppendInput = Omit<EventRecord, "seq" | "id" | "occurredAt" | "mode"> & { occurredAt?: string; mode?: ResourceMode };
+
 export interface EventRepository {
-  append(input: Omit<EventRecord, "seq" | "id" | "occurredAt"> & { occurredAt?: string }): Promise<EventRecord>;
+  append(input: EventAppendInput): Promise<EventRecord>;
   /** Cursor read, seq-ascending. `orgId: undefined` = every org (PlatformAdmin). */
   listAfter(after: number, opts: { orgId?: string | null; type?: string; limit: number }): Promise<EventRecord[]>;
   findById(id: string): Promise<EventRecord | null>;
@@ -659,11 +684,24 @@ export interface WebhookEndpointRecord {
   createdBy: string;
   createdAt: string;
   lastDeliveryAt: string | null;
+  /**
+   * EN-D2. Which stream this endpoint subscribes to: a `"test"` endpoint hears
+   * only sandbox events and a `"live"` one only real ones. `"live"` for every
+   * endpoint registered before EN-D2, via the DB default. Deliberately ABSENT
+   * from `update`'s patch — an endpoint cannot be moved between streams, because
+   * the secret and delivery history would follow it across the boundary.
+   */
+  mode: ResourceMode;
 }
 
+/**
+ * Lifecycle columns (`status`/`disabled*`/`consecutive*Failures`/`failingSince`/`deletedAt`/`lastDeliveryAt`) are repo-managed.
+ * `mode` is optional and defaults to `"live"` — the zero-migration default.
+ */
+export type WebhookEndpointCreateInput = Omit<WebhookEndpointRecord, "id" | "createdAt" | "status" | "disabledReason" | "disabledAt" | "consecutiveFailures" | "consecutiveGuardFailures" | "failingSince" | "deletedAt" | "lastDeliveryAt" | "mode"> & { mode?: ResourceMode };
+
 export interface WebhookEndpointRepository {
-  /** Lifecycle columns (`status`/`disabled*`/`consecutive*Failures`/`failingSince`/`deletedAt`/`lastDeliveryAt`) are repo-managed. */
-  create(input: Omit<WebhookEndpointRecord, "id" | "createdAt" | "status" | "disabledReason" | "disabledAt" | "consecutiveFailures" | "consecutiveGuardFailures" | "failingSince" | "deletedAt" | "lastDeliveryAt">): Promise<WebhookEndpointRecord>;
+  create(input: WebhookEndpointCreateInput): Promise<WebhookEndpointRecord>;
   findById(id: string): Promise<WebhookEndpointRecord | null>;
   /** Live endpoints of one org. `null` lists platform-scope endpoints. */
   listByOrg(orgId: string | null): Promise<WebhookEndpointRecord[]>;

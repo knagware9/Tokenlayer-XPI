@@ -2,5 +2,6 @@
   { "id": "besu", "label": "Hyperledger Besu", "family": "evm", "kind": "evm", "rpcEnv": "BESU_RPC_URL", "keyEnv": "BESU_OPERATOR_KEY", "gas": "auto", "confirmations": 1, "required": true },
   { "id": "mst", "label": "MST Testnet", "family": "evm", "kind": "evm", "rpcEnv": "MST_RPC_URL", "keyEnv": "MST_OPERATOR_KEY", "gas": "auto", "confirmations": 2, "expectedChainId": 91562037, "explorerUrl": "https://testnet.mstscan.com", "currencySymbol": "tMSTC", "faucetUrl": "https://faucet.mstblockchain.com/" },
   { "id": "fabric", "label": "Hyperledger Fabric", "family": "fabric", "kind": "simulated" },
-  { "id": "canton", "label": "Canton Network (simulated)", "family": "canton", "kind": "simulated" }
+  { "id": "canton", "label": "Canton Network (simulated)", "family": "canton", "kind": "simulated" },
+  { "id": "sandbox", "label": "Sandbox (simulated)", "family": "mock", "kind": "simulated" }
 ]

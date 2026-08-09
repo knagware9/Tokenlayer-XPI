@@ -11,6 +11,7 @@ import {
   type Role,
   type TokenStandard,
   type TokenType,
+  type ResourceMode,
   type UseCaseDefinition,
   type CredentialUseCaseDefinition,
   type UseCaseTemplate,
@@ -18,6 +19,7 @@ import {
 import type {
   AccountRecord,
   AccountRepository,
+  ApiKeyCreateInput,
   ApiKeyRecord,
   ApiKeyRepository,
   AssetFilter,
@@ -35,6 +37,7 @@ import type {
   CredentialRepository,
   DocumentRecord,
   DocumentRepository,
+  EventAppendInput,
   EventRecord,
   EventRepository,
   KycDetails,
@@ -70,6 +73,7 @@ import type {
   VerificationStatus,
   WebhookDeliveryRecord,
   WebhookDeliveryRepository,
+  WebhookEndpointCreateInput,
   WebhookEndpointRecord,
   WebhookEndpointRepository,
 } from "./types.js";
@@ -362,6 +366,7 @@ interface UseCaseRow {
   workflow: string;
   roles: string;
   ownerOrgId: string | null;
+  sandbox: boolean;
 }
 
 /** Parse a JSON object column, tolerating null/empty/invalid → `{}`. */
@@ -375,7 +380,7 @@ function parseJsonObject(raw: string | null | undefined): Record<string, unknown
   }
 }
 
-function rowToUseCase(r: UseCaseRow): UseCaseDefinition {
+export function rowToUseCase(r: UseCaseRow): UseCaseDefinition {
   const fees = parseJsonObject(r.fees);
   const saleTermsDefault = parseJsonObject(r.saleTermsDefault);
   const valuation = parseJsonObject(r.valuation);
@@ -404,6 +409,8 @@ function rowToUseCase(r: UseCaseRow): UseCaseDefinition {
     ...(Object.keys(workflow).length > 0 ? { workflow: workflow as UseCaseDefinition["workflow"] } : {}),
     ownerOrgId: r.ownerOrgId ?? undefined,
     roles: JSON.parse(r.roles),
+    // Column, not derivation — the whole point of EN-D2's flag (see chains.ts).
+    sandbox: r.sandbox,
   });
 }
 
@@ -429,6 +436,9 @@ function useCaseToData(def: UseCaseDefinition) {
     workflow: JSON.stringify(def.workflow ?? {}),
     ownerOrgId: def.ownerOrgId ?? null,
     roles: JSON.stringify(def.roles),
+    // Written explicitly rather than left to the column default: the default
+    // exists for rows that predate the column, not for rows we are writing now.
+    sandbox: def.sandbox === true,
   };
 }
 
@@ -461,10 +471,10 @@ export class PrismaUseCaseRepository implements UseCaseRepository {
   }
 }
 
-function toCredentialUseCase(r: {
+export function rowToCredentialUseCase(r: {
   key: string; name: string; description: string | null;
   credentialTypes: string; issuer: string; holderPolicy: string; verifier: string; ownerOrgId: string | null;
-  holderAcceptance: boolean;
+  holderAcceptance: boolean; sandbox: boolean;
 }): CredentialUseCaseDefinition {
   return {
     key: r.key, name: r.name, description: r.description ?? undefined,
@@ -472,6 +482,10 @@ function toCredentialUseCase(r: {
     holderPolicy: JSON.parse(r.holderPolicy), verifier: JSON.parse(r.verifier),
     ownerOrgId: r.ownerOrgId,
     ...(r.holderAcceptance ? { holderAcceptance: true } : {}),
+    // Unlike holderAcceptance this is ALWAYS present: the memory repo normalises
+    // an absent sandbox to false, so omitting it here when false would be the
+    // exact memory/prisma divergence THE PARITY RULE forbids.
+    sandbox: r.sandbox,
   };
 }
 export class PrismaCredentialUseCaseRepository implements CredentialUseCaseRepository {
@@ -480,24 +494,26 @@ export class PrismaCredentialUseCaseRepository implements CredentialUseCaseRepos
       key: def.key, name: def.name, description: def.description ?? null,
       credentialTypes: JSON.stringify(def.credentialTypes), issuer: JSON.stringify(def.issuer),
       holderPolicy: JSON.stringify(def.holderPolicy), verifier: JSON.stringify(def.verifier),
-      ownerOrgId: def.ownerOrgId ?? null, holderAcceptance: def.holderAcceptance ?? false } });
-    return toCredentialUseCase(r);
+      ownerOrgId: def.ownerOrgId ?? null, holderAcceptance: def.holderAcceptance ?? false,
+      sandbox: def.sandbox === true } });
+    return rowToCredentialUseCase(r);
   }
   async get(key: string): Promise<CredentialUseCaseDefinition | null> {
     const r = await prisma.credentialUseCase.findUnique({ where: { key } });
-    return r ? toCredentialUseCase(r) : null;
+    return r ? rowToCredentialUseCase(r) : null;
   }
   async has(key: string): Promise<boolean> { return (await prisma.credentialUseCase.count({ where: { key } })) > 0; }
   async list(): Promise<CredentialUseCaseDefinition[]> {
-    return (await prisma.credentialUseCase.findMany({ orderBy: { createdAt: "asc" } })).map(toCredentialUseCase);
+    return (await prisma.credentialUseCase.findMany({ orderBy: { createdAt: "asc" } })).map(rowToCredentialUseCase);
   }
   async update(key: string, def: CredentialUseCaseDefinition): Promise<CredentialUseCaseDefinition> {
     const r = await prisma.credentialUseCase.update({ where: { key }, data: {
       name: def.name, description: def.description ?? null,
       credentialTypes: JSON.stringify(def.credentialTypes), issuer: JSON.stringify(def.issuer),
       holderPolicy: JSON.stringify(def.holderPolicy), verifier: JSON.stringify(def.verifier),
-      ownerOrgId: def.ownerOrgId ?? null, holderAcceptance: def.holderAcceptance ?? false } });
-    return toCredentialUseCase(r);
+      ownerOrgId: def.ownerOrgId ?? null, holderAcceptance: def.holderAcceptance ?? false,
+      sandbox: def.sandbox === true } });
+    return rowToCredentialUseCase(r);
   }
 }
 
@@ -1007,10 +1023,10 @@ export class PrismaStagedInvoiceRepository implements StagedInvoiceRepository {
   }
 }
 
-const toApiKey = (r: {
+export const rowToApiKey = (r: {
   id: string; orgId: string | null; userId: string; name: string; prefix: string; secretHash: string;
   scopes: string; expiresAt: Date | null; lastUsedAt: Date | null; revokedAt: Date | null;
-  revokedBy: string | null; createdBy: string; createdAt: Date;
+  revokedBy: string | null; createdBy: string; createdAt: Date; mode: string;
 }): ApiKeyRecord => ({
   id: r.id, orgId: r.orgId, userId: r.userId, name: r.name, prefix: r.prefix, secretHash: r.secretHash,
   scopes: JSON.parse(r.scopes) as string[],
@@ -1018,38 +1034,40 @@ const toApiKey = (r: {
   lastUsedAt: r.lastUsedAt ? r.lastUsedAt.toISOString() : null,
   revokedAt: r.revokedAt ? r.revokedAt.toISOString() : null,
   revokedBy: r.revokedBy, createdBy: r.createdBy, createdAt: r.createdAt.toISOString(),
+  mode: r.mode as ResourceMode,
 });
 
 export class PrismaApiKeyRepository implements ApiKeyRepository {
-  async create(input: Omit<ApiKeyRecord, "id" | "createdAt" | "lastUsedAt" | "revokedAt" | "revokedBy">): Promise<ApiKeyRecord> {
-    return toApiKey(await prisma.apiKey.create({
+  async create(input: ApiKeyCreateInput): Promise<ApiKeyRecord> {
+    return rowToApiKey(await prisma.apiKey.create({
       data: {
         orgId: input.orgId, userId: input.userId, name: input.name, prefix: input.prefix,
         secretHash: input.secretHash, scopes: JSON.stringify(input.scopes),
         expiresAt: input.expiresAt ? new Date(input.expiresAt) : null, createdBy: input.createdBy,
+        mode: input.mode ?? "live",
       },
     }));
   }
   async findByPrefix(prefix: string): Promise<ApiKeyRecord | null> {
     const r = await prisma.apiKey.findUnique({ where: { prefix } });
-    return r ? toApiKey(r) : null;
+    return r ? rowToApiKey(r) : null;
   }
   async findById(id: string): Promise<ApiKeyRecord | null> {
     const r = await prisma.apiKey.findUnique({ where: { id } });
-    return r ? toApiKey(r) : null;
+    return r ? rowToApiKey(r) : null;
   }
   /** Revoked/expired keys are deliberately NOT filtered — they are the audit trail. */
   async listByOrg(orgId: string | null): Promise<ApiKeyRecord[]> {
-    return (await prisma.apiKey.findMany({ where: { orgId }, orderBy: { createdAt: "desc" } })).map(toApiKey);
+    return (await prisma.apiKey.findMany({ where: { orgId }, orderBy: { createdAt: "desc" } })).map(rowToApiKey);
   }
   async rotate(id: string, input: { prefix: string; secretHash: string }): Promise<ApiKeyRecord> {
-    return toApiKey(await prisma.apiKey.update({ where: { id }, data: { prefix: input.prefix, secretHash: input.secretHash } }));
+    return rowToApiKey(await prisma.apiKey.update({ where: { id }, data: { prefix: input.prefix, secretHash: input.secretHash } }));
   }
   async touchLastUsed(id: string, at: string): Promise<void> {
     await prisma.apiKey.update({ where: { id }, data: { lastUsedAt: new Date(at) } });
   }
   async revoke(id: string, input: { by: string; at: string }): Promise<ApiKeyRecord> {
-    return toApiKey(await prisma.apiKey.update({
+    return rowToApiKey(await prisma.apiKey.update({
       where: { id },
       data: { revokedAt: new Date(input.at), revokedBy: input.by },
     }));
@@ -1087,21 +1105,23 @@ export class PrismaLoginKeyRepository implements LoginKeyRepository {
   }
 }
 
-const toEvent = (r: {
+export const rowToEvent = (r: {
   seq: number; id: string; type: string; orgId: string | null; useCaseKey: string | null;
-  subjectId: string | null; data: string; occurredAt: Date;
+  subjectId: string | null; data: string; occurredAt: Date; mode: string;
 }): EventRecord => ({
   seq: r.seq, id: r.id, type: r.type, orgId: r.orgId, useCaseKey: r.useCaseKey,
   subjectId: r.subjectId, data: JSON.parse(r.data) as Record<string, unknown>,
   occurredAt: r.occurredAt.toISOString(),
+  mode: r.mode as ResourceMode,
 });
 
 export class PrismaEventRepository implements EventRepository {
-  async append(input: Omit<EventRecord, "seq" | "id" | "occurredAt"> & { occurredAt?: string }): Promise<EventRecord> {
-    return toEvent(await prisma.event.create({
+  async append(input: EventAppendInput): Promise<EventRecord> {
+    return rowToEvent(await prisma.event.create({
       data: {
         type: input.type, orgId: input.orgId, useCaseKey: input.useCaseKey, subjectId: input.subjectId,
         data: JSON.stringify(input.data),
+        mode: input.mode ?? "live",
         ...(input.occurredAt ? { occurredAt: new Date(input.occurredAt) } : {}),
       },
     }));
@@ -1116,20 +1136,20 @@ export class PrismaEventRepository implements EventRepository {
       },
       orderBy: { seq: "asc" },
       take: opts.limit,
-    })).map(toEvent);
+    })).map(rowToEvent);
   }
   async findById(id: string): Promise<EventRecord | null> {
     const r = await prisma.event.findUnique({ where: { id } });
-    return r ? toEvent(r) : null;
+    return r ? rowToEvent(r) : null;
   }
 }
 
-const toWebhookEndpoint = (r: {
+export const rowToWebhookEndpoint = (r: {
   id: string; orgId: string | null; url: string; description: string | null; eventTypes: string;
   useCaseKey: string | null; secretEncrypted: string; status: string; disabledReason: string | null;
   disabledAt: Date | null; consecutiveFailures: number; consecutiveGuardFailures: number;
   failingSince: Date | null; deletedAt: Date | null; createdBy: string;
-  createdAt: Date; lastDeliveryAt: Date | null;
+  createdAt: Date; lastDeliveryAt: Date | null; mode: string;
 }): WebhookEndpointRecord => ({
   id: r.id, orgId: r.orgId, url: r.url, description: r.description,
   eventTypes: JSON.parse(r.eventTypes) as string[],
@@ -1142,34 +1162,36 @@ const toWebhookEndpoint = (r: {
   deletedAt: r.deletedAt ? r.deletedAt.toISOString() : null,
   createdBy: r.createdBy, createdAt: r.createdAt.toISOString(),
   lastDeliveryAt: r.lastDeliveryAt ? r.lastDeliveryAt.toISOString() : null,
+  mode: r.mode as ResourceMode,
 });
 
 export class PrismaWebhookEndpointRepository implements WebhookEndpointRepository {
-  async create(input: Omit<WebhookEndpointRecord, "id" | "createdAt" | "status" | "disabledReason" | "disabledAt" | "consecutiveFailures" | "consecutiveGuardFailures" | "failingSince" | "deletedAt" | "lastDeliveryAt">): Promise<WebhookEndpointRecord> {
-    return toWebhookEndpoint(await prisma.webhookEndpoint.create({
+  async create(input: WebhookEndpointCreateInput): Promise<WebhookEndpointRecord> {
+    return rowToWebhookEndpoint(await prisma.webhookEndpoint.create({
       data: {
         orgId: input.orgId, url: input.url, description: input.description,
         eventTypes: JSON.stringify(input.eventTypes), useCaseKey: input.useCaseKey,
         secretEncrypted: input.secretEncrypted, createdBy: input.createdBy,
+        mode: input.mode ?? "live",
       },
     }));
   }
   async findById(id: string): Promise<WebhookEndpointRecord | null> {
     const r = await prisma.webhookEndpoint.findUnique({ where: { id } });
-    return r ? toWebhookEndpoint(r) : null;
+    return r ? rowToWebhookEndpoint(r) : null;
   }
   /** Soft-deleted rows are filtered: unlike an api key, a dead endpoint is not an audit trail. */
   async listByOrg(orgId: string | null): Promise<WebhookEndpointRecord[]> {
-    return (await prisma.webhookEndpoint.findMany({ where: { orgId, deletedAt: null }, orderBy: { createdAt: "desc" } })).map(toWebhookEndpoint);
+    return (await prisma.webhookEndpoint.findMany({ where: { orgId, deletedAt: null }, orderBy: { createdAt: "desc" } })).map(rowToWebhookEndpoint);
   }
   async listActive(): Promise<WebhookEndpointRecord[]> {
-    return (await prisma.webhookEndpoint.findMany({ where: { status: "active", deletedAt: null }, orderBy: { createdAt: "asc" } })).map(toWebhookEndpoint);
+    return (await prisma.webhookEndpoint.findMany({ where: { status: "active", deletedAt: null }, orderBy: { createdAt: "asc" } })).map(rowToWebhookEndpoint);
   }
   async update(id: string, patch: Partial<Pick<WebhookEndpointRecord, "url" | "description" | "eventTypes" | "useCaseKey" | "secretEncrypted" | "status" | "disabledReason" | "disabledAt" | "consecutiveFailures" | "consecutiveGuardFailures" | "failingSince" | "deletedAt" | "lastDeliveryAt">>): Promise<WebhookEndpointRecord> {
     // Each key is spread in only when PRESENT: an absent key must leave the
     // column alone, while an explicit `null` must clear it (re-enabling an
     // endpoint clears disabledReason/disabledAt), and `undefined` cannot say both.
-    return toWebhookEndpoint(await prisma.webhookEndpoint.update({
+    return rowToWebhookEndpoint(await prisma.webhookEndpoint.update({
       where: { id },
       data: {
         ...(patch.url !== undefined ? { url: patch.url } : {}),
