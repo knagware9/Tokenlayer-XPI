@@ -31,6 +31,7 @@ import type {
   WebhookEndpointRepository,
 } from "./persistence/types.js";
 import type { IdentityRegistry } from "./registry.js";
+import type { SecretBox } from "./webhooks/secret-box.js";
 
 export interface AppDeps {
   useCases: UseCaseRepository;
@@ -69,6 +70,16 @@ export interface AppDeps {
    * reverse).
    */
   webhooksAllowInsecure: boolean;
+  /**
+   * Endpoint signing secrets at rest. REQUIRED, and on AppDeps rather than
+   * constructed per call site, because BOTH halves of the system must use the
+   * same box: the routes seal a freshly minted secret, the dispatcher opens it
+   * to sign. Two independently built boxes over two different master keys would
+   * pass every unit test and then fail to sign a single real delivery. Required
+   * (not optional) so a missed construction site is a compile error rather than
+   * an `undefined` that only shows up on the first webhook a customer registers.
+   */
+  secretBox: SecretBox;
   keystore: Keystore;
   /** True iff DID_MASTER_KEY was explicitly configured (production must set it). */
   didMasterConfigured: boolean;

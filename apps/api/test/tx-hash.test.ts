@@ -19,6 +19,7 @@ import { createEngine } from "../src/context.js";
 import { loadCurrencies } from "../src/currencies.js";
 import { createMemoryChallengeStore } from "../src/identity-challenges.js";
 import { createKeystore } from "../src/keystore.js";
+import { createSecretBox } from "../src/webhooks/secret-box.js";
 import {
   MemoryAccountRepository,
   MemoryApiKeyRepository,
@@ -80,7 +81,7 @@ async function buildAppWithDeps(registry?: IdentityRegistry): Promise<TestApp> {
     organizations: new MemoryOrganizationRepository(), credentials, verificationRequests: new MemoryVerificationRequestRepository(),
     stagedInvoices: new MemoryStagedInvoiceRepository(), apiKeys: new MemoryApiKeyRepository(),
     events: new MemoryEventRepository(), webhookEndpoints: new MemoryWebhookEndpointRepository(), webhookDeliveries: new MemoryWebhookDeliveryRepository(),
-    webhooksAllowInsecure: false,
+    webhooksAllowInsecure: false, secretBox: createSecretBox("22".repeat(32)),
     keystore: createKeystore("11".repeat(32)), didMasterConfigured: true,
     challenges: createMemoryChallengeStore(), loginKeys: new MemoryLoginKeyRepository(), qrLogin: createMemoryQrLoginStore(),
     publicWebUrl: "http://localhost:5173", enabledDomains: ["tokenization", "identity"],

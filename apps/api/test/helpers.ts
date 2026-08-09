@@ -7,6 +7,7 @@ import { createEngine } from "../src/context.js";
 import { loadCurrencies } from "../src/currencies.js";
 import { createMemoryChallengeStore } from "../src/identity-challenges.js";
 import { createKeystore } from "../src/keystore.js";
+import { createSecretBox } from "../src/webhooks/secret-box.js";
 import { createMemoryQrLoginStore } from "../src/qr-login-sessions.js";
 import {
   MemoryAccountRepository,
@@ -57,6 +58,13 @@ export interface TestAppHandle {
   loginKeys: MemoryLoginKeyRepository;
   organizations: MemoryOrganizationRepository;
   audit: MemoryAuditRepository;
+  /**
+   * The very deps this app was built over. Needed where a test must drive a
+   * NON-HTTP path of the same instance — EN-C's emit/fan-out is the case:
+   * `emitEvent(deps, …)` is what a domain route calls internally, and the
+   * webhook tests have to prove which endpoints a real fan-out reaches.
+   */
+  deps: AppDeps;
 }
 
 export async function buildTestApp(opts: TestAppOptions = {}): Promise<FastifyInstance> {
@@ -107,6 +115,9 @@ export async function buildTestAppWithRepos(opts: TestAppOptions = {}): Promise<
     // the registration-time posture, and the secure default is the right one to
     // exercise by default.
     webhooksAllowInsecure: false,
+    // A fixed test master key: the suite needs `open(seal(x)) === x` across a
+    // single app instance, not secrecy.
+    secretBox: createSecretBox("22".repeat(32)),
     keystore, didMasterConfigured: opts.didMasterConfigured ?? true,
     challenges: createMemoryChallengeStore(), loginKeys, qrLogin: createMemoryQrLoginStore(), publicWebUrl: "http://localhost:5173", enabledDomains: opts.enabledDomains ?? ["tokenization", "identity"], trustedKycIssuers: opts.trustedKycIssuers,
     devIssuerSeed: opts.devIssuerSeed, isProduction: opts.isProduction,
@@ -126,7 +137,7 @@ export async function buildTestAppWithRepos(opts: TestAppOptions = {}): Promise<
     registry: opts.registry,
   };
   await ensurePlatformIssuerOrg(deps);
-  return { app: await buildApp(deps), users, apiKeys, loginKeys, organizations, audit };
+  return { app: await buildApp(deps), users, apiKeys, loginKeys, organizations, audit, deps };
 }
 
 /** All v1 API routes live under this prefix. */

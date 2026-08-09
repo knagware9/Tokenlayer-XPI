@@ -109,6 +109,11 @@ async function main(): Promise<void> {
     webhookEndpoints,
     webhookDeliveries,
     webhooksAllowInsecure: env.webhooksAllowInsecure,
+    // ONE box, shared by the registration routes (which seal a freshly minted
+    // secret) and the dispatcher below (which opens it to sign). A DEDICATED key
+    // where the operator has set one; falls back to the DID key so an existing
+    // deployment keeps working without re-encrypting.
+    secretBox: createSecretBox(env.webhookMasterKey),
     keystore,
     didMasterConfigured: env.didMasterConfigured,
     challenges: createMemoryChallengeStore(),
@@ -186,9 +191,10 @@ async function main(): Promise<void> {
         events,
         webhookEndpoints,
         webhookDeliveries,
-        // A DEDICATED key where the operator has set one; falls back to the DID
-        // key so an existing deployment keeps working without re-encrypting.
-        secretBox: createSecretBox(env.webhookMasterKey),
+        // The SAME box the routes sealed with — see deps.secretBox above. A
+        // second `createSecretBox` here would work only by coincidence of both
+        // reading the same env var, and would break silently the day they did not.
+        secretBox: deps.secretBox,
         send: httpSender,
         // The SAME guard posture the registration route uses, or a URL that was
         // legal to save would be permanently undeliverable.
