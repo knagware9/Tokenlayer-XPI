@@ -360,3 +360,84 @@ model LoginKey {
 
   @@index([userId])
 }
+
+// EN-C event outbox. Deliberately NOT the audit log: AuditLog is per-asset
+// hash-chained (@@unique([assetId, seq])) for HA-B tamper evidence, its seq is
+// per-asset, and assetId is null for every credential/org row — so it has no
+// global cursor. `seq` here is that cursor.
+//
+// `seq` is the @id because SQLite/Prisma only allow @default(autoincrement())
+// on an Int @id. The public, stable identifier sent to integrators is `id`.
+model Event {
+  seq        Int      @id @default(autoincrement())
+  id         String   @unique @default(cuid())
+  type       String
+  orgId      String? // the single owning org; null = platform-scope
+  useCaseKey String?
+  subjectId  String? // the credential / asset / verification this is about
+  data       String // JSON-encoded, redacted payload
+  occurredAt DateTime @default(now())
+
+  @@index([orgId, seq])
+  @@index([type])
+}
+
+// An org's declared interest. `secretEncrypted` is AES-256-GCM under
+// WEBHOOK_MASTER_KEY (which falls back to DID_MASTER_KEY when unset, so an
+// existing deployment needs no re-encryption), NOT a hash: HMAC signing must
+// REPRODUCE the secret, so a one-way hash would make signing impossible.
+//
+// There is no key versioning and no re-encryption path, so CHANGING the key in
+// place makes every stored secret unopenable. The dispatcher treats that as a
+// platform fault — the attempt fails with an honest reason and disables nothing
+// — but the deliveries do not recover until the old key is restored.
+model WebhookEndpoint {
+  id                       String    @id @default(cuid())
+  orgId                    String? // null = platform-scope, PlatformAdmin only
+  url                      String
+  description              String?
+  eventTypes               String // JSON string[]; ["*"] allowed
+  useCaseKey               String?
+  secretEncrypted          String
+  status                   String    @default("active") // active | disabled
+  disabledReason           String?
+  disabledAt               DateTime?
+  // Only failures we can attribute to THE ENDPOINT (non-2xx / unreachable) may
+  // auto-disable it. Guard/DNS refusals are counted apart and disable nothing:
+  // their cause is outside our trust boundary, so feeding them here would turn
+  // our own SSRF defence into a way to silence an integrator.
+  consecutiveFailures      Int       @default(0)
+  consecutiveGuardFailures Int       @default(0)
+  // Start of the CURRENT endpoint-failure run; null while healthy. The
+  // auto-disable time floor reads this, which is what stops a backlog burst
+  // (batch size and the threshold are both 20) from disabling in one pass.
+  failingSince             DateTime?
+  deletedAt                DateTime?
+  createdBy                String
+  createdAt                DateTime  @default(now())
+  lastDeliveryAt           DateTime?
+
+  @@index([orgId])
+}
+
+// One attempt chain for one (event, endpoint) pair. The unique pair is the
+// fan-out idempotency key: re-emitting or re-fanning cannot double-enqueue.
+model WebhookDelivery {
+  id             String    @id @default(cuid())
+  endpointId     String
+  eventId        String
+  eventSeq       Int
+  status         String    @default("pending") // pending | inflight | delivered | failed | dead
+  attempts       Int       @default(0)
+  nextAttemptAt  DateTime  @default(now())
+  lastAttemptAt  DateTime?
+  responseStatus Int?
+  responseError  String?
+  durationMs     Int?
+  claimedAt      DateTime?
+  claimedBy      String?
+  createdAt      DateTime  @default(now())
+
+  @@unique([endpointId, eventId])
+  @@index([status, nextAttemptAt])
+}

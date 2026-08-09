@@ -1140,6 +1140,95 @@ export const S: Record<string, FastifySchema> = {
     params: { type: "object", required: ["id", "keyId"], properties: { id: { type: "string" }, keyId: { type: "string" } } },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404) },
   },
+
+  // ── EN-C: webhooks + the event cursor ───────────────────────────────────
+  // Every 2xx here is `additionalProperties: true` ON PURPOSE. fast-json-stringify
+  // SILENTLY STRIPS undeclared fields, and a projection that quietly loses
+  // `status` or `disabledReason` would look like a working endpoint list while
+  // hiding the one column an integrator debugs with. The response shape is
+  // pinned by webhooks-routes.test.ts, which is where it belongs — a serializer
+  // is not an authorization boundary, and `webhookView` (not this schema) is
+  // what keeps `secretEncrypted` out of a body.
+  createWebhook: {
+    tags: ["Webhooks"], summary: "Register a webhook endpoint (signing secret returned once, never again)", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    body: {
+      type: "object", additionalProperties: false, required: ["url", "eventTypes"],
+      properties: {
+        url: { type: "string", minLength: 1 },
+        description: { type: "string" },
+        // Loose: the route runs core's validateEventTypes for the real check
+        // (400 UNKNOWN_EVENT_TYPE), so the catalog lives in exactly one place.
+        eventTypes: { type: "array", items: { type: "string" } },
+        useCaseKey: { type: "string" },
+      },
+    },
+    response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
+  },
+  listWebhooks: {
+    tags: ["Webhooks"], summary: "List an organization's webhook endpoints (never the secret)", security: bearer,
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404) },
+  },
+  updateWebhook: {
+    tags: ["Webhooks"], summary: "Update a webhook endpoint (re-enabling clears its failure bookkeeping)", security: bearer,
+    params: { type: "object", required: ["id", "whId"], properties: { id: { type: "string" }, whId: { type: "string" } } },
+    body: {
+      type: "object", additionalProperties: false,
+      properties: {
+        url: { type: "string", minLength: 1 },
+        // Explicitly nullable: `null` CLEARS the description / use-case filter.
+        // Without nullable, fastify would 400 the one request that narrows an
+        // endpoint back to "no filter".
+        description: { type: "string", nullable: true },
+        eventTypes: { type: "array", items: { type: "string" } },
+        useCaseKey: { type: "string", nullable: true },
+        status: { type: "string", enum: ["active", "disabled"] },
+      },
+    },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
+  },
+  rotateWebhookSecret: {
+    tags: ["Webhooks"], summary: "Rotate a webhook signing secret (the old one stops verifying immediately)", security: bearer,
+    params: { type: "object", required: ["id", "whId"], properties: { id: { type: "string" }, whId: { type: "string" } } },
+    body: { type: "object", additionalProperties: false, properties: {} },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404) },
+  },
+  deleteWebhook: {
+    tags: ["Webhooks"], summary: "Delete a webhook endpoint (soft — deliveries stop immediately)", security: bearer,
+    params: { type: "object", required: ["id", "whId"], properties: { id: { type: "string" }, whId: { type: "string" } } },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404) },
+  },
+  testWebhook: {
+    tags: ["Webhooks"], summary: "Send a synthetic ping to one endpoint", security: bearer,
+    params: { type: "object", required: ["id", "whId"], properties: { id: { type: "string" }, whId: { type: "string" } } },
+    body: { type: "object", additionalProperties: false, properties: {} },
+    response: { 202: { type: "object", additionalProperties: true }, ...errs(401, 403, 404, 409) },
+  },
+  listWebhookDeliveries: {
+    tags: ["Webhooks"], summary: "Recent delivery attempts for one endpoint", security: bearer,
+    params: { type: "object", required: ["id", "whId"], properties: { id: { type: "string" }, whId: { type: "string" } } },
+    querystring: { type: "object", additionalProperties: false, properties: { limit: { type: "string" } } },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404) },
+  },
+  replayWebhookDelivery: {
+    tags: ["Webhooks"], summary: "Requeue one delivery for another attempt", security: bearer,
+    params: {
+      type: "object", required: ["id", "whId", "dId"],
+      properties: { id: { type: "string" }, whId: { type: "string" }, dId: { type: "string" } },
+    },
+    body: { type: "object", additionalProperties: false, properties: {} },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404) },
+  },
+  listEvents: {
+    tags: ["Webhooks"], summary: "Cursor read of the durable event log (the catch-up path for a missed delivery)", security: bearer,
+    querystring: {
+      type: "object", additionalProperties: false,
+      properties: { after: { type: "string" }, type: { type: "string" }, limit: { type: "string" } },
+    },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(401) },
+  },
+
   myCredentials: { tags: ["Identity"], summary: "Credentials held by the caller", security: bearer, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401) } },
   identityDashboard: {
     tags: ["Identity"], summary: "Scoped identity operations dashboard (credential lifecycle + verification aggregates)", security: bearer,

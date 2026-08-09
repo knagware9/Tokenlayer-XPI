@@ -35,6 +35,8 @@ import type {
   CredentialRepository,
   DocumentRecord,
   DocumentRepository,
+  EventRecord,
+  EventRepository,
   KycDetails,
   CompanyProfile,
   KycStatus,
@@ -66,6 +68,10 @@ import type {
   VerificationRequestRecord,
   VerificationRequestRepository,
   VerificationStatus,
+  WebhookDeliveryRecord,
+  WebhookDeliveryRepository,
+  WebhookEndpointRecord,
+  WebhookEndpointRepository,
 } from "./types.js";
 import { ListingConflictError } from "./types.js";
 
@@ -1078,5 +1084,203 @@ export class PrismaLoginKeyRepository implements LoginKeyRepository {
   }
   async touch(id: string, at: string): Promise<void> {
     await prisma.loginKey.update({ where: { id }, data: { lastUsedAt: new Date(at) } });
+  }
+}
+
+const toEvent = (r: {
+  seq: number; id: string; type: string; orgId: string | null; useCaseKey: string | null;
+  subjectId: string | null; data: string; occurredAt: Date;
+}): EventRecord => ({
+  seq: r.seq, id: r.id, type: r.type, orgId: r.orgId, useCaseKey: r.useCaseKey,
+  subjectId: r.subjectId, data: JSON.parse(r.data) as Record<string, unknown>,
+  occurredAt: r.occurredAt.toISOString(),
+});
+
+export class PrismaEventRepository implements EventRepository {
+  async append(input: Omit<EventRecord, "seq" | "id" | "occurredAt"> & { occurredAt?: string }): Promise<EventRecord> {
+    return toEvent(await prisma.event.create({
+      data: {
+        type: input.type, orgId: input.orgId, useCaseKey: input.useCaseKey, subjectId: input.subjectId,
+        data: JSON.stringify(input.data),
+        ...(input.occurredAt ? { occurredAt: new Date(input.occurredAt) } : {}),
+      },
+    }));
+  }
+  /** `orgId: undefined` means EVERY org (PlatformAdmin); `orgId: null` means platform-scope rows only. */
+  async listAfter(after: number, opts: { orgId?: string | null; type?: string; limit: number }): Promise<EventRecord[]> {
+    return (await prisma.event.findMany({
+      where: {
+        seq: { gt: after },
+        ...(opts.orgId === undefined ? {} : { orgId: opts.orgId }),
+        ...(opts.type ? { type: opts.type } : {}),
+      },
+      orderBy: { seq: "asc" },
+      take: opts.limit,
+    })).map(toEvent);
+  }
+  async findById(id: string): Promise<EventRecord | null> {
+    const r = await prisma.event.findUnique({ where: { id } });
+    return r ? toEvent(r) : null;
+  }
+}
+
+const toWebhookEndpoint = (r: {
+  id: string; orgId: string | null; url: string; description: string | null; eventTypes: string;
+  useCaseKey: string | null; secretEncrypted: string; status: string; disabledReason: string | null;
+  disabledAt: Date | null; consecutiveFailures: number; consecutiveGuardFailures: number;
+  failingSince: Date | null; deletedAt: Date | null; createdBy: string;
+  createdAt: Date; lastDeliveryAt: Date | null;
+}): WebhookEndpointRecord => ({
+  id: r.id, orgId: r.orgId, url: r.url, description: r.description,
+  eventTypes: JSON.parse(r.eventTypes) as string[],
+  useCaseKey: r.useCaseKey, secretEncrypted: r.secretEncrypted,
+  status: r.status as WebhookEndpointRecord["status"], disabledReason: r.disabledReason,
+  disabledAt: r.disabledAt ? r.disabledAt.toISOString() : null,
+  consecutiveFailures: r.consecutiveFailures,
+  consecutiveGuardFailures: r.consecutiveGuardFailures,
+  failingSince: r.failingSince ? r.failingSince.toISOString() : null,
+  deletedAt: r.deletedAt ? r.deletedAt.toISOString() : null,
+  createdBy: r.createdBy, createdAt: r.createdAt.toISOString(),
+  lastDeliveryAt: r.lastDeliveryAt ? r.lastDeliveryAt.toISOString() : null,
+});
+
+export class PrismaWebhookEndpointRepository implements WebhookEndpointRepository {
+  async create(input: Omit<WebhookEndpointRecord, "id" | "createdAt" | "status" | "disabledReason" | "disabledAt" | "consecutiveFailures" | "consecutiveGuardFailures" | "failingSince" | "deletedAt" | "lastDeliveryAt">): Promise<WebhookEndpointRecord> {
+    return toWebhookEndpoint(await prisma.webhookEndpoint.create({
+      data: {
+        orgId: input.orgId, url: input.url, description: input.description,
+        eventTypes: JSON.stringify(input.eventTypes), useCaseKey: input.useCaseKey,
+        secretEncrypted: input.secretEncrypted, createdBy: input.createdBy,
+      },
+    }));
+  }
+  async findById(id: string): Promise<WebhookEndpointRecord | null> {
+    const r = await prisma.webhookEndpoint.findUnique({ where: { id } });
+    return r ? toWebhookEndpoint(r) : null;
+  }
+  /** Soft-deleted rows are filtered: unlike an api key, a dead endpoint is not an audit trail. */
+  async listByOrg(orgId: string | null): Promise<WebhookEndpointRecord[]> {
+    return (await prisma.webhookEndpoint.findMany({ where: { orgId, deletedAt: null }, orderBy: { createdAt: "desc" } })).map(toWebhookEndpoint);
+  }
+  async listActive(): Promise<WebhookEndpointRecord[]> {
+    return (await prisma.webhookEndpoint.findMany({ where: { status: "active", deletedAt: null }, orderBy: { createdAt: "asc" } })).map(toWebhookEndpoint);
+  }
+  async update(id: string, patch: Partial<Pick<WebhookEndpointRecord, "url" | "description" | "eventTypes" | "useCaseKey" | "secretEncrypted" | "status" | "disabledReason" | "disabledAt" | "consecutiveFailures" | "consecutiveGuardFailures" | "failingSince" | "deletedAt" | "lastDeliveryAt">>): Promise<WebhookEndpointRecord> {
+    // Each key is spread in only when PRESENT: an absent key must leave the
+    // column alone, while an explicit `null` must clear it (re-enabling an
+    // endpoint clears disabledReason/disabledAt), and `undefined` cannot say both.
+    return toWebhookEndpoint(await prisma.webhookEndpoint.update({
+      where: { id },
+      data: {
+        ...(patch.url !== undefined ? { url: patch.url } : {}),
+        ...(patch.description !== undefined ? { description: patch.description } : {}),
+        ...(patch.eventTypes !== undefined ? { eventTypes: JSON.stringify(patch.eventTypes) } : {}),
+        ...(patch.useCaseKey !== undefined ? { useCaseKey: patch.useCaseKey } : {}),
+        ...(patch.secretEncrypted !== undefined ? { secretEncrypted: patch.secretEncrypted } : {}),
+        ...(patch.status !== undefined ? { status: patch.status } : {}),
+        ...(patch.disabledReason !== undefined ? { disabledReason: patch.disabledReason } : {}),
+        ...(patch.disabledAt !== undefined ? { disabledAt: patch.disabledAt ? new Date(patch.disabledAt) : null } : {}),
+        ...(patch.consecutiveFailures !== undefined ? { consecutiveFailures: patch.consecutiveFailures } : {}),
+        ...(patch.consecutiveGuardFailures !== undefined ? { consecutiveGuardFailures: patch.consecutiveGuardFailures } : {}),
+        // `null` clears the failure clock (a success); absent leaves it running.
+        ...(patch.failingSince !== undefined ? { failingSince: patch.failingSince ? new Date(patch.failingSince) : null } : {}),
+        ...(patch.deletedAt !== undefined ? { deletedAt: patch.deletedAt ? new Date(patch.deletedAt) : null } : {}),
+        ...(patch.lastDeliveryAt !== undefined ? { lastDeliveryAt: patch.lastDeliveryAt ? new Date(patch.lastDeliveryAt) : null } : {}),
+      },
+    }));
+  }
+}
+
+const toWebhookDelivery = (r: {
+  id: string; endpointId: string; eventId: string; eventSeq: number; status: string; attempts: number;
+  nextAttemptAt: Date; lastAttemptAt: Date | null; responseStatus: number | null;
+  responseError: string | null; durationMs: number | null; claimedAt: Date | null;
+  claimedBy: string | null; createdAt: Date;
+}): WebhookDeliveryRecord => ({
+  id: r.id, endpointId: r.endpointId, eventId: r.eventId, eventSeq: r.eventSeq,
+  status: r.status as WebhookDeliveryRecord["status"], attempts: r.attempts,
+  nextAttemptAt: r.nextAttemptAt.toISOString(),
+  lastAttemptAt: r.lastAttemptAt ? r.lastAttemptAt.toISOString() : null,
+  responseStatus: r.responseStatus, responseError: r.responseError, durationMs: r.durationMs,
+  claimedAt: r.claimedAt ? r.claimedAt.toISOString() : null,
+  claimedBy: r.claimedBy, createdAt: r.createdAt.toISOString(),
+});
+
+export class PrismaWebhookDeliveryRepository implements WebhookDeliveryRepository {
+  async enqueue(input: { endpointId: string; eventId: string; eventSeq: number }): Promise<WebhookDeliveryRecord> {
+    // The unique (endpointId, eventId) pair IS the idempotency key. upsert with an
+    // empty update returns the existing row instead of throwing P2002.
+    return toWebhookDelivery(await prisma.webhookDelivery.upsert({
+      where: { endpointId_eventId: { endpointId: input.endpointId, eventId: input.eventId } },
+      create: { endpointId: input.endpointId, eventId: input.eventId, eventSeq: input.eventSeq },
+      update: {},
+    }));
+  }
+  async findById(id: string): Promise<WebhookDeliveryRecord | null> {
+    const r = await prisma.webhookDelivery.findUnique({ where: { id } });
+    return r ? toWebhookDelivery(r) : null;
+  }
+  /** Newest event first. Ordered by `eventSeq`, not `createdAt`: a fan-out writes every row in the same millisecond. */
+  async listByEndpoint(endpointId: string, limit: number): Promise<WebhookDeliveryRecord[]> {
+    return (await prisma.webhookDelivery.findMany({ where: { endpointId }, orderBy: { eventSeq: "desc" }, take: limit })).map(toWebhookDelivery);
+  }
+  async listDue(now: string, limit: number): Promise<WebhookDeliveryRecord[]> {
+    return (await prisma.webhookDelivery.findMany({
+      where: { status: { in: ["pending", "failed"] }, nextAttemptAt: { lte: new Date(now) } },
+      orderBy: [{ nextAttemptAt: "asc" }, { eventSeq: "asc" }],
+      take: limit,
+    })).map(toWebhookDelivery);
+  }
+  async claim(id: string, workerId: string, now: string): Promise<WebhookDeliveryRecord | null> {
+    // Compare-and-set. The status predicate is inside the WHERE, so two racing
+    // dispatchers cannot both transition the same row — the loser updates 0 rows.
+    const n = await prisma.webhookDelivery.updateMany({
+      where: { id, status: { in: ["pending", "failed"] } },
+      data: { status: "inflight", claimedAt: new Date(now), claimedBy: workerId },
+    });
+    if (n.count === 0) return null;
+    const r = await prisma.webhookDelivery.findUnique({ where: { id } });
+    return r ? toWebhookDelivery(r) : null;
+  }
+  /**
+   * Operator replay, as a compare-and-set. The `not: "inflight"` predicate is
+   * inside the WHERE for the same reason `claim`'s is: a dispatcher claiming
+   * between a read and a plain update would have its claim reset while it was
+   * mid-POST. The loser of the race updates 0 rows and gets a 409.
+   */
+  async requeue(id: string, at: string): Promise<WebhookDeliveryRecord | null> {
+    const n = await prisma.webhookDelivery.updateMany({
+      where: { id, status: { not: "inflight" } },
+      data: { status: "pending", attempts: 0, nextAttemptAt: new Date(at), claimedAt: null, claimedBy: null },
+    });
+    if (n.count === 0) return null;
+    const r = await prisma.webhookDelivery.findUnique({ where: { id } });
+    return r ? toWebhookDelivery(r) : null;
+  }
+  /** Crash recovery: an inflight row whose worker died is nobody's, so it goes back in the queue. */
+  async reclaimStale(before: string): Promise<number> {
+    const n = await prisma.webhookDelivery.updateMany({
+      where: { status: "inflight", claimedAt: { lt: new Date(before) } },
+      data: { status: "pending", claimedAt: null, claimedBy: null },
+    });
+    return n.count;
+  }
+  async update(id: string, patch: Partial<Pick<WebhookDeliveryRecord, "status" | "attempts" | "nextAttemptAt" | "lastAttemptAt" | "responseStatus" | "responseError" | "durationMs" | "claimedAt" | "claimedBy">>): Promise<WebhookDeliveryRecord> {
+    // Same present-vs-null discipline as the endpoint patch: an absent key must
+    // not touch the column, an explicit null must clear it (releasing a claim).
+    return toWebhookDelivery(await prisma.webhookDelivery.update({
+      where: { id },
+      data: {
+        ...(patch.status !== undefined ? { status: patch.status } : {}),
+        ...(patch.attempts !== undefined ? { attempts: patch.attempts } : {}),
+        ...(patch.nextAttemptAt !== undefined ? { nextAttemptAt: new Date(patch.nextAttemptAt) } : {}),
+        ...(patch.lastAttemptAt !== undefined ? { lastAttemptAt: patch.lastAttemptAt ? new Date(patch.lastAttemptAt) : null } : {}),
+        ...(patch.responseStatus !== undefined ? { responseStatus: patch.responseStatus } : {}),
+        ...(patch.responseError !== undefined ? { responseError: patch.responseError } : {}),
+        ...(patch.durationMs !== undefined ? { durationMs: patch.durationMs } : {}),
+        ...(patch.claimedAt !== undefined ? { claimedAt: patch.claimedAt ? new Date(patch.claimedAt) : null } : {}),
+        ...(patch.claimedBy !== undefined ? { claimedBy: patch.claimedBy } : {}),
+      },
+    }));
   }
 }

@@ -21,6 +21,7 @@ import {
   PrismaProposalRepository,
   PrismaCashRepository,
   PrismaDocumentRepository,
+  PrismaEventRepository,
   PrismaListingRepository,
   PrismaLoginKeyRepository,
   PrismaRegistryDeploymentRepository,
@@ -30,10 +31,14 @@ import {
   PrismaUseCaseRepository,
   PrismaUserRepository,
   PrismaVerificationRequestRepository,
+  PrismaWebhookDeliveryRepository,
+  PrismaWebhookEndpointRepository,
 } from "./persistence/prisma.js";
 import { resolveIdentityRegistry } from "./registry.js";
 import { seedDefaults } from "./seed.js";
 import { seedUseCases } from "./use-cases.js";
+import { createHttpSender, startDispatcher } from "./webhooks/dispatcher.js";
+import { createSecretBox } from "./webhooks/secret-box.js";
 
 async function main(): Promise<void> {
   const rbac = new RbacPolicy();
@@ -59,6 +64,9 @@ async function main(): Promise<void> {
   const stagedInvoices = new PrismaStagedInvoiceRepository();
   const loginKeys = new PrismaLoginKeyRepository();
   const apiKeys = new PrismaApiKeyRepository();
+  const events = new PrismaEventRepository();
+  const webhookEndpoints = new PrismaWebhookEndpointRepository();
+  const webhookDeliveries = new PrismaWebhookDeliveryRepository();
   const keystore = createKeystore(env.didMasterKey);
   // Demo users/accounts (with predictable passwords) are seeded only outside production.
   if (env.nodeEnv !== "production") await seedDefaults(users, accounts);
@@ -97,6 +105,15 @@ async function main(): Promise<void> {
     verificationRequests,
     stagedInvoices,
     apiKeys,
+    events,
+    webhookEndpoints,
+    webhookDeliveries,
+    webhooksAllowInsecure: env.webhooksAllowInsecure,
+    // ONE box, shared by the registration routes (which seal a freshly minted
+    // secret) and the dispatcher below (which opens it to sign). A DEDICATED key
+    // where the operator has set one; falls back to the DID key so an existing
+    // deployment keeps working without re-encrypting.
+    secretBox: createSecretBox(env.webhookMasterKey),
     keystore,
     didMasterConfigured: env.didMasterConfigured,
     challenges: createMemoryChallengeStore(),
@@ -159,6 +176,57 @@ async function main(): Promise<void> {
   await app.listen({ port: env.port, host: "0.0.0.0" });
   const chainList = chains.list().map((c) => c.id).join(", ");
   console.log(`TokenLayer API listening on http://localhost:${env.port}  (chains: ${chainList})`);
+
+  // Started HERE and nowhere else — deliberately NOT inside buildApp, so the
+  // test harness (which builds hundreds of apps) never starts a live timer that
+  // outlives the test that created it.
+  //
+  // The dispatcher is in-process: while this API is down, the emit path is down
+  // with it, so nothing accumulates AND nothing is delivered. An integrator that
+  // missed deliveries catches up through the cursor API (GET /events?after=),
+  // which is the documented recovery path — not this worker.
+  if (env.webhooksEnabled) {
+    const stop = startDispatcher(
+      {
+        events,
+        webhookEndpoints,
+        webhookDeliveries,
+        // The SAME box the routes sealed with — see deps.secretBox above. A
+        // second `createSecretBox` here would work only by coincidence of both
+        // reading the same env var, and would break silently the day they did not.
+        secretBox: deps.secretBox,
+        // Configuration is read HERE and handed in. dispatcher.ts imports no
+        // env at all: it used to, and that made `import`ing it a boot-time
+        // assertion which crashed the dispatcher TEST FILE in any checkout
+        // without a .env — sixteen security tests that stopped running while
+        // the suite still went green.
+        send: createHttpSender(env.webhooksTimeoutMs),
+        // The SAME guard posture the registration route uses, or a URL that was
+        // legal to save would be permanently undeliverable.
+        guard: { allowInsecureLoopback: env.webhooksAllowInsecure },
+      },
+      env.webhooksPollMs,
+    );
+    // AWAIT the running pass before exiting, rather than merely cancelling the
+    // timer and exiting immediately — that cancelled the ticker while killing
+    // the pass mid-send, stranding every row it had claimed as `inflight`,
+    // which is precisely what this handler exists to avoid.
+    //
+    // Bounded, because a pass can legitimately take batchSize × the per-attempt
+    // timeout, and an orchestrator will SIGKILL long before that. So: wait for
+    // the pass, but no longer than the grace below, then go. Anything still
+    // claimed when we give up is picked up by `reclaimStale` on the next
+    // process's first pass — that sweep, not this handler, is the guarantee.
+    const SHUTDOWN_GRACE_MS = 5_000;
+    for (const sig of ["SIGTERM", "SIGINT"] as const) {
+      process.once(sig, () => {
+        void Promise.race([stop(), new Promise((r) => setTimeout(r, SHUTDOWN_GRACE_MS).unref?.())]).then(() => {
+          process.exit(0);
+        });
+      });
+    }
+    console.log(`[webhooks] dispatcher polling every ${env.webhooksPollMs}ms`);
+  }
 }
 
 main().catch((err) => {

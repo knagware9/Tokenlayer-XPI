@@ -10,6 +10,7 @@
 import type { Actor } from "@tokenlayer/core";
 import { splitProRata } from "@tokenlayer/core";
 import type { AppDeps } from "./context.js";
+import { emitEvent, ownerOrgOfUseCase } from "./events.js";
 import { foldAsset } from "./holders.js";
 import { contextOf } from "./http/support.js";
 import type { AssetRecord, CashflowRecord } from "./persistence/types.js";
@@ -68,6 +69,39 @@ export async function executeIssueActivation(
 
 /** The five gatable lifecycle actions (mint/transfer/burn/freeze/unfreeze), engine-dispatched as `actor`. */
 export async function runGatedAction(
+  deps: AppDeps,
+  actor: Actor,
+  asset: AssetRecord,
+  action: string,
+  b: Record<string, string>,
+): Promise<{ txHash: string }> {
+  const receipt = await dispatchGatedAction(deps, actor, asset, action, b);
+  // EN-C. Emitted at THIS chokepoint rather than in the route, because both
+  // paths that move tokens come through here: the direct POST
+  // /assets/:id/actions/:action AND the maker-checker approval that executes the
+  // captured action as the proposer. A route-level emit would silently skip
+  // every use case that gates transfers — an integrator would see
+  // `proposal.executed` and nothing about the transfer it performed.
+  if (action === "transfer" || action === "burn") {
+    await emitEvent(deps, {
+      type: action === "transfer" ? "asset.transferred" : "asset.redeemed",
+      orgId: await ownerOrgOfUseCase(deps, asset.useCaseKey),
+      useCaseKey: asset.useCaseKey,
+      subjectId: asset.id,
+      data: {
+        assetId: asset.id, useCaseKey: asset.useCaseKey, chainId: asset.chainId,
+        tokenType: asset.tokenType,
+        from: b.from ?? null, to: action === "transfer" ? (b.to ?? null) : null,
+        amount: b.amount ?? null, tokenId: b.tokenId ?? null,
+        actorId: actor.id, txHash: receipt.txHash,
+      },
+    });
+  }
+  return receipt;
+}
+
+/** The raw ledger dispatch. Split out so `runGatedAction` owns the emit. */
+async function dispatchGatedAction(
   deps: AppDeps,
   actor: Actor,
   asset: AssetRecord,

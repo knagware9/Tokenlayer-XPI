@@ -83,6 +83,31 @@ describe("nav guard", () => {
     }
   });
 
+  it("keeps an EARLIER guard alive after a later one is released", () => {
+    // THE REGRESSION CASE, and the only one here that a single-slot
+    // implementation fails. EN-C puts two surfaces that each hold a one-time
+    // secret on the Developers screen (the API key and a webhook signing
+    // secret), so both can have a live guard at the same time. With one slot the
+    // second registration silently REPLACED the first, and releasing the second
+    // — acknowledging the webhook secret — left nothing registered while the API
+    // key secret was still unacknowledged: a click could then discard it with no
+    // confirmation at all.
+    //
+    // The two guards must disagree for the test to have teeth. The sibling case
+    // below registers false + false, which a single slot also passes, since
+    // whichever guard survives says the same thing.
+    const releaseA = setNavGuard(() => false);
+    const releaseB = setNavGuard(() => true);
+    try {
+      // A is still registered and still refusing, so navigation is refused.
+      releaseB();
+      expect(confirmNavigation()).toBe(false);
+    } finally {
+      releaseA();
+    }
+    expect(confirmNavigation()).toBe(true);
+  });
+
   it("does not let a stale release clear a newer guard", () => {
     // Two reveals in a row remount the panel, so an old effect's cleanup can run
     // after the new effect registered. If that cleanup cleared the live guard,

@@ -58,6 +58,8 @@ describe("API_SCOPES", () => {
     // "usecases" was added for EN-B's `usecases:provision` (configuration
     // authoring — use cases, templates, orgs, the one-step provisioner), which
     // `users:onboard` would have described dishonestly.
-    expect([...API_SCOPE_RESOURCES].sort()).toEqual(["assets", "credentials", "org", "usecases", "users", "verifications"]);
+    // "webhooks" was added for EN-C's `webhooks:read`/`webhooks:write`
+    // (managing an org's own webhook endpoints and reading its event log).
+    expect([...API_SCOPE_RESOURCES].sort()).toEqual(["assets", "credentials", "org", "usecases", "users", "verifications", "webhooks"]);
   });
 });

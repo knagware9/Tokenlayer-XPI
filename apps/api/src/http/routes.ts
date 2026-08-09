@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { ApiKeyRecord, AssetRecord, CashflowRecord, CompanyProfile, CredentialRecord, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord } from "../persistence/types.js";
+import type { ApiKeyRecord, AssetRecord, CashflowRecord, CompanyProfile, CredentialRecord, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord, WebhookEndpointRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, issueCredential, issuerBindingAllows, normalizeUseCaseDefinition, ORG_OPERATING_ROLES, orgDomainEnabled, orgRoleEnabled, PolicyError, presentCredential, presentCredentials, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateCredentialUseCase, validateMetadata, scopeAllows, validateOrgCapabilities, validateScopes, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ApiScope, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type OrgOperatingRole, type OrgType, type Role, type UseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
+import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, issueCredential, issuerBindingAllows, normalizeUseCaseDefinition, ORG_OPERATING_ROLES, orgDomainEnabled, orgRoleEnabled, PolicyError, presentCredential, presentCredentials, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateCredentialUseCase, validateEventTypes, validateMetadata, scopeAllows, validateOrgCapabilities, validateScopes, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ApiScope, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type OrgDomain, type OrgOperatingRole, type OrgType, type Role, type UseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
 import qrcode from "qrcode";
 import type { AppDeps } from "../context.js";
 import { renderCredentialCertificate } from "../certificate.js";
@@ -13,6 +13,7 @@ import { deployAndCreateUseCase } from "../use-cases.js";
 import { computeAnalytics } from "../analytics.js";
 import { computeIdentityDashboard } from "../identity-analytics.js";
 import { issueCredentialFor, revokeCredentialById } from "../credential-issuance.js";
+import { emitEvent, ownerOrgOfUseCase } from "../events.js";
 import { mintOrgMembership } from "../membership.js";
 import { ensurePlatformIssuerOrg, PLATFORM_ORG_NAME } from "../platform-org.js";
 import { computeActivity, computePortfolio } from "../investor.js";
@@ -21,6 +22,7 @@ import { assetBalancesOf, coded, CodedError, dropPayerShare, executeCashflowCore
 import { proposalKind } from "../proposal-kinds.js";
 import type { OnboardUserPayload } from "../user-kinds.js";
 import { resolveDid } from "../did-resolver.js";
+import { checkUrl } from "../webhooks/url-guard.js";
 import { API_KEY_BCRYPT_ROUNDS, invalidateVerifiedPrefix, mintSecret } from "../api-keys.js";
 import { S } from "./schemas.js";
 import { actorOf, claimsOf, contextOf, isPositiveIntString, machinePrincipal, notFound, requirePrincipal, requireScope, scopedToCaller, type TokenClaims } from "./support.js";
@@ -1264,6 +1266,25 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       throw err;
     }
     const finalAsset = await deps.assets.get(id);
+    // EN-C. Only on the UNGATED path — the gated branch above returned 202 with
+    // the asset `pending_approval` and its mint DEFERRED, so nothing has been
+    // issued yet and claiming otherwise would be a lie an integrator acts on.
+    // The gated issuance surfaces as `proposal.executed` on approval.
+    // NOTE `metadata` is deliberately absent: for an invoice use case it is the
+    // commercial detail (debtor, amount, terms) and is not the event's business.
+    await emitEvent(deps, {
+      type: "asset.issued",
+      orgId: useCase.ownerOrgId ?? null,
+      useCaseKey: bUseCaseKey,
+      subjectId: id,
+      data: {
+        assetId: id, name, useCaseKey: bUseCaseKey, chainId,
+        tokenType: result.tokenType, tokenStandard: useCase.tokenStandard,
+        symbol: useCase.symbol, contractRef: result.ref.contractRef,
+        status: finalAsset?.status ?? null, txHash: result.txHash,
+        initialSupply: wantsSupply ? initialSupply : null,
+      },
+    }, input.request.log);
     return { ok: true, status: 201, body: { asset: finalAsset, txHash: result.txHash, ...(issuanceFeeCharged ? { issuanceFee: issuanceFeeCharged } : {}) } };
   }
 
@@ -2942,6 +2963,474 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return reply.code(200).send({ key: await viewKey(revoked) });
   });
 
+  // ═══ EN-C: webhook endpoints, deliveries and the event cursor ═════════════
+
+  /** Cursor page sizes. A caller may ask for less; nobody may ask for more. */
+  const EVENT_PAGE_DEFAULT = 100;
+  const EVENT_PAGE_MAX = 500;
+  const DELIVERY_PAGE_DEFAULT = 100;
+  const DELIVERY_PAGE_MAX = 500;
+
+  /**
+   * THE public projection of an endpoint — used by EVERY read route, including
+   * the ones that just wrote the row.
+   *
+   * It exists for exactly one reason: `secretEncrypted` is a field on the
+   * record, and returning the record is the natural thing to write. An endpoint
+   * signing secret is not a hash — it is the live key with which an attacker
+   * FORGES deliveries the integrator's verifier accepts as genuine — so the
+   * ciphertext must never leave the process either. Constructing the response by
+   * NAMING its fields (rather than deleting one from a spread) is what makes a
+   * newly added secret-bearing column fail closed: it is simply not in this list.
+   *
+   * The plaintext secret appears in a response body exactly TWICE in the whole
+   * system: the 201 from create and the 200 from rotate. Neither goes through
+   * here — they add `secret` alongside this view, explicitly, at those two sites.
+   */
+  function webhookView(e: WebhookEndpointRecord) {
+    return {
+      id: e.id, orgId: e.orgId, url: e.url, description: e.description, eventTypes: e.eventTypes,
+      useCaseKey: e.useCaseKey, status: e.status, disabledReason: e.disabledReason, disabledAt: e.disabledAt,
+      consecutiveFailures: e.consecutiveFailures, consecutiveGuardFailures: e.consecutiveGuardFailures,
+      failingSince: e.failingSince, deletedAt: e.deletedAt, createdBy: e.createdBy, createdAt: e.createdAt,
+      lastDeliveryAt: e.lastDeliveryAt,
+    };
+  }
+
+  /**
+   * Which product domain an event type belongs to, for the EN-A envelope check
+   * at SUBSCRIBE time. `null` means domain-neutral — `*` (which is a request for
+   * whatever the org is entitled to, not a claim on any particular domain) and
+   * `proposal.executed` (maker-checker governance, which both domains use).
+   */
+  function eventTypeDomain(t: string): OrgDomain | null {
+    if (t.startsWith("asset.")) return "tokenization";
+    if (t.startsWith("credential.") || t.startsWith("verification.")) return "identity";
+    return null;
+  }
+
+  /**
+   * EN-A GATES SUBSCRIBING, NOT RECEIVING — and the asymmetry is deliberate.
+   *
+   * An org with no `tokenization` capability may not ASK for `asset.*`: that is
+   * a request to be told about a class of act the envelope says it does not
+   * perform, and honouring it would let a tightened envelope be worked around by
+   * a fresh registration. But an org that subscribed while permitted KEEPS
+   * receiving after its envelope narrows. EN-A governs what an org may DO, not
+   * what it may observe about acts it has already performed, and it has been
+   * non-retroactive since it shipped — a capability change does not un-issue a
+   * credential or un-mint a token, so it must not silently blind an integrator
+   * to the ones that already exist. Making it retroactive here would ALSO be a
+   * new failure mode: an operator narrowing an envelope would silently break a
+   * customer's production integration with no error anyone could see.
+   *
+   * Both directions are pinned by webhooks-routes.test.ts.
+   *
+   * Returns the missing domain, or null when the whole subscription is in
+   * envelope. A legacy (null) envelope passes everything — `orgDomainEnabled`.
+   */
+  function subscriptionOutsideEnvelope(org: OrganizationRecord, types: string[]): OrgDomain | null {
+    for (const t of types) {
+      const domain = eventTypeDomain(t);
+      if (domain !== null && !orgDomainEnabled(org.capabilities, domain)) return domain;
+    }
+    return null;
+  }
+
+  /**
+   * Org scope for the eight endpoint routes. Deliberately NOT `apiKeyScope`:
+   * that one refuses machine principals outright, because a key minting a key is
+   * the one path by which a key's own scopes could widen. A webhook endpoint
+   * confers no authority — it only ever receives events its org can already read
+   * through `GET /events` — so an integrator managing its own delivery
+   * destinations with its own key is exactly the point of EN-C. What narrows a
+   * key here is the `webhooks:read`/`webhooks:write` scope on the route.
+   */
+  async function webhookOrg(request: FastifyRequest, reply: FastifyReply, id: string): Promise<OrganizationRecord | null> {
+    const claims = request.user as TokenClaims;
+    if (!orgScoped(claims, id)) {
+      reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to manage that organization's webhooks" });
+      return null;
+    }
+    const org = await deps.organizations.get(id);
+    if (!org) { notFound(reply, "organization not found"); return null; }
+    return org;
+  }
+
+  /**
+   * Load an endpoint that genuinely belongs to `orgId`. 404 — never 403 — for
+   * another org's endpoint, and for a soft-deleted one, mirroring `scopedAsset`
+   * and `orgKey`: a 403 would be an EXISTENCE ORACLE, letting one org confirm
+   * which endpoint ids another org holds by reading status codes. The whole
+   * point of the no-oracle rule is that "not yours" and "not there" are
+   * indistinguishable from outside.
+   */
+  async function orgEndpoint(reply: FastifyReply, orgId: string, whId: string): Promise<WebhookEndpointRecord | null> {
+    const e = await deps.webhookEndpoints.findById(whId);
+    if (!e || e.orgId !== orgId || e.deletedAt !== null) { notFound(reply, "webhook endpoint not found"); return null; }
+    return e;
+  }
+
+  /**
+   * SSRF guard at registration. Returns false once the 400 has been sent.
+   * `checkUrl` returns a verdict rather than throwing, so what reaches the
+   * client is our own reason string — never a raw DNS/resolver error, which
+   * would turn the guard into a network-probing oracle for the caller.
+   */
+  async function checkWebhookUrl(reply: FastifyReply, url: string): Promise<boolean> {
+    const verdict = await checkUrl(url, { allowInsecureLoopback: deps.webhooksAllowInsecure });
+    if (verdict.ok) return true;
+    reply.code(400).send({ error: "INVALID_WEBHOOK_URL", message: verdict.reason });
+    return false;
+  }
+
+  /** Clamp a caller-supplied page size; anything unparseable falls back to the default. */
+  function pageLimit(raw: string | undefined, def: number, max: number): number {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 1) return def;
+    return Math.min(Math.floor(n), max);
+  }
+
+  app.post("/orgs/:id/webhooks", { schema: S.createWebhook, ...authScoped("webhooks:write") }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    const b = request.body as { url: string; description?: string; eventTypes: unknown; useCaseKey?: string };
+    const org = await webhookOrg(request, reply, id);
+    if (!org) return;
+
+    // ORDER MATTERS. Vocabulary (400) before entitlement (403) before
+    // reachability (400): a typo'd event type must not be reported as a missing
+    // capability, and neither must be reported as a bad URL.
+    const eventTypes = validateEventTypes(b.eventTypes); // 400 UNKNOWN_EVENT_TYPE / INVALID_EVENT_TYPES
+    const missing = subscriptionOutsideEnvelope(org, eventTypes);
+    if (missing) return orgCapabilityMissing(reply, org, missing);
+    if (!(await checkWebhookUrl(reply, b.url))) return;
+
+    const secret = deps.secretBox.mint();
+    const endpoint = await deps.webhookEndpoints.create({
+      orgId: id,
+      url: b.url,
+      description: b.description ?? null,
+      eventTypes,
+      // `|| null`: "" is not a use-case filter, it is an empty string, and
+      // storing it would make it a MATCHABLE value in `endpointMatches` — the
+      // ""-vs-null gate bypass this codebase has been bitten by twice.
+      useCaseKey: b.useCaseKey || null,
+      secretEncrypted: deps.secretBox.seal(secret),
+      createdBy: claims.id,
+    });
+    // The ENDPOINT ID and what it subscribed to are the audit trail. The SECRET
+    // is never audited, logged, or returned by any read route — the 201 below is
+    // its only life, exactly as with an API key.
+    await deps.audit.append({
+      actorId: claims.id, action: "webhook-created" as LifecycleAction,
+      payload: { orgId: id, endpointId: endpoint.id, url: endpoint.url, eventTypes: endpoint.eventTypes, useCaseKey: endpoint.useCaseKey },
+    });
+    return reply.code(201).send({ endpoint: webhookView(endpoint), secret });
+  });
+
+  app.get("/orgs/:id/webhooks", { schema: S.listWebhooks, ...authScoped("webhooks:read") }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    if (!(await webhookOrg(request, reply, id))) return;
+    return { endpoints: (await deps.webhookEndpoints.listByOrg(id)).map(webhookView) };
+  });
+
+  app.patch("/orgs/:id/webhooks/:whId", { schema: S.updateWebhook, ...authScoped("webhooks:write") }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { id, whId } = request.params as { id: string; whId: string };
+    const b = request.body as {
+      url?: string; description?: string | null; eventTypes?: unknown;
+      useCaseKey?: string | null; status?: "active" | "disabled";
+    };
+    const org = await webhookOrg(request, reply, id);
+    if (!org) return;
+    const endpoint = await orgEndpoint(reply, id, whId);
+    if (!endpoint) return;
+
+    const patch: Parameters<typeof deps.webhookEndpoints.update>[1] = {};
+    if (b.eventTypes !== undefined) {
+      const eventTypes = validateEventTypes(b.eventTypes);
+      // The envelope is re-checked HERE as well as at create: otherwise an org
+      // registers `*` while entitled and then PATCHes to `asset.issued` after its
+      // envelope narrows, and the create-time gate has governed nothing.
+      const missing = subscriptionOutsideEnvelope(org, eventTypes);
+      if (missing) return orgCapabilityMissing(reply, org, missing);
+      patch.eventTypes = eventTypes;
+    }
+    if (b.url !== undefined) {
+      // RE-RUN THE GUARD ON EVERY URL CHANGE. Validating only at registration
+      // would make PATCH the way around it: register a public URL, then move the
+      // endpoint to 169.254.169.254 with a second request.
+      if (!(await checkWebhookUrl(reply, b.url))) return;
+      patch.url = b.url;
+    }
+    if (b.description !== undefined) patch.description = b.description || null;
+    if (b.useCaseKey !== undefined) patch.useCaseKey = b.useCaseKey || null;
+
+    if (b.status !== undefined && b.status !== endpoint.status) {
+      patch.status = b.status;
+      if (b.status === "active") {
+        // RE-ENABLING MUST RESET THE BOOKKEEPING, all five fields together. The
+        // dispatcher auto-disables on `consecutiveFailures >= AUTO_DISABLE_AFTER`
+        // AND a failure run older than AUTO_DISABLE_MIN_AGE_MS — both of which
+        // are still satisfied by the values that caused the disable. Flipping
+        // `status` alone re-disables the endpoint on its very next failed
+        // attempt, which to the integrator looks like the re-enable silently
+        // doing nothing. `failingSince` matters most: leave it and the run's age
+        // keeps growing from the ORIGINAL outage forever.
+        patch.disabledReason = null;
+        patch.disabledAt = null;
+        patch.consecutiveFailures = 0;
+        patch.consecutiveGuardFailures = 0;
+        patch.failingSince = null;
+      } else {
+        patch.disabledReason = "disabled by an administrator";
+        patch.disabledAt = new Date().toISOString();
+      }
+    }
+
+    const updated = await deps.webhookEndpoints.update(endpoint.id, patch);
+    await deps.audit.append({
+      actorId: claims.id, action: "webhook-updated" as LifecycleAction,
+      payload: { orgId: id, endpointId: endpoint.id, changed: Object.keys(patch) },
+    });
+    return reply.code(200).send({ endpoint: webhookView(updated) });
+  });
+
+  app.post("/orgs/:id/webhooks/:whId/rotate", { schema: S.rotateWebhookSecret, ...authScoped("webhooks:write") }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { id, whId } = request.params as { id: string; whId: string };
+    if (!(await webhookOrg(request, reply, id))) return;
+    const endpoint = await orgEndpoint(reply, id, whId);
+    if (!endpoint) return;
+
+    // NO OVERLAP WINDOW, deliberately: the moment this returns, deliveries are
+    // signed with the new secret and the old one verifies nothing. A grace period
+    // would mean a leaked secret stays valid for exactly as long as the window,
+    // which is the opposite of what rotation is for. The cost is that an
+    // integrator must deploy the new secret promptly — the same contract API-key
+    // rotation already has.
+    const secret = deps.secretBox.mint();
+    const updated = await deps.webhookEndpoints.update(endpoint.id, { secretEncrypted: deps.secretBox.seal(secret) });
+    await deps.audit.append({
+      actorId: claims.id, action: "webhook-secret-rotated" as LifecycleAction,
+      payload: { orgId: id, endpointId: endpoint.id, url: endpoint.url },
+    });
+    return reply.code(200).send({ endpoint: webhookView(updated), secret });
+  });
+
+  app.delete("/orgs/:id/webhooks/:whId", { schema: S.deleteWebhook, ...authScoped("webhooks:write") }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { id, whId } = request.params as { id: string; whId: string };
+    if (!(await webhookOrg(request, reply, id))) return;
+    const endpoint = await orgEndpoint(reply, id, whId);
+    if (!endpoint) return;
+
+    // SOFT delete: the row stays so its delivery history keeps a destination to
+    // point at. `endpointMatches` and `listActive` both already exclude a row
+    // with `deletedAt` set, so fan-out stops on the next event; the dispatcher
+    // dead-letters anything already queued. `status` goes with it so an operator
+    // reading the row sees one consistent answer rather than "active, deleted".
+    const now = new Date().toISOString();
+    const deleted = await deps.webhookEndpoints.update(endpoint.id, {
+      deletedAt: now, status: "disabled", disabledReason: "deleted", disabledAt: now,
+    });
+    await deps.audit.append({
+      actorId: claims.id, action: "webhook-deleted" as LifecycleAction,
+      payload: { orgId: id, endpointId: endpoint.id, url: endpoint.url },
+    });
+    return reply.code(200).send({ endpoint: webhookView(deleted) });
+  });
+
+  /**
+   * A synthetic ping, so an integrator can prove signature verification, TLS and
+   * their handler BEFORE the first real business event arrives.
+   *
+   * THREE DECISIONS, and the first is why the other two exist.
+   *
+   * 1. `ping` IS NOT IN `EVENT_TYPES` AND MUST NOT BE. C1's catalog is a closed
+   *    set of REAL PLATFORM FACTS — things that happened to an asset, a
+   *    credential or a proposal. A test ping is a fact about this API call, not
+   *    about the business. Adding it to the catalog would make it subscribable,
+   *    which is meaningless (nobody wants a feed of other people's tests), and
+   *    would put a non-fact into the one vocabulary the web console renders and
+   *    integrators switch on.
+   *
+   * 2. IT IS STILL A REAL ROW IN THE OUTBOX. The dispatcher resolves
+   *    `events.findById(delivery.eventId)` and dead-letters when it cannot, so a
+   *    delivery with no event is a delivery that never sends. Writing the row is
+   *    also honest: "an operator tested this endpoint at 14:02" IS a durable
+   *    fact, it is scoped to the org that asked for it, and it shows up in that
+   *    org's own `GET /events` where a confused integrator will look for it.
+   *    `EventRecord.type` is a plain `string`, so this costs the catalog nothing.
+   *
+   * 3. NO SUBSCRIPTION MATCHING — the delivery is enqueued for THIS ENDPOINT
+   *    ONLY, bypassing `endpointMatches`. Matching would make the route useless
+   *    in exactly the case it is for: an endpoint subscribed to
+   *    `["asset.issued"]` matches no `ping`, so testing it would silently do
+   *    nothing. Going the other way and calling `emitEvent` would be worse — a
+   *    `["*"]` endpoint DOES match `ping`, so testing one endpoint would spray a
+   *    ping at every wildcard endpoint in the org. A ping is addressed, by the
+   *    operator, to the one endpoint they named. Note the direction of the two
+   *    mistakes: matching under-delivers to the intended endpoint, `emitEvent`
+   *    over-delivers to unintended ones. Neither can happen here — the only
+   *    endpoint id this route can ever enqueue against is one `orgEndpoint`
+   *    already proved belongs to the caller's org.
+   */
+  app.post("/orgs/:id/webhooks/:whId/test", { schema: S.testWebhook, ...authScoped("webhooks:write") }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { id, whId } = request.params as { id: string; whId: string };
+    if (!(await webhookOrg(request, reply, id))) return;
+    const endpoint = await orgEndpoint(reply, id, whId);
+    if (!endpoint) return;
+    // A disabled endpoint's delivery is dead on arrival (the dispatcher settles
+    // it `dead` without sending), so queueing one would report success for
+    // something guaranteed not to happen. Say so instead.
+    if (endpoint.status !== "active") {
+      return reply.code(409).send({ error: "ENDPOINT_DISABLED", message: "re-enable the endpoint before testing it" });
+    }
+
+    const event = await deps.events.append({
+      type: "ping",
+      orgId: endpoint.orgId,
+      useCaseKey: endpoint.useCaseKey,
+      subjectId: endpoint.id,
+      data: { endpointId: endpoint.id, requestedBy: claims.id, message: "This is a test delivery from TokenLayer." },
+    });
+    const delivery = await deps.webhookDeliveries.enqueue({ endpointId: endpoint.id, eventId: event.id, eventSeq: event.seq });
+    await deps.audit.append({
+      actorId: claims.id, action: "webhook-tested" as LifecycleAction,
+      payload: { orgId: id, endpointId: endpoint.id, eventId: event.id, deliveryId: delivery.id },
+    });
+    // 202: queued, not delivered. The dispatcher is what sends, on its own poll.
+    return reply.code(202).send({ delivery, event: { id: event.id, seq: event.seq, type: event.type, occurredAt: event.occurredAt } });
+  });
+
+  app.get("/orgs/:id/webhooks/:whId/deliveries", { schema: S.listWebhookDeliveries, ...authScoped("webhooks:read") }, async (request, reply) => {
+    const { id, whId } = request.params as { id: string; whId: string };
+    const q = request.query as { limit?: string };
+    if (!(await webhookOrg(request, reply, id))) return;
+    const endpoint = await orgEndpoint(reply, id, whId);
+    if (!endpoint) return;
+    // A delivery row carries no payload — ids, status, attempt counts and the
+    // endpoint's own HTTP answer. The event body is read from GET /events, which
+    // applies its own org scope.
+    return { deliveries: await deps.webhookDeliveries.listByEndpoint(endpoint.id, pageLimit(q.limit, DELIVERY_PAGE_DEFAULT, DELIVERY_PAGE_MAX)) };
+  });
+
+  app.post("/orgs/:id/webhooks/:whId/deliveries/:dId/replay", { schema: S.replayWebhookDelivery, ...authScoped("webhooks:write") }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { id, whId, dId } = request.params as { id: string; whId: string; dId: string };
+    if (!(await webhookOrg(request, reply, id))) return;
+    const endpoint = await orgEndpoint(reply, id, whId);
+    if (!endpoint) return;
+    const delivery = await deps.webhookDeliveries.findById(dId);
+    // 404, NOT 403, for a delivery belonging to another org — and the check is
+    // `endpointId !== endpoint.id`, where `endpoint` has ALREADY been proved to
+    // belong to the caller's org. So a foreign delivery id and a nonexistent one
+    // are indistinguishable from outside: no existence oracle, same rule as
+    // `scopedProposal` and `orgKey`.
+    if (!delivery || delivery.endpointId !== endpoint.id) return notFound(reply, "delivery not found");
+    // An inflight row is claimed by a running dispatcher pass, and resetting it
+    // would let a second worker claim it while the first is mid-POST — a
+    // double-send, whose settle would clobber the reset anyway.
+    //
+    // THE CHECK IS IN THE WRITE, not in the read above. `repo.requeue` carries
+    // the `status !== "inflight"` predicate into the UPDATE itself, so a claim
+    // landing between this route's read and its write loses instead of being
+    // silently undone. `attempts` goes back to zero inside the same statement,
+    // so a replayed delivery gets the FULL retry schedule rather than dying on
+    // its next attempt because the original run exhausted it.
+    const replayed = await deps.webhookDeliveries.requeue(delivery.id, new Date().toISOString());
+    if (!replayed) {
+      return reply.code(409).send({ error: "DELIVERY_INFLIGHT", message: "this delivery is being attempted right now" });
+    }
+    await deps.audit.append({
+      actorId: claims.id, action: "webhook-delivery-replayed" as LifecycleAction,
+      payload: { orgId: id, endpointId: endpoint.id, deliveryId: delivery.id, eventId: delivery.eventId },
+    });
+    return reply.code(200).send({ delivery: replayed });
+  });
+
+  /**
+   * The cursor API — the documented catch-up path for an integrator that was
+   * offline, and the reason the emit path is allowed to fan out only to
+   * endpoints that existed at the time.
+   *
+   * ORG SCOPE IS THE WHOLE SECURITY PROPERTY HERE. A PlatformAdmin reads every
+   * org's log; ANYONE ELSE reads exactly their own org's, and NOBODY ELSE reads
+   * the platform-scope bucket. `undefined` (every org) and `null` (the
+   * platform-scope rows) are one keystroke apart and mean opposite things, so
+   * both branches are spelled out rather than folded into a ternary on a value.
+   *
+   * THE ORG-LESS PRINCIPAL READS NOTHING, and that guard is the fix for a real
+   * cross-tenant leak rather than a defensive flourish. `requireScope` only
+   * narrows API KEYS, so a JWT session carries `webhooks:read` unconditionally
+   * and this route has no role check of its own; before the guard below, every
+   * principal whose `orgId` is null — a seeded user, a holder, an org-less
+   * Verifier desk operator — selected exactly the `orgId: null` rows. That is
+   * not an empty bucket, because resolution failures land in it: an asset event
+   * whose use case has no `ownerOrgId` (every seeded/legacy tokenization use
+   * case), a credential whose holder DID no longer resolves, a verification
+   * raised at an org-less desk. A gold-loan buyer could read a carbon asset's
+   * `asset.issued` payload it gets a 404 for on `GET /assets/:id`, and a third
+   * party's `holderDid` and requested credential types out of
+   * `verification.requested`.
+   *
+   * Nothing legitimate needs the null branch: a PlatformAdmin already reads every
+   * row including the platform-scope ones through the `{}` branch, and no route
+   * can create an endpoint whose `orgId` is null, so no org-less principal has
+   * anything of its own in this log to read.
+   *
+   * `after` is EXCLUSIVE (`seq > after`), so the documented loop —
+   * `after = nextAfter` — never re-reads and never skips. An empty page returns
+   * the caller's own cursor back, so polling a quiet log is idempotent.
+   *
+   * TWO THINGS THIS SCOPE DELIBERATELY DOES NOT DO, both worth knowing before
+   * anyone treats it as airtight:
+   *
+   *  - IT IS ORG-GRAINED, NOT USE-CASE-GRAINED. A use-case-scoped member of org
+   *    A (a UseCaseAdmin, an Issuer desk) reads ALL of org A's events, including
+   *    those of use cases they cannot otherwise see — every other read route in
+   *    this file narrows through `scopedToCaller`, and this one does not.
+   *    Webhook ENDPOINTS can narrow by `useCaseKey`; the cursor cannot. This is
+   *    the granularity EN-C specifies, and it is a widening WITHIN an org only —
+   *    but it is the line to change if per-desk isolation is ever required.
+   *  - `seq` IS A GLOBAL COUNTER, so the gaps between an org's own rows disclose
+   *    how many events the rest of the platform produced in between. Volume
+   *    only — no ids, types, orgs or payloads cross the boundary. That is
+   *    inherent to C2's single globally ordered log (the property that makes one
+   *    cursor work at all); a per-org sequence would close it and would change
+   *    the log's shape.
+   */
+  app.get("/events", { schema: S.listEvents, ...authScoped("webhooks:read") }, async (request) => {
+    const claims = request.user as TokenClaims;
+    const q = request.query as { after?: string; type?: string; limit?: string };
+    const raw = Number(q.after);
+    const after = Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0;
+    const limit = pageLimit(q.limit, EVENT_PAGE_DEFAULT, EVENT_PAGE_MAX);
+    // An ABSENT `orgId` key is what the repos read as "every org", so the
+    // PlatformAdmin branch is the one that leaves `scope` empty — and the only
+    // one. A non-admin either narrows to a real org id or reads nothing at all:
+    // it can never reach the query with `orgId: null`, which would have selected
+    // the platform-scope bucket (see the note above). Written as a block rather
+    // than a spread ternary so the narrowing is the compiler's job too — `scope`
+    // cannot hold a null or undefined `orgId` in any branch.
+    const scope: { orgId?: string } = {};
+    if (claims.role !== "PlatformAdmin") {
+      // The caller's own cursor comes back, so the documented polling loop is
+      // unaffected — it simply never advances.
+      if (!claims.orgId) return { events: [], nextAfter: after };
+      scope.orgId = claims.orgId;
+    }
+    const events = await deps.events.listAfter(after, {
+      ...scope,
+      ...(q.type ? { type: q.type } : {}),
+      limit,
+    });
+    return { events, nextAfter: events.length > 0 ? events[events.length - 1]!.seq : after };
+  });
+
   // PUBLIC W3C DID resolution — a DID document is public key material; same
   // public posture as /credentials/:id/status. Third-party verifiers resolve
   // an issuer DID against the on-chain DidRegistry with no platform account.
@@ -2996,6 +3485,16 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return cred;
   }
 
+  /**
+   * EN-C tenancy key for the credential lifecycle events. The owning org of a
+   * credential is the org that SIGNED it, resolved from its issuer DID — not the
+   * acting principal's org, which on these routes is the HOLDER's. Null (⇒
+   * platform-scope) only if that org has vanished; never throws, because it
+   * feeds an emit that must not fail the route.
+   */
+  const issuerOrgIdOf = async (cred: CredentialRecord): Promise<string | null> =>
+    (await deps.organizations.findByDid(cred.issuerDid).catch(() => null))?.id ?? null;
+
   // EN-B: the three holder-lifecycle routes below are DELIBERATELY UNSCOPED.
   // They act only on a credential the caller ALREADY holds and confer no
   // authority over anyone else: accepting/rejecting/asking-for-changes changes
@@ -3007,6 +3506,19 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (!cred) return reply;
     const updated = await deps.credentials.setAcceptance(cred.id, { acceptance: "accepted", at: new Date().toISOString(), note: null });
     await deps.audit.append({ actorId: (request.user as TokenClaims).id, action: "credential-accepted" as LifecycleAction, payload: { credentialId: cred.id } });
+    // EN-C: the ISSUER is the party waiting on this answer, so the event is
+    // theirs — a holder does not register webhook endpoints.
+    await emitEvent(deps, {
+      type: "credential.accepted",
+      orgId: await issuerOrgIdOf(cred),
+      useCaseKey: cred.credentialUseCaseKey,
+      subjectId: cred.id,
+      data: {
+        credentialId: cred.id, credentialType: cred.type, subjectDid: cred.holderDid,
+        issuerDid: cred.issuerDid, credentialUseCaseKey: cred.credentialUseCaseKey,
+        acceptance: updated.acceptance, acceptedAt: updated.acceptanceAt,
+      },
+    }, request.log);
     return { id: updated.id, acceptance: updated.acceptance, acceptanceAt: updated.acceptanceAt };
   });
 
@@ -3019,6 +3531,21 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     await revokeCredentialById(deps, cred.id, { reason: note ? `holder rejected: ${note}` : "holder rejected", by: claims.id, at: new Date().toISOString() });
     const updated = await deps.credentials.setAcceptance(cred.id, { acceptance: "rejected", at: new Date().toISOString(), note });
     await deps.audit.append({ actorId: claims.id, action: "credential-rejected" as LifecycleAction, payload: { credentialId: cred.id, note } });
+    // EN-C: a holder rejection legitimately produces TWO events — the
+    // `credential.revoked` that revokeCredentialById above already emitted (the
+    // credential is now dead on-chain) and this one, which says WHY. Both facts
+    // are true and an integrator subscribed to either should see it.
+    await emitEvent(deps, {
+      type: "credential.rejected",
+      orgId: await issuerOrgIdOf(cred),
+      useCaseKey: cred.credentialUseCaseKey,
+      subjectId: cred.id,
+      data: {
+        credentialId: cred.id, credentialType: cred.type, subjectDid: cred.holderDid,
+        issuerDid: cred.issuerDid, credentialUseCaseKey: cred.credentialUseCaseKey,
+        acceptance: updated.acceptance, rejectedAt: updated.acceptanceAt, note, revoked: true,
+      },
+    }, request.log);
     return { id: updated.id, acceptance: updated.acceptance, revoked: true };
   });
 
@@ -3285,6 +3812,22 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         expiresAt: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
       });
       await deps.audit.append({ actorId: claims.id, action: "verification-requested" as LifecycleAction, payload: { requestId: rec.id, verifierUserId: claims.id, holderDid: b.holderDid, types: b.requestedTypes, credentialUseCaseKey: rec.credentialUseCaseKey } });
+      // EN-C. `verifierOrgId || null`, not `?? null`: an ORG-LESS desk operator
+      // stores "" here (see the `verifierScoped` comment), and "" is not an org —
+      // it must degrade to platform-scope, or `endpointMatches` would hand this
+      // request to any endpoint whose orgId happened to be "".
+      await emitEvent(deps, {
+        type: "verification.requested",
+        orgId: rec.verifierOrgId || null,
+        useCaseKey: rec.credentialUseCaseKey,
+        subjectId: rec.id,
+        data: {
+          requestId: rec.id, verifierOrgId: rec.verifierOrgId || null, holderDid: rec.holderDid,
+          requestedTypes: rec.requestedTypes, purpose: rec.purpose,
+          credentialUseCaseKey: rec.credentialUseCaseKey, status: rec.status,
+          expiresAt: rec.expiresAt,
+        },
+      }, request.log);
       return reply.code(201).send(vreqView(rec));
     }
 
@@ -3325,6 +3868,20 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       expiresAt: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
     });
     await deps.audit.append({ actorId: claims.id, action: "verification-requested" as LifecycleAction, payload: { requestId: rec.id, verifierOrgId: org.id, holderDid: b.holderDid, types: b.requestedTypes, credentialUseCaseKey: rec.credentialUseCaseKey } });
+    // EN-C — the OrgAdmin path of the same route (see the desk-operator branch
+    // above for why this is `|| null`).
+    await emitEvent(deps, {
+      type: "verification.requested",
+      orgId: rec.verifierOrgId || null,
+      useCaseKey: rec.credentialUseCaseKey,
+      subjectId: rec.id,
+      data: {
+        requestId: rec.id, verifierOrgId: rec.verifierOrgId || null, holderDid: rec.holderDid,
+        requestedTypes: rec.requestedTypes, purpose: rec.purpose,
+        credentialUseCaseKey: rec.credentialUseCaseKey, status: rec.status,
+        expiresAt: rec.expiresAt,
+      },
+    }, request.log);
     return reply.code(201).send(vreqView(rec));
   });
 
@@ -3502,6 +4059,24 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const result = { valid: core.valid && requestedCovered, holderDid: core.holderDid ?? null, reason: core.reason ?? null, purpose: r.purpose, credentials, verifiedAt: new Date().toISOString() };
     await deps.verificationRequests.setVerifierResult(r.id, { result, at: result.verifiedAt });
     await deps.audit.append({ actorId: claims.id, action: "verification-verified" as LifecycleAction, payload: { requestId: r.id, valid: result.valid, holderDid: core.holderDid ?? null } });
+    // EN-C. The VERDICT ONLY. `result` carries each presented credential's
+    // decoded `claims` — the private content the holder consented to disclose to
+    // ONE verifier, for ONE purpose. Publishing that to a webhook would re-share
+    // it with every endpoint the org has registered, outside the consent the
+    // holder actually gave. So: ids, types, per-credential valid flags, nothing
+    // else. Same reason `vreqView` never exposes verifierResult.
+    await emitEvent(deps, {
+      type: "verification.completed",
+      orgId: r.verifierOrgId || null,
+      useCaseKey: r.credentialUseCaseKey,
+      subjectId: r.id,
+      data: {
+        requestId: r.id, verifierOrgId: r.verifierOrgId || null, holderDid: result.holderDid,
+        credentialUseCaseKey: r.credentialUseCaseKey, purpose: r.purpose,
+        valid: result.valid, reason: result.reason, verifiedAt: result.verifiedAt,
+        credentials: credentials.map((c) => ({ id: c.id, type: c.type, valid: c.valid, reason: c.reason })),
+      },
+    }, request.log);
     return result; // 200 even when valid:false
   });
 
@@ -3838,7 +4413,29 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     }
     try {
       await executeProposal(request, p, { id: proposerUser.id, role: proposerUser.role });
-      return { proposal: proposalView(await deps.proposals.setStatus(p.id, "executed")) };
+      const executed = await deps.proposals.setStatus(p.id, "executed");
+      // EN-C. AFTER executeProposal returns, so the event means "it happened",
+      // not "it was approved" — the catch below turns a failed execution into a
+      // `failed` proposal and emits nothing.
+      // `p.orgId` is null for token kinds (they carry useCaseKey instead), so
+      // fall back to the OWNING ORG OF THE USE CASE rather than letting a
+      // tokenization proposal degrade to platform-scope and reach nobody.
+      // The payload is NOT `p.payload`: proposal payloads are internal command
+      // arguments and have already been found to carry a bcrypt passwordHash
+      // (EN-B final review). Kind + ids only.
+      await emitEvent(deps, {
+        type: "proposal.executed",
+        orgId: p.orgId || (p.useCaseKey ? await ownerOrgOfUseCase(deps, p.useCaseKey) : null),
+        useCaseKey: p.useCaseKey,
+        subjectId: p.id,
+        data: {
+          proposalId: p.id, kind: p.kind, orgId: p.orgId, useCaseKey: p.useCaseKey,
+          assetId: p.assetId, status: executed.status,
+          proposerId: p.proposerId, approvals: executed.approvals.length,
+          required: executed.required, decidedAt: executed.decidedAt,
+        },
+      }, request.log);
+      return { proposal: proposalView(executed) };
     } catch (err) {
       const code = err instanceof CodedError ? err.code : err instanceof PolicyError ? err.code : "EXECUTION_FAILED";
       // A gated issuance that fails to activate keeps no fee (parity with reject).

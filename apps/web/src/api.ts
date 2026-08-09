@@ -1,4 +1,4 @@
-import type { AccountState, ActivityEvent, AnalyticsSummary, ApiKeyView, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, ChainInfo, ChainStatus, CompanyCategory, ContractCode, CredentialStatusInfo, CredentialTypeInfo, CredentialTypeSpec, CredentialUseCase, DidDocument, EligibleHolder, HeldCredential, IdentityDashboardData, IdentityRegistryInfo, IdentityResult, InvoiceRowResult, IssuedCredential, Listing, LoginKeyInfo, MintedApiKey, OrgCapabilities, OrgMember, OrgType, Organization, Portfolio, ProvisionResult, Proposal, QrLoginPoll, QrLoginStart, Role, SessionPrincipal, SessionUser, StagedInvoice, TokenInfo, TokenStandard, TokenizeResult, Trade, UseCase, UseCaseTemplate, UseCaseTemplateMeta, VerificationRequest, VerificationResult } from "./types.js";
+import type { AccountState, ActivityEvent, AnalyticsSummary, ApiKeyView, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, ChainInfo, ChainStatus, CompanyCategory, ContractCode, CredentialStatusInfo, CredentialTypeInfo, CredentialTypeSpec, CredentialUseCase, DidDocument, EligibleHolder, HeldCredential, IdentityDashboardData, IdentityRegistryInfo, IdentityResult, InvoiceRowResult, IssuedCredential, Listing, LoginKeyInfo, MintedApiKey, MintedWebhook, OrgCapabilities, OrgMember, OrgType, Organization, PlatformEvent, Portfolio, ProvisionResult, Proposal, QrLoginPoll, QrLoginStart, Role, SessionPrincipal, SessionUser, StagedInvoice, TokenInfo, TokenStandard, TokenizeResult, Trade, UseCase, UseCaseTemplate, UseCaseTemplateMeta, VerificationRequest, VerificationResult, WebhookDelivery, WebhookEndpoint } from "./types.js";
 
 export interface Currency { code: string; label: string; }
 export interface CashBalance { currency: string; address: string; amount: string; }
@@ -241,6 +241,59 @@ export const api = {
   revokeApiKey: (token: string, orgId: string, keyId: string) =>
     // 200 → { key }: a SOFT revoke — the row stays as the audit trail.
     request<{ key: ApiKeyView }>(`/orgs/${encodeURIComponent(orgId)}/api-keys/${encodeURIComponent(keyId)}`, token, { method: "DELETE" }),
+  // EN-C webhooks. `createWebhook`/`rotateWebhookSecret` are the only calls that
+  // ever see a signing secret; no read route returns it and nothing here stores
+  // it. Unlike the api-key routes above, every webhook route answers with a
+  // NAMED ENVELOPE (`{ endpoints }`, `{ endpoint }`, `{ deliveries }`), so each
+  // wrapper unwraps it — callers get the row(s) and never the envelope.
+  listWebhooks: (token: string, orgId: string) =>
+    request<{ endpoints: WebhookEndpoint[] }>(`/orgs/${encodeURIComponent(orgId)}/webhooks`, token).then((r) => r.endpoints),
+  createWebhook: (token: string, orgId: string, body: { url: string; description?: string; eventTypes: string[]; useCaseKey?: string }) =>
+    // 201 → { endpoint, secret }. 400 INVALID_WEBHOOK_URL when the URL fails the
+    // SSRF guard; 403 ORG_CAPABILITY_MISSING when a type is outside the envelope.
+    request<MintedWebhook>(`/orgs/${encodeURIComponent(orgId)}/webhooks`, token, { method: "POST", body: JSON.stringify(body) }),
+  updateWebhook: (token: string, orgId: string, whId: string, body: { url?: string; description?: string | null; eventTypes?: string[]; useCaseKey?: string | null; status?: "active" | "disabled" }) =>
+    // 200 → { endpoint }. `status: "active"` is the RE-ENABLE: the server clears
+    // disabledReason/disabledAt and resets both failure counters and failingSince.
+    request<{ endpoint: WebhookEndpoint }>(`/orgs/${encodeURIComponent(orgId)}/webhooks/${encodeURIComponent(whId)}`, token, { method: "PATCH", body: JSON.stringify(body) })
+      .then((r) => r.endpoint),
+  rotateWebhookSecret: (token: string, orgId: string, whId: string) =>
+    // 200 → { endpoint, secret }: a NEW signing secret with NO overlap window —
+    // the previous one stops signing anything the moment this returns.
+    request<MintedWebhook>(`/orgs/${encodeURIComponent(orgId)}/webhooks/${encodeURIComponent(whId)}/rotate`, token, { method: "POST", body: "{}" }),
+  deleteWebhook: (token: string, orgId: string, whId: string) =>
+    // 200 → { endpoint }: a SOFT delete. The row stays so its delivery history
+    // keeps a destination to point at, but it stops matching new events at once.
+    request<{ endpoint: WebhookEndpoint }>(`/orgs/${encodeURIComponent(orgId)}/webhooks/${encodeURIComponent(whId)}`, token, { method: "DELETE" })
+      .then((r) => r.endpoint),
+  testWebhook: (token: string, orgId: string, whId: string) =>
+    // 202 → { delivery, event }: QUEUED, not delivered — the dispatcher sends on
+    // its own poll. 409 ENDPOINT_DISABLED when the endpoint is switched off.
+    request<{ delivery: WebhookDelivery; event: { id: string; seq: number; type: string; occurredAt: string } }>(
+      `/orgs/${encodeURIComponent(orgId)}/webhooks/${encodeURIComponent(whId)}/test`, token, { method: "POST", body: "{}" },
+    ),
+  webhookDeliveries: (token: string, orgId: string, whId: string, limit?: number) =>
+    request<{ deliveries: WebhookDelivery[] }>(
+      `/orgs/${encodeURIComponent(orgId)}/webhooks/${encodeURIComponent(whId)}/deliveries${limit ? `?limit=${limit}` : ""}`, token,
+    ).then((r) => r.deliveries),
+  replayWebhookDelivery: (token: string, orgId: string, whId: string, deliveryId: string) =>
+    // 200 → { delivery } reset to pending with a fresh retry budget.
+    // 409 DELIVERY_INFLIGHT when a dispatcher already claimed the row.
+    request<{ delivery: WebhookDelivery }>(
+      `/orgs/${encodeURIComponent(orgId)}/webhooks/${encodeURIComponent(whId)}/deliveries/${encodeURIComponent(deliveryId)}/replay`,
+      token, { method: "POST", body: "{}" },
+    ).then((r) => r.delivery),
+  // The durable cursor. `after` is EXCLUSIVE, so the documented catch-up loop is
+  // `after = nextAfter` — it never re-reads and never skips, and an empty page
+  // hands the caller's own cursor back.
+  events: (token: string, opts: { after?: number; type?: string; limit?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.after !== undefined) q.set("after", String(opts.after));
+    if (opts.type) q.set("type", opts.type);
+    if (opts.limit !== undefined) q.set("limit", String(opts.limit));
+    const qs = q.toString();
+    return request<{ events: PlatformEvent[]; nextAfter: number }>(`/events${qs ? `?${qs}` : ""}`, token);
+  },
   certificateUrl: (id: string): string => `${BASE}/credentials/${encodeURIComponent(id)}/certificate.pdf`,
   didResolveUrl: (did: string): string => `${BASE}/dids/${encodeURIComponent(did)}/resolve`,
   myCredentials: (token: string) => request<HeldCredential[]>("/me/credentials", token),

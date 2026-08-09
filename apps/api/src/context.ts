@@ -18,6 +18,7 @@ import type {
   CredentialUseCaseRepository,
   CredentialUseCaseTemplateRepository,
   DocumentRepository,
+  EventRepository,
   ListingRepository,
   LoginKeyRepository,
   OrganizationRepository,
@@ -26,8 +27,11 @@ import type {
   UseCaseRepository,
   UserRepository,
   VerificationRequestRepository,
+  WebhookDeliveryRepository,
+  WebhookEndpointRepository,
 } from "./persistence/types.js";
 import type { IdentityRegistry } from "./registry.js";
+import type { SecretBox } from "./webhooks/secret-box.js";
 
 export interface AppDeps {
   useCases: UseCaseRepository;
@@ -52,6 +56,30 @@ export interface AppDeps {
   stagedInvoices: StagedInvoiceRepository;
   /** Machine credentials (EN-B): the auth seam resolves `tl_live_…` bearers through this. */
   apiKeys: ApiKeyRepository;
+  /** EN-C event outbox: the durable, globally ordered log integrators read. */
+  events: EventRepository;
+  webhookEndpoints: WebhookEndpointRepository;
+  webhookDeliveries: WebhookDeliveryRepository;
+  /**
+   * Dev/demo only: permits an http:// webhook endpoint on loopback. REQUIRED,
+   * not optional, so that every construction site has to state its posture —
+   * an omitted-and-therefore-undefined flag would silently mean "secure" in one
+   * harness and be forgotten in the one that mattered. The registration-time URL
+   * guard and the dispatcher's delivery-time re-check must be given the SAME
+   * value, or a URL that was legal to save becomes undeliverable (or worse, the
+   * reverse).
+   */
+  webhooksAllowInsecure: boolean;
+  /**
+   * Endpoint signing secrets at rest. REQUIRED, and on AppDeps rather than
+   * constructed per call site, because BOTH halves of the system must use the
+   * same box: the routes seal a freshly minted secret, the dispatcher opens it
+   * to sign. Two independently built boxes over two different master keys would
+   * pass every unit test and then fail to sign a single real delivery. Required
+   * (not optional) so a missed construction site is a compile error rather than
+   * an `undefined` that only shows up on the first webhook a customer registers.
+   */
+  secretBox: SecretBox;
   keystore: Keystore;
   /** True iff DID_MASTER_KEY was explicitly configured (production must set it). */
   didMasterConfigured: boolean;

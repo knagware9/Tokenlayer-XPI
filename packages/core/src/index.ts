@@ -15,6 +15,7 @@ export { computeCashflowSchedule, splitProRata, type TermsConfig, type Scheduled
 export { auditGenesis, auditEntryHash, verifyChain, type AuditChainFields, type ChainEntry, type VerifyResult } from "./audit-chain.js";
 export { ORG_DOMAINS, ORG_OPERATING_ROLES, orgDomainEnabled, orgRoleEnabled, validateOrgCapabilities, type OrgDomain, type OrgOperatingRole, type OrgCapabilities } from "./org-capabilities.js";
 export { API_SCOPES, API_SCOPE_RESOURCES, scopeAllows, validateScopes, type ApiScope, type ApiScopeGrant } from "./api-scopes.js";
+export { EVENT_TYPES, isEventType, validateEventTypes, type EventType, type EventSubscription } from "./events.js";
 // Explicit re-export (not `export *`) because identity's `IssueInput` would
 // otherwise collide with lifecycle-engine's asset `IssueInput` (TS2308).
 export {

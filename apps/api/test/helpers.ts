@@ -7,6 +7,7 @@ import { createEngine } from "../src/context.js";
 import { loadCurrencies } from "../src/currencies.js";
 import { createMemoryChallengeStore } from "../src/identity-challenges.js";
 import { createKeystore } from "../src/keystore.js";
+import { createSecretBox } from "../src/webhooks/secret-box.js";
 import { createMemoryQrLoginStore } from "../src/qr-login-sessions.js";
 import {
   MemoryAccountRepository,
@@ -21,6 +22,7 @@ import {
   MemoryProposalRepository,
   MemoryCashRepository,
   MemoryDocumentRepository,
+  MemoryEventRepository,
   MemoryListingRepository,
   MemoryStagedInvoiceRepository,
   MemoryCredentialUseCaseRepository,
@@ -28,6 +30,8 @@ import {
   MemoryUseCaseRepository,
   MemoryUserRepository,
   MemoryVerificationRequestRepository,
+  MemoryWebhookDeliveryRepository,
+  MemoryWebhookEndpointRepository,
 } from "../src/persistence/memory.js";
 import { ensurePlatformIssuerOrg } from "../src/platform-org.js";
 import type { IdentityRegistry } from "../src/registry.js";
@@ -54,6 +58,13 @@ export interface TestAppHandle {
   loginKeys: MemoryLoginKeyRepository;
   organizations: MemoryOrganizationRepository;
   audit: MemoryAuditRepository;
+  /**
+   * The very deps this app was built over. Needed where a test must drive a
+   * NON-HTTP path of the same instance — EN-C's emit/fan-out is the case:
+   * `emitEvent(deps, …)` is what a domain route calls internally, and the
+   * webhook tests have to prove which endpoints a real fan-out reaches.
+   */
+  deps: AppDeps;
 }
 
 export async function buildTestApp(opts: TestAppOptions = {}): Promise<FastifyInstance> {
@@ -81,6 +92,9 @@ export async function buildTestAppWithRepos(opts: TestAppOptions = {}): Promise<
   const verificationRequests = new MemoryVerificationRequestRepository();
   const stagedInvoices = new MemoryStagedInvoiceRepository();
   const apiKeys = new MemoryApiKeyRepository();
+  const events = new MemoryEventRepository();
+  const webhookEndpoints = new MemoryWebhookEndpointRepository();
+  const webhookDeliveries = new MemoryWebhookDeliveryRepository();
   const loginKeys = new MemoryLoginKeyRepository();
   const keystore = createKeystore("11".repeat(32));
   // seedDefaults now creates the second PlatformAdmin (admin2@tokenlayer.dev) so
@@ -96,7 +110,15 @@ export async function buildTestAppWithRepos(opts: TestAppOptions = {}): Promise<
   // The suite makes many logins from one IP; raise the throttle unless a test opts into it.
   const deps: AppDeps = {
     useCases, credentialUseCases, credentialTemplates, rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents, cashflows, proposals,
-    organizations, credentials, verificationRequests, stagedInvoices, apiKeys, keystore, didMasterConfigured: opts.didMasterConfigured ?? true,
+    organizations, credentials, verificationRequests, stagedInvoices, apiKeys, events, webhookEndpoints, webhookDeliveries,
+    // The harness never delivers anything (no dispatcher runs in tests); this is
+    // the registration-time posture, and the secure default is the right one to
+    // exercise by default.
+    webhooksAllowInsecure: false,
+    // A fixed test master key: the suite needs `open(seal(x)) === x` across a
+    // single app instance, not secrecy.
+    secretBox: createSecretBox("22".repeat(32)),
+    keystore, didMasterConfigured: opts.didMasterConfigured ?? true,
     challenges: createMemoryChallengeStore(), loginKeys, qrLogin: createMemoryQrLoginStore(), publicWebUrl: "http://localhost:5173", enabledDomains: opts.enabledDomains ?? ["tokenization", "identity"], trustedKycIssuers: opts.trustedKycIssuers,
     devIssuerSeed: opts.devIssuerSeed, isProduction: opts.isProduction,
     currencies: loadCurrencies(), jwtSecret: "test-secret", publicApiUrl: "http://test.local/api/v1",
@@ -115,7 +137,7 @@ export async function buildTestAppWithRepos(opts: TestAppOptions = {}): Promise<
     registry: opts.registry,
   };
   await ensurePlatformIssuerOrg(deps);
-  return { app: await buildApp(deps), users, apiKeys, loginKeys, organizations, audit };
+  return { app: await buildApp(deps), users, apiKeys, loginKeys, organizations, audit, deps };
 }
 
 /** All v1 API routes live under this prefix. */
