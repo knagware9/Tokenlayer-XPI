@@ -140,11 +140,20 @@ function orgCapabilityMissing(reply: FastifyReply, org: OrganizationRecord, miss
   });
 }
 
-/** Registers every /api/v1 route on the given (prefixed) instance. */
-export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
+/**
+ * Registers every /api/v1 route on the given (prefixed) instance.
+ *
+ * `sharedPrincipal` is the app-wide auth preHandler. It is a PARAMETER rather
+ * than something built here because EN-D1's production docs gate needs the very
+ * same instance: that preHandler owns the per-key rate-limit and failed-attempt
+ * counters, and a second instance would be a second, independently-refilling
+ * budget for the same key. It stays optional so a caller that only wants routes
+ * (tests, tooling) still gets a correct — if separately counted — app.
+ */
+export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrincipal?: ReturnType<typeof requirePrincipal>): void {
   // ONE preHandler instance: it owns the per-key rate-limit and failed-attempt
   // counters, so every route must share it rather than build its own.
-  const principal = requirePrincipal(deps);
+  const principal = sharedPrincipal ?? requirePrincipal(deps);
   const auth = { preHandler: principal };
   /**
    * `auth` plus an API-key scope gate. A JWT request passes the gate
