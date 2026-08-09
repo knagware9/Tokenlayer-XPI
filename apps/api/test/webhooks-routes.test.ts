@@ -629,7 +629,10 @@ describe("GET /events — the cursor (EN-C task C6)", () => {
     const b = await makeOrg(h.app, platform, "Cursor B");
 
     await emitEvent(h.deps, { type: "asset.issued", orgId: a.id, subjectId: "a1", data: { assetId: "a1" } });
-    await emitEvent(h.deps, { type: "credential.issued", orgId: b.id, subjectId: "b1", data: { credentialId: "b1" } });
+    // B's marker carries a hyphen deliberately: the substring assertion below
+    // scans the whole serialized body, and event ids are random hex, so a
+    // two-character marker like "b1" matches one ~20% of the time by chance.
+    await emitEvent(h.deps, { type: "credential.issued", orgId: b.id, subjectId: "b1-only-org-b", data: { credentialId: "b1-only-org-b" } });
     await emitEvent(h.deps, { type: "asset.transferred", orgId: a.id, subjectId: "a2", data: { assetId: "a2" } });
     await emitEvent(h.deps, { type: "proposal.executed", orgId: null, subjectId: "p1", data: { proposalId: "p1" } });
 
@@ -640,11 +643,11 @@ describe("GET /events — the cursor (EN-C task C6)", () => {
     // body — not in a payload, not in a subject, not as a stray field.
     const mine = await read(a.adminTok);
     expect(mine.events.map((e: { subjectId: string }) => e.subjectId)).toEqual(["a1", "a2"]);
-    expect(JSON.stringify(mine)).not.toContain("b1");
+    expect(JSON.stringify(mine)).not.toContain("b1-only-org-b");
     expect(mine.nextAfter).toBe(mine.events[1].seq);
 
     const theirs = await read(b.adminTok);
-    expect(theirs.events.map((e: { subjectId: string }) => e.subjectId)).toEqual(["b1"]);
+    expect(theirs.events.map((e: { subjectId: string }) => e.subjectId)).toEqual(["b1-only-org-b"]);
 
     // The cursor is EXCLUSIVE — `after = nextAfter` never re-reads and never
     // skips, which is the whole contract of the documented catch-up loop.
@@ -658,7 +661,7 @@ describe("GET /events — the cursor (EN-C task C6)", () => {
 
     // A PlatformAdmin reads every org's log, including the platform-scope row.
     const all = await read(platform);
-    expect(all.events.map((e: { subjectId: string }) => e.subjectId)).toEqual(["a1", "b1", "a2", "p1"]);
+    expect(all.events.map((e: { subjectId: string }) => e.subjectId)).toEqual(["a1", "b1-only-org-b", "a2", "p1"]);
 
     // …and `type` narrows within the caller's own scope, never outside it.
     expect((await read(a.adminTok, "?type=asset.issued")).events.map((e: { subjectId: string }) => e.subjectId)).toEqual(["a1"]);
