@@ -3331,22 +3331,20 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     // are indistinguishable from outside: no existence oracle, same rule as
     // `scopedProposal` and `orgKey`.
     if (!delivery || delivery.endpointId !== endpoint.id) return notFound(reply, "delivery not found");
-    // An inflight row is claimed by a running dispatcher pass. Resetting it here
+    // An inflight row is claimed by a running dispatcher pass, and resetting it
     // would let a second worker claim it while the first is mid-POST — a
-    // double-send, and the settle that follows would clobber the reset anyway.
-    if (delivery.status === "inflight") {
+    // double-send, whose settle would clobber the reset anyway.
+    //
+    // THE CHECK IS IN THE WRITE, not in the read above. `repo.requeue` carries
+    // the `status !== "inflight"` predicate into the UPDATE itself, so a claim
+    // landing between this route's read and its write loses instead of being
+    // silently undone. `attempts` goes back to zero inside the same statement,
+    // so a replayed delivery gets the FULL retry schedule rather than dying on
+    // its next attempt because the original run exhausted it.
+    const replayed = await deps.webhookDeliveries.requeue(delivery.id, new Date().toISOString());
+    if (!replayed) {
       return reply.code(409).send({ error: "DELIVERY_INFLIGHT", message: "this delivery is being attempted right now" });
     }
-
-    const replayed = await deps.webhookDeliveries.update(delivery.id, {
-      status: "pending",
-      // Back to zero, so a replayed delivery gets the FULL retry schedule rather
-      // than dying on its next attempt because the original run exhausted it.
-      attempts: 0,
-      nextAttemptAt: new Date().toISOString(),
-      claimedAt: null,
-      claimedBy: null,
-    });
     await deps.audit.append({
       actorId: claims.id, action: "webhook-delivery-replayed" as LifecycleAction,
       payload: { orgId: id, endpointId: endpoint.id, deliveryId: delivery.id, eventId: delivery.eventId },
@@ -3360,11 +3358,29 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
    * endpoints that existed at the time.
    *
    * ORG SCOPE IS THE WHOLE SECURITY PROPERTY HERE. A PlatformAdmin reads every
-   * org's log; ANYONE ELSE reads exactly their own, and `claims.orgId ?? null`
-   * is what the repo filters on — `null` selects platform-scope rows only, never
-   * "all rows" (that is `undefined`, and only the PlatformAdmin branch produces
-   * it). The two are one keystroke apart and mean opposite things, which is why
-   * the branch is spelled out rather than folded into a ternary on the value.
+   * org's log; ANYONE ELSE reads exactly their own org's, and NOBODY ELSE reads
+   * the platform-scope bucket. `undefined` (every org) and `null` (the
+   * platform-scope rows) are one keystroke apart and mean opposite things, so
+   * both branches are spelled out rather than folded into a ternary on a value.
+   *
+   * THE ORG-LESS PRINCIPAL READS NOTHING, and that guard is the fix for a real
+   * cross-tenant leak rather than a defensive flourish. `requireScope` only
+   * narrows API KEYS, so a JWT session carries `webhooks:read` unconditionally
+   * and this route has no role check of its own; before the guard below, every
+   * principal whose `orgId` is null — a seeded user, a holder, an org-less
+   * Verifier desk operator — selected exactly the `orgId: null` rows. That is
+   * not an empty bucket, because resolution failures land in it: an asset event
+   * whose use case has no `ownerOrgId` (every seeded/legacy tokenization use
+   * case), a credential whose holder DID no longer resolves, a verification
+   * raised at an org-less desk. A gold-loan buyer could read a carbon asset's
+   * `asset.issued` payload it gets a 404 for on `GET /assets/:id`, and a third
+   * party's `holderDid` and requested credential types out of
+   * `verification.requested`.
+   *
+   * Nothing legitimate needs the null branch: a PlatformAdmin already reads every
+   * row including the platform-scope ones through the `{}` branch, and no route
+   * can create an endpoint whose `orgId` is null, so no org-less principal has
+   * anything of its own in this log to read.
    *
    * `after` is EXCLUSIVE (`seq > after`), so the documented loop —
    * `after = nextAfter` — never re-reads and never skips. An empty page returns
@@ -3393,9 +3409,22 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const raw = Number(q.after);
     const after = Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0;
     const limit = pageLimit(q.limit, EVENT_PAGE_DEFAULT, EVENT_PAGE_MAX);
+    // An ABSENT `orgId` key is what the repos read as "every org", so the
+    // PlatformAdmin branch is the one that leaves `scope` empty — and the only
+    // one. A non-admin either narrows to a real org id or reads nothing at all:
+    // it can never reach the query with `orgId: null`, which would have selected
+    // the platform-scope bucket (see the note above). Written as a block rather
+    // than a spread ternary so the narrowing is the compiler's job too — `scope`
+    // cannot hold a null or undefined `orgId` in any branch.
+    const scope: { orgId?: string } = {};
+    if (claims.role !== "PlatformAdmin") {
+      // The caller's own cursor comes back, so the documented polling loop is
+      // unaffected — it simply never advances.
+      if (!claims.orgId) return { events: [], nextAfter: after };
+      scope.orgId = claims.orgId;
+    }
     const events = await deps.events.listAfter(after, {
-      // `{}` OMITS the key: the repos read `orgId === undefined` as "every org".
-      ...(claims.role === "PlatformAdmin" ? {} : { orgId: claims.orgId ?? null }),
+      ...scope,
       ...(q.type ? { type: q.type } : {}),
       limit,
     });

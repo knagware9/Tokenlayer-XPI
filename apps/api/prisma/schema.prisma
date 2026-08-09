@@ -383,8 +383,14 @@ model Event {
 }
 
 // An org's declared interest. `secretEncrypted` is AES-256-GCM under
-// DID_MASTER_KEY, NOT a hash: HMAC signing must REPRODUCE the secret, so a
-// one-way hash would make signing impossible.
+// WEBHOOK_MASTER_KEY (which falls back to DID_MASTER_KEY when unset, so an
+// existing deployment needs no re-encryption), NOT a hash: HMAC signing must
+// REPRODUCE the secret, so a one-way hash would make signing impossible.
+//
+// There is no key versioning and no re-encryption path, so CHANGING the key in
+// place makes every stored secret unopenable. The dispatcher treats that as a
+// platform fault — the attempt fails with an honest reason and disables nothing
+// — but the deliveries do not recover until the old key is restored.
 model WebhookEndpoint {
   id                       String    @id @default(cuid())
   orgId                    String? // null = platform-scope, PlatformAdmin only

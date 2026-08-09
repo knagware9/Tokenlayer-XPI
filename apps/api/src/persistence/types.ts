@@ -705,5 +705,18 @@ export interface WebhookDeliveryRepository {
   claim(id: string, workerId: string, now: string): Promise<WebhookDeliveryRecord | null>;
   /** Rows stuck inflight since before `before` — crash recovery. */
   reclaimStale(before: string): Promise<number>;
+  /**
+   * CAS re-queue for an operator replay: any status EXCEPT `inflight` ->
+   * `pending`, attempts back to 0, due now. Returns null when the row was
+   * already claimed, which the route turns into a 409.
+   *
+   * The predicate has to live in the write, not in a prior read. Replay used to
+   * read the row, check `status !== "inflight"`, and then issue a plain update:
+   * a dispatcher claiming in that gap had its claim silently reset while it was
+   * mid-POST, so the row could be claimed and sent a second time and the
+   * settle that followed clobbered the replay. Same compare-and-set discipline
+   * as `claim` — the two are the only writers that contend for this column.
+   */
+  requeue(id: string, at: string): Promise<WebhookDeliveryRecord | null>;
   update(id: string, patch: Partial<Pick<WebhookDeliveryRecord, "status" | "attempts" | "nextAttemptAt" | "lastAttemptAt" | "responseStatus" | "responseError" | "durationMs" | "claimedAt" | "claimedBy">>): Promise<WebhookDeliveryRecord>;
 }

@@ -1242,6 +1242,21 @@ export class PrismaWebhookDeliveryRepository implements WebhookDeliveryRepositor
     const r = await prisma.webhookDelivery.findUnique({ where: { id } });
     return r ? toWebhookDelivery(r) : null;
   }
+  /**
+   * Operator replay, as a compare-and-set. The `not: "inflight"` predicate is
+   * inside the WHERE for the same reason `claim`'s is: a dispatcher claiming
+   * between a read and a plain update would have its claim reset while it was
+   * mid-POST. The loser of the race updates 0 rows and gets a 409.
+   */
+  async requeue(id: string, at: string): Promise<WebhookDeliveryRecord | null> {
+    const n = await prisma.webhookDelivery.updateMany({
+      where: { id, status: { not: "inflight" } },
+      data: { status: "pending", attempts: 0, nextAttemptAt: new Date(at), claimedAt: null, claimedBy: null },
+    });
+    if (n.count === 0) return null;
+    const r = await prisma.webhookDelivery.findUnique({ where: { id } });
+    return r ? toWebhookDelivery(r) : null;
+  }
   /** Crash recovery: an inflight row whose worker died is nobody's, so it goes back in the queue. */
   async reclaimStale(before: string): Promise<number> {
     const n = await prisma.webhookDelivery.updateMany({

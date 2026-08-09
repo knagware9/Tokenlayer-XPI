@@ -912,6 +912,19 @@ export class MemoryWebhookDeliveryRepository implements WebhookDeliveryRepositor
     }
     return count;
   }
+  async requeue(deliveryId: string, at: string): Promise<WebhookDeliveryRecord | null> {
+    const rec = this.byId.get(deliveryId);
+    // The `!== "inflight"` predicate is the compare half, and it must sit HERE
+    // rather than in the caller: a claim landing between a caller's read and its
+    // write would be reset mid-POST.
+    if (!rec || rec.status === "inflight") return null;
+    rec.status = "pending";
+    rec.attempts = 0;
+    rec.nextAttemptAt = at;
+    rec.claimedAt = null;
+    rec.claimedBy = null;
+    return { ...rec };
+  }
   async update(deliveryId: string, patch: Partial<Pick<WebhookDeliveryRecord, "status" | "attempts" | "nextAttemptAt" | "lastAttemptAt" | "responseStatus" | "responseError" | "durationMs" | "claimedAt" | "claimedBy">>): Promise<WebhookDeliveryRecord> {
     const rec = this.byId.get(deliveryId);
     if (!rec) throw new Error(`unknown webhook delivery '${deliveryId}'`);

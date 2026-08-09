@@ -41,16 +41,25 @@ function eventTypeDomain(t: string): "tokenization" | "identity" | null {
  *
  * `capabilities === null` is the UNRESTRICTED LEGACY envelope (the org predates
  * EN-A), not "no capabilities" — it offers everything, exactly as
- * `orgDomainEnabled` treats it. A PlatformAdmin is unfiltered because the server
- * does not apply the envelope to them either; filtering here would hide types
- * the platform operator can legitimately register on an org's behalf.
+ * `orgDomainEnabled` treats it.
  *
- * Offering a type the envelope excludes is not merely untidy: the create call
- * fails the WHOLE subscription with one 403, so a single out-of-envelope tick
- * loses the operator every other choice they made in the form.
+ * THE ANSWER DOES NOT DEPEND ON THE CALLER'S ROLE, and `role` is taken only so
+ * that stays visible at every call site. There used to be a PlatformAdmin
+ * bypass here, justified by "the server does not apply the envelope to them
+ * either" — which is false for THIS resource. The member-add routes do exempt a
+ * PlatformAdmin (routes.ts, POST /users and POST /orgs/:id/users); the webhook
+ * create and update routes call `subscriptionOutsideEnvelope(org, eventTypes)`
+ * unconditionally, on the TARGET org's envelope, whoever is asking. So the
+ * bypass offered a platform operator ticks the server would refuse.
+ *
+ * That is worse than untidy, and it is the exact harm the filter exists to
+ * prevent: the create call fails the WHOLE subscription with one 403, so a
+ * single out-of-envelope tick loses the operator every other choice they made
+ * in the form. DO NOT reintroduce a branch on `role` without first changing the
+ * server to match.
  */
 export function subscribableEventTypes(capabilities: OrgCapabilities | null, role: Role | null | undefined): EventType[] {
-  if (role === "PlatformAdmin") return [...EVENT_TYPES];
+  void role;
   return EVENT_TYPES.filter((t) => {
     const domain = eventTypeDomain(t);
     return domain === null || orgDomainEnabled(capabilities, domain);
@@ -841,16 +850,43 @@ function Deliveries({ orgId, endpoint }: { orgId: string; endpoint: WebhookEndpo
 }
 
 /** The integration contract: how to verify a delivery, and what the delivery
- *  guarantees actually are. Both are things integrators build on and get wrong. */
+ *  guarantees actually are. Both are things integrators build on and get wrong.
+ *
+ *  THE SNIPPET IS A MIRROR OF `verifySignature` (apps/api/src/webhooks/signing.ts)
+ *  and must stay one. It is the only piece of this console an integrator copies
+ *  into their own production server, so a shortcut taken here for brevity ships
+ *  as a defect in someone else's code. The version this replaced took exactly
+ *  the two shortcuts signing.ts warns against — a positional parse and a
+ *  `timingSafeEqual` with no length check — and against real header output a
+ *  short `v1=` threw RangeError, a missing header threw TypeError (both a 500 an
+ *  unauthenticated attacker can trigger at will), and `v2=zz,t=…,v1=…` rejected
+ *  a perfectly valid delivery, defeating the version prefix on the day we use it. */
 function VerifyingDeliveries(): JSX.Element {
   const snippet = [
-    `const sig = req.headers["${SIGNATURE_HEADER.toLowerCase()}"];          // t=<unix>,v1=<hex>`,
-    "const [t, v1] = sig.split(\",\").map(p => p.split(\"=\")[1]);",
+    `const sig = req.headers["${SIGNATURE_HEADER.toLowerCase()}"];   // t=<unix>,v1=<hex>`,
+    "if (!sig) return res.sendStatus(400);",
+    "",
+    "// PARSE BY NAME, never by position: v1= is not promised to be the last (or",
+    "// second) parameter, and a future v2= must not shift what you read.",
+    "const parts = new Map();",
+    "for (const part of sig.split(\",\")) {",
+    "  const i = part.indexOf(\"=\");",
+    "  if (i > 0) parts.set(part.slice(0, i).trim(), part.slice(i + 1).trim());",
+    "}",
+    "const rawT = parts.get(\"t\"), v1 = parts.get(\"v1\");",
+    "// Number(\"\") is 0, not NaN, so an empty t= must be rejected here and not by",
+    "// the freshness check below.",
+    "if (!rawT || !v1 || !Number.isFinite(Number(rawT))) return res.sendStatus(400);",
+    "const t = Number(rawT);",
+    "if (Math.abs(Math.floor(Date.now() / 1000) - t) > 300) return res.sendStatus(400);",
     "",
     "// rawBody is the EXACT bytes of the request body — not JSON.parse'd and re-stringified.",
-    "const expected = crypto.createHmac(\"sha256\", SECRET).update(`${t}.${rawBody}`).digest(\"hex\");",
-    "const fresh = Math.abs(Math.floor(Date.now()/1000) - Number(t)) <= 300;",
-    "const ok = fresh && crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(v1));",
+    "const expected = Buffer.from(",
+    "  crypto.createHmac(\"sha256\", SECRET).update(`${t}.${rawBody}`).digest(\"hex\"), \"hex\");",
+    "const got = Buffer.from(v1, \"hex\");",
+    "// LENGTH FIRST: timingSafeEqual THROWS on a length mismatch, so comparing",
+    "// straight away turns an attacker-controlled short v1= into a 500.",
+    "const ok = expected.length === got.length && crypto.timingSafeEqual(expected, got);",
   ].join("\n");
   return (
     <Card
@@ -871,6 +907,14 @@ function VerifyingDeliveries(): JSX.Element {
           The timestamp is <em>inside</em> the signed material, so it cannot be re-stamped by someone replaying a captured
           delivery. Reject anything more than <strong>300 seconds</strong> from your clock, and compare with a constant-time
           comparison — never <span className="font-mono">===</span>.
+        </p>
+        <p>
+          <strong>Two details above are load-bearing, not style.</strong> Compare buffer <em>lengths</em> before calling{" "}
+          <span className="font-mono">timingSafeEqual</span>: it throws on a length mismatch, so a one-character{" "}
+          <span className="font-mono">v1=</span> from an unauthenticated caller becomes a 500 in your handler rather than a
+          rejected delivery. And read the parameters <em>by name</em>: splitting on{" "}
+          <span className="font-mono">,</span> and taking positions works only until a delivery carries a parameter you have
+          not seen — which is exactly what the <span className="font-mono">v1=</span> prefix exists to allow.
         </p>
         <p>
           <strong>At-least-once, not exactly-once.</strong> A delivery your server handled but answered slowly (or a replay an

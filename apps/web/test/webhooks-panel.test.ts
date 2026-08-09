@@ -49,11 +49,25 @@ describe("subscribableEventTypes", () => {
     expect(offered).toContain("proposal.executed");
   });
 
-  it("does not filter a PlatformAdmin, whatever the org's envelope says", () => {
-    // The server does not apply the envelope to a PlatformAdmin either, so
-    // filtering here would hide types they can legitimately register.
-    expect(subscribableEventTypes(IDENTITY_ONLY, "PlatformAdmin")).toEqual([...EVENT_TYPES]);
-    expect(subscribableEventTypes(TOKENIZATION_ONLY, "PlatformAdmin")).toEqual([...EVENT_TYPES]);
+  it("filters a PlatformAdmin too — the server applies the envelope to them here", () => {
+    // INVERTED from the assertion this test shipped with, which pinned the claim
+    // that a PlatformAdmin is unfiltered "because the server does not apply the
+    // envelope to them either". For webhooks that is not true: POST and PATCH
+    // /orgs/:id/webhooks both call `subscriptionOutsideEnvelope` unconditionally
+    // on the target org's envelope, unlike the member-add routes which really do
+    // exempt a PlatformAdmin. Offering the extra ticks therefore offered a
+    // platform operator a form the server rejects WHOLESALE with one 403,
+    // losing every other choice in it.
+    expect(subscribableEventTypes(IDENTITY_ONLY, "PlatformAdmin")).toEqual(
+      subscribableEventTypes(IDENTITY_ONLY, "OrgAdmin"),
+    );
+    expect(subscribableEventTypes(IDENTITY_ONLY, "PlatformAdmin").filter((t) => t.startsWith("asset."))).toEqual([]);
+    expect(subscribableEventTypes(TOKENIZATION_ONLY, "PlatformAdmin")).toEqual(
+      subscribableEventTypes(TOKENIZATION_ONLY, "OrgAdmin"),
+    );
+    // ...and the legacy (null) envelope still offers a PlatformAdmin everything,
+    // so this is the ENVELOPE talking and not a blanket refusal.
+    expect(subscribableEventTypes(null, "PlatformAdmin")).toEqual([...EVENT_TYPES]);
   });
 
   it("actually consults the envelope — the two orgs are offered different lists", () => {

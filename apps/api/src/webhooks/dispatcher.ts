@@ -37,7 +37,15 @@
  *        refusals are tracked in their own counter and disable nothing, because
  *        their cause sits outside our trust boundary — an attacker who can
  *        degrade resolution for the endpoint's hostname would otherwise silence
- *        an integrator without sending the victim a single packet.
+ *        an integrator without sending the victim a single packet. The same rule
+ *        caught a THIRD case later: a signing secret we cannot decrypt, which is
+ *        a fault entirely on our side of the boundary (a WEBHOOK_MASTER_KEY
+ *        rotation), and which used to be classified as the integrator's fault
+ *        and disable every endpoint on the platform. See the send loop below.
+ *
+ *    NOTE that this counter counts ATTEMPTS, not whole dead-lettered deliveries
+ *    — see AUTO_DISABLE_AFTER, where the choice and the design doc's earlier
+ *    wording are reconciled.
  *
  * WHAT THIS DESIGN DOES NOT DO. The dispatcher is in-process: while the API is
  * down, events are still recorded by the emit path but nothing is delivered, and
@@ -47,7 +55,6 @@
  * worker.
  */
 import { randomUUID } from "node:crypto";
-import { env } from "../env.js";
 import type { EventRepository, WebhookDeliveryRepository, WebhookEndpointRepository } from "../persistence/types.js";
 import type { SecretBox } from "./secret-box.js";
 import { signatureHeader } from "./signing.js";
@@ -56,6 +63,18 @@ import { checkUrl, type UrlGuardOptions } from "./url-guard.js";
 /** Delays BEFORE attempts 2..6 — six attempts spanning ~8h. */
 export const BACKOFF_MS = [30_000, 120_000, 600_000, 3_600_000, 21_600_000] as const;
 export const MAX_ATTEMPTS = BACKOFF_MS.length + 1;
+/**
+ * Consecutive failed ATTEMPTS — not whole dead-lettered deliveries — that are
+ * attributable to the endpoint, and which must ALSO satisfy
+ * AUTO_DISABLE_MIN_AGE_MS below.
+ *
+ * "Attempts" is the deliberate choice, and the design doc used to say the
+ * opposite. The reason it said deliveries was the burst — a count alone is
+ * exhausted by one pass over a backlog — and the time floor answers that
+ * directly and better. Counting whole deliveries instead would mean ~8h of
+ * retries per unit, so an abandoned low-volume endpoint would keep being
+ * retried for weeks before the valve tripped.
+ */
 export const AUTO_DISABLE_AFTER = 20;
 /**
  * How long a failure run must have PERSISTED before auto-disable may fire.
@@ -103,43 +122,59 @@ function withJitter(ms: number): number {
   return Math.round(ms * (0.8 + Math.random() * 0.4));
 }
 
-export const httpSender: Sender = async (url, body, headers) => {
-  const res = await fetch(url, {
-    method: "POST",
-    body,
-    headers: { ...headers, "content-type": "application/json" },
-    // A SECURITY CONTROL, not a preference. The URL guard only ever inspects the
-    // REGISTERED url; a 302 to http://169.254.169.254/ would send the next hop
-    // to an address that has been through no check at all, turning this server
-    // into the org's proxy for its own metadata service. Refusing to follow
-    // redirects is what keeps "the URL we validated" and "the URL we requested"
-    // the same string. A 3xx is therefore a failed attempt, never a hop.
-    redirect: "manual",
-    signal: AbortSignal.timeout(env.webhooksTimeoutMs),
-  });
-  // Only the status is part of the delivery contract, so the body is read purely
-  // to release the socket — and read BOUNDED. `res.text()` would buffer whatever
-  // the endpoint chooses to send, so an integrator streaming an endless body
-  // could pin this worker's memory and hold the pass open until the timeout.
-  // Reading a capped prefix and then cancelling bounds both.
-  const reader = res.body?.getReader();
-  if (reader) {
-    try {
-      let read = 0;
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        read += value?.byteLength ?? 0;
-        if (read >= MAX_RESPONSE_BYTES) break;
+/**
+ * The real sender, as a FACTORY rather than a constant, so this module imports
+ * no configuration at all.
+ *
+ * The timeout is the only thing here that was ever configurable, and reading it
+ * from `env.js` at module scope made importing this file a boot-time assertion:
+ * `env.ts` throws when JWT_SECRET is absent, `.env` is gitignored, and so in a
+ * clone, in CI or in a fresh worktree the DISPATCHER TEST FILE FAILED TO
+ * COLLECT — sixteen tests, including every auto-disable and CAS-claim proof,
+ * silently did not run while the suite still reported all green. A worker whose
+ * security evidence only exists on the author's machine has no security
+ * evidence. Configuration is therefore read exactly once, in server.ts, where
+ * the process already depends on `env` anyway, and handed in.
+ */
+export function createHttpSender(timeoutMs: number): Sender {
+  return async (url, body, headers) => {
+    const res = await fetch(url, {
+      method: "POST",
+      body,
+      headers: { ...headers, "content-type": "application/json" },
+      // A SECURITY CONTROL, not a preference. The URL guard only ever inspects
+      // the REGISTERED url; a 302 to http://169.254.169.254/ would send the next
+      // hop to an address that has been through no check at all, turning this
+      // server into the org's proxy for its own metadata service. Refusing to
+      // follow redirects is what keeps "the URL we validated" and "the URL we
+      // requested" the same string. A 3xx is a failed attempt, never a hop.
+      redirect: "manual",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    // Only the status is part of the delivery contract, so the body is read
+    // purely to release the socket — and read BOUNDED. `res.text()` would buffer
+    // whatever the endpoint chooses to send, so an integrator streaming an
+    // endless body could pin this worker's memory and hold the pass open until
+    // the timeout. Reading a capped prefix and then cancelling bounds both.
+    const reader = res.body?.getReader();
+    if (reader) {
+      try {
+        let read = 0;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          read += value?.byteLength ?? 0;
+          if (read >= MAX_RESPONSE_BYTES) break;
+        }
+      } catch {
+        /* a truncated or aborted body says nothing about delivery — the status did */
+      } finally {
+        await reader.cancel().catch(() => {});
       }
-    } catch {
-      /* a truncated or aborted body says nothing about delivery — the status did */
-    } finally {
-      await reader.cancel().catch(() => {});
     }
-  }
-  return { status: res.status };
-};
+    return { status: res.status };
+  };
+}
 
 /** One pass. Returns how many deliveries this worker actually handled. */
 export async function dispatchDue(deps: DispatchDeps): Promise<number> {
@@ -181,13 +216,52 @@ export async function dispatchDue(deps: DispatchDeps): Promise<number> {
     let responseStatus: number | null = null;
     let responseError: string | null = null;
 
+    // OPEN THE SIGNING SECRET BEFORE THE SEND, AND OUTSIDE ITS try.
+    //
+    // This is not a tidiness move. Inside the try, a GCM open failure was caught
+    // by the same `catch` as a TLS reset and classified as evidence about the
+    // INTEGRATOR'S SERVER. So rotating WEBHOOK_MASTER_KEY — which env.ts
+    // actively advises, with no key-versioning or re-encryption path — made
+    // every stored secret unopenable, and the dispatcher answered by attempting
+    // zero HTTP sends and then DISABLING EVERY ORG'S ENDPOINT with the reason
+    // "20 consecutive delivery failures over N minutes". That reason is false,
+    // and it sends an operator to audit an integrator's server over a mistake
+    // made on our side of the boundary.
+    //
+    // It is the same class the guard refusal was already hardened for: A FAILURE
+    // WHOSE CAUSE IS OURS MUST NEVER DISABLE SOMEONE ELSE'S ENDPOINT. So it gets
+    // its own category, below, and touches neither health counter.
+    let secret: string | null = null;
+    try {
+      secret = deps.secretBox.open(endpoint.secretEncrypted);
+    } catch (err) {
+      responseError =
+        "signing secret could not be decrypted — this is a PLATFORM configuration fault, " +
+        "not a fault of this endpoint (check WEBHOOK_MASTER_KEY): " +
+        (err instanceof Error ? err.message : String(err));
+    }
+    const secretUnavailable = secret === null;
+
     // RE-CHECK THE URL (see the header note). A guard rejection is a FAILED
     // ATTEMPT, not a silent skip: it burns an attempt and is recorded with its
     // reason, so a delivery to a name that has genuinely moved onto a private
     // address still dead-letters at MAX_ATTEMPTS and shows the operator why.
     // What it must NOT do is count toward auto-disable — see below.
-    const verdict = await checkUrl(endpoint.url, deps.guard);
-    if (!verdict.ok) {
+    //
+    // An unopenable secret is treated the same way on the RETRY axis: it burns
+    // an attempt and eventually dead-letters, rather than pinning the row
+    // pending and re-running a doomed decrypt on every poll forever. Six
+    // attempts span ~8h, which is a working day for an operator to restore the
+    // key and let the backlog drain; anything still queued after that is
+    // recoverable through the cursor API, the documented catch-up path.
+    //
+    // Nested rather than flattened so the compiler enforces the ordering too:
+    // there is no path to `signatureHeader` that has not already proved the
+    // secret opened.
+    const verdict = secret === null ? null : await checkUrl(endpoint.url, deps.guard);
+    if (secret === null || verdict === null) {
+      /* secret already reported above — not one packet is sent */
+    } else if (!verdict.ok) {
       guardRefused = true;
       responseError = verdict.reason;
     } else {
@@ -204,13 +278,15 @@ export async function dispatchDue(deps: DispatchDeps): Promise<number> {
       // Signed at SEND time, not at enqueue time: the timestamp inside the MAC is
       // what the integrator's freshness check compares against, and a signature
       // minted when the row was queued would be hours stale by the last retry.
+      // The SECRET, though, was opened above — only the MAC is computed here, so
+      // nothing inside this try can fail for a reason that is ours.
       const t = Math.floor(Date.now() / 1000);
       try {
         const res = await deps.send(endpoint.url, body, {
           "Tokenlayer-Event-Id": event.id,
           "Tokenlayer-Delivery-Id": claimed.id,
           "Tokenlayer-Event-Type": event.type,
-          "Tokenlayer-Signature": signatureHeader(deps.secretBox.open(endpoint.secretEncrypted), t, body),
+          "Tokenlayer-Signature": signatureHeader(secret, t, body),
         });
         responseStatus = res.status;
         // 2xx ONLY. `< 400` would count a 302 as delivered, which is precisely
@@ -272,13 +348,27 @@ export async function dispatchDue(deps: DispatchDeps): Promise<number> {
     // auto-disable and never a wrong disable — the right way round for a counter
     // whose only consequence is switching an org's endpoint off.
     const settledAt = new Date().toISOString();
-    const endpointFailed = !ok && !guardRefused;
-    // A guard refusal leaves the endpoint counter and its clock exactly where
-    // they were: it is neither evidence of failure nor evidence of health.
+    // THE ONLY FAILURE THAT COUNTS AGAINST AN ENDPOINT IS ONE WE CAN ATTRIBUTE
+    // TO IT. Three ways an attempt fails, and only one of them is evidence about
+    // the integrator: a non-2xx or an unreachable host. A guard refusal is
+    // evidence about DNS (or about an attacker), and an unopenable signing
+    // secret is evidence about OUR OWN key configuration — in that case not a
+    // single packet left this process, so there is nothing the endpoint could
+    // have done differently. Counting either would turn a fault on our side of
+    // the boundary into an outage on someone else's.
+    const endpointFailed = !ok && !guardRefused && !secretUnavailable;
+    // A guard refusal or an unopenable secret leaves the endpoint counter and
+    // its clock exactly where they were: neither is evidence of failure, and
+    // neither is evidence of health.
     const failures = ok ? 0 : endpointFailed ? endpoint.consecutiveFailures + 1 : endpoint.consecutiveFailures;
     // "Consecutive" is meant literally: the guard passing at all breaks a run of
-    // guard refusals, whether or not the send that followed it succeeded.
-    const guardFailures = guardRefused ? endpoint.consecutiveGuardFailures + 1 : 0;
+    // guard refusals, whether or not the send that followed it succeeded. An
+    // attempt that never reached the guard leaves this run untouched too.
+    const guardFailures = guardRefused
+      ? endpoint.consecutiveGuardFailures + 1
+      : secretUnavailable
+        ? endpoint.consecutiveGuardFailures
+        : 0;
     // The clock starts at the FIRST failure of a run and is not restarted by
     // later failures in it, so `settledAt - failingSince` is the true age of the
     // run rather than the age of the most recent failure.
@@ -300,7 +390,7 @@ export async function dispatchDue(deps: DispatchDeps): Promise<number> {
       ...(shouldDisable
         ? {
             status: "disabled" as const,
-            disabledReason: `${failures} consecutive delivery failures over ${Math.round(runAgeMs / 60_000)} minutes`,
+            disabledReason: `${failures} consecutive failed delivery attempts over ${Math.round(runAgeMs / 60_000)} minutes`,
             disabledAt: settledAt,
           }
         : {}),
@@ -309,26 +399,47 @@ export async function dispatchDue(deps: DispatchDeps): Promise<number> {
   return handled;
 }
 
-export function startDispatcher(deps: Omit<DispatchDeps, "workerId">, pollMs: number): () => void {
+/**
+ * Start the poller. The returned stop function is ASYNC and settles only once
+ * any pass that was already running has finished.
+ *
+ * That await is the point. A synchronous `clearInterval` cancels the TIMER, not
+ * the pass, so a SIGTERM handler that called it and then exited immediately
+ * killed the process mid-send, leaving every row that pass had claimed sitting
+ * `inflight` — the exact thing shutdown is supposed to avoid, while the comment
+ * claimed it was avoided. Awaiting the pass makes the claim true for a pass that
+ * completes. It is not a guarantee for every case: a caller that gives up
+ * waiting, or a real crash, still strands claims, and the honest backstop for
+ * those is `reclaimStale` at the top of the next pass (STALE_CLAIM_MS).
+ */
+export function startDispatcher(deps: Omit<DispatchDeps, "workerId">, pollMs: number): () => Promise<void> {
   // Per-process, so `claimedBy` on a stuck row names which instance stranded it.
   const workerId = `wh-${randomUUID().slice(0, 8)}`;
   let running = false;
-  const timer = setInterval(async () => {
+  // Always a settled promise between passes, so stop() never waits on nothing.
+  let pass: Promise<void> = Promise.resolve();
+  const timer = setInterval(() => {
     // Passes must never overlap: a slow pass plus a short interval would stack
     // workers that all share one workerId, and a row this worker already claimed
     // would look like its own to the overlapping pass.
     if (running) return;
     running = true;
-    try {
-      await dispatchDue({ ...deps, workerId });
-    } catch (err) {
-      // A pass that throws must not kill the interval — the next tick retries.
-      console.error("[webhooks] dispatch pass failed", err);
-    } finally {
-      running = false;
-    }
+    pass = (async () => {
+      try {
+        await dispatchDue({ ...deps, workerId });
+      } catch (err) {
+        // A pass that throws must not kill the interval — the next tick retries.
+        console.error("[webhooks] dispatch pass failed", err);
+      } finally {
+        running = false;
+      }
+    })();
   }, pollMs);
   // The poller must not be the reason the process refuses to exit.
   timer.unref?.();
-  return () => clearInterval(timer);
+  return async () => {
+    // Cancel FIRST, so no new pass can start while we wait for the current one.
+    clearInterval(timer);
+    await pass;
+  };
 }

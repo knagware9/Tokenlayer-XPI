@@ -69,7 +69,18 @@ function redact(value: unknown): unknown {
 
 export interface EmitInput {
   type: EventType;
-  /** The single owning org. null = platform-scope (PlatformAdmin endpoints only). */
+  /**
+   * The single owning org, or null.
+   *
+   * null IS NOT A SCOPE ANYONE SUBSCRIBES TO. No route can register an endpoint
+   * with a null `orgId`, so a null event fans out to nobody, and `GET /events`
+   * shows it only to a PlatformAdmin (who sees every row regardless). It is
+   * therefore the value a row lands on when the owning org could not be
+   * resolved — an unowned legacy use case, a holder DID that no longer resolves,
+   * an org-less desk — and what it means in practice is A DURABLE RECORD THAT IS
+   * DELIVERED TO NOBODY, not a bucket with an audience. Prefer a real org id
+   * wherever one can be established.
+   */
   orgId: string | null;
   useCaseKey?: string | null;
   subjectId?: string | null;
@@ -116,9 +127,15 @@ export async function emitEvent(deps: AppDeps, input: EmitInput, log: EmitLogger
 
 /**
  * The owning org of a tokenization use case, for the asset events' tenancy key.
+ *
  * Resolves to null rather than throwing when the use case has vanished or is
  * unowned — this feeds a call that must not fail its caller, so a missing owner
- * degrades the event to platform-scope instead of taking the mint down with it.
+ * must not take the mint down with it. What null costs is DELIVERY, not safety:
+ * the event is still recorded, but it matches no endpoint and only a
+ * PlatformAdmin can read it back (see `EmitInput.orgId`). Every seeded/legacy
+ * tokenization use case has no `ownerOrgId`, so this is the common case on an
+ * old deployment, and it is the reason the null bucket must never be readable by
+ * an org-less principal.
  */
 export async function ownerOrgOfUseCase(deps: AppDeps, useCaseKey: string): Promise<string | null> {
   try {

@@ -7,6 +7,7 @@
  * not send" without depending on what example.test happens to resolve to on the
  * machine running CI.
  */
+import { readFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 import {
   MemoryEventRepository,
@@ -403,5 +404,77 @@ describe("dispatcher", () => {
     const send = vi.fn(async () => ({ status: 200 }));
     expect(await dispatchDue({ ...f, secretBox: box, send, guard: okGuard, workerId: "w1" })).toBe(1);
     expect((await f.webhookDeliveries.findById(f.d.id))!.status).toBe("delivered");
+  });
+
+  it("a ROTATED master key is OUR fault: it disables NOTHING and says so honestly", async () => {
+    // FINAL-REVIEW FIX (MEDIUM). `secretBox.open` used to be evaluated INSIDE
+    // the send `try`, so a GCM open failure was caught by the same handler as a
+    // TLS reset and classified as evidence about the integrator's server.
+    // env.ts actively advises setting WEBHOOK_MASTER_KEY (it otherwise falls
+    // back to DID_MASTER_KEY) and there is no re-encryption path, so following
+    // our own advice on a live deployment attempted zero HTTP sends and then
+    // disabled EVERY org's endpoint with the reason "N consecutive delivery
+    // failures" — a claim that is false and sends an operator to audit somebody
+    // else's server.
+    //
+    // Same class the guard refusal was already hardened for: a failure whose
+    // cause is on OUR side must never disable someone else's endpoint.
+    const f = await fixture();
+    const rotated = createSecretBox("33".repeat(32)); // the secret was sealed under `box`
+    // On the brink: one endpoint-attributable failure with a two-hour-old run
+    // would disable it, so the ONLY thing keeping it alive is the classification.
+    await f.webhookEndpoints.update(f.ep.id, {
+      consecutiveFailures: AUTO_DISABLE_AFTER - 1,
+      failingSince: agoMs(2 * 60 * 60_000),
+    });
+    const send = vi.fn(async () => ({ status: 200 }));
+    await backlog(f, AUTO_DISABLE_AFTER * 2); // and a backlog large enough to exhaust any counter
+
+    const handled = await dispatchDue({
+      ...f, secretBox: rotated, send, guard: okGuard, workerId: "w1", batchSize: 100,
+    });
+    expect(handled).toBe(AUTO_DISABLE_AFTER * 2 + 1);
+    expect(send).not.toHaveBeenCalled(); // not one packet left this process
+
+    const ep = (await f.webhookEndpoints.findById(f.ep.id))!;
+    expect(ep.status).toBe("active");
+    expect(ep.disabledReason).toBeNull();
+    expect(ep.disabledAt).toBeNull();
+    // BOTH counters and the clock are untouched: an attempt that never reached
+    // the network is evidence about neither the endpoint nor DNS.
+    expect(ep.consecutiveFailures).toBe(AUTO_DISABLE_AFTER - 1);
+    expect(ep.consecutiveGuardFailures).toBe(0);
+    expect(Date.now() - Date.parse(ep.failingSince!)).toBeGreaterThan(AUTO_DISABLE_MIN_AGE_MS);
+
+    // The delivery records the REAL reason, and does not impersonate one.
+    const d = (await f.webhookDeliveries.findById(f.d.id))!;
+    expect(d.status).toBe("failed");
+    expect(d.attempts).toBe(1);
+    expect(d.responseStatus).toBeNull();
+    expect(d.responseError).toMatch(/WEBHOOK_MASTER_KEY/);
+    expect(d.responseError).toMatch(/PLATFORM configuration fault/);
+    expect(d.responseError).not.toMatch(/endpoint returned/);
+
+    // …and it is a retryable failure, so restoring the key drains the backlog
+    // rather than leaving the operator with nothing but dead rows.
+    await makeDue(f);
+    expect(await dispatchDue({ ...f, secretBox: box, send, guard: okGuard, workerId: "w1" })).toBe(1);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect((await f.webhookDeliveries.findById(f.d.id))!.status).toBe("delivered");
+  });
+
+  it("imports NO configuration, so this file collects in a checkout with no .env", async () => {
+    // FINAL-REVIEW FIX (MEDIUM), and the reason it is asserted on the SOURCE:
+    // the defect was invisible from inside a passing run. `dispatcher.ts`
+    // imported `../env.js` at module scope, `env.ts` throws when JWT_SECRET is
+    // absent, and `.env` is gitignored — so in a clone, in CI or in a fresh
+    // worktree THIS ENTIRE FILE failed to collect and all of its tests silently
+    // did not run, while the suite still reported green (579 tests without a
+    // .env, 595 with). Configuration now enters through `createHttpSender` from
+    // server.ts, and this pins that it stays that way.
+    const src = await readFile(new URL("../src/webhooks/dispatcher.ts", import.meta.url), "utf8");
+    expect(src).not.toMatch(/from\s+"\.\.\/env\.js"/);
+    // Nor the lazy version of the same coupling.
+    expect(src).not.toMatch(/process\.env/);
   });
 });

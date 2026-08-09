@@ -341,6 +341,61 @@ describe("cross-org isolation across all nine routes (EN-C task C6)", () => {
     // B's delivery was not touched by A's attempt.
     expect((await h.deps.webhookDeliveries.findById(foreignDelivery.id))?.status).toBe("pending");
   });
+
+  it("replay refuses a CLAIMED delivery in the WRITE, not in a prior read", async () => {
+    // FINAL-REVIEW FIX (LOW). Replay used to read the row, check
+    // `status !== "inflight"`, and then issue a plain update. A dispatcher
+    // claiming in that gap had its claim silently reset while it was mid-POST,
+    // so the row could be claimed and sent a second time — and the settle that
+    // followed clobbered the replay anyway. The predicate now travels inside the
+    // UPDATE (`requeue`), the same compare-and-set discipline as `claim`.
+    const h = await buildTestAppWithRepos();
+    const platform = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const a = await makeOrg(h.app, platform, "Race Co");
+    const ep = (await createHook(h.app, a.adminTok, a.id, { url: HOOK, eventTypes: ["*"] })).json().endpoint.id as string;
+    await emitEvent(h.deps, { type: "asset.issued", orgId: a.id, data: { assetId: "r_1" } });
+    const d = (await h.deps.webhookDeliveries.listByEndpoint(ep, 5))[0]!;
+    // Burn an attempt and settle it, so the row is a realistic replay candidate.
+    await h.deps.webhookDeliveries.update(d.id, { status: "failed", attempts: 3 });
+
+    const replayUrl = `${V1}/orgs/${a.id}/webhooks/${ep}/deliveries/${d.id}/replay`;
+    // A settled row replays: back to pending, attempts reset, due now.
+    const ok = await h.app.inject({ method: "POST", url: replayUrl, headers: auth(a.adminTok), payload: {} });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json().delivery).toMatchObject({ status: "pending", attempts: 0 });
+
+    // NOW THE RACE ITSELF, and it has to be the race or this test proves
+    // nothing: simply claiming the row first and then calling replay is refused
+    // by a read-based check too, so it would pass against the very code this
+    // fixes. Instead a dispatcher claims INSIDE the window — after the route's
+    // read returns, before the route writes — which is the only interleaving
+    // that distinguishes a check in the read from a check in the write. The
+    // route's snapshot therefore still says `pending`.
+    const repo = h.deps.webhookDeliveries;
+    const realFindById = repo.findById.bind(repo);
+    let raced = false;
+    repo.findById = async (id: string) => {
+      const row = await realFindById(id);
+      if (!raced && row && row.id === d.id) {
+        raced = true;
+        await repo.claim(d.id, "w-race", new Date().toISOString());
+      }
+      return row;
+    };
+
+    const conflict = await h.app.inject({ method: "POST", url: replayUrl, headers: auth(a.adminTok), payload: {} });
+    expect(raced).toBe(true); // the interleaving really happened
+    expect(conflict.statusCode).toBe(409);
+    expect(conflict.json().error).toBe("DELIVERY_INFLIGHT");
+    // THE POINT: the worker's claim survives the refused replay intact. Resetting
+    // it would let a second worker take the row while the first is mid-POST, and
+    // the first worker's settle would then clobber the replay anyway.
+    repo.findById = realFindById;
+    const after = (await repo.findById(d.id))!;
+    expect(after.status).toBe("inflight");
+    expect(after.claimedBy).toBe("w-race");
+    expect(after.claimedAt).not.toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -608,6 +663,61 @@ describe("GET /events — the cursor (EN-C task C6)", () => {
     // …and `type` narrows within the caller's own scope, never outside it.
     expect((await read(a.adminTok, "?type=asset.issued")).events.map((e: { subjectId: string }) => e.subjectId)).toEqual(["a1"]);
     expect((await read(a.adminTok, "?type=credential.issued")).events).toEqual([]);
+  });
+
+  it("shows an ORG-LESS principal NOTHING — the platform-scope bucket is not a fallback", async () => {
+    // FINAL-REVIEW FIX (HIGH). `requireScope` only narrows API KEYS, so a JWT
+    // session carries `webhooks:read` unconditionally, and this route has no
+    // role check and no `orgScoped`. Any principal whose `orgId` is null — every
+    // seeded user, every holder, every org-less Verifier desk operator —
+    // therefore selected exactly the `orgId: null` rows.
+    //
+    // And that bucket is not niche: the branch ROUTES RESOLUTION FAILURES INTO
+    // IT. `ownerOrgOfUseCase` returns null for every seeded/legacy tokenization
+    // use case, a holder DID that no longer resolves gives `?? null`, and an
+    // org-less Verifier desk raises verifications with no org at all. So the
+    // rows below are exactly what a real deployment accumulates.
+    const h = await buildTestAppWithRepos();
+    const platform = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const a = await makeOrg(h.app, platform, "Scope A");
+
+    await emitEvent(h.deps, {
+      type: "asset.issued", orgId: null, useCaseKey: "carbon-credit", subjectId: "unowned-asset",
+      data: { assetId: "unowned-asset", supply: 5000 },
+    });
+    await emitEvent(h.deps, {
+      type: "verification.requested", orgId: null, subjectId: "vr-1",
+      data: { holderDid: "did:tl:a-third-partys-holder", purpose: "kyc", credentialTypes: ["KycCredential"] },
+    });
+    await emitEvent(h.deps, { type: "asset.issued", orgId: a.id, subjectId: "a1", data: { assetId: "a1" } });
+
+    // A gold-loan Buyer: a real seeded principal, authenticated, org-less, and
+    // one that gets a 404 from GET /assets/:id for a carbon asset.
+    const buyer = await loginAs(h.app, "gold.buyer@tokenlayer.dev", "gold123");
+    const res = await h.app.inject({ method: "GET", url: `${V1}/events`, headers: auth(buyer) });
+    // 200-and-empty, NOT 403: an org-less caller is not forbidden from the
+    // route, there is simply nothing in this log that belongs to them.
+    expect(res.statusCode).toBe(200);
+    expect(res.json().events).toEqual([]);
+    // Scanned on the RAW body, so a row nested one level deeper than a parsed
+    // assertion looked still fails this.
+    expect(res.body).not.toContain("unowned-asset");
+    expect(res.body).not.toContain("a-third-partys-holder");
+    expect(res.body).not.toContain("KycCredential");
+    // The caller's own cursor still comes back, so the documented polling loop
+    // is unaffected — it just never advances.
+    const paged = await h.app.inject({ method: "GET", url: `${V1}/events?after=2`, headers: auth(buyer) });
+    expect(paged.json()).toEqual({ events: [], nextAfter: 2 });
+
+    // A SCOPE, NOT A BLANKET. The same call still works for everyone it should:
+    // an OrgAdmin reads exactly their own org...
+    const mine = (await h.app.inject({ method: "GET", url: `${V1}/events`, headers: auth(a.adminTok) })).json();
+    expect(mine.events.map((e: { subjectId: string }) => e.subjectId)).toEqual(["a1"]);
+    // ...and a PlatformAdmin still reads every row INCLUDING the null ones, so
+    // nothing has become unreadable — it has only stopped being readable by the
+    // wrong people.
+    const all = (await h.app.inject({ method: "GET", url: `${V1}/events`, headers: auth(platform) })).json();
+    expect(all.events.map((e: { subjectId: string }) => e.subjectId)).toEqual(["unowned-asset", "vr-1", "a1"]);
   });
 
   it("caps the page size, and tolerates junk in the query", async () => {

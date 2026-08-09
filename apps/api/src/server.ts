@@ -37,7 +37,7 @@ import {
 import { resolveIdentityRegistry } from "./registry.js";
 import { seedDefaults } from "./seed.js";
 import { seedUseCases } from "./use-cases.js";
-import { httpSender, startDispatcher } from "./webhooks/dispatcher.js";
+import { createHttpSender, startDispatcher } from "./webhooks/dispatcher.js";
 import { createSecretBox } from "./webhooks/secret-box.js";
 
 async function main(): Promise<void> {
@@ -195,19 +195,34 @@ async function main(): Promise<void> {
         // second `createSecretBox` here would work only by coincidence of both
         // reading the same env var, and would break silently the day they did not.
         secretBox: deps.secretBox,
-        send: httpSender,
+        // Configuration is read HERE and handed in. dispatcher.ts imports no
+        // env at all: it used to, and that made `import`ing it a boot-time
+        // assertion which crashed the dispatcher TEST FILE in any checkout
+        // without a .env — sixteen security tests that stopped running while
+        // the suite still went green.
+        send: createHttpSender(env.webhooksTimeoutMs),
         // The SAME guard posture the registration route uses, or a URL that was
         // legal to save would be permanently undeliverable.
         guard: { allowInsecureLoopback: env.webhooksAllowInsecure },
       },
       env.webhooksPollMs,
     );
-    // Stop polling before exit so an in-flight pass is not killed mid-settle,
-    // leaving a row inflight for the next process to reclaim.
+    // AWAIT the running pass before exiting, rather than merely cancelling the
+    // timer and exiting immediately — that cancelled the ticker while killing
+    // the pass mid-send, stranding every row it had claimed as `inflight`,
+    // which is precisely what this handler exists to avoid.
+    //
+    // Bounded, because a pass can legitimately take batchSize × the per-attempt
+    // timeout, and an orchestrator will SIGKILL long before that. So: wait for
+    // the pass, but no longer than the grace below, then go. Anything still
+    // claimed when we give up is picked up by `reclaimStale` on the next
+    // process's first pass — that sweep, not this handler, is the guarantee.
+    const SHUTDOWN_GRACE_MS = 5_000;
     for (const sig of ["SIGTERM", "SIGINT"] as const) {
       process.once(sig, () => {
-        stop();
-        process.exit(0);
+        void Promise.race([stop(), new Promise((r) => setTimeout(r, SHUTDOWN_GRACE_MS).unref?.())]).then(() => {
+          process.exit(0);
+        });
       });
     }
     console.log(`[webhooks] dispatcher polling every ${env.webhooksPollMs}ms`);
