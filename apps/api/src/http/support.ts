@@ -126,8 +126,8 @@ function isExpired(expiresAt: string | null): boolean {
 /**
  * Auth preHandler factory. Two ways to arrive at ONE principal:
  *
- *   Authorization: Bearer <jwt>       → verify the signature
- *   Authorization: Bearer tl_live_…   → verify the API key (EN-B)
+ *   Authorization: Bearer <jwt>              → verify the signature
+ *   Authorization: Bearer tl_live_/tl_test_… → verify the API key (EN-B/EN-D2)
  *
  * Both branches then re-read the principal from the database and rewrite
  * `request.user` into the SAME `TokenClaims` shape. That is the whole design:
@@ -194,12 +194,12 @@ export function requirePrincipal(deps: {
 
   return async function (request: FastifyRequest, reply: FastifyReply): Promise<void> {
     const raw = bearerOf(request.headers.authorization);
-    const prefix = raw === null ? null : prefixOf(raw);
+    const claimed = raw === null ? null : prefixOf(raw);
 
     // --- JWT path: unchanged from before EN-B ------------------------------
-    // `prefix === null` already covers `raw === null`; the first disjunct is
+    // `claimed === null` already covers `raw === null`; the first disjunct is
     // redundant at runtime and kept only so TS narrows `raw` to string below.
-    if (raw === null || prefix === null) {
+    if (raw === null || claimed === null) {
       request.apiKey = undefined;
       try {
         await request.jwtVerify();
@@ -218,8 +218,23 @@ export function requirePrincipal(deps: {
     }
 
     // --- API-key path ------------------------------------------------------
+    const { prefix } = claimed;
     const key = await deps.apiKeys.findByPrefix(prefix);
-    if (!key || key.revokedAt !== null || isExpired(key.expiresAt)) {
+    // THE MARKER MUST AGREE WITH THE ROW, AND DISAGREEMENT FAILS CLOSED.
+    // Without this last clause the `tl_test_` marker is decoration: a secret
+    // that LOOKS safe would authenticate as whatever its row happens to say,
+    // and a `tl_live_` string on a sandbox row would read as production to
+    // every human who ever saw it. The two can only diverge through a bug, a
+    // hand-edited row or a half-applied migration — in every one of those cases
+    // one of the two is wrong and we cannot tell which, so we trust neither.
+    // Checked HERE, alongside revoked/expired: before the cache and before any
+    // bcrypt, and inside the same guard that keeps the rate/failure counters
+    // allocated only for prefixes that resolved to a usable row.
+    if (!key || key.revokedAt !== null || isExpired(key.expiresAt) || key.mode !== claimed.mode) {
+      // The SAME generic 401 as unknown/revoked/expired/wrong-secret — EN-B
+      // made those indistinguishable on purpose and a distinguishable code here
+      // would turn the endpoint into an oracle for "this prefix exists, but as
+      // the other mode".
       await rejectUnauthenticated(reply);
       return;
     }

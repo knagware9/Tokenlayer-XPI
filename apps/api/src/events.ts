@@ -31,6 +31,7 @@
  *    call sites must still pass only what they mean to publish.
  */
 import type { EventType } from "@tokenlayer/core";
+import { KEY_PREFIX_MARKERS } from "./api-keys.js";
 import type { AppDeps } from "./context.js";
 import { endpointMatches } from "./webhooks/matching.js";
 
@@ -61,9 +62,12 @@ function redact(value: unknown): unknown {
     }
     return out;
   }
-  // A live API-key secret is recognisable by prefix wherever it lands, including
-  // inside a free-text field no key name would have caught.
-  if (typeof value === "string" && value.startsWith("tl_live_")) return "[redacted]";
+  // An API-key secret is recognisable by its marker wherever it lands, including
+  // inside a free-text field no key name would have caught. EVERY marker, read
+  // from the one map: a sandbox secret is still a secret, and hardcoding
+  // `tl_live_` here would have left `tl_test_` credentials landing in the
+  // durable outbox and every webhook body built from it.
+  if (typeof value === "string" && Object.values(KEY_PREFIX_MARKERS).some((m) => value.startsWith(m))) return "[redacted]";
   return value;
 }
 

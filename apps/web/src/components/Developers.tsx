@@ -9,8 +9,22 @@ import { Guides } from "./Guides.js";
 import { Webhooks } from "./Webhooks.js";
 import { Card, EmptyState, Pill, SectionHeader } from "./ui.js";
 
-/** The public marker every secret carries — mirrors the API's KEY_PREFIX_MARKER. */
-const KEY_MARKER = "tl_live_";
+/**
+ * The public markers a secret can carry — mirrors the API's
+ * `KEY_PREFIX_MARKERS` (apps/api/src/api-keys.ts), on the same terms as the
+ * `API_SCOPES` mirror in types.ts: the web app has no dependency on the API
+ * package, so this list is updated by hand. It is display-only — the server
+ * parses the real marker and refuses anything else.
+ */
+const KEY_MARKERS = { live: "tl_live_", test: "tl_test_" } as const;
+
+/**
+ * Every key this console can mint or list today is a LIVE key: no route accepts
+ * a mode and `ApiKeyView` carries none, so there is nothing to choose from yet.
+ * Read through the map rather than a bare literal so the display follows when
+ * that changes, instead of confidently labelling a sandbox key `tl_live_`.
+ */
+const KEY_MARKER = KEY_MARKERS.live;
 
 /**
  * Roles a key's bound service user may take. Mirrors the server's
