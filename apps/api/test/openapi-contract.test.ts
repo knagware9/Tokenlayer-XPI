@@ -1,7 +1,11 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { S } from "../src/http/schemas.js";
+import { components, S } from "../src/http/schemas.js";
 import { buildTestApp, loginAs, V1 } from "./helpers.js";
 import { allRouteDeclarations, declaredRoutes, routeKey, type RouteDecl } from "./route-decls.js";
+
+const SCHEMAS_TS = fileURLToPath(new URL("../src/http/schemas.ts", import.meta.url));
 
 /**
  * EN-D1: the OpenAPI document is a PRODUCT SURFACE, not a by-product.
@@ -239,5 +243,234 @@ describe("the consistency check has no blind spot", () => {
     // A documented operation the parser never returned is an operation neither
     // consistency check above can police.
     expect(untraceable, `operations in the document with no matching declaration: ${untraceable.join(", ")}`).toEqual([]);
+  });
+});
+
+/**
+ * ═══ THE ADDITIVITY RULE, ENFORCED ═══
+ *
+ * `fast-json-stringify` serialises every response against its declared schema
+ * and SILENTLY STRIPS anything the schema does not declare. So narrowing a
+ * response schema does not fail a test — it deletes a field from a live
+ * response and says nothing at all. There is no error, no warning, and no
+ * broken assertion unless some test happened to read that exact field.
+ *
+ * EN-D1 documents what routes return. It may only ever ADD.
+ *
+ * Two checks, deliberately of different kinds:
+ *
+ *  1. A coarse whole-file floor. Cheap, and it covers request bodies and
+ *     components alike, but it is blind to one schema losing the flag while
+ *     another gains it.
+ *  2. A PRECISE structural walk of the live schema objects — the very objects
+ *     Fastify compiles — which names the exact schema path that narrowed. This
+ *     is the check that actually protects the wire; the floor is its backstop.
+ */
+const ADDITIVE_FLOOR = 153;
+
+/**
+ * Object nodes that do NOT carry `additionalProperties: true` and predate
+ * EN-D1. Each is a pre-existing narrowing, recorded rather than fixed: opening
+ * one up would CHANGE what the API serialises, which is exactly what a
+ * documentation task must not do. The list may shrink; every addition to it is
+ * a field being stripped and needs its own justification.
+ */
+const PRE_EXISTING_NARROWING: Record<string, string> = {
+  "S.login.response.200": "predates EN-D1 — token+user only, and `user` itself is open",
+  "S.issueAsset.response.201": "predates EN-D1",
+  "S.action.response.200.oneOf[1]": "predates EN-D1 — explicit additionalProperties:false on the 202 arm",
+  "S.listCashflows.response.200": "predates EN-D1",
+  "S.listCashflows.response.200.preview.split.items": "predates EN-D1",
+  "S.uploadDocument.response.201": "predates EN-D1",
+  "S.uploadKybDocument.response.201": "predates EN-D1",
+  "Error#": "the error envelope is a closed contract by design",
+  "Pagination#": "closed by design",
+  "ContractCode#.constructorArgs.items": "predates EN-D1",
+  "MetadataSchema#.properties": "a schema-of-schemas; its additionalProperties is a $ref, not `true`",
+  "UseCase#.contracts": "a map whose additionalProperties is the value schema, not `true`",
+  "AssetList#": "predates EN-D1",
+  "AccountState#": "predates EN-D1",
+  "TokenInfo#": "predates EN-D1",
+  "Currency#": "predates EN-D1",
+  "AuditList#": "predates EN-D1",
+};
+
+type SchemaNode = Record<string, unknown>;
+
+/** Every object node under `root`, keyed by a stable path. `$ref` nodes are the
+ * boundary — the component they name is walked separately, once. */
+function objectNodes(root: unknown, path: string, into: Map<string, SchemaNode>): void {
+  if (!root || typeof root !== "object") return;
+  if (Array.isArray(root)) {
+    root.forEach((child, i) => objectNodes(child, `${path}[${i}]`, into));
+    return;
+  }
+  const n = root as SchemaNode;
+  if (n.$ref) return;
+  if (n.type === "object" || (n.properties !== undefined && n.type === undefined)) into.set(path, n);
+  if (n.properties && typeof n.properties === "object") {
+    for (const [k, v] of Object.entries(n.properties as Record<string, unknown>)) objectNodes(v, `${path}.${k}`, into);
+  }
+  for (const k of ["items", "allOf", "anyOf", "oneOf"] as const) if (n[k]) objectNodes(n[k], `${path}.${k}`, into);
+}
+
+/** Every object node reachable from a RESPONSE schema, plus every component
+ * (components are what responses `$ref`, so narrowing one strips fields too). */
+function allResponseObjectNodes(): Map<string, SchemaNode> {
+  const found = new Map<string, SchemaNode>();
+  for (const [name, schema] of Object.entries(S)) {
+    const response = (schema as { response?: Record<string, unknown> }).response;
+    if (!response) continue;
+    for (const [code, node] of Object.entries(response)) objectNodes(node, `S.${name}.response.${code}`, found);
+  }
+  for (const c of components) objectNodes(c, `${(c as { $id: string }).$id}#`, found);
+  return found;
+}
+
+describe("the additivity rule", () => {
+  it("never removes additionalProperties: true from a response schema", () => {
+    const src = readFileSync(SCHEMAS_TS, "utf8");
+    const count = (src.match(/additionalProperties:\s*true/g) ?? []).length;
+    expect(count, "a response schema was narrowed — that STRIPS fields from live responses").toBeGreaterThanOrEqual(
+      ADDITIVE_FLOOR,
+    );
+  });
+
+  it("every object node in every response is still open", () => {
+    // The precise half. A whole-file count cannot tell "one schema lost the
+    // flag while another gained it" from "nothing happened"; this can, and it
+    // names the path.
+    const narrowed: string[] = [];
+    for (const [path, node] of allResponseObjectNodes()) {
+      if (node.additionalProperties === true) continue;
+      if (path in PRE_EXISTING_NARROWING) continue;
+      narrowed.push(
+        `${path} — additionalProperties is ${JSON.stringify(node.additionalProperties)}, not true. ` +
+          `fast-json-stringify will STRIP every field this node does not declare.`,
+      );
+    }
+    expect(narrowed, `\n${narrowed.join("\n")}\n`).toEqual([]);
+  });
+
+  it("the pre-existing-narrowing list has no stale entries", () => {
+    const stillNarrow = new Set(
+      [...allResponseObjectNodes()].filter(([, n]) => n.additionalProperties !== true).map(([p]) => p),
+    );
+    const stale = Object.keys(PRE_EXISTING_NARROWING).filter((p) => !stillNarrow.has(p));
+    expect(stale, `no longer narrowed (or renamed) — drop from PRE_EXISTING_NARROWING: ${stale.join(", ")}`).toEqual([]);
+  });
+});
+
+/**
+ * ═══ WHAT A ROUTE RETURNS ═══
+ *
+ * Before EN-D1's third task, 153 response schemas were `{ type: "object",
+ * additionalProperties: true }` with no `properties` at all. The published
+ * reference therefore said, of most of this API, "returns an object" — and
+ * named not one field. An integrator cannot write a client against that; they
+ * have to call the thing and read the JSON, which is precisely the work the
+ * document exists to save.
+ *
+ * So the routes an external system actually calls must enumerate what they
+ * return, or say in writing why they do not.
+ */
+/** The tags an external system actually calls. */
+const INTEGRATION_SURFACE = new Set([
+  "Auth",
+  "API Keys",
+  "Webhooks",
+  "Credentials",
+  "Credential Use Cases",
+  "Verification",
+  "Assets",
+  "Users",
+  "Organizations",
+  "Proposals",
+  "Config",
+  "Catalog",
+]);
+
+/** Integration-surface routes whose response is deliberately not enumerated. */
+const DOCUMENTATION_DEFERRED: Record<string, string> = {
+  "GET /credentials/:id/certificate.pdf": "returns opaque PDF bytes, not a JSON object",
+};
+
+type ResponseSchema = { response?: Record<string, unknown>; tags?: string[]; description?: string };
+
+const schemaOf = (r: RouteDecl): ResponseSchema | undefined => (r.schema ? (S[r.schema] as ResponseSchema | undefined) : undefined);
+
+const onIntegrationSurface = (r: RouteDecl): boolean => (schemaOf(r)?.tags ?? []).some((t) => INTEGRATION_SURFACE.has(t));
+
+/** A response node that tells an integrator something: a component reference,
+ * or at least one named field (directly, or in an array's items). */
+function namesAField(node: unknown): boolean {
+  if (!node || typeof node !== "object") return false;
+  const n = node as SchemaNode;
+  if (n.$ref) return true;
+  if (n.type === "null") return true; // 204: "no body" IS the documented shape
+  if (n.properties && Object.keys(n.properties as object).length > 0) return true;
+  if (n.type === "array") return namesAField(n.items);
+  if (Array.isArray(n.oneOf)) return n.oneOf.every((alt) => namesAField(alt));
+  return false;
+}
+
+/** Route keys of every integration-surface route that documents no 2xx shape. */
+function undocumentedRoutes(): string[] {
+  const failures: string[] = [];
+  for (const r of declaredRoutes()) {
+    if (!onIntegrationSurface(r)) continue;
+    const response = schemaOf(r)?.response ?? {};
+    const twoXX = Object.entries(response).filter(([code]) => code.startsWith("2"));
+    if (twoXX.some(([, node]) => namesAField(node))) continue;
+    failures.push(routeKey(r));
+  }
+  return failures;
+}
+
+describe("every integration-surface route says what it returns", () => {
+  it("declares at least one 2xx shape with named fields", () => {
+    const failures = undocumentedRoutes()
+      .filter((k) => !(k in DOCUMENTATION_DEFERRED))
+      .map((k) => `${k} — its 2xx response names no field. Add a \`properties\` block (or a $ref), or defer it with a reason.`);
+    // Collected, not thrown one at a time: one run should print the whole work
+    // queue rather than whichever route sorts first.
+    expect(failures, `\n${failures.join("\n")}\n`).toEqual([]);
+  });
+
+  it("the deferral list has no stale entries", () => {
+    // The same discipline scope-coverage.test.ts applies to its exemptions: an
+    // exemption nobody needs any more is an exemption nobody re-examines.
+    const undocumented = new Set(undocumentedRoutes());
+    const stale = Object.keys(DOCUMENTATION_DEFERRED).filter((k) => !undocumented.has(k));
+    expect(stale, `these routes are documented now (or no longer exist) — drop them: ${stale.join(", ")}`).toEqual([]);
+  });
+});
+
+/**
+ * ═══ THE 202 PROBLEM ═══
+ *
+ * On this platform almost every mutation answers **202 with a proposal**, not
+ * with the object it appears to create. Maker-checker means the work happens on
+ * APPROVAL, by someone else, later. A client that POSTs a user and then reads
+ * `id` off the response gets a PROPOSAL's id, and the user it asked for may
+ * never exist at all — the checker can reject it.
+ *
+ * That is the single most confusing thing about this API for a newcomer, and it
+ * is invisible in a status code. Every route that can answer 202 must say so in
+ * prose.
+ */
+describe("every 202 route explains the proposal", () => {
+  it("names the proposal in its description", () => {
+    const failures: string[] = [];
+    for (const r of declaredRoutes()) {
+      const schema = schemaOf(r);
+      if (!schema?.response || !("202" in schema.response)) continue;
+      if (/proposal/i.test(schema.description ?? "")) continue;
+      failures.push(
+        `${routeKey(r)} (S.${r.schema}) can answer 202 but never says "proposal" in its description — ` +
+          `an integrator will read the 202 body as the object they asked for, and it is not.`,
+      );
+    }
+    expect(failures, `\n${failures.join("\n")}\n`).toEqual([]);
   });
 });

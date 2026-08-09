@@ -451,6 +451,196 @@ export const components: Record<string, unknown>[] = [
     },
     required: ["id", "useCaseKey", "kind", "payload", "proposerId", "proposerLabel", "required", "approvals", "status", "createdAt"],
   },
+  {
+    $id: "ProposalEnvelope",
+    type: "object",
+    additionalProperties: true,
+    description:
+      "THE 202 BODY. What a gated mutation answers with instead of the thing you asked it to create. The operation " +
+      "has NOT happened: a proposal is a request captured pending approval, and `proposal.id` is the id of that " +
+      "request — never of the user, credential or asset named in it, which may never exist at all if a checker " +
+      "rejects it. Poll `GET /proposals/:id`, or subscribe to `proposal.executed`, to learn the outcome.",
+    properties: { proposal: { $ref: "Proposal#" } },
+    required: ["proposal"],
+  },
+  {
+    $id: "Organization",
+    type: "object",
+    additionalProperties: true,
+    description: "An organization — the top-level tenant. `capabilities` is its EN-A envelope; `null` means a legacy, unrestricted org.",
+    properties: {
+      id: { type: "string" },
+      name: { type: "string" },
+      orgType: { type: "string", enum: ["bank", "corporate", "msme", "government", "verifier"] },
+      registrationId: { type: "string", nullable: true },
+      jurisdiction: { type: "string", nullable: true },
+      /** The org's own DID — the issuer identifier on every credential it issues. */
+      did: { type: "string" },
+      verified: { type: "boolean" },
+      status: { type: "string", enum: ["pending", "active", "rejected"] },
+      companyProfile: { type: "object", additionalProperties: true, nullable: true, description: "KYB profile captured at self-registration; null for a platform-created org." },
+      capabilities: { type: "object", additionalProperties: true, nullable: true, description: "The EN-A capability envelope. null = legacy, unrestricted." },
+      createdAt: { type: "string" },
+      // Present on the two READ routes only (list/get); the capability PATCH
+      // returns the bare org. Not required, so it is simply absent there.
+      credentials: {
+        type: "array",
+        description: "Credentials this organization HOLDS (it is the subject), e.g. its OrganizationCredential. Not the ones it issued — that is `GET /orgs/:id/credentials`.",
+        items: {
+          type: "object",
+          additionalProperties: true,
+          properties: {
+            id: { type: "string" },
+            type: { type: "string" },
+            issuerDid: { type: "string" },
+            issuedAt: { type: "string" },
+            revoked: { type: "boolean" },
+          },
+        },
+      },
+    },
+    required: ["id", "name", "orgType", "did", "verified", "status", "createdAt"],
+  },
+  {
+    $id: "ApiKeyView",
+    type: "object",
+    additionalProperties: true,
+    description:
+      "An API key's public record. The SECRET is not here and is not retrievable: it appears exactly twice in the " +
+      "system's whole lifetime — the 201 from create and the 200 from rotate — and nowhere else, ever.",
+    properties: {
+      id: { type: "string" },
+      orgId: { type: "string" },
+      /** The service user this key authenticates as. Its role and use-case scope are the key's ceiling. */
+      userId: { type: "string" },
+      name: { type: "string" },
+      /** The key's public, non-secret identifier — the `tl_live_…` prefix. */
+      prefix: { type: "string" },
+      scopes: { type: "array", items: { type: "string" } },
+      role: { type: "string", nullable: true, description: "The bound service user's role. null if that user has vanished." },
+      useCaseKey: { type: "string", nullable: true },
+      // DERIVED, not stored: `expired` is recomputed from expiresAt on every
+      // read, so a key can move active -> expired with no write anywhere.
+      status: { type: "string", enum: ["active", "expired", "revoked"] },
+      lastUsedAt: { type: "string", nullable: true },
+      expiresAt: { type: "string", nullable: true },
+      revokedAt: { type: "string", nullable: true },
+      revokedBy: { type: "string", nullable: true },
+      createdBy: { type: "string" },
+      createdAt: { type: "string" },
+    },
+    required: ["id", "orgId", "userId", "name", "prefix", "scopes", "status", "createdBy", "createdAt"],
+  },
+  {
+    $id: "WebhookEndpoint",
+    type: "object",
+    additionalProperties: true,
+    description:
+      "A registered delivery destination. The signing secret is NEVER in this view — it is returned once at " +
+      "registration and once per rotation, and read routes cannot produce it.",
+    properties: {
+      id: { type: "string" },
+      orgId: { type: "string", nullable: true },
+      url: { type: "string" },
+      description: { type: "string", nullable: true },
+      eventTypes: { type: "array", items: { type: "string" }, description: "Subscribed event types, or `[\"*\"]` for everything the org is entitled to." },
+      useCaseKey: { type: "string", nullable: true, description: "Narrows delivery to one use case. null = the whole org's stream." },
+      status: { type: "string", enum: ["active", "disabled"] },
+      disabledReason: { type: "string", nullable: true },
+      disabledAt: { type: "string", nullable: true },
+      consecutiveFailures: { type: "integer", description: "Consecutive failures where YOUR server answered badly or was unreachable. Only this counter can auto-disable an endpoint." },
+      consecutiveGuardFailures: { type: "integer", description: "Consecutive failures where our own URL guard refused to send (DNS did not resolve, or resolved somewhere not publicly routable). Never auto-disables." },
+      failingSince: { type: "string", nullable: true, description: "When the CURRENT failure run began; null whenever the endpoint is healthy." },
+      deletedAt: { type: "string", nullable: true, description: "Soft delete. A deleted endpoint keeps its delivery history but receives nothing." },
+      createdBy: { type: "string" },
+      createdAt: { type: "string" },
+      lastDeliveryAt: { type: "string", nullable: true },
+    },
+    required: ["id", "url", "eventTypes", "status", "consecutiveFailures", "consecutiveGuardFailures", "createdBy", "createdAt"],
+  },
+  {
+    $id: "WebhookDelivery",
+    type: "object",
+    additionalProperties: true,
+    description:
+      "One attempt chain for one (event, endpoint) pair. It carries NO event payload — read the body from " +
+      "`GET /events`, which applies its own org scope.",
+    properties: {
+      id: { type: "string" },
+      endpointId: { type: "string" },
+      eventId: { type: "string" },
+      eventSeq: { type: "integer" },
+      status: { type: "string", enum: ["pending", "inflight", "delivered", "failed", "dead"], description: "`dead` = retries exhausted or the endpoint was gone; it will not be attempted again unless you replay it." },
+      attempts: { type: "integer" },
+      nextAttemptAt: { type: "string" },
+      lastAttemptAt: { type: "string", nullable: true },
+      responseStatus: { type: "integer", nullable: true, description: "The HTTP status YOUR endpoint answered with." },
+      responseError: { type: "string", nullable: true },
+      durationMs: { type: "integer", nullable: true },
+      claimedAt: { type: "string", nullable: true },
+      claimedBy: { type: "string", nullable: true },
+      createdAt: { type: "string" },
+    },
+    required: ["id", "endpointId", "eventId", "eventSeq", "status", "attempts", "nextAttemptAt", "createdAt"],
+  },
+  {
+    $id: "Event",
+    type: "object",
+    additionalProperties: true,
+    description:
+      "One durable, globally ordered platform fact — and the same object a webhook delivers. `seq` is the cursor: " +
+      "pass the last one you saw as `after`, which is EXCLUSIVE, so the loop never re-reads and never skips.",
+    properties: {
+      seq: { type: "integer", description: "Global monotonic cursor. Gaps in YOUR stream are other tenants' events, not lost ones." },
+      id: { type: "string", description: "Stable public id, also sent as the `Tokenlayer-Event-Id` delivery header." },
+      type: { type: "string", description: "e.g. `asset.issued`, `credential.accepted`, `verification.completed`, `proposal.executed`." },
+      orgId: { type: "string", nullable: true, description: "The owning org — the tenancy key. null = platform scope." },
+      useCaseKey: { type: "string", nullable: true },
+      subjectId: { type: "string", nullable: true, description: "The id of the thing the event is about (asset, credential, verification request…)." },
+      data: { type: "object", additionalProperties: true, description: "Per-type payload. Its shape follows `type`; treat unknown keys as forward-compatible additions." },
+      occurredAt: { type: "string" },
+    },
+    required: ["seq", "id", "type", "data", "occurredAt"],
+  },
+  {
+    $id: "VerificationRequest",
+    type: "object",
+    additionalProperties: true,
+    description:
+      "A verifier's request for a presentation, and the holder's consent record for it. NOTE the verifier's own " +
+      "verdict is deliberately NOT here — read it from `GET /verification-requests/:id/verify`.",
+    properties: {
+      id: { type: "string" },
+      verifierOrgId: { type: "string", description: "May be the empty string for a use-case-scoped Verifier desk that belongs to no org." },
+      holderDid: { type: "string" },
+      requestedTypes: { type: "array", items: { type: "string" } },
+      purpose: { type: "string" },
+      status: { type: "string", enum: ["pending", "consented", "rejected", "verified", "expired"] },
+      consentedCredentialIds: { type: "array", items: { type: "string" }, nullable: true },
+      consentedAt: { type: "string", nullable: true },
+      verifiedAt: { type: "string", nullable: true },
+      createdAt: { type: "string" },
+      expiresAt: { type: "string" },
+      credentialUseCaseKey: { type: "string", nullable: true },
+      // Added by GET /me/verification-requests only — the holder's own view,
+      // which pre-computes what they could consent with. Absent elsewhere.
+      eligibleCredentials: {
+        type: "array",
+        description: "HOLDER VIEW ONLY. The caller's own unrevoked, accepted credentials whose type this request asks for.",
+        items: {
+          type: "object",
+          additionalProperties: true,
+          properties: {
+            id: { type: "string" },
+            type: { type: "string" },
+            issuerDid: { type: "string" },
+            issuedAt: { type: "string" },
+          },
+        },
+      },
+    },
+    required: ["id", "verifierOrgId", "holderDid", "requestedTypes", "purpose", "status", "createdAt", "expiresAt"],
+  },
 ];
 
 /** Standard error responses attached to authenticated routes. */
@@ -1274,7 +1464,19 @@ export const S: Record<string, FastifySchema> = {
         expiresAt: { type: "string" },
       },
     },
-    response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
+    response: {
+      // THE ONLY TIME THE SECRET EXISTS IN A RESPONSE. It is bcrypt-hashed at
+      // rest, so it cannot be re-derived; a caller that drops it must rotate.
+      201: {
+        type: "object", additionalProperties: true,
+        properties: {
+          key: { $ref: "ApiKeyView#" },
+          secret: { type: "string", description: "The full `tl_live_…` credential, returned HERE AND NOWHERE ELSE. Store it before acknowledging this call." },
+        },
+        required: ["key", "secret"],
+      },
+      ...errs(400, 401, 403, 404),
+    },
   },
   listApiKeys: {
     tags: ["API Keys"], summary: "List an organization's API keys (never the secret)", security: humanOnly,
@@ -1282,20 +1484,38 @@ export const S: Record<string, FastifySchema> = {
       "Session-only. An API key is refused with **403 `MACHINE_PRINCIPAL`**: a key may not enumerate the " +
       "organization's keys.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
-    response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403, 404) },
+    response: { 200: { type: "array", items: { $ref: "ApiKeyView#" } }, ...errs(401, 403, 404) },
   },
   rotateApiKey: {
     tags: ["API Keys"], summary: "Rotate an API key's secret (the old one dies immediately)", security: humanOnly,
     description: "Session-only. An API key is refused with **403 `MACHINE_PRINCIPAL`** — key lifecycle is a human act.",
     params: { type: "object", required: ["id", "keyId"], properties: { id: { type: "string" }, keyId: { type: "string" } } },
     body: { type: "object", additionalProperties: false, properties: {} },
-    response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404, 409) },
+    response: {
+      200: {
+        type: "object", additionalProperties: true,
+        properties: {
+          key: { $ref: "ApiKeyView#" },
+          secret: { type: "string", description: "The NEW credential. The previous one stops authenticating the moment this returns — there is no overlap window." },
+        },
+        required: ["key", "secret"],
+      },
+      ...errs(400, 401, 403, 404, 409),
+    },
   },
   revokeApiKey: {
     tags: ["API Keys"], summary: "Revoke an API key (soft — the row stays as the audit trail)", security: humanOnly,
     description: "Session-only. An API key is refused with **403 `MACHINE_PRINCIPAL`** — key lifecycle is a human act.",
     params: { type: "object", required: ["id", "keyId"], properties: { id: { type: "string" }, keyId: { type: "string" } } },
-    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404) },
+    // Idempotent: revoking an already-revoked key answers 200 with the same view.
+    response: {
+      200: {
+        type: "object", additionalProperties: true,
+        properties: { key: { $ref: "ApiKeyView#" } },
+        required: ["key"],
+      },
+      ...errs(401, 403, 404),
+    },
   },
 
   // ── EN-C: webhooks + the event cursor ───────────────────────────────────
@@ -1323,7 +1543,17 @@ export const S: Record<string, FastifySchema> = {
         useCaseKey: { type: "string" },
       },
     },
-    response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
+    response: {
+      201: {
+        type: "object", additionalProperties: true,
+        properties: {
+          endpoint: { $ref: "WebhookEndpoint#" },
+          secret: { type: "string", description: "The HMAC signing secret, returned HERE AND NOWHERE ELSE. Every delivery to this endpoint is signed with it; verify `Tokenlayer-Signature` against it." },
+        },
+        required: ["endpoint", "secret"],
+      },
+      ...errs(400, 401, 403, 404),
+    },
   },
   listWebhooks: {
     tags: ["Webhooks"], summary: "List an organization's webhook endpoints (never the secret)", security: eitherCredential,
@@ -1331,7 +1561,14 @@ export const S: Record<string, FastifySchema> = {
       "Requires the `webhooks:read` scope. The signing secret is never returned here — it is shown once at " +
       "registration, and thereafter only a rotation produces a new one.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
-    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404) },
+    response: {
+      200: {
+        type: "object", additionalProperties: true,
+        properties: { endpoints: { type: "array", items: { $ref: "WebhookEndpoint#" } } },
+        required: ["endpoints"],
+      },
+      ...errs(401, 403, 404),
+    },
   },
   updateWebhook: {
     tags: ["Webhooks"], summary: "Update a webhook endpoint (re-enabling clears its failure bookkeeping)", security: eitherCredential,
@@ -1353,7 +1590,14 @@ export const S: Record<string, FastifySchema> = {
         status: { type: "string", enum: ["active", "disabled"] },
       },
     },
-    response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
+    response: {
+      200: {
+        type: "object", additionalProperties: true,
+        properties: { endpoint: { $ref: "WebhookEndpoint#" } },
+        required: ["endpoint"],
+      },
+      ...errs(400, 401, 403, 404),
+    },
   },
   rotateWebhookSecret: {
     tags: ["Webhooks"], summary: "Rotate a webhook signing secret (the old one stops verifying immediately)", security: eitherCredential,
@@ -1362,29 +1606,78 @@ export const S: Record<string, FastifySchema> = {
       "immediately, so cut the receiver over deliberately rather than expecting an overlap window.",
     params: { type: "object", required: ["id", "whId"], properties: { id: { type: "string" }, whId: { type: "string" } } },
     body: { type: "object", additionalProperties: false, properties: {} },
-    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404) },
+    response: {
+      200: {
+        type: "object", additionalProperties: true,
+        properties: {
+          endpoint: { $ref: "WebhookEndpoint#" },
+          secret: { type: "string", description: "The NEW signing secret. The old one verifies nothing from this moment on." },
+        },
+        required: ["endpoint", "secret"],
+      },
+      ...errs(401, 403, 404),
+    },
   },
   deleteWebhook: {
     tags: ["Webhooks"], summary: "Delete a webhook endpoint (soft — deliveries stop immediately)", security: eitherCredential,
     description: "Requires the `webhooks:write` scope. A soft delete: deliveries stop immediately.",
     params: { type: "object", required: ["id", "whId"], properties: { id: { type: "string" }, whId: { type: "string" } } },
-    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404) },
+    // The soft-deleted row comes back, so `deletedAt`/`status` confirm the delete.
+    response: {
+      200: {
+        type: "object", additionalProperties: true,
+        properties: { endpoint: { $ref: "WebhookEndpoint#" } },
+        required: ["endpoint"],
+      },
+      ...errs(401, 403, 404),
+    },
   },
   testWebhook: {
     tags: ["Webhooks"], summary: "Send a synthetic ping to one endpoint", security: eitherCredential,
     description:
       "Requires the `webhooks:write` scope. Answers **202** as soon as the ping is queued, before it is delivered — " +
-      "read the endpoint's deliveries to see how it went.",
+      "read the endpoint's deliveries to see how it went.\n\n" +
+      "**This 202 is NOT a maker-checker proposal.** Almost every other 202 in this API carries a `proposal` and " +
+      "means \"nothing has happened yet, pending approval\"; this one carries a `delivery` and means the ping is " +
+      "queued and will be sent by the dispatcher with no approval involved. The `ping` type is deliberately absent " +
+      "from the subscribable event catalog — it is a fact about this API call, not about your business — so a " +
+      "delivery is enqueued for THIS endpoint alone, whatever it is subscribed to.",
     params: { type: "object", required: ["id", "whId"], properties: { id: { type: "string" }, whId: { type: "string" } } },
     body: { type: "object", additionalProperties: false, properties: {} },
-    response: { 202: { type: "object", additionalProperties: true }, ...errs(401, 403, 404, 409) },
+    response: {
+      202: {
+        type: "object", additionalProperties: true,
+        properties: {
+          delivery: { $ref: "WebhookDelivery#" },
+          event: {
+            type: "object", additionalProperties: true,
+            description: "The outbox row the ping was written as — an abridged Event (no `data`, `orgId` or `useCaseKey`). The full row is readable from `GET /events`.",
+            properties: {
+              id: { type: "string" },
+              seq: { type: "integer" },
+              type: { type: "string", description: "Always `ping`." },
+              occurredAt: { type: "string" },
+            },
+          },
+        },
+        required: ["delivery", "event"],
+      },
+      ...errs(401, 403, 404, 409),
+    },
   },
   listWebhookDeliveries: {
     tags: ["Webhooks"], summary: "Recent delivery attempts for one endpoint", security: eitherCredential,
     description: "Requires the `webhooks:read` scope. The recent delivery attempts for one endpoint, with their outcomes.",
     params: { type: "object", required: ["id", "whId"], properties: { id: { type: "string" }, whId: { type: "string" } } },
     querystring: { type: "object", additionalProperties: false, properties: { limit: { type: "string" } } },
-    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404) },
+    response: {
+      200: {
+        type: "object", additionalProperties: true,
+        properties: { deliveries: { type: "array", items: { $ref: "WebhookDelivery#" } } },
+        required: ["deliveries"],
+      },
+      ...errs(401, 403, 404),
+    },
   },
   replayWebhookDelivery: {
     tags: ["Webhooks"], summary: "Requeue one delivery for another attempt", security: eitherCredential,
@@ -1396,7 +1689,16 @@ export const S: Record<string, FastifySchema> = {
       properties: { id: { type: "string" }, whId: { type: "string" }, dId: { type: "string" } },
     },
     body: { type: "object", additionalProperties: false, properties: {} },
-    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404) },
+    // The requeued row: `status` is back to `pending` and `attempts` to 0, so a
+    // replay gets the FULL retry schedule rather than dying on its next attempt.
+    response: {
+      200: {
+        type: "object", additionalProperties: true,
+        properties: { delivery: { $ref: "WebhookDelivery#" } },
+        required: ["delivery"],
+      },
+      ...errs(401, 403, 404),
+    },
   },
   listEvents: {
     tags: ["Webhooks"], summary: "Cursor read of the durable event log (the catch-up path for a missed delivery)", security: eitherCredential,
@@ -1407,7 +1709,22 @@ export const S: Record<string, FastifySchema> = {
       type: "object", additionalProperties: false,
       properties: { after: { type: "string" }, type: { type: "string" }, limit: { type: "string" } },
     },
-    response: { 200: { type: "object", additionalProperties: true }, ...errs(401) },
+    response: {
+      200: {
+        type: "object", additionalProperties: true,
+        properties: {
+          events: { type: "array", items: { $ref: "Event#" } },
+          nextAfter: {
+            type: "integer",
+            description:
+              "Pass as `after` on the next call. An EMPTY page returns your own cursor back unchanged, so polling a " +
+              "quiet log is idempotent and the loop `after = nextAfter` never re-reads and never skips.",
+          },
+        },
+        required: ["events", "nextAfter"],
+      },
+      ...errs(401),
+    },
   },
 
   myCredentials: { tags: ["Identity"], summary: "Credentials held by the caller", security: eitherCredential,
