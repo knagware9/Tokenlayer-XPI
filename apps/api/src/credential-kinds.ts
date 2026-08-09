@@ -26,6 +26,7 @@ export interface IssueCredentialPayload {
 
 export const issueCredentialKind: ProposalKindHandler = {
   kind: "issue-credential",
+  apiScope: "credentials:issue",
   canView: orgScopedView,
   // Anyone who may view it may decide it (the routes already exclude the
   // proposer via SELF_APPROVAL). Viewing is limited to PlatformAdmin + the
@@ -56,6 +57,7 @@ export interface RevokeCredentialPayload {
 
 export const revokeCredentialKind: ProposalKindHandler = {
   kind: "revoke-credential",
+  apiScope: "credentials:revoke",
   canView: orgScopedView,
   canApprove: orgScopedView,
   async execute(ctx, _proposer, p) {

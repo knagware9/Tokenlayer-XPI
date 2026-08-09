@@ -10,7 +10,7 @@
  * scopedToCaller for a kind whose useCaseKey is null (null === null would match
  * every unscoped user).
  */
-import type { Actor, LifecycleAction } from "@tokenlayer/core";
+import type { Actor, ApiScope, LifecycleAction } from "@tokenlayer/core";
 import type { AppDeps } from "./context.js";
 import { issueCredentialKind, revokeCredentialKind } from "./credential-kinds.js";
 import { issueUsecaseCredentialBatchKind, issueUsecaseCredentialKind } from "./credential-usecase-kinds.js";
@@ -34,6 +34,18 @@ export interface KindContext {
 
 export interface ProposalKindHandler {
   kind: string;
+  /**
+   * EN-B: the API scope a KEY principal must hold to DECIDE this kind, or
+   * `null` for "no key may ever decide this" (governance kinds that could
+   * widen the authority a key is bound by).
+   *
+   * REQUIRED, and deliberately not optional: approving a proposal EXECUTES the
+   * operation, so the scope map on the routes that merely DRAFT one is only half
+   * the gate. Making this a mandatory field means a new kind cannot be
+   * registered without its author deciding — the compiler asks the question, and
+   * a kind that is never asked would otherwise fall through open.
+   */
+  apiScope: ApiScope | null;
   /** May this caller SEE this proposal? Security boundary. */
   canView(deps: AppDeps, claims: TokenClaims, p: ProposalRecord): Promise<boolean>;
   /** May this caller decide it? (Already known to not be the proposer.) */
@@ -81,6 +93,8 @@ async function assetOf(ctx: KindContext, p: ProposalRecord, missing: string) {
 
 const issueKind: ProposalKindHandler = {
   kind: "issue",
+  // Approving activates the asset — the same act POST /assets drafts.
+  apiScope: "assets:issue",
   canView: tokenCanView,
   canApprove: tokenCanApprove,
   async execute(ctx, proposer, p) {
@@ -97,6 +111,8 @@ const issueKind: ProposalKindHandler = {
 
 const cashflowKind: ProposalKindHandler = {
   kind: "cashflow-execute",
+  // Settling a cashflow moves value between holders.
+  apiScope: "assets:transfer",
   canView: tokenCanView,
   canApprove: tokenCanApprove,
   async execute(ctx, proposer, p) {
@@ -112,6 +128,10 @@ const cashflowKind: ProposalKindHandler = {
 /** mint | transfer | burn | freeze | unfreeze — the five direct lifecycle actions. */
 const actionKind = (kind: string): ProposalKindHandler => ({
   kind,
+  // mint/transfer/burn/freeze/unfreeze all arrive through
+  // POST /assets/:id/actions/:action, which the scope map gates as
+  // `assets:transfer` — propose and execute must agree.
+  apiScope: "assets:transfer",
   canView: tokenCanView,
   canApprove: tokenCanApprove,
   async execute(ctx, proposer, p) {

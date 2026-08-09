@@ -82,6 +82,16 @@ export interface Env {
    * demo/load environments where many users authenticate from one egress IP.
    */
   loginRateLimitMax?: number;
+  /** Max requests per API KEY per minute. Unset → the route default (600). */
+  apiKeyRateLimitMax?: number;
+  /**
+   * Max FAILED key verifications per prefix per minute before the prefix is
+   * refused without bcrypt work. Unset → the route default (20). Prefixes are
+   * public, so this is what bounds an attacker's CPU cost on this process.
+   */
+  apiKeyFailedAttemptMax?: number;
+  /** Minimum gap between bcrypt attempts for an over-budget prefix. Unset → 5000ms. */
+  apiKeyReserveIntervalMs?: number;
   /**
    * Allowlist of trusted KYC credential issuer DIDs (comma-separated in the env).
    * Empty ⇒ no issuer is trusted, so identity verification fails closed.
@@ -122,6 +132,9 @@ export const env: Env = {
   platformFeeAccount,
   marketEscrowAccount,
   loginRateLimitMax: process.env.LOGIN_RATE_LIMIT_MAX ? Number(process.env.LOGIN_RATE_LIMIT_MAX) : undefined,
+  apiKeyRateLimitMax: process.env.API_KEY_RATE_LIMIT_MAX ? Number(process.env.API_KEY_RATE_LIMIT_MAX) : undefined,
+  apiKeyFailedAttemptMax: process.env.API_KEY_FAILED_ATTEMPT_MAX ? Number(process.env.API_KEY_FAILED_ATTEMPT_MAX) : undefined,
+  apiKeyReserveIntervalMs: process.env.API_KEY_RESERVE_INTERVAL_MS ? Number(process.env.API_KEY_RESERVE_INTERVAL_MS) : undefined,
   trustedKycIssuers: (process.env.TRUSTED_KYC_ISSUERS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   devKycIssuerSeed: process.env.DEV_KYC_ISSUER_SEED,
   didMasterKey: process.env.DID_MASTER_KEY ?? DEV_DID_MASTER_KEY,

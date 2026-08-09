@@ -21,6 +21,11 @@ export const NAV_DOMAIN: Record<string, DomainKey | "shared"> = {
   // org: the Organizations screen carries the capability-request control, so
   // hiding it there would leave no in-app way back from a narrowed envelope.
   organizations: "shared",
+  // Developers (API keys) is tenant tooling for the whole account, not a domain
+  // surface — the same reasoning as Organizations above, and the same trap: a
+  // key can be bound to either domain's roles, so domain-scoping this page would
+  // hide an org's own integration credentials behind a switcher they may not have.
+  developers: "shared",
   approvals: "shared", users: "shared", profile: "shared", credentials: "shared", back: "shared", logout: "shared",
 };
 

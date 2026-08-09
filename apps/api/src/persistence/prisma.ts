@@ -18,6 +18,8 @@ import {
 import type {
   AccountRecord,
   AccountRepository,
+  ApiKeyRecord,
+  ApiKeyRepository,
   AssetFilter,
   AssetRecord,
   AssetRepository,
@@ -58,6 +60,7 @@ import type {
   CredentialUseCaseRepository,
   CredentialUseCaseTemplateRepository,
   UseCaseRepository,
+  UserKind,
   UserRecord,
   UserRepository,
   VerificationRequestRecord,
@@ -81,6 +84,7 @@ const toUser = (r: {
   did: string | null;
   orgId: string | null;
   didSeedEncrypted: string | null;
+  kind: string;
   createdAt: Date;
 }): UserRecord => ({
   id: r.id,
@@ -95,6 +99,7 @@ const toUser = (r: {
   did: r.did ?? undefined,
   orgId: r.orgId ?? null,
   didSeedEncrypted: r.didSeedEncrypted ?? null,
+  kind: r.kind as UserKind,
   createdAt: r.createdAt.toISOString(),
 });
 
@@ -107,8 +112,8 @@ export class PrismaUserRepository implements UserRepository {
     const r = await prisma.user.findUnique({ where: { id } });
     return r ? toUser(r) : null;
   }
-  async create(input: Omit<UserRecord, "id" | "createdAt">): Promise<UserRecord> {
-    return toUser(await prisma.user.create({ data: { ...input, kyc: input.kyc ? JSON.stringify(input.kyc) : null } }));
+  async create(input: Omit<UserRecord, "id" | "createdAt" | "kind"> & { kind?: UserKind }): Promise<UserRecord> {
+    return toUser(await prisma.user.create({ data: { ...input, kind: input.kind ?? "human", kyc: input.kyc ? JSON.stringify(input.kyc) : null } }));
   }
   async list(useCaseKey?: string): Promise<UserRecord[]> {
     return (await prisma.user.findMany({ where: useCaseKey ? { useCaseKey } : undefined, orderBy: { createdAt: "asc" } })).map(toUser);
@@ -993,6 +998,55 @@ export class PrismaStagedInvoiceRepository implements StagedInvoiceRepository {
   }
   async remove(id: string): Promise<void> {
     await prisma.stagedInvoice.delete({ where: { id } });
+  }
+}
+
+const toApiKey = (r: {
+  id: string; orgId: string | null; userId: string; name: string; prefix: string; secretHash: string;
+  scopes: string; expiresAt: Date | null; lastUsedAt: Date | null; revokedAt: Date | null;
+  revokedBy: string | null; createdBy: string; createdAt: Date;
+}): ApiKeyRecord => ({
+  id: r.id, orgId: r.orgId, userId: r.userId, name: r.name, prefix: r.prefix, secretHash: r.secretHash,
+  scopes: JSON.parse(r.scopes) as string[],
+  expiresAt: r.expiresAt ? r.expiresAt.toISOString() : null,
+  lastUsedAt: r.lastUsedAt ? r.lastUsedAt.toISOString() : null,
+  revokedAt: r.revokedAt ? r.revokedAt.toISOString() : null,
+  revokedBy: r.revokedBy, createdBy: r.createdBy, createdAt: r.createdAt.toISOString(),
+});
+
+export class PrismaApiKeyRepository implements ApiKeyRepository {
+  async create(input: Omit<ApiKeyRecord, "id" | "createdAt" | "lastUsedAt" | "revokedAt" | "revokedBy">): Promise<ApiKeyRecord> {
+    return toApiKey(await prisma.apiKey.create({
+      data: {
+        orgId: input.orgId, userId: input.userId, name: input.name, prefix: input.prefix,
+        secretHash: input.secretHash, scopes: JSON.stringify(input.scopes),
+        expiresAt: input.expiresAt ? new Date(input.expiresAt) : null, createdBy: input.createdBy,
+      },
+    }));
+  }
+  async findByPrefix(prefix: string): Promise<ApiKeyRecord | null> {
+    const r = await prisma.apiKey.findUnique({ where: { prefix } });
+    return r ? toApiKey(r) : null;
+  }
+  async findById(id: string): Promise<ApiKeyRecord | null> {
+    const r = await prisma.apiKey.findUnique({ where: { id } });
+    return r ? toApiKey(r) : null;
+  }
+  /** Revoked/expired keys are deliberately NOT filtered — they are the audit trail. */
+  async listByOrg(orgId: string | null): Promise<ApiKeyRecord[]> {
+    return (await prisma.apiKey.findMany({ where: { orgId }, orderBy: { createdAt: "desc" } })).map(toApiKey);
+  }
+  async rotate(id: string, input: { prefix: string; secretHash: string }): Promise<ApiKeyRecord> {
+    return toApiKey(await prisma.apiKey.update({ where: { id }, data: { prefix: input.prefix, secretHash: input.secretHash } }));
+  }
+  async touchLastUsed(id: string, at: string): Promise<void> {
+    await prisma.apiKey.update({ where: { id }, data: { lastUsedAt: new Date(at) } });
+  }
+  async revoke(id: string, input: { by: string; at: string }): Promise<ApiKeyRecord> {
+    return toApiKey(await prisma.apiKey.update({
+      where: { id },
+      data: { revokedAt: new Date(input.at), revokedBy: input.by },
+    }));
   }
 }
 

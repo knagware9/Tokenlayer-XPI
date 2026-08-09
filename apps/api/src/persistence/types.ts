@@ -16,6 +16,13 @@ export interface KycDetails {
   revokeReason?: string;
 }
 
+/**
+ * "service" marks the machine principal an API key authenticates as (EN-B): no
+ * usable password, refused by interactive login. Defaults to "human" on create,
+ * so every pre-EN-B caller and row stays human without a migration.
+ */
+export type UserKind = "human" | "service";
+
 export interface UserRecord {
   id: string;
   email: string;
@@ -29,6 +36,7 @@ export interface UserRecord {
   did?: string;
   orgId?: string | null;
   didSeedEncrypted?: string | null;
+  kind: UserKind;
   createdAt: string;
 }
 
@@ -81,7 +89,8 @@ export interface AccountRecord {
 export interface UserRepository {
   findByEmail(email: string): Promise<UserRecord | null>;
   findById(id: string): Promise<UserRecord | null>;
-  create(input: Omit<UserRecord, "id" | "createdAt">): Promise<UserRecord>;
+  /** `kind` is optional and defaults to "human" — mirrors the column default. */
+  create(input: Omit<UserRecord, "id" | "createdAt" | "kind"> & { kind?: UserKind }): Promise<UserRecord>;
   list(useCaseKey?: string): Promise<UserRecord[]>;
   listByOrg(orgId: string): Promise<UserRecord[]>;
   update(id: string, patch: Partial<Pick<UserRecord, "passwordHash" | "accountId" | "active" | "kycStatus" | "did" | "kyc" | "orgId" | "didSeedEncrypted">>): Promise<UserRecord>;
@@ -532,4 +541,57 @@ export interface LoginKeyRepository {
   get(id: string): Promise<LoginKeyRecord | null>;
   remove(id: string): Promise<void>;
   touch(id: string, at: string): Promise<void>;
+}
+
+/**
+ * An org-scoped machine credential (EN-B), bound to a service user — the
+ * principal the key becomes. The secret itself is NEVER stored: only its bcrypt
+ * hash plus the public `prefix` used to find the row before hashing.
+ */
+export interface ApiKeyRecord {
+  id: string;
+  /** Owning org; null = platform-owned key (PlatformAdmin-minted). */
+  orgId: string | null;
+  /** The bound service user whose role/useCaseKey/orgId this key authenticates as. */
+  userId: string;
+  name: string;
+  /** First 8 chars of the secret body — safe to display and index. */
+  prefix: string;
+  secretHash: string;
+  /** Coarse scopes from core's API_SCOPES vocabulary; persisted as a JSON string. */
+  scopes: string[];
+  expiresAt: string | null;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+  revokedBy: string | null;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface ApiKeyRepository {
+  /** Lifecycle columns (`lastUsedAt`/`revokedAt`/`revokedBy`) are repo-managed and start null. */
+  create(input: Omit<ApiKeyRecord, "id" | "createdAt" | "lastUsedAt" | "revokedAt" | "revokedBy">): Promise<ApiKeyRecord>;
+  /** The single indexed lookup the auth path does before any hash work. */
+  findByPrefix(prefix: string): Promise<ApiKeyRecord | null>;
+  findById(id: string): Promise<ApiKeyRecord | null>;
+  /**
+   * Every key of the org, newest first — INCLUDING revoked and expired ones:
+   * they are the audit trail of what was ever granted, so nothing is filtered.
+   *
+   * `null` lists PLATFORM-owned keys (the `orgId: null` rows). Without this the
+   * null-org affordance would be write-only — a key nothing could ever
+   * enumerate, which is a worse thing to own than no affordance at all. The
+   * HTTP surface never mints one (a PlatformAdmin uses the platform org's real
+   * id), so this is the seed/operator path.
+   */
+  listByOrg(orgId: string | null): Promise<ApiKeyRecord[]>;
+  /**
+   * Replace the secret in place: same row, same id/scopes/bound user, new
+   * `prefix` + `secretHash`. The old secret dies the instant this returns.
+   */
+  rotate(id: string, input: { prefix: string; secretHash: string }): Promise<ApiKeyRecord>;
+  /** Last-use stamp; callers throttle the write (see the design's compare-then-write). */
+  touchLastUsed(id: string, at: string): Promise<void>;
+  /** Soft revoke: sets `revokedAt`/`revokedBy`, keeping the row for the audit trail. */
+  revoke(id: string, input: { by: string; at: string }): Promise<ApiKeyRecord>;
 }

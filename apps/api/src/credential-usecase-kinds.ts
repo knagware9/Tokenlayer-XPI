@@ -28,6 +28,7 @@ export interface IssueUsecaseCredentialPayload {
 
 export const issueUsecaseCredentialKind: ProposalKindHandler = {
   kind: "issue-usecase-credential",
+  apiScope: "credentials:issue",
   canView: orgScopedView,
   canApprove: orgScopedView,
   async execute(ctx, _proposer, p) {
@@ -80,6 +81,7 @@ interface CredentialBatchRowResult {
  */
 export const issueUsecaseCredentialBatchKind: ProposalKindHandler = {
   kind: "issue-usecase-credential-batch",
+  apiScope: "credentials:issue",
   canView: orgScopedView,
   canApprove: orgScopedView,
   async execute(ctx, _proposer, p) {

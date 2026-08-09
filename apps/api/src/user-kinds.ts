@@ -54,7 +54,7 @@ async function onboardSingle(deps: AppDeps, proposer: Actor, pl: OnboardUserPayl
   if (pl.walletAddress) accountId = (await deps.accounts.upsert(pl.walletAddress, pl.email)).id;
   const created = await deps.users.create({
     email: pl.email, passwordHash: pl.passwordHash, role: pl.role, useCaseKey: pl.useCaseKey,
-    accountId, active: true, kycStatus: "pending", kyc: pl.kyc ?? null,
+    accountId, active: true, kycStatus: "pending", kyc: pl.kyc ?? null, kind: "human",
   });
   let issuedCredentialId: string | null = null;
   try {
@@ -110,6 +110,7 @@ async function onboardSingle(deps: AppDeps, proposer: Actor, pl: OnboardUserPayl
 
 export const onboardUserKind: ProposalKindHandler = {
   kind: "onboard-user",
+  apiScope: "users:onboard",
   canView: userScopedView,
   canApprove: userScopedView,
   async execute(ctx, proposer, p) {
@@ -132,6 +133,7 @@ interface BatchRowResult {
 
 export const onboardUserBatchKind: ProposalKindHandler = {
   kind: "onboard-user-batch",
+  apiScope: "users:onboard",
   canView: userScopedView,
   canApprove: userScopedView,
   async execute(ctx, proposer, p) {
@@ -165,6 +167,11 @@ export interface RevokeUserIdentityPayload {
 
 export const revokeUserIdentityKind: ProposalKindHandler = {
   kind: "revoke-user-identity",
+  // The coarse vocabulary has ONE user-write scope, and this is a user-lifecycle
+  // write; it matches the gate on the route that drafts it
+  // (POST /users/:id/revoke-identity). A separate `users:revoke` would be finer
+  // but the spec deliberately chose coarse resource:action scopes.
+  apiScope: "users:onboard",
   canView: userScopedView,
   canApprove: userScopedView,
   async execute(ctx, proposer, p) {

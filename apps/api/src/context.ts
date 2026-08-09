@@ -8,6 +8,7 @@ import type { Keystore } from "./keystore.js";
 import type { QrLoginStore } from "./qr-login-sessions.js";
 import type {
   AccountRepository,
+  ApiKeyRepository,
   AssetRepository,
   AuditAnchorRepository,
   AuditRepository,
@@ -49,6 +50,8 @@ export interface AppDeps {
   credentials: CredentialRepository;
   verificationRequests: VerificationRequestRepository;
   stagedInvoices: StagedInvoiceRepository;
+  /** Machine credentials (EN-B): the auth seam resolves `tl_live_…` bearers through this. */
+  apiKeys: ApiKeyRepository;
   keystore: Keystore;
   /** True iff DID_MASTER_KEY was explicitly configured (production must set it). */
   didMasterConfigured: boolean;
@@ -75,6 +78,20 @@ export interface AppDeps {
   isProduction?: boolean;
   /** Max login attempts per IP per 15-min window (default 10). */
   loginRateLimitMax?: number;
+  /** Max requests per API KEY per minute (default 600) — 429 RATE_LIMITED past it. */
+  apiKeyRateLimitMax?: number;
+  /**
+   * Max FAILED key verifications per prefix per minute (default 20) before the
+   * prefix is refused without any bcrypt work. Prefixes are public, so this is
+   * what stops a stranger burning the event loop with garbage secrets.
+   */
+  apiKeyFailedAttemptMax?: number;
+  /**
+   * Minimum gap between bcrypt attempts for an OVER-BUDGET key prefix (default
+   * 5000ms). This reserve is what stops the failed-attempt bound from becoming a
+   * denial of service against a legitimate cold key.
+   */
+  apiKeyReserveIntervalMs?: number;
   /**
    * Platform fee account (address) receiving marketplace/issuance fees. When
    * absent, fees are disabled (treated as 0) regardless of use-case config.

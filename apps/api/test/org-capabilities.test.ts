@@ -371,9 +371,22 @@ describe("capability enforcement (EN-A task A4)", () => {
     const bypass = await app.inject({ method: "POST", url: `${V1}/orgs/${capped.orgId}/users`, headers: auth(platform), payload: member({ role: "Verifier" }) });
     expect(bypass.statusCode).toBe(201);
 
-    // A legacy (null-envelope) org is unrestricted.
-    const legacyAdd = await app.inject({ method: "POST", url: `${V1}/orgs/${legacy.orgId}/users`, headers: auth(legacy.adminTok), payload: member({ role: "Verifier", useCaseKey: "invoice-tokenization" }) });
+    // A legacy (null-envelope) org is unrestricted BY THE ENVELOPE: the very
+    // role and domain the capped org was refused above go through here.
+    const legacyAdd = await app.inject({ method: "POST", url: `${V1}/orgs/${legacy.orgId}/users`, headers: auth(legacy.adminTok), payload: member({ role: "Verifier", useCaseKey: "desk-uc" }) });
     expect(legacyAdd.statusCode).toBe(201);
+
+    // …but "unrestricted by the envelope" was never "unrestricted". This line
+    // used to bind a legacy org's member to `invoice-tokenization` — a
+    // PLATFORM-seeded use case it does not own — and assert 201. That was the
+    // EN-B review's MEDIUM finding: `scopedToCaller` authorizes on
+    // `claims.useCaseKey` alone, so the stored key IS the grant, and a 201 here
+    // handed a foreign tenant's whole asset register to whoever asked. It is
+    // now ORG_NOT_BOUND — and note it is NOT a capability error, which is the
+    // point: the envelope axis and the use-case-ownership axis are independent.
+    const legacyForeign = await app.inject({ method: "POST", url: `${V1}/orgs/${legacy.orgId}/users`, headers: auth(legacy.adminTok), payload: member({ role: "Verifier", useCaseKey: "invoice-tokenization" }) });
+    expect(legacyForeign.statusCode).toBe(403);
+    expect(legacyForeign.json().error).toBe("ORG_NOT_BOUND");
   });
 
   // --- gate 9 (review find): legacy closed-catalog issuance ----------------

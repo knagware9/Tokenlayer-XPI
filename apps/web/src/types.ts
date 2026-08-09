@@ -380,6 +380,70 @@ export interface OrgMember {
   kycStatus: string;
 }
 
+// ---- EN-B: machine API access (org-scoped API keys) ------------------------
+/**
+ * A DELIBERATE MIRROR of `@tokenlayer/core`'s `API_SCOPES`
+ * (packages/core/src/api-scopes.ts). The web app has no dependency on core —
+ * every shared vocabulary here is copied the same way `ORG_DOMAINS` above is —
+ * so this list must be updated when core's is. It is only ever a display and
+ * pick-list: the server runs core's `validateScopes` and answers 400
+ * INVALID_SCOPES for anything it does not recognise, so a stale copy here can
+ * never grant a scope, only fail to offer one.
+ *
+ * A stored grant may also be `*` or `resource:*`; the console only ever mints
+ * exact scopes, but the table renders whatever the server returns.
+ */
+export const API_SCOPES = [
+  "credentials:read",
+  "credentials:issue",
+  "credentials:revoke",
+  "verifications:read",
+  "verifications:request",
+  "verifications:verify",
+  "assets:read",
+  "assets:issue",
+  "assets:transfer",
+  "users:read",
+  "users:onboard",
+  "org:read",
+  "usecases:provision",
+] as const;
+export type ApiScope = (typeof API_SCOPES)[number];
+
+/** Derived server-side from `revokedAt` + `expiresAt` — never stored. */
+export type ApiKeyStatus = "active" | "revoked" | "expired";
+
+/** The public projection of a key. NEVER carries the secret or its hash. */
+export interface ApiKeyView {
+  id: string;
+  /** null = a platform-owned key (not mintable from this surface). */
+  orgId: string | null;
+  /** The bound service user whose role this key authenticates as. */
+  userId: string;
+  name: string;
+  /** First 8 chars of the secret body — the only part that is ever displayable. */
+  prefix: string;
+  scopes: string[];
+  role: Role | null;
+  useCaseKey: string | null;
+  status: ApiKeyStatus;
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  revokedBy: string | null;
+  createdBy: string;
+  createdAt: string;
+}
+
+/**
+ * The create/rotate response — the ONLY moment `secret` exists anywhere outside
+ * the caller's own storage. It is never persisted by this app: see Developers.tsx.
+ */
+export interface MintedApiKey {
+  key: ApiKeyView;
+  secret: string;
+}
+
 export interface HeldCredential {
   id: string;
   type: string[];

@@ -11,6 +11,7 @@ import { createKeystore } from "./keystore.js";
 import { ensureNamedOrg, ensurePlatformIssuerOrg, ensureUserWallet, provisionOrgMemberIdentities, provisionPlatformOperatorIdentities } from "./platform-org.js";
 import {
   PrismaAccountRepository,
+  PrismaApiKeyRepository,
   PrismaAssetRepository,
   PrismaAuditAnchorRepository,
   PrismaAuditRepository,
@@ -57,6 +58,7 @@ async function main(): Promise<void> {
   const verificationRequests = new PrismaVerificationRequestRepository();
   const stagedInvoices = new PrismaStagedInvoiceRepository();
   const loginKeys = new PrismaLoginKeyRepository();
+  const apiKeys = new PrismaApiKeyRepository();
   const keystore = createKeystore(env.didMasterKey);
   // Demo users/accounts (with predictable passwords) are seeded only outside production.
   if (env.nodeEnv !== "production") await seedDefaults(users, accounts);
@@ -94,6 +96,7 @@ async function main(): Promise<void> {
     credentials,
     verificationRequests,
     stagedInvoices,
+    apiKeys,
     keystore,
     didMasterConfigured: env.didMasterConfigured,
     challenges: createMemoryChallengeStore(),
@@ -111,6 +114,9 @@ async function main(): Promise<void> {
     platformFeeAccount: env.platformFeeAccount,
     marketEscrowAccount: env.marketEscrowAccount,
     loginRateLimitMax: env.loginRateLimitMax,
+    apiKeyRateLimitMax: env.apiKeyRateLimitMax,
+    apiKeyFailedAttemptMax: env.apiKeyFailedAttemptMax,
+    apiKeyReserveIntervalMs: env.apiKeyReserveIntervalMs,
     registry,
   };
   const platformOrg = await ensurePlatformIssuerOrg(deps);

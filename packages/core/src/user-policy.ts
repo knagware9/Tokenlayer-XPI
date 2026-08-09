@@ -51,6 +51,13 @@ export function canCreateUser(
  * - OrgAdmin: any org-internal role, but never another OrgAdmin or a PlatformAdmin.
  */
 export function canCreateOrgMember(managerRole: Role, targetRole: Role): boolean {
+  // LOAD-BEARING FOR EN-B, not merely tidy: this line is what breaks the 2-hop
+  // scope-widening chain "API key → mint a human OrgAdmin with a caller-chosen
+  // password → log in as them → mint a `*` key". Nobody — not even a
+  // PlatformAdmin-bound key — can mint a PlatformAdmin here, so the chain can
+  // never start above the org tier. A key bound to a PlatformAdmin service user
+  // (only reachable through the repos or a seed, never through the HTTP surface)
+  // plus the `users:onboard` scope would reopen it if this ever relaxed.
   if (targetRole === "PlatformAdmin") return false;
   if (targetRole === "OrgAdmin") return managerRole === "PlatformAdmin";
   if (ORG_INTERNAL_ROLES.includes(targetRole)) return managerRole === "PlatformAdmin" || managerRole === "OrgAdmin";

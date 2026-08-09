@@ -1,10 +1,14 @@
-import type { AccountState, ActivityEvent, AnalyticsSummary, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, ChainInfo, ChainStatus, CompanyCategory, ContractCode, CredentialStatusInfo, CredentialTypeInfo, CredentialTypeSpec, CredentialUseCase, DidDocument, EligibleHolder, HeldCredential, IdentityDashboardData, IdentityRegistryInfo, IdentityResult, InvoiceRowResult, IssuedCredential, Listing, LoginKeyInfo, OrgCapabilities, OrgMember, OrgType, Organization, Portfolio, ProvisionResult, Proposal, QrLoginPoll, QrLoginStart, Role, SessionPrincipal, SessionUser, StagedInvoice, TokenInfo, TokenStandard, TokenizeResult, Trade, UseCase, UseCaseTemplate, UseCaseTemplateMeta, VerificationRequest, VerificationResult } from "./types.js";
+import type { AccountState, ActivityEvent, AnalyticsSummary, ApiKeyView, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, ChainInfo, ChainStatus, CompanyCategory, ContractCode, CredentialStatusInfo, CredentialTypeInfo, CredentialTypeSpec, CredentialUseCase, DidDocument, EligibleHolder, HeldCredential, IdentityDashboardData, IdentityRegistryInfo, IdentityResult, InvoiceRowResult, IssuedCredential, Listing, LoginKeyInfo, MintedApiKey, OrgCapabilities, OrgMember, OrgType, Organization, Portfolio, ProvisionResult, Proposal, QrLoginPoll, QrLoginStart, Role, SessionPrincipal, SessionUser, StagedInvoice, TokenInfo, TokenStandard, TokenizeResult, Trade, UseCase, UseCaseTemplate, UseCaseTemplateMeta, VerificationRequest, VerificationResult } from "./types.js";
 
 export interface Currency { code: string; label: string; }
 export interface CashBalance { currency: string; address: string; amount: string; }
 
 const ORIGIN = (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:4000";
 const BASE = `${ORIGIN}/api/v1`;
+
+/** The versioned API root, exported so a surface can SHOW an integrator a real
+ *  URL to call (the Developers page's curl snippet) rather than a fake one. */
+export const API_BASE = BASE;
 
 /** List endpoints return { data, pagination }; the dashboard only needs the rows. */
 interface Listed<T> {
@@ -223,6 +227,20 @@ export const api = {
   orgMembers: (token: string, id: string) => request<OrgMember[]>(`/orgs/${encodeURIComponent(id)}/members`, token),
   createMember: (token: string, id: string, body: { email: string; password: string; role: string; useCaseKey?: string; walletAddress?: string }) =>
     request<{ id: string; did: string; membershipVc: boolean }>(`/orgs/${encodeURIComponent(id)}/users`, token, { method: "POST", body: JSON.stringify(body) }),
+  // EN-B machine API access. `createApiKey`/`rotateApiKey` are the ONLY calls in
+  // this app that ever see a key secret, and it is in the response body alone —
+  // no read route returns it and nothing here stores it.
+  listApiKeys: (token: string, orgId: string) =>
+    request<ApiKeyView[]>(`/orgs/${encodeURIComponent(orgId)}/api-keys`, token),
+  createApiKey: (token: string, orgId: string, body: { name: string; role: Role; useCaseKey?: string; scopes: string[]; expiresAt?: string }) =>
+    // 201 → { key, secret }.
+    request<MintedApiKey>(`/orgs/${encodeURIComponent(orgId)}/api-keys`, token, { method: "POST", body: JSON.stringify(body) }),
+  rotateApiKey: (token: string, orgId: string, keyId: string) =>
+    // 200 → { key, secret }: a NEW secret; the previous one stops working at once.
+    request<MintedApiKey>(`/orgs/${encodeURIComponent(orgId)}/api-keys/${encodeURIComponent(keyId)}/rotate`, token, { method: "POST", body: "{}" }),
+  revokeApiKey: (token: string, orgId: string, keyId: string) =>
+    // 200 → { key }: a SOFT revoke — the row stays as the audit trail.
+    request<{ key: ApiKeyView }>(`/orgs/${encodeURIComponent(orgId)}/api-keys/${encodeURIComponent(keyId)}`, token, { method: "DELETE" }),
   certificateUrl: (id: string): string => `${BASE}/credentials/${encodeURIComponent(id)}/certificate.pdf`,
   didResolveUrl: (did: string): string => `${BASE}/dids/${encodeURIComponent(did)}/resolve`,
   myCredentials: (token: string) => request<HeldCredential[]>("/me/credentials", token),

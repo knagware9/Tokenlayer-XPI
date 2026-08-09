@@ -9,7 +9,10 @@ coverage/
 .DS_Store
 
 # Prisma / SQLite
-apps/api/prisma/*.db
+# `*.db*`, not `*.db`: the narrow glob matched dev.db but NOT dev.db.freshkey.bak,
+# and a 233 KB local backup carrying 18 users' bcrypt hashes was committed
+# through that gap. The trailing wildcard also subsumes the -journal line below.
+apps/api/prisma/*.db*
 apps/api/prisma/*.db-journal
 *.sqlite
 
