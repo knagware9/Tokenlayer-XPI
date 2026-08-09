@@ -67,8 +67,17 @@ const DEFAULT_FAILED_MAX = 20;
  * attacker who knows the (public) prefix spends the budget every window and a
  * legitimate key that has gone cold can never re-verify. One attempt per 5s
  * costs an attacker-facing ~10ms/s of CPU per prefix (~1% of a core at
- * API_KEY_BCRYPT_ROUNDS) while capping a live integration's outage at one
- * retry interval.
+ * API_KEY_BCRYPT_ROUNDS).
+ *
+ * What the reserve gives a cold legitimate key is a CHANCE, not a bound. The
+ * slot is first-come-first-served and is not held for anyone, so under a
+ * sustained flood on a public prefix the attacker wins most slots and the real
+ * client's recovery is probabilistic — expected recovery scales with how often
+ * it retries relative to the flood, not with a single retry interval. It is
+ * still strictly better than the un-reserved bound, under which a cold key
+ * never recovers at all while the flood continues. A key that is merely WARM
+ * never enters this path: the verified-prefix cache is consulted first and is
+ * deliberately immune to the failure budget.
  */
 const DEFAULT_RESERVE_INTERVAL_MS = 5_000;
 
@@ -83,8 +92,23 @@ function bearerOf(header: string | undefined): string | null {
 
 /**
  * The ONE message every failed authentication returns, whatever went wrong.
- * Distinguishing "unknown key" from "revoked" from "expired" from "wrong
- * secret" from "deactivated service user" would hand an attacker an oracle.
+ *
+ * What this guarantees, exactly: the RESPONSE BODY and status never distinguish
+ * "unknown key" from "revoked" from "expired" from "wrong secret" from
+ * "deactivated service user". Nothing an attacker reads off the response tells
+ * these apart.
+ *
+ * What it does NOT guarantee, and deliberately: constant TIME. The checks below
+ * reject an unknown/revoked/expired prefix before any bcrypt work, so those
+ * answers come back in microseconds while a live prefix with a wrong secret
+ * pays a full hash — measured at 0.06 ms vs 51 ms, roughly 850x. So the timing
+ * does leak "is this prefix live", which the identical bodies would otherwise
+ * hide. That is accepted rather than overlooked: a prefix is PUBLIC by design
+ * (it is displayed in the UI and is not the secret), so liveness of a prefix is
+ * not material, and the alternative — hashing on every unknown prefix to
+ * flatten the timing — is precisely the CPU-exhaustion vector the failure
+ * budget below exists to prevent. Do not "fix" the timing by moving the cheap
+ * rejections after the bcrypt.
  */
 async function rejectUnauthenticated(reply: FastifyReply): Promise<void> {
   await reply.code(401).send({ error: "UNAUTHORIZED", message: "missing or invalid bearer token" });

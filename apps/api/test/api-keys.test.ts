@@ -1354,3 +1354,313 @@ describe("read routes are scope-gated (read sweep)", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Final whole-branch review fixes (EN-B). Both findings are the SAME class: a
+// tenancy predicate that decides authority without ever consulting the
+// organization. EN-B did not introduce either — binding a key to an ordinary
+// org member is what made both reachable by an unattended machine credential.
+// ---------------------------------------------------------------------------
+
+const suspend = (h: TestAppHandle, cred: string, id: string) =>
+  h.app.inject({ method: "PATCH", url: `${V1}/users/${id}`, headers: auth(cred), payload: { active: false } });
+const removeUser = (h: TestAppHandle, cred: string, id: string) =>
+  h.app.inject({ method: "DELETE", url: `${V1}/users/${id}`, headers: auth(cred) });
+const revokeIdentity = (h: TestAppHandle, cred: string, id: string) =>
+  h.app.inject({ method: "POST", url: `${V1}/users/${id}/revoke-identity`, headers: auth(cred), payload: { reason: "test" } });
+const idChallenge = (h: TestAppHandle, cred: string, id: string) =>
+  h.app.inject({ method: "POST", url: `${V1}/users/${id}/identity/challenge`, headers: auth(cred), payload: {} });
+
+/** Every route that administers an EXISTING account through `canAdministerUser`. */
+const administerAll = async (h: TestAppHandle, cred: string, id: string) => [
+  { route: "PATCH /users/:id", res: await suspend(h, cred, id) },
+  { route: "DELETE /users/:id", res: await removeUser(h, cred, id) },
+  { route: "POST /users/:id/revoke-identity", res: await revokeIdentity(h, cred, id) },
+  { route: "POST /users/:id/identity/challenge", res: await idChallenge(h, cred, id) },
+];
+
+describe("administering an existing account is bounded by RANK and TENANCY (final review, HIGH)", () => {
+  /**
+   * An org, its human OrgAdmin, and a key holding nothing but `users:onboard`.
+   * The key is OrgAdmin-roled — the strongest this surface can produce, and it
+   * takes a PlatformAdmin to mint (canCreateOrgMember stops an OrgAdmin minting
+   * a peer). An OrgAdmin-bound service user carries `useCaseKey: null`, which is
+   * the whole bug: so does every PlatformAdmin and every other org's OrgAdmin.
+   */
+  async function attacker(h: TestAppHandle, admin: string, label: string) {
+    const orgId = await makeOrg(h, admin, `${label} Co`);
+    const humanTok = await makeOrgAdmin(h, admin, orgId, `${label}.admin@x.dev`);
+    const key = await mintKey(h, admin, orgId, { name: `${label} key`, role: "OrgAdmin", scopes: ["users:onboard"] });
+    return { orgId, humanTok, secret: key.secret };
+  }
+
+  it("a users:onboard key cannot suspend, delete or revoke-identity a PlatformAdmin", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await platformAdmin(h);
+    const atk = await attacker(h, admin, "atk1");
+    const victim = (await h.users.findByEmail("admin2@tokenlayer.dev"))!;
+
+    for (const { route, res } of await administerAll(h, atk.secret, victim.id)) {
+      expect({ route, code: res.statusCode }).toEqual({ route, code: 403 });
+      expect({ route, error: res.json().error }).toEqual({ route, error: "FORBIDDEN" });
+    }
+    // The assertion that actually matters: the platform's second admin is still
+    // there, still active, and can still log in. The review's proof of the hole
+    // was a 200 on suspend, a 401 ACCOUNT_SUSPENDED on login, and a 204 that
+    // removed the row.
+    const still = await h.users.findById(victim.id);
+    expect(still?.active).toBe(true);
+    const login = await h.app.inject({ method: "POST", url: `${V1}/auth/login`, payload: { email: "admin2@tokenlayer.dev", password: "admin123" } });
+    expect(login.statusCode).toBe(200);
+  });
+
+  it("…nor a FOREIGN org's OrgAdmin, nor a foreign org's use-case-less member", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await platformAdmin(h);
+    const atk = await attacker(h, admin, "atk2");
+    const victimOrg = await makeOrg(h, admin, "Victim Co");
+    await makeOrgAdmin(h, admin, victimOrg, "victim.admin@x.dev");
+    const victimAdmin = (await h.users.findByEmail("victim.admin@x.dev"))!;
+    // A plain member with NO use case. Use-case equality alone said `null ===
+    // null` and called this the attacker's own tenant; only the org says otherwise.
+    const made = await h.app.inject({
+      method: "POST", url: `${V1}/orgs/${victimOrg}/users`, headers: auth(admin),
+      payload: { email: "victim.trader@x.dev", password: "secret1", role: "Trader" },
+    });
+    expect(made.statusCode).toBe(201);
+    const victimMember = made.json().id as string;
+
+    for (const target of [victimAdmin.id, victimMember]) {
+      for (const cred of [atk.secret, atk.humanTok]) { // the key AND the human behind it
+        for (const { route, res } of await administerAll(h, cred, target)) {
+          expect({ route, code: res.statusCode }).toEqual({ route, code: 403 });
+        }
+      }
+    }
+    expect((await h.users.findById(victimMember))?.active).toBe(true);
+    expect(await h.users.findById(victimAdmin.id)).not.toBeNull();
+  });
+
+  /**
+   * The RANK rule on its own. The PlatformAdmin cases above are actually killed
+   * by the org rule (a PlatformAdmin carries `orgId: null`, so it matches no
+   * org), which would leave rank untested — and a guard no test kills is
+   * decoration. A PEER OrgAdmin inside the attacker's OWN org is the case only
+   * rank can refuse: same org, same null use case, equal rank.
+   */
+  it("a key cannot turn on its own org's OTHER OrgAdmin — rank, not tenancy", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await platformAdmin(h);
+    const atk = await attacker(h, admin, "peer");
+    // A second OrgAdmin in the SAME org. Only a PlatformAdmin can mint one
+    // (canCreateOrgMember), which is precisely why destroying one must not be
+    // available a tier lower.
+    await makeOrgAdmin(h, admin, atk.orgId, "peer.other@x.dev");
+    const peer = (await h.users.findByEmail("peer.other@x.dev"))!;
+    expect(peer.orgId).toBe(atk.orgId); // same tenant — tenancy cannot be what refuses this
+
+    for (const cred of [atk.secret, atk.humanTok]) {
+      for (const { route, res } of await administerAll(h, cred, peer.id)) {
+        expect({ route, code: res.statusCode }).toEqual({ route, code: 403 });
+      }
+    }
+    expect((await h.users.findById(peer.id))?.active).toBe(true);
+    expect((await h.app.inject({ method: "POST", url: `${V1}/auth/login`, payload: { email: "peer.other@x.dev", password: "secret1" } })).statusCode).toBe(200);
+  });
+
+  it("a HUMAN OrgAdmin cannot delete a PlatformAdmin either — the predicate was always wrong", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await platformAdmin(h);
+    const atk = await attacker(h, admin, "atk3");
+    const victim = (await h.users.findByEmail("admin2@tokenlayer.dev"))!;
+
+    for (const { route, res } of await administerAll(h, atk.humanTok, victim.id)) {
+      expect({ route, code: res.statusCode }).toEqual({ route, code: 403 });
+    }
+    expect(await h.users.findById(victim.id)).not.toBeNull();
+  });
+
+  it("the legitimate paths are untouched: own-org members, and a PlatformAdmin over anyone", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await platformAdmin(h);
+    const orgId = await makeOrg(h, admin, "Legit Co");
+    const orgAdmin = await makeOrgAdmin(h, admin, orgId, "legit.admin@x.dev");
+    const key = await mintKey(h, admin, orgId, { name: "legit key", role: "OrgAdmin", scopes: ["users:onboard"] });
+    const addMember = async (email: string) => {
+      const res = await h.app.inject({ method: "POST", url: `${V1}/orgs/${orgId}/users`, headers: auth(orgAdmin), payload: { email, password: "secret1", role: "Trader" } });
+      expect(res.statusCode).toBe(201);
+      return res.json().id as string;
+    };
+
+    // The human OrgAdmin still suspends and still deletes their own member.
+    const byHuman = await addMember("legit.one@x.dev");
+    expect((await suspend(h, orgAdmin, byHuman)).statusCode).toBe(200);
+    expect((await removeUser(h, orgAdmin, byHuman)).statusCode).toBe(204);
+    expect(await h.users.findById(byHuman)).toBeNull();
+
+    // …and so does the key. Delegating onboarding still delegates something.
+    const byKey = await addMember("legit.two@x.dev");
+    expect((await suspend(h, key.secret, byKey)).statusCode).toBe(200);
+    expect((await h.users.findById(byKey))?.active).toBe(false);
+    expect((await removeUser(h, key.secret, byKey)).statusCode).toBe(204);
+
+    // A PlatformAdmin still reaches anyone at all, including another PlatformAdmin.
+    const admin2 = (await h.users.findByEmail("admin2@tokenlayer.dev"))!;
+    expect((await suspend(h, admin, admin2.id)).statusCode).toBe(200);
+  });
+
+  it("a USE-CASE-scoped manager still manages their own use case's members", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await platformAdmin(h);
+    const checker = await loginAs(h.app, "admin2@tokenlayer.dev", "admin123");
+    const uca = await onboardUser(h.app, admin, checker, { email: "uca@x.dev", password: "secret1", role: "UseCaseAdmin", useCaseKey: "invoice-tokenization" });
+    const buyer = await onboardUser(h.app, admin, checker, { email: "uca.buyer@x.dev", password: "secret1", role: "Buyer", useCaseKey: "invoice-tokenization" });
+    const ucaTok = await loginAs(h.app, "uca@x.dev", "secret1");
+
+    // Same use case, below them in rank: unchanged, 200.
+    expect((await suspend(h, ucaTok, buyer.id)).statusCode).toBe(200);
+    // A peer UseCaseAdmin (here, themselves) stays out of reach.
+    expect((await suspend(h, ucaTok, uca.id)).statusCode).toBe(403);
+    // An unscoped PlatformAdmin is not in their use case, and outranks them.
+    const admin2 = (await h.users.findByEmail("admin2@tokenlayer.dev"))!;
+    expect((await removeUser(h, ucaTok, admin2.id)).statusCode).toBe(403);
+    expect(await h.users.findById(admin2.id)).not.toBeNull();
+
+    // The USE-CASE equality rule on its own: an identical role, identically
+    // ranked, in a DIFFERENT use case. Nothing but that comparison refuses this.
+    const stranger = await onboardUser(h.app, admin, checker, { email: "other.buyer@x.dev", password: "secret1", role: "Buyer", useCaseKey: "carbon-credit" });
+    for (const { route, res } of await administerAll(h, ucaTok, stranger.id)) {
+      expect({ route, code: res.statusCode }).toEqual({ route, code: 403 });
+    }
+    expect((await h.users.findById(stranger.id))?.active).toBe(true);
+  });
+});
+
+/** A complete, schema-valid TOKENIZATION definition deployable on the test stack (fabric). */
+const TOK_DEF = (key: string) => ({
+  key, name: `Notes ${key}`, symbol: "NTS", tokenStandard: "ERC-20",
+  allowedChainIds: ["fabric"], defaultChainId: "fabric",
+  metadataSchema: { type: "object", properties: {} },
+  lifecycle: { mint: true, transfer: true, burn: true, freeze: true },
+  compliance: { allowlist: true, transferRestrictions: false },
+  roles: ["UseCaseAdmin", "Issuer"],
+});
+
+/** The real org self-service path to an org-OWNED tokenization use case: draft → PlatformAdmin approves. */
+async function ownedUseCase(h: TestAppHandle, admin: string, orgAdmin: string, key: string): Promise<string> {
+  const draft = await h.app.inject({ method: "POST", url: `${V1}/use-cases`, headers: auth(orgAdmin), payload: TOK_DEF(key) });
+  if (draft.statusCode !== 202) throw new Error(`ownedUseCase draft failed: ${draft.statusCode} ${draft.payload}`);
+  const appr = await h.app.inject({ method: "POST", url: `${V1}/proposals/${draft.json().proposal.id}/approve`, headers: auth(admin), payload: {} });
+  // "executed" (not merely "approved"): the create-use-case executor deploys and
+  // persists on approval, stamping ownerOrgId from the PROPOSER's org.
+  const p = appr.json().proposal as { status: string; payload: { ownerOrgId?: string } };
+  if (p?.status !== "executed") throw new Error(`ownedUseCase approve failed: ${appr.statusCode} ${appr.payload}`);
+  expect(p.payload.ownerOrgId).toBeTruthy();
+  return key;
+}
+
+describe("a member — and so a KEY — binds only to a use case its org owns (final review, MEDIUM)", () => {
+  it("binding to a tokenization use case the org does not own is ORG_NOT_BOUND, on both mint paths", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await platformAdmin(h);
+    const orgId = await makeOrg(h, admin, "Foreign Binder Co");
+    const orgAdmin = await makeOrgAdmin(h, admin, orgId, "binder.admin@x.dev");
+
+    // The review's exact proof-of-concept: this used to return 201, and the key
+    // then read the victim tenant's whole register through `scopedToCaller`.
+    const mint = await h.app.inject({
+      method: "POST", url: `${V1}/orgs/${orgId}/api-keys`, headers: auth(orgAdmin),
+      payload: { name: "exfil", role: "Trader", useCaseKey: "invoice-tokenization", scopes: ["assets:read", "assets:transfer"] },
+    });
+    expect(mint.statusCode).toBe(403);
+    expect(mint.json()).toMatchObject({ error: "ORG_NOT_BOUND", details: { orgId, useCaseKey: "invoice-tokenization" } });
+
+    // The human member path is the same function, so it is closed identically —
+    // otherwise the OrgAdmin just mints the member and logs in as them.
+    const member = await h.app.inject({
+      method: "POST", url: `${V1}/orgs/${orgId}/users`, headers: auth(orgAdmin),
+      payload: { email: "binder.trader@x.dev", password: "secret1", role: "Trader", useCaseKey: "invoice-tokenization" },
+    });
+    expect(member.statusCode).toBe(403);
+    expect(member.json().error).toBe("ORG_NOT_BOUND");
+
+    // Nothing was created by either attempt — no user, no key, no service account.
+    expect((await h.app.inject({ method: "GET", url: `${V1}/orgs/${orgId}/members`, headers: auth(orgAdmin) })).json()).toEqual(
+      expect.not.arrayContaining([expect.objectContaining({ useCaseKey: "invoice-tokenization" })]),
+    );
+    expect((await h.app.inject({ method: "GET", url: `${V1}/orgs/${orgId}/api-keys`, headers: auth(orgAdmin) })).json()).toEqual([]);
+
+    // An unknown key fails CLOSED rather than being stored for later.
+    const unknown = await h.app.inject({
+      method: "POST", url: `${V1}/orgs/${orgId}/api-keys`, headers: auth(orgAdmin),
+      payload: { name: "future", role: "Trader", useCaseKey: "not-a-use-case", scopes: ["assets:read"] },
+    });
+    expect(unknown.statusCode).toBe(404);
+    expect(unknown.json().error).toBe("USE_CASE_NOT_FOUND");
+
+    // The unknown-key refusal is a check in its OWN right, not a side effect of
+    // the ownership lookup: it must also bite on the two paths that skip
+    // ownership entirely — a Holder (ungated by design) and a PlatformAdmin
+    // (exempt by design). Otherwise "name a key nobody has created yet, and
+    // acquire the use case when someone else creates it" stays open for them.
+    const holderUnknown = await h.app.inject({
+      method: "POST", url: `${V1}/orgs/${orgId}/users`, headers: auth(orgAdmin),
+      payload: { email: "binder.holder@x.dev", password: "secret1", role: "Holder", useCaseKey: "not-a-use-case" },
+    });
+    expect(holderUnknown.statusCode).toBe(404);
+    expect(holderUnknown.json().error).toBe("USE_CASE_NOT_FOUND");
+
+    const platformUnknown = await h.app.inject({
+      method: "POST", url: `${V1}/orgs/${orgId}/api-keys`, headers: auth(admin),
+      payload: { name: "platform future", role: "Trader", useCaseKey: "not-a-use-case", scopes: ["assets:read"] },
+    });
+    expect(platformUnknown.statusCode).toBe(404);
+    expect(platformUnknown.json().error).toBe("USE_CASE_NOT_FOUND");
+  });
+
+  it("the org's OWN use case still mints a working key, and that key sees only its own register", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await platformAdmin(h);
+    const orgId = await makeOrg(h, admin, "Owner Co");
+    const orgAdmin = await makeOrgAdmin(h, admin, orgId, "owner.admin@x.dev");
+    const ownKey = await ownedUseCase(h, admin, orgAdmin, "owner-notes");
+    // Something confidential in the use case the org does NOT own — this is the
+    // asset the review's foreign-bound key read back in full.
+    const confidential = await h.app.inject({
+      method: "POST", url: `${V1}/assets`, headers: auth(admin),
+      payload: {
+        useCaseKey: "invoice-tokenization", name: "CONFIDENTIAL-INV-1", chainId: "fabric",
+        metadata: { invoiceNumber: "CONFIDENTIAL-INV-1", invoiceDate: "2026-07-01", buyerName: "JSW Steel Limited", currency: "INR", amount: 1000000, dueDate: "2099-12-31" },
+      },
+    });
+    expect(confidential.statusCode).toBe(201);
+
+    const minted = await mintKey(h, orgAdmin, orgId, { name: "own erp", role: "Trader", useCaseKey: ownKey, scopes: ["assets:read"] });
+    expect(minted.key).toMatchObject({ role: "Trader", useCaseKey: ownKey, status: "active" });
+
+    const assets = await h.app.inject({ method: "GET", url: `${V1}/assets`, headers: auth(minted.secret) });
+    expect(assets.statusCode).toBe(200);
+    const rows = (assets.json() as { data: { useCaseKey: string; name: string }[] }).data;
+    expect(rows.every((a) => a.useCaseKey === ownKey)).toBe(true);
+    expect(rows.some((a) => a.name === "CONFIDENTIAL-INV-1")).toBe(false);
+  });
+
+  it("a PlatformAdmin is exempt, and a Holder stays deliberately ungated", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await platformAdmin(h);
+    const orgId = await makeOrg(h, admin, "Exempt Co");
+    const orgAdmin = await makeOrgAdmin(h, admin, orgId, "exempt.admin@x.dev");
+
+    // The platform override: a PlatformAdmin still assigns platform-seeded use cases.
+    const byPlatform = await mintKey(h, admin, orgId, { name: "platform bound", role: "Trader", useCaseKey: "invoice-tokenization", scopes: ["assets:read"] });
+    expect(byPlatform.key.useCaseKey).toBe("invoice-tokenization");
+
+    // Holder: no route authorizes on `role === "Holder"`, so the key grants
+    // nothing and holderPolicy decides at issuance time. Unchanged.
+    const holder = await h.app.inject({
+      method: "POST", url: `${V1}/orgs/${orgId}/users`, headers: auth(orgAdmin),
+      payload: { email: "exempt.holder@x.dev", password: "secret1", role: "Holder", useCaseKey: "invoice-tokenization" },
+    });
+    expect(holder.statusCode).toBe(201);
+  });
+});

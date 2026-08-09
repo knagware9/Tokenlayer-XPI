@@ -27,6 +27,51 @@ import { actorOf, claimsOf, contextOf, isPositiveIntString, machinePrincipal, no
 
 const NO_USE_CASE = "__none__"; // sentinel: a use-case key that matches no real use case (denies scoped users with no assigned use case)
 
+/**
+ * May `claims` administer the EXISTING account `target` — suspend it, delete
+ * it, or draft a revoke-identity proposal against it?
+ *
+ * ONE definition, shared by DELETE /users/:id, PATCH /users/:id and
+ * POST /users/:id/revoke-identity. It used to be three copies of an inline
+ * expression, and drift between copies is exactly how the hole below survived.
+ *
+ * Three rules, all load-bearing:
+ *
+ *  1. RANK. A manager below PlatformAdmin never reaches an account at or above
+ *     the org tier. The old predicate excluded only `UseCaseAdmin`, so an
+ *     OrgAdmin could suspend and permanently delete a PlatformAdmin — and,
+ *     since EN-B binds an API key to an ordinary org member, so could a
+ *     machine credential holding nothing but `users:onboard`. This mirrors
+ *     `canCreateOrgMember`, which already refuses to CREATE an OrgAdmin or a
+ *     PlatformAdmin: being unable to create one while being able to destroy one
+ *     was never coherent.
+ *
+ *  2. SAME USE CASE, read through NO_USE_CASE for consistency with the rest of
+ *     the file. Note what this does NOT do: `null` normalizes to the same
+ *     sentinel on both sides, so two unscoped principals still match. The
+ *     sentinel is presentational here — rule 3 is what closes that case.
+ *
+ *  3. THE UNSCOPED CASE. When the manager itself has no use case (an OrgAdmin
+ *     always, a UseCaseAdmin never), use-case equality has proved nothing:
+ *     every PlatformAdmin, every other org's OrgAdmin and every org's
+ *     use-case-less members all carry `null` too. Fall back to the boundary
+ *     that actually applies to an unscoped manager — the ORGANIZATION. An
+ *     org-less unscoped manager matches nobody.
+ *
+ * Rules 1 and 3 are both TIGHTENINGS of behaviour inherited from `main`, and
+ * they bite humans as well as keys: a human OrgAdmin could previously delete a
+ * PlatformAdmin, and could manage a use-case-less member of a foreign org. EN-B
+ * did not introduce either — it made both reachable by an unattended credential.
+ */
+function canAdministerUser(claims: TokenClaims, target: UserRecord): boolean {
+  if (claims.role === "PlatformAdmin") return true;
+  if (!canManageUsers(claims.role)) return false;
+  if (target.role === "PlatformAdmin" || target.role === "OrgAdmin" || target.role === "UseCaseAdmin") return false;
+  if ((target.useCaseKey ?? NO_USE_CASE) !== (claims.useCaseKey ?? NO_USE_CASE)) return false;
+  if (claims.useCaseKey === null) return Boolean(claims.orgId) && (target.orgId ?? null) === claims.orgId;
+  return true;
+}
+
 const BCRYPT_ROUNDS = 12;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 
@@ -2212,8 +2257,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const { id } = request.params as { id: string };
     const target = await deps.users.findById(id);
     if (!target) return notFound(reply, "user not found");
-    const sameScope = claims.role === "PlatformAdmin" || (canManageUsers(claims.role) && target.useCaseKey === claims.useCaseKey && target.role !== "UseCaseAdmin");
-    if (!sameScope) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to remove that user" });
+    if (!canAdministerUser(claims, target)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to remove that user" });
     await deps.users.remove(id);
     return reply.code(204).send();
   });
@@ -2224,8 +2268,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const b = request.body as { password?: string; active?: boolean; kycStatus?: "approved" | "rejected" };
     const target = await deps.users.findById(id);
     if (!target) return notFound(reply, "user not found");
-    const sameScope = claims.role === "PlatformAdmin" || (canManageUsers(claims.role) && target.useCaseKey === claims.useCaseKey && target.role !== "UseCaseAdmin");
-    if (!sameScope) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to edit that user" });
+    if (!canAdministerUser(claims, target)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to edit that user" });
     const patch: { passwordHash?: string; active?: boolean; kycStatus?: KycStatus } = {};
     // A machine principal may not set a password on an EXISTING account: that is
     // takeover of a human who already exists and whose credential the key had no
@@ -2253,8 +2296,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const { reason } = request.body as { reason: string };
     const target = await deps.users.findById(id);
     if (!target) return notFound(reply, "user not found");
-    const sameScope = claims.role === "PlatformAdmin" || (canManageUsers(claims.role) && target.useCaseKey === claims.useCaseKey && target.role !== "UseCaseAdmin");
-    if (!sameScope) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to revoke that user's identity" });
+    if (!canAdministerUser(claims, target)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to revoke that user's identity" });
     // null useCaseKey → scans all pending; the userId match below still scopes it.
     const pending = await deps.proposals.list(target.useCaseKey ?? undefined, "pending");
     if (pending.some((p) => p.kind === "revoke-user-identity" && (p.payload as { userId: string }).userId === id)) {
@@ -2630,37 +2672,75 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       const missing = await orgMemberCapabilityViolation(org, b.role, memberUseCaseKey);
       if (missing) { orgCapabilityMissing(reply, org, missing); return null; }
     }
-    // EN-A review fix: A4 widened this route's role enum to the org-internal
-    // Holder/Verifier roles, and the key below is stored VERBATIM. A `Verifier`
-    // member is authorized downstream (POST /verification-requests, and the
-    // request-visibility check) purely by `role + useCaseKey` — never by the
-    // org's binding — so a foreign credential-use-case key here would be a
-    // cross-org escalation. Resolve the key and require the org to be
-    // legitimately attached before minting such a member.
+    // USE-CASE BINDING. The key below is stored VERBATIM on the member, and a
+    // member is authorized downstream by `role + useCaseKey` alone, so this is
+    // where a cross-org escalation is either stopped or created.
     //
-    // `Holder` deliberately gets NO attachment check: no route authorizes on
-    // `role === "Holder"` (holder eligibility is decided by the use case's
-    // holderPolicy at issuance time), so a Holder member's key grants nothing.
-    // A TOKENIZATION key is likewise harmless: the desk-verifier branch only
-    // ever resolves the credential-use-case catalog. Both stay ungated.
-    if (memberUseCaseKey && (b.role === "Verifier" || b.role === "Holder")) {
+    // The comment that used to sit here reasoned only about Verifier and Holder
+    // and concluded "A TOKENIZATION key is likewise harmless". That was FALSE
+    // for every other role, and the review proved it: a foreign org's OrgAdmin
+    // minted `{ role: "Trader", useCaseKey: "<a tokenization key it does not
+    // own>" }`, got a 201, and read the victim tenant's whole asset register.
+    // The reason is `scopedToCaller`, which authorizes on `claims.useCaseKey`
+    // ALONE — it never consults the member's org. So the key written here IS
+    // the authorization, for UseCaseAdmin/Issuer/Trader/Buyer/Auditor just as
+    // much as for Verifier. Nothing about the tokenization catalog made it safe;
+    // only the absence of a check made it look that way.
+    //
+    // The rule now, by domain — and deliberately NOT symmetric, because the two
+    // catalogs express org attachment differently:
+    //
+    //   TOKENIZATION — the org must OWN the use case. There is no binding
+    //     concept in this catalog at all: `ownerOrgId` is the only relationship
+    //     it can express, and org self-service stamps it from the creator's own
+    //     claims (see POST /use-cases). A platform-seeded use case (ownerOrgId
+    //     null) is owned by no org and so is off-limits through the ORG route —
+    //     a PlatformAdmin, exempt here, still assigns members to those through
+    //     the sibling POST /users. `Holder` stays ungated: no route authorizes
+    //     on `role === "Holder"` (holder eligibility is decided by the use
+    //     case's holderPolicy at issuance time), so the key grants nothing.
+    //
+    //   IDENTITY — UNCHANGED, on purpose. Only the Verifier check EN-A already
+    //     had. This catalog has explicit OPEN bindings (`issuer: {kind:
+    //     "platform"}`, `verifier: {kind: "any"}`) that deliberately let an org
+    //     operate a desk on a use case nobody owns; that is a product decision
+    //     EN-A made with its eyes open, and narrowing it is a separate design
+    //     question this fix has no mandate for. The demonstrated leak was
+    //     tokenization, and `verifierBindingAllows` already covers the identity
+    //     case the same review closed earlier in EN-A.
+    //
+    // Separately, an unknown key now fails closed for EVERY role rather than
+    // only Verifier/Holder. It used to be stored verbatim: name a key that does
+    // not exist yet, wait for someone else to create it, and the member
+    // silently acquires a use case nobody ever granted them.
+    if (memberUseCaseKey) {
       const domain = await resolveUseCaseDomain(memberUseCaseKey);
       // Same code the sibling POST /users route uses for an unknown key.
       if (!domain) { reply.code(404).send({ error: "USE_CASE_NOT_FOUND", message: `no use case '${memberUseCaseKey}'` }); return null; }
-      if (b.role === "Verifier" && domain === "identity" && claims.role !== "PlatformAdmin") {
-        const def = await deps.credentialUseCases.get(memberUseCaseKey);
-        // A vanished def (TOCTOU against resolveUseCaseDomain's listing) fails
-        // CLOSED rather than open — the key named a use case that no longer exists.
-        if (!def) { reply.code(404).send({ error: "USE_CASE_NOT_FOUND", message: `no use case '${memberUseCaseKey}'` }); return null; }
-        if (def.ownerOrgId !== org.id && !verifierBindingAllows(def.verifier, org.id)) {
-          // A BINDING failure, not a capability one — distinct error, and it
-          // bites for a legacy (null-envelope) org too.
-          reply.code(403).send({
-            error: "ORG_NOT_BOUND",
-            message: `organization '${org.name}' is neither the owner nor a bound verifier of credential use case '${memberUseCaseKey}'`,
-            details: { orgId: org.id, useCaseKey: memberUseCaseKey },
-          });
-          return null;
+      // A BINDING failure, not a capability one — distinct error, and it bites
+      // for a legacy (null-envelope) org too.
+      const notBound = (message: string) => {
+        reply.code(403).send({ error: "ORG_NOT_BOUND", message, details: { orgId: org.id, useCaseKey: memberUseCaseKey } });
+        return null;
+      };
+      if (claims.role !== "PlatformAdmin" && b.role !== "Holder") {
+        if (domain === "identity") {
+          if (b.role === "Verifier") {
+            const def = await deps.credentialUseCases.get(memberUseCaseKey);
+            // A vanished def (TOCTOU against resolveUseCaseDomain's listing) fails
+            // CLOSED rather than open — the key named a use case that no longer exists.
+            if (!def) { reply.code(404).send({ error: "USE_CASE_NOT_FOUND", message: `no use case '${memberUseCaseKey}'` }); return null; }
+            if (def.ownerOrgId !== org.id && !verifierBindingAllows(def.verifier, org.id)) {
+              return notBound(`organization '${org.name}' is neither the owner nor a bound verifier of credential use case '${memberUseCaseKey}'`);
+            }
+          }
+        } else {
+          const def = await deps.useCases.get(memberUseCaseKey).catch(() => null);
+          // Same fail-closed TOCTOU reading as the identity branch above.
+          if (!def) { reply.code(404).send({ error: "USE_CASE_NOT_FOUND", message: `no use case '${memberUseCaseKey}'` }); return null; }
+          if ((def.ownerOrgId ?? null) !== org.id) {
+            return notBound(`organization '${org.name}' does not own use case '${memberUseCaseKey}'`);
+          }
         }
       }
     }
@@ -3427,8 +3507,11 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
 
   // --- identity (DID / Verifiable Credentials) ------------------------------
 
-  // Loads the target user and enforces the SAME scope guard as PATCH /users/:id:
-  // PlatformAdmin, or a user-manager acting on a same-use-case non-admin target.
+  // Loads the target user and enforces the SAME scope guard as PATCH /users/:id
+  // — literally so: it calls `canAdministerUser`, the one predicate all four
+  // administer-an-existing-account routes share. This was a FOURTH inline copy
+  // of that expression (it carried the same PlatformAdmin-deletable hole) and
+  // is deliberately no longer written out, so the next tightening cannot miss it.
   // 404 (via notFound) when missing; 403 when out of scope. Null ⇒ reply sent.
   async function manageableTarget(request: FastifyRequest, reply: FastifyReply): Promise<UserRecord | null> {
     const claims = request.user as TokenClaims;
@@ -3437,8 +3520,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       notFound(reply, "user not found");
       return null;
     }
-    const ok = claims.role === "PlatformAdmin" || (canManageUsers(claims.role) && target.useCaseKey === claims.useCaseKey && target.role !== "UseCaseAdmin");
-    if (!ok) {
+    if (!canAdministerUser(claims, target)) {
       reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to manage that user" });
       return null;
     }

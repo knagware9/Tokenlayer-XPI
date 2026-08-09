@@ -86,7 +86,14 @@ const DELIBERATELY_UNSCOPED: Record<string, string> = {
   "POST /use-cases/preview-code": "pure render of contract source; writes nothing",
   "POST /credential-use-case-templates/:key/preview": "pure template render; writes nothing",
   "POST /audit/anchor": "integrity-only on-chain write; confers no authority, bounded by role + the per-key rate limit",
-  "POST /documents": "stores opaque bytes; every act that USES a document is scoped",
+  // Scoped on PRIVILEGE only, and that is the whole claim: the bytes are
+  // opaque, reading one back needs assets:read, and every act that USES a
+  // document is scoped, so an upload confers no authority. It says NOTHING
+  // about storage growth — a key with `issue` rights can upload repeatedly up
+  // to DOC_UPLOAD_BODY_LIMIT per request, bounded only by the per-key rate
+  // limit, with no quota and no retention. That is the review's LOW-3, left
+  // open on purpose; do not read this entry as covering it.
+  "POST /documents": "stores opaque bytes; every act that USES a document is scoped (privilege only — not a storage bound)",
   "POST /identity/mint": "dev-only demo minter (404 unless DEV_ISSUER_SEED is set); absent in production",
 
   // === READS ===============================================================
