@@ -1127,7 +1127,8 @@ export class PrismaEventRepository implements EventRepository {
 const toWebhookEndpoint = (r: {
   id: string; orgId: string | null; url: string; description: string | null; eventTypes: string;
   useCaseKey: string | null; secretEncrypted: string; status: string; disabledReason: string | null;
-  disabledAt: Date | null; consecutiveFailures: number; deletedAt: Date | null; createdBy: string;
+  disabledAt: Date | null; consecutiveFailures: number; consecutiveGuardFailures: number;
+  failingSince: Date | null; deletedAt: Date | null; createdBy: string;
   createdAt: Date; lastDeliveryAt: Date | null;
 }): WebhookEndpointRecord => ({
   id: r.id, orgId: r.orgId, url: r.url, description: r.description,
@@ -1136,13 +1137,15 @@ const toWebhookEndpoint = (r: {
   status: r.status as WebhookEndpointRecord["status"], disabledReason: r.disabledReason,
   disabledAt: r.disabledAt ? r.disabledAt.toISOString() : null,
   consecutiveFailures: r.consecutiveFailures,
+  consecutiveGuardFailures: r.consecutiveGuardFailures,
+  failingSince: r.failingSince ? r.failingSince.toISOString() : null,
   deletedAt: r.deletedAt ? r.deletedAt.toISOString() : null,
   createdBy: r.createdBy, createdAt: r.createdAt.toISOString(),
   lastDeliveryAt: r.lastDeliveryAt ? r.lastDeliveryAt.toISOString() : null,
 });
 
 export class PrismaWebhookEndpointRepository implements WebhookEndpointRepository {
-  async create(input: Omit<WebhookEndpointRecord, "id" | "createdAt" | "status" | "disabledReason" | "disabledAt" | "consecutiveFailures" | "deletedAt" | "lastDeliveryAt">): Promise<WebhookEndpointRecord> {
+  async create(input: Omit<WebhookEndpointRecord, "id" | "createdAt" | "status" | "disabledReason" | "disabledAt" | "consecutiveFailures" | "consecutiveGuardFailures" | "failingSince" | "deletedAt" | "lastDeliveryAt">): Promise<WebhookEndpointRecord> {
     return toWebhookEndpoint(await prisma.webhookEndpoint.create({
       data: {
         orgId: input.orgId, url: input.url, description: input.description,
@@ -1162,7 +1165,7 @@ export class PrismaWebhookEndpointRepository implements WebhookEndpointRepositor
   async listActive(): Promise<WebhookEndpointRecord[]> {
     return (await prisma.webhookEndpoint.findMany({ where: { status: "active", deletedAt: null }, orderBy: { createdAt: "asc" } })).map(toWebhookEndpoint);
   }
-  async update(id: string, patch: Partial<Pick<WebhookEndpointRecord, "url" | "description" | "eventTypes" | "useCaseKey" | "secretEncrypted" | "status" | "disabledReason" | "disabledAt" | "consecutiveFailures" | "deletedAt" | "lastDeliveryAt">>): Promise<WebhookEndpointRecord> {
+  async update(id: string, patch: Partial<Pick<WebhookEndpointRecord, "url" | "description" | "eventTypes" | "useCaseKey" | "secretEncrypted" | "status" | "disabledReason" | "disabledAt" | "consecutiveFailures" | "consecutiveGuardFailures" | "failingSince" | "deletedAt" | "lastDeliveryAt">>): Promise<WebhookEndpointRecord> {
     // Each key is spread in only when PRESENT: an absent key must leave the
     // column alone, while an explicit `null` must clear it (re-enabling an
     // endpoint clears disabledReason/disabledAt), and `undefined` cannot say both.
@@ -1178,6 +1181,9 @@ export class PrismaWebhookEndpointRepository implements WebhookEndpointRepositor
         ...(patch.disabledReason !== undefined ? { disabledReason: patch.disabledReason } : {}),
         ...(patch.disabledAt !== undefined ? { disabledAt: patch.disabledAt ? new Date(patch.disabledAt) : null } : {}),
         ...(patch.consecutiveFailures !== undefined ? { consecutiveFailures: patch.consecutiveFailures } : {}),
+        ...(patch.consecutiveGuardFailures !== undefined ? { consecutiveGuardFailures: patch.consecutiveGuardFailures } : {}),
+        // `null` clears the failure clock (a success); absent leaves it running.
+        ...(patch.failingSince !== undefined ? { failingSince: patch.failingSince ? new Date(patch.failingSince) : null } : {}),
         ...(patch.deletedAt !== undefined ? { deletedAt: patch.deletedAt ? new Date(patch.deletedAt) : null } : {}),
         ...(patch.lastDeliveryAt !== undefined ? { lastDeliveryAt: patch.lastDeliveryAt ? new Date(patch.lastDeliveryAt) : null } : {}),
       },

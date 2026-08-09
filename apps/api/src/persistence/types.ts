@@ -635,7 +635,26 @@ export interface WebhookEndpointRecord {
   status: "active" | "disabled";
   disabledReason: string | null;
   disabledAt: string | null;
+  /**
+   * Consecutive failures where THE ENDPOINT ITSELF answered badly (non-2xx) or
+   * could not be reached. Only this counter can auto-disable, because only this
+   * counter is evidence about the integrator's server.
+   */
   consecutiveFailures: number;
+  /**
+   * Consecutive failures where OUR URL GUARD refused to send — DNS did not
+   * resolve, or resolved somewhere not publicly routable. Counted separately and
+   * acted on by nobody: see the auto-disable note in dispatcher.ts. A high value
+   * here is a signal to surface to an operator, not a reason to switch an org's
+   * endpoint off, because its cause lies outside our trust boundary.
+   */
+  consecutiveGuardFailures: number;
+  /**
+   * When the CURRENT run of endpoint failures began; null whenever the endpoint
+   * is healthy. This is the clock the auto-disable time floor reads, and the
+   * reason a burst of failures in one dispatch pass cannot disable anything.
+   */
+  failingSince: string | null;
   deletedAt: string | null;
   createdBy: string;
   createdAt: string;
@@ -643,14 +662,14 @@ export interface WebhookEndpointRecord {
 }
 
 export interface WebhookEndpointRepository {
-  /** Lifecycle columns (`status`/`disabled*`/`consecutiveFailures`/`deletedAt`/`lastDeliveryAt`) are repo-managed. */
-  create(input: Omit<WebhookEndpointRecord, "id" | "createdAt" | "status" | "disabledReason" | "disabledAt" | "consecutiveFailures" | "deletedAt" | "lastDeliveryAt">): Promise<WebhookEndpointRecord>;
+  /** Lifecycle columns (`status`/`disabled*`/`consecutive*Failures`/`failingSince`/`deletedAt`/`lastDeliveryAt`) are repo-managed. */
+  create(input: Omit<WebhookEndpointRecord, "id" | "createdAt" | "status" | "disabledReason" | "disabledAt" | "consecutiveFailures" | "consecutiveGuardFailures" | "failingSince" | "deletedAt" | "lastDeliveryAt">): Promise<WebhookEndpointRecord>;
   findById(id: string): Promise<WebhookEndpointRecord | null>;
   /** Live endpoints of one org. `null` lists platform-scope endpoints. */
   listByOrg(orgId: string | null): Promise<WebhookEndpointRecord[]>;
   /** Every active, non-deleted endpoint — the fan-out candidate set. */
   listActive(): Promise<WebhookEndpointRecord[]>;
-  update(id: string, patch: Partial<Pick<WebhookEndpointRecord, "url" | "description" | "eventTypes" | "useCaseKey" | "secretEncrypted" | "status" | "disabledReason" | "disabledAt" | "consecutiveFailures" | "deletedAt" | "lastDeliveryAt">>): Promise<WebhookEndpointRecord>;
+  update(id: string, patch: Partial<Pick<WebhookEndpointRecord, "url" | "description" | "eventTypes" | "useCaseKey" | "secretEncrypted" | "status" | "disabledReason" | "disabledAt" | "consecutiveFailures" | "consecutiveGuardFailures" | "failingSince" | "deletedAt" | "lastDeliveryAt">>): Promise<WebhookEndpointRecord>;
 }
 
 /** One attempt chain for one (event, endpoint) pair. */

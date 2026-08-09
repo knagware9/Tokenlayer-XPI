@@ -786,7 +786,7 @@ export class MemoryWebhookEndpointRepository implements WebhookEndpointRepositor
   private clone(r: WebhookEndpointRecord): WebhookEndpointRecord {
     return { ...r, eventTypes: [...r.eventTypes] };
   }
-  async create(input: Omit<WebhookEndpointRecord, "id" | "createdAt" | "status" | "disabledReason" | "disabledAt" | "consecutiveFailures" | "deletedAt" | "lastDeliveryAt">): Promise<WebhookEndpointRecord> {
+  async create(input: Omit<WebhookEndpointRecord, "id" | "createdAt" | "status" | "disabledReason" | "disabledAt" | "consecutiveFailures" | "consecutiveGuardFailures" | "failingSince" | "deletedAt" | "lastDeliveryAt">): Promise<WebhookEndpointRecord> {
     const rec: WebhookEndpointRecord = {
       ...input,
       eventTypes: [...input.eventTypes],
@@ -795,6 +795,10 @@ export class MemoryWebhookEndpointRepository implements WebhookEndpointRepositor
       disabledReason: null,
       disabledAt: null,
       consecutiveFailures: 0,
+      consecutiveGuardFailures: 0,
+      // A fresh endpoint is healthy, so its failure clock is not running. The
+      // prisma default is likewise NULL, not now().
+      failingSince: null,
       deletedAt: null,
       createdAt: now(),
       lastDeliveryAt: null,
@@ -819,7 +823,7 @@ export class MemoryWebhookEndpointRepository implements WebhookEndpointRepositor
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
       .map((r) => this.clone(r));
   }
-  async update(endpointId: string, patch: Partial<Pick<WebhookEndpointRecord, "url" | "description" | "eventTypes" | "useCaseKey" | "secretEncrypted" | "status" | "disabledReason" | "disabledAt" | "consecutiveFailures" | "deletedAt" | "lastDeliveryAt">>): Promise<WebhookEndpointRecord> {
+  async update(endpointId: string, patch: Partial<Pick<WebhookEndpointRecord, "url" | "description" | "eventTypes" | "useCaseKey" | "secretEncrypted" | "status" | "disabledReason" | "disabledAt" | "consecutiveFailures" | "consecutiveGuardFailures" | "failingSince" | "deletedAt" | "lastDeliveryAt">>): Promise<WebhookEndpointRecord> {
     const rec = this.byId.get(endpointId);
     if (!rec) throw new Error(`unknown webhook endpoint '${endpointId}'`);
     // An ABSENT key leaves the column alone; an explicit `null` clears it

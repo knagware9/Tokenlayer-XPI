@@ -24,6 +24,21 @@
  *    means pinning the validated address and connecting to that, which is a
  *    client-level change this task does not make.
  *
+ * 4. AUTO-DISABLE IS A SAFETY VALVE, NOT A SILENCING PRIMITIVE. Switching an
+ *    org's endpoint off is a denial of service we perform on ourselves, so it
+ *    needs more than a number. Two properties keep it honest, and both were
+ *    added after the first version of this file shipped without them:
+ *      - A WALL-CLOCK FLOOR. A purely consecutive count is exhaustible by a
+ *        burst — the default batch size and AUTO_DISABLE_AFTER are both 20, so
+ *        one pass over a backlog could have disabled an endpoint whose server
+ *        was down for the length of a rolling deploy. The failure run must ALSO
+ *        have persisted for AUTO_DISABLE_MIN_AGE_MS.
+ *      - ONLY FAILURES WE CAN ATTRIBUTE TO THE ENDPOINT COUNT. Guard/DNS
+ *        refusals are tracked in their own counter and disable nothing, because
+ *        their cause sits outside our trust boundary — an attacker who can
+ *        degrade resolution for the endpoint's hostname would otherwise silence
+ *        an integrator without sending the victim a single packet.
+ *
  * WHAT THIS DESIGN DOES NOT DO. The dispatcher is in-process: while the API is
  * down, events are still recorded by the emit path but nothing is delivered, and
  * the backlog only drains when a process comes back. There is no separate queue
@@ -42,6 +57,18 @@ import { checkUrl, type UrlGuardOptions } from "./url-guard.js";
 export const BACKOFF_MS = [30_000, 120_000, 600_000, 3_600_000, 21_600_000] as const;
 export const MAX_ATTEMPTS = BACKOFF_MS.length + 1;
 export const AUTO_DISABLE_AFTER = 20;
+/**
+ * How long a failure run must have PERSISTED before auto-disable may fire.
+ *
+ * Without this, auto-disable is a silencing primitive rather than a safety
+ * valve. A purely consecutive counter with no time floor is exhausted by a
+ * BURST: the default batch size is also 20, so one dispatch pass over a backlog
+ * of 20 queued events could permanently disable an endpoint whose server was
+ * down for the thirty seconds of a rolling deploy. Requiring the run to have
+ * been failing for an hour means the count and the clock must BOTH agree, and no
+ * amount of backlog can substitute for elapsed time.
+ */
+export const AUTO_DISABLE_MIN_AGE_MS = 60 * 60_000;
 /**
  * How long a row may sit `inflight` before another pass takes it back. A worker
  * that is killed mid-send leaves its claim behind, and without this the row is
@@ -150,15 +177,18 @@ export async function dispatchDue(deps: DispatchDeps): Promise<number> {
     const attempts = claimed.attempts + 1;
     const startedAt = Date.now();
     let ok = false;
+    let guardRefused = false;
     let responseStatus: number | null = null;
     let responseError: string | null = null;
 
     // RE-CHECK THE URL (see the header note). A guard rejection is a FAILED
     // ATTEMPT, not a silent skip: it burns an attempt and is recorded with its
-    // reason, so an endpoint whose DNS has genuinely moved to a private address
-    // eventually dead-letters and shows the operator why.
+    // reason, so a delivery to a name that has genuinely moved onto a private
+    // address still dead-letters at MAX_ATTEMPTS and shows the operator why.
+    // What it must NOT do is count toward auto-disable — see below.
     const verdict = await checkUrl(endpoint.url, deps.guard);
     if (!verdict.ok) {
+      guardRefused = true;
       responseError = verdict.reason;
     } else {
       const body = JSON.stringify({
@@ -217,21 +247,61 @@ export async function dispatchDue(deps: DispatchDeps): Promise<number> {
       claimedBy: null,
     });
 
-    // Endpoint health. `consecutiveFailures` is read from the snapshot taken
-    // before the send, so two workers settling two deliveries to the SAME
-    // endpoint at the same instant can lose one increment. That costs at most a
-    // slightly later auto-disable and never a wrong disable, which is the right
-    // way round for a counter whose only consequence is switching an org's
-    // endpoint off.
-    const failures = ok ? 0 : endpoint.consecutiveFailures + 1;
+    // ── Endpoint health ──────────────────────────────────────────────────────
+    //
+    // TWO COUNTERS, because the two ways an attempt fails are evidence about
+    // different things.
+    //
+    // A non-2xx answer (or an unreachable host) is evidence about THE
+    // INTEGRATOR'S SERVER, and enough of it, for long enough, justifies
+    // switching the endpoint off. A guard refusal is evidence about DNS — or
+    // about an attacker — and says nothing about whether the integrator's server
+    // is healthy. Crucially it is the one leg an attacker can pull WITHOUT
+    // TOUCHING THE VICTIM AT ALL: degrade resolution for the endpoint's
+    // hostname, or briefly point it at a private address, and a single shared
+    // counter would disable a perfectly good endpoint with no traffic sent to
+    // it. That would make our own SSRF defence into a silencing primitive. So
+    // guard refusals are counted separately and acted on by NOBODY here: the
+    // delivery still retries on the normal schedule and still dies at
+    // MAX_ATTEMPTS. A large consecutiveGuardFailures is for an operator to SEE,
+    // not for this worker to act on.
+    //
+    // `consecutiveFailures` is read from the snapshot taken before the send, so
+    // two workers settling two deliveries to the SAME endpoint at the same
+    // instant can lose one increment. That costs at most a slightly later
+    // auto-disable and never a wrong disable — the right way round for a counter
+    // whose only consequence is switching an org's endpoint off.
+    const settledAt = new Date().toISOString();
+    const endpointFailed = !ok && !guardRefused;
+    // A guard refusal leaves the endpoint counter and its clock exactly where
+    // they were: it is neither evidence of failure nor evidence of health.
+    const failures = ok ? 0 : endpointFailed ? endpoint.consecutiveFailures + 1 : endpoint.consecutiveFailures;
+    // "Consecutive" is meant literally: the guard passing at all breaks a run of
+    // guard refusals, whether or not the send that followed it succeeded.
+    const guardFailures = guardRefused ? endpoint.consecutiveGuardFailures + 1 : 0;
+    // The clock starts at the FIRST failure of a run and is not restarted by
+    // later failures in it, so `settledAt - failingSince` is the true age of the
+    // run rather than the age of the most recent failure.
+    const failingSince = ok ? null : endpointFailed ? (endpoint.failingSince ?? settledAt) : endpoint.failingSince;
+
+    // BOTH the count AND the elapsed time must agree. The count alone is
+    // exhaustible by a burst — one pass over a 20-row backlog — which is exactly
+    // the attack the time floor exists to defeat. On the very first failure of a
+    // run `failingSince` is `settledAt`, so the age is zero and no burst,
+    // however large, can disable anything.
+    const runAgeMs = failingSince ? Date.parse(settledAt) - Date.parse(failingSince) : 0;
+    const shouldDisable = failures >= AUTO_DISABLE_AFTER && runAgeMs >= AUTO_DISABLE_MIN_AGE_MS;
+
     await deps.webhookEndpoints.update(endpoint.id, {
       consecutiveFailures: failures,
-      lastDeliveryAt: new Date().toISOString(),
-      ...(failures >= AUTO_DISABLE_AFTER
+      consecutiveGuardFailures: guardFailures,
+      failingSince,
+      lastDeliveryAt: settledAt,
+      ...(shouldDisable
         ? {
             status: "disabled" as const,
-            disabledReason: `${failures} consecutive delivery failures`,
-            disabledAt: new Date().toISOString(),
+            disabledReason: `${failures} consecutive delivery failures over ${Math.round(runAgeMs / 60_000)} minutes`,
+            disabledAt: settledAt,
           }
         : {}),
     });

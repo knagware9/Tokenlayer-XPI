@@ -13,7 +13,13 @@ import {
   MemoryWebhookDeliveryRepository,
   MemoryWebhookEndpointRepository,
 } from "../src/persistence/memory.js";
-import { AUTO_DISABLE_AFTER, BACKOFF_MS, MAX_ATTEMPTS, dispatchDue } from "../src/webhooks/dispatcher.js";
+import {
+  AUTO_DISABLE_AFTER,
+  AUTO_DISABLE_MIN_AGE_MS,
+  BACKOFF_MS,
+  MAX_ATTEMPTS,
+  dispatchDue,
+} from "../src/webhooks/dispatcher.js";
 import { createSecretBox } from "../src/webhooks/secret-box.js";
 import { verifySignature } from "../src/webhooks/signing.js";
 
@@ -51,6 +57,26 @@ async function fixture() {
 async function makeDue(f: Awaited<ReturnType<typeof fixture>>): Promise<void> {
   await f.webhookDeliveries.update(f.d.id, { nextAttemptAt: new Date(Date.now() - 1000).toISOString() });
 }
+
+/**
+ * `n` MORE queued events for the same endpoint — a backlog. This is the shape of
+ * the burst attack: one dispatch pass settles all of them, so a counter with no
+ * time floor is exhausted in a single pass.
+ */
+async function backlog(f: Awaited<ReturnType<typeof fixture>>, n: number): Promise<void> {
+  for (let i = 0; i < n; i += 1) {
+    const ev = await f.events.append({
+      type: "credential.issued",
+      orgId: "org1",
+      useCaseKey: null,
+      subjectId: `c${i + 2}`,
+      data: { credentialId: `c${i + 2}` },
+    });
+    await f.webhookDeliveries.enqueue({ endpointId: f.ep.id, eventId: ev.id, eventSeq: ev.seq });
+  }
+}
+
+const agoMs = (ms: number): string => new Date(Date.now() - ms).toISOString();
 
 describe("dispatcher", () => {
   it("delivers a signed payload that the documented verify recipe accepts", async () => {
@@ -155,9 +181,14 @@ describe("dispatcher", () => {
     expect(send).toHaveBeenCalledTimes(MAX_ATTEMPTS);
   });
 
-  it("auto-disables the endpoint at AUTO_DISABLE_AFTER consecutive failures", async () => {
+  it("auto-disables at AUTO_DISABLE_AFTER failures once the run is OLDER than the floor", async () => {
     const f = await fixture();
-    await f.webhookEndpoints.update(f.ep.id, { consecutiveFailures: AUTO_DISABLE_AFTER - 1 });
+    // The count is one short AND the run has been going for two hours: both
+    // conditions are about to be true together, which is the only way to disable.
+    await f.webhookEndpoints.update(f.ep.id, {
+      consecutiveFailures: AUTO_DISABLE_AFTER - 1,
+      failingSince: agoMs(2 * 60 * 60_000),
+    });
     const send = vi.fn(async () => ({ status: 500 }));
     await dispatchDue({ ...f, secretBox: box, send, guard: okGuard, workerId: "w1" });
 
@@ -167,6 +198,35 @@ describe("dispatcher", () => {
     expect(ep.disabledReason).toMatch(/consecutive/i);
     expect(ep.disabledReason).toContain(String(AUTO_DISABLE_AFTER));
     expect(ep.disabledAt).not.toBeNull();
+  });
+
+  it("a BURST cannot disable: AUTO_DISABLE_AFTER failures inside the min-age window leave it active", async () => {
+    // THE ATTACK, PINNED. A backlog of exactly AUTO_DISABLE_AFTER events settles
+    // in ONE pass (batchSize defaults to 20 too), so the count alone is fully
+    // exhausted while the failure run is only milliseconds old. Before the time
+    // floor this permanently disabled the endpoint; a 30-second outage during a
+    // rolling deploy was enough.
+    const f = await fixture();
+    await backlog(f, AUTO_DISABLE_AFTER - 1); // + the fixture's own = AUTO_DISABLE_AFTER
+    const send = vi.fn(async () => ({ status: 500 }));
+
+    const handled = await dispatchDue({ ...f, secretBox: box, send, guard: okGuard, workerId: "w1", batchSize: 100 });
+    expect(handled).toBe(AUTO_DISABLE_AFTER);
+
+    const ep = (await f.webhookEndpoints.findById(f.ep.id))!;
+    expect(ep.consecutiveFailures).toBe(AUTO_DISABLE_AFTER); // the count IS exhausted
+    expect(ep.status).toBe("active"); // ...and it still must not disable
+    expect(ep.disabledReason).toBeNull();
+    expect(ep.disabledAt).toBeNull();
+    // The clock started at the first failure of the run and is barely old.
+    expect(ep.failingSince).not.toBeNull();
+    expect(Date.now() - Date.parse(ep.failingSince!)).toBeLessThan(AUTO_DISABLE_MIN_AGE_MS);
+
+    // And it stays active on the very next failure too — nothing about a burst
+    // is merely deferred by one attempt.
+    await makeDue(f);
+    await dispatchDue({ ...f, secretBox: box, send, guard: okGuard, workerId: "w1" });
+    expect((await f.webhookEndpoints.findById(f.ep.id))!.status).toBe("active");
   });
 
   it("stops short of auto-disabling one failure early", async () => {
@@ -191,6 +251,77 @@ describe("dispatcher", () => {
     expect(ep.lastDeliveryAt).not.toBeNull();
   });
 
+  it("a success CLEARS failingSince, so a later run starts its clock fresh", async () => {
+    const f = await fixture();
+    // An old run, nearly at the threshold and well past the age floor: one more
+    // failure would have disabled it.
+    await f.webhookEndpoints.update(f.ep.id, {
+      consecutiveFailures: AUTO_DISABLE_AFTER - 1,
+      failingSince: agoMs(5 * 60 * 60_000),
+    });
+    await dispatchDue({ ...f, secretBox: box, send: async () => ({ status: 200 }), guard: okGuard, workerId: "w1" });
+    const healthy = (await f.webhookEndpoints.findById(f.ep.id))!;
+    expect(healthy.failingSince).toBeNull();
+    expect(healthy.consecutiveFailures).toBe(0);
+
+    // A NEW run must date from now, not inherit the five-hour-old clock — else a
+    // single delivery after a recovery would disable on the strength of history
+    // the endpoint has already disproved.
+    await backlog(f, AUTO_DISABLE_AFTER);
+    await dispatchDue({
+      ...f, secretBox: box, send: async () => ({ status: 500 }), guard: okGuard, workerId: "w1", batchSize: 100,
+    });
+    const failing = (await f.webhookEndpoints.findById(f.ep.id))!;
+    expect(failing.consecutiveFailures).toBe(AUTO_DISABLE_AFTER);
+    expect(failing.status).toBe("active");
+    expect(Date.now() - Date.parse(failing.failingSince!)).toBeLessThan(AUTO_DISABLE_MIN_AGE_MS);
+  });
+
+  it("GUARD/DNS rejections never disable, however many — but the delivery still dies", async () => {
+    // An attacker who can degrade DNS for the endpoint's hostname (or briefly
+    // point it at a private address) must not be able to switch off a
+    // competitor's integration without sending the victim a single packet.
+    const f = await fixture();
+    const send = vi.fn(async () => ({ status: 200 }));
+    const rebound = { resolve: async () => ["127.0.0.1"] };
+    await f.webhookEndpoints.update(f.ep.id, { failingSince: agoMs(5 * 60 * 60_000) }); // an ancient clock too
+    await backlog(f, AUTO_DISABLE_AFTER * 2);
+
+    await dispatchDue({ ...f, secretBox: box, send, guard: rebound, workerId: "w1", batchSize: 100 });
+
+    const ep = (await f.webhookEndpoints.findById(f.ep.id))!;
+    expect(send).not.toHaveBeenCalled();
+    expect(ep.consecutiveGuardFailures).toBeGreaterThanOrEqual(AUTO_DISABLE_AFTER);
+    expect(ep.consecutiveFailures).toBe(0); // the endpoint counter is untouched
+    expect(ep.status).toBe("active");
+    expect(ep.disabledReason).toBeNull();
+
+    // Still not disabled after MAX_ATTEMPTS more rounds — and the DELIVERY does
+    // die, so a genuinely rebound endpoint is not retried forever either.
+    for (let i = 0; i < MAX_ATTEMPTS; i += 1) {
+      await makeDue(f);
+      await dispatchDue({ ...f, secretBox: box, send, guard: rebound, workerId: "w1", batchSize: 100 });
+    }
+    expect((await f.webhookDeliveries.findById(f.d.id))!.status).toBe("dead");
+    expect((await f.webhookEndpoints.findById(f.ep.id))!.status).toBe("active");
+  });
+
+  it("the guard-failure run resets as soon as the guard passes again", async () => {
+    const f = await fixture();
+    await dispatchDue({
+      ...f, secretBox: box, send: async () => ({ status: 200 }), guard: { resolve: async () => ["127.0.0.1"] }, workerId: "w1",
+    });
+    expect((await f.webhookEndpoints.findById(f.ep.id))!.consecutiveGuardFailures).toBe(1);
+
+    // The guard passing BREAKS the run even though the send then failed — the
+    // counter means consecutive guard refusals, not "failures of any kind".
+    await makeDue(f);
+    await dispatchDue({ ...f, secretBox: box, send: async () => ({ status: 500 }), guard: okGuard, workerId: "w1" });
+    const ep = (await f.webhookEndpoints.findById(f.ep.id))!;
+    expect(ep.consecutiveGuardFailures).toBe(0);
+    expect(ep.consecutiveFailures).toBe(1);
+  });
+
   it("REFUSES to send when the guard rejects at DELIVERY time (DNS rebinding)", async () => {
     const f = await fixture();
     const send = vi.fn(async () => ({ status: 200 }));
@@ -205,10 +336,13 @@ describe("dispatcher", () => {
     expect(d.attempts).toBe(1);
     expect(d.responseStatus).toBeNull();
     expect(d.responseError).toMatch(/loopback|not publicly routable/i);
-    // The refusal counts against endpoint health, so an endpoint that has really
-    // moved onto a private address eventually gets switched off rather than
-    // retried forever.
-    expect((await f.webhookEndpoints.findById(f.ep.id))!.consecutiveFailures).toBe(1);
+    // The refusal is recorded, but in its OWN counter: it is evidence about DNS,
+    // not about whether the integrator's server is healthy, and it must never
+    // feed the counter that can switch an org's endpoint off.
+    const ep = (await f.webhookEndpoints.findById(f.ep.id))!;
+    expect(ep.consecutiveGuardFailures).toBe(1);
+    expect(ep.consecutiveFailures).toBe(0);
+    expect(ep.failingSince).toBeNull();
   });
 
   it("a claimed delivery is invisible to a second concurrent dispatcher", async () => {

@@ -103,6 +103,18 @@ export interface Env {
   didMasterKey: string;
   /** True iff DID_MASTER_KEY was explicitly set (production must set it). */
   didMasterConfigured: boolean;
+  /**
+   * 32-byte hex master key encrypting WEBHOOK ENDPOINT SIGNING SECRETS.
+   *
+   * Falls back to didMasterKey so nothing breaks and no migration is needed, but
+   * they protect different things and should be different keys: one compromise
+   * currently loses every custodial DID seed AND every integrator signing
+   * secret, and neither can be rotated without re-encrypting the other's data.
+   * Setting WEBHOOK_MASTER_KEY separates them.
+   */
+  webhookMasterKey: string;
+  /** True iff WEBHOOK_MASTER_KEY was explicitly set (i.e. not sharing the DID key). */
+  webhookMasterConfigured: boolean;
   /** Public base URL of this API, embedded in credentialStatus pointers on issued VCs. */
   publicApiUrl: string;
   /** Public base URL of the web app, embedded in QR-login sign URLs. */
@@ -158,6 +170,8 @@ export const env: Env = {
   devKycIssuerSeed: process.env.DEV_KYC_ISSUER_SEED,
   didMasterKey: process.env.DID_MASTER_KEY ?? DEV_DID_MASTER_KEY,
   didMasterConfigured: !!process.env.DID_MASTER_KEY,
+  webhookMasterKey: process.env.WEBHOOK_MASTER_KEY ?? process.env.DID_MASTER_KEY ?? DEV_DID_MASTER_KEY,
+  webhookMasterConfigured: !!process.env.WEBHOOK_MASTER_KEY,
   publicApiUrl: process.env.PUBLIC_API_URL ?? `http://localhost:${Number(process.env.PORT ?? 4000)}/api/v1`,
   publicWebUrl: process.env.PUBLIC_WEB_URL ?? (process.env.CORS_ORIGINS ?? "http://localhost:5173").split(",")[0]!.trim(),
   registryChainId: process.env.REGISTRY_CHAIN_ID ?? "besu",
@@ -180,5 +194,13 @@ if (!env.didMasterConfigured) {
   console.warn(
     "[keystore] DID_MASTER_KEY is not set — using an INSECURE dev key to encrypt custodial DID seeds. " +
       "Set DID_MASTER_KEY (openssl rand -hex 32) before any production use.",
+  );
+}
+
+if (!env.webhookMasterConfigured) {
+  console.warn(
+    "[webhooks] WEBHOOK_MASTER_KEY is not set — webhook signing secrets are encrypted with the DID master key. " +
+      "One key compromise then loses every custodial DID seed AND every integrator signing secret, and neither " +
+      "can be rotated independently. Set WEBHOOK_MASTER_KEY (openssl rand -hex 32) before any production use.",
   );
 }

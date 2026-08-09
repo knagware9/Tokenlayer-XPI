@@ -386,21 +386,30 @@ model Event {
 // DID_MASTER_KEY, NOT a hash: HMAC signing must REPRODUCE the secret, so a
 // one-way hash would make signing impossible.
 model WebhookEndpoint {
-  id                  String    @id @default(cuid())
-  orgId               String? // null = platform-scope, PlatformAdmin only
-  url                 String
-  description         String?
-  eventTypes          String // JSON string[]; ["*"] allowed
-  useCaseKey          String?
-  secretEncrypted     String
-  status              String    @default("active") // active | disabled
-  disabledReason      String?
-  disabledAt          DateTime?
-  consecutiveFailures Int       @default(0)
-  deletedAt           DateTime?
-  createdBy           String
-  createdAt           DateTime  @default(now())
-  lastDeliveryAt      DateTime?
+  id                       String    @id @default(cuid())
+  orgId                    String? // null = platform-scope, PlatformAdmin only
+  url                      String
+  description              String?
+  eventTypes               String // JSON string[]; ["*"] allowed
+  useCaseKey               String?
+  secretEncrypted          String
+  status                   String    @default("active") // active | disabled
+  disabledReason           String?
+  disabledAt               DateTime?
+  // Only failures we can attribute to THE ENDPOINT (non-2xx / unreachable) may
+  // auto-disable it. Guard/DNS refusals are counted apart and disable nothing:
+  // their cause is outside our trust boundary, so feeding them here would turn
+  // our own SSRF defence into a way to silence an integrator.
+  consecutiveFailures      Int       @default(0)
+  consecutiveGuardFailures Int       @default(0)
+  // Start of the CURRENT endpoint-failure run; null while healthy. The
+  // auto-disable time floor reads this, which is what stops a backlog burst
+  // (batch size and the threshold are both 20) from disabling in one pass.
+  failingSince             DateTime?
+  deletedAt                DateTime?
+  createdBy                String
+  createdAt                DateTime  @default(now())
+  lastDeliveryAt           DateTime?
 
   @@index([orgId])
 }

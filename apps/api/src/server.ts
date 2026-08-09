@@ -186,7 +186,9 @@ async function main(): Promise<void> {
         events,
         webhookEndpoints,
         webhookDeliveries,
-        secretBox: createSecretBox(env.didMasterKey),
+        // A DEDICATED key where the operator has set one; falls back to the DID
+        // key so an existing deployment keeps working without re-encrypting.
+        secretBox: createSecretBox(env.webhookMasterKey),
         send: httpSender,
         // The SAME guard posture the registration route uses, or a URL that was
         // legal to save would be permanently undeliverable.
