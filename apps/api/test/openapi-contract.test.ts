@@ -265,6 +265,17 @@ describe("the consistency check has no blind spot", () => {
  *  2. A PRECISE structural walk of the live schema objects — the very objects
  *     Fastify compiles — which names the exact schema path that narrowed. This
  *     is the check that actually protects the wire; the floor is its backstop.
+ *
+ * MEASURED, not assumed: removing `additionalProperties: true` from a single
+ * component was caught by (2) and SURVIVED (1), because EN-D1 raised the raw
+ * count well clear of the floor. Do not read a green floor as "nothing
+ * narrowed" — (2) is the check that means that.
+ *
+ * The floor stays at its PRE-EN-D1 measurement rather than ratcheting up to
+ * today's count, deliberately: a later refactor that replaces two inline
+ * objects with one shared component legitimately lowers the raw count while
+ * narrowing nothing, and a ratchet would fail it for no reason. The floor
+ * guards against wholesale removal; (2) guards against everything else.
  */
 const ADDITIVE_FLOOR = 153;
 
