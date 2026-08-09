@@ -28,6 +28,16 @@ export function orgRoleEnabled(caps: OrgCapabilities | null | undefined, role: O
   return caps == null || caps.roles.includes(role);
 }
 
+/**
+ * Mirrors core's `orgDomainEnabled`, on the same terms as `orgRoleEnabled`: a
+ * null/absent (legacy) envelope enables every domain. Used by the webhook
+ * subscription picker, which must not offer an org an event class the server
+ * would refuse with 403 ORG_CAPABILITY_MISSING.
+ */
+export function orgDomainEnabled(caps: OrgCapabilities | null | undefined, domain: OrgDomain): boolean {
+  return caps == null || caps.domains.includes(domain);
+}
+
 /** Is a role gated by the envelope at all? Only the three operating roles are. */
 export function isOrgOperatingRole(role: string): role is OrgOperatingRole {
   return (ORG_OPERATING_ROLES as readonly string[]).includes(role);

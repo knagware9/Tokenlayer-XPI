@@ -8,29 +8,46 @@
  * that panel an unmount is a permanent discard, and a stray click must not be
  * able to cause it silently.
  *
- * Deliberately a module singleton rather than context: exactly one panel is
- * mounted at a time, so there is never more than one guard to hold, and threading
- * a provider through the shell for a single call site would be the larger change.
+ * Deliberately a module singleton rather than context: threading a provider
+ * through the shell for a couple of call sites would be the larger change.
+ *
+ * A SET, NOT A SINGLE SLOT — and the difference is a real bug, not tidiness.
+ * The Developers panel now hosts TWO surfaces that each hold a one-time secret
+ * (the API key and a webhook signing secret), so both can have a live guard at
+ * once. With a single slot the second registration silently replaced the first,
+ * and releasing the second (acknowledging the webhook secret) left NO guard
+ * registered while the API key secret was still unacknowledged — the exact
+ * silent loss this module exists to prevent. Holding every live guard makes the
+ * answer independent of the order they were registered or released in.
  */
 
-let guard: (() => boolean) | null = null;
+const guards = new Set<() => boolean>();
 
 /**
  * Register a confirmation to run before the shell navigates. Returns the
- * unregister function — call it from the effect cleanup. The identity check on
- * unregister means a late cleanup can never clear a NEWER guard.
+ * unregister function — call it from the effect cleanup. Unregistering removes
+ * only THIS guard, so a late cleanup can never clear a newer one.
  */
 export function setNavGuard(fn: () => boolean): () => void {
-  guard = fn;
+  guards.add(fn);
   return () => {
-    if (guard === fn) guard = null;
+    guards.delete(fn);
   };
 }
 
 /**
- * True when navigation may proceed. With no guard registered — the normal case
- * for every other panel — this is unconditionally true.
+ * True when navigation may proceed — every registered guard must consent. With
+ * none registered, the normal case for every other panel, this is
+ * unconditionally true.
+ *
+ * SHORT-CIRCUITS on the first refusal: a guard typically shows a `confirm()`
+ * dialog, and once the operator has declined one there is nothing to gain by
+ * asking about the rest. Iterates a copy, so a guard that unregisters itself
+ * mid-loop cannot disturb the iteration.
  */
 export function confirmNavigation(): boolean {
-  return guard === null || guard();
+  for (const guard of [...guards]) {
+    if (!guard()) return false;
+  }
+  return true;
 }

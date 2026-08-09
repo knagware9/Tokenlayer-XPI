@@ -444,6 +444,134 @@ export interface MintedApiKey {
   secret: string;
 }
 
+// ---- EN-C: webhooks & events ----------------------------------------------
+/**
+ * A DELIBERATE MIRROR of `@tokenlayer/core`'s `EVENT_TYPES`
+ * (packages/core/src/events.ts), on the same terms as `API_SCOPES` above: the
+ * web app has no dependency on core, so this list must be updated when core's
+ * is. It is only ever a display and pick-list — the server runs core's
+ * `validateEventTypes` and answers 400 UNKNOWN_EVENT_TYPE for anything it does
+ * not recognise, so a stale copy here can never subscribe to something that
+ * does not exist, only fail to offer something that does.
+ *
+ * A STORED subscription may also be `"*"` (subscribe to everything the org is
+ * entitled to). This console only ever mints exact types, but the table renders
+ * whatever the server returns, so nothing here assumes the list is exhaustive.
+ *
+ * `ping` is deliberately NOT here: it is a fact about a test API call, not a
+ * platform fact, and the server excludes it from the catalog for that reason.
+ * Testing an endpoint is a button, never a subscription.
+ */
+export const EVENT_TYPES = [
+  // Identity
+  "credential.issued",
+  "credential.accepted",
+  "credential.rejected",
+  "credential.revoked",
+  "verification.requested",
+  "verification.completed",
+  // Tokenization
+  "asset.issued",
+  "asset.transferred",
+  "asset.redeemed",
+  // Governance
+  "proposal.executed",
+] as const;
+export type EventType = (typeof EVENT_TYPES)[number];
+
+/**
+ * One plain line per event type, for the integrator choosing them — typed as a
+ * TOTAL record, so adding a type to the mirrored vocabulary above without
+ * describing it here fails the build rather than shipping a blank checkbox.
+ * (The same discipline as SCOPE_DESCRIPTIONS in Developers.tsx.)
+ */
+export const EVENT_DESCRIPTIONS: Record<EventType, string> = {
+  "credential.issued": "A credential was issued to a holder.",
+  "credential.accepted": "A holder accepted a credential you issued them.",
+  "credential.rejected": "A holder rejected a credential you issued them.",
+  "credential.revoked": "A credential was revoked by its issuer.",
+  "verification.requested": "A verifier asked a holder to present credentials.",
+  "verification.completed": "A verification finished and has a result.",
+  "asset.issued": "An asset was tokenized and minted on-chain.",
+  "asset.transferred": "Tokens moved between accounts.",
+  "asset.redeemed": "Tokens were redeemed and burned.",
+  "proposal.executed": "A maker-checker proposal was approved and carried out.",
+};
+
+/** The public projection of a webhook endpoint. NEVER carries the secret. */
+export interface WebhookEndpoint {
+  id: string;
+  /** null = a platform-scope endpoint (not registrable from this surface). */
+  orgId: string | null;
+  url: string;
+  description: string | null;
+  /** Exact types, or `["*"]`. Typed as strings because `*` is not an EventType. */
+  eventTypes: string[];
+  useCaseKey: string | null;
+  status: "active" | "disabled";
+  /** Why it was switched off — the ONLY place an auto-disable is ever explained. */
+  disabledReason: string | null;
+  disabledAt: string | null;
+  /**
+   * Failed attempts in a row against the integrator's SERVER (non-2xx, timeout,
+   * unreachable host). This is the counter that auto-disables an endpoint, once
+   * it reaches the platform threshold AND the run is old enough.
+   */
+  consecutiveFailures: number;
+  /**
+   * Attempts in a row the platform REFUSED TO SEND because the URL failed its
+   * safety re-check at delivery time — its DNS moved, or it now resolves to a
+   * private address. A different fact entirely from `consecutiveFailures`: the
+   * integrator's server was never contacted, so it says nothing about its
+   * health. These NEVER auto-disable an endpoint, by design (otherwise anyone
+   * able to degrade a hostname's resolution could silence an org's webhooks).
+   */
+  consecutiveGuardFailures: number;
+  /** When the current failure run started — not when it last failed. */
+  failingSince: string | null;
+  deletedAt?: string | null;
+  createdBy?: string;
+  createdAt: string;
+  lastDeliveryAt: string | null;
+}
+
+/** One queued/attempted delivery. Carries no payload — read that from /events. */
+export interface WebhookDelivery {
+  id: string;
+  eventId: string;
+  eventSeq: number;
+  status: "pending" | "inflight" | "delivered" | "failed" | "dead";
+  attempts: number;
+  nextAttemptAt: string;
+  lastAttemptAt: string | null;
+  responseStatus: number | null;
+  responseError: string | null;
+  durationMs: number | null;
+  createdAt?: string;
+}
+
+/**
+ * The create/rotate response — the ONLY moment `secret` exists anywhere outside
+ * the integrator's own storage. Never persisted by this app: see Webhooks.tsx.
+ */
+export interface MintedWebhook {
+  endpoint: WebhookEndpoint;
+  secret: string;
+}
+
+/** A row from the durable cursor log (`GET /events`). */
+export interface PlatformEvent {
+  seq: number;
+  id: string;
+  /** `string`, not EventType: the log also carries `ping`. */
+  type: string;
+  orgId: string | null;
+  useCaseKey: string | null;
+  subjectId: string | null;
+  data: Record<string, unknown>;
+  occurredAt: string;
+}
+
 export interface HeldCredential {
   id: string;
   type: string[];

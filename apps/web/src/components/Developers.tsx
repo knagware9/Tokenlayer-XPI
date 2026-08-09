@@ -4,6 +4,7 @@ import { useAuth } from "../auth.js";
 import { isOrgOperatingRole, orgRoleEnabled } from "../lib/capabilities.js";
 import { setNavGuard } from "../lib/nav-guard.js";
 import { API_SCOPES, type ApiKeyView, type ApiScope, type OrgCapabilities, type Organization, type Role } from "../types.js";
+import { Webhooks } from "./Webhooks.js";
 import { Card, EmptyState, Pill, SectionHeader } from "./ui.js";
 
 /** The public marker every secret carries — mirrors the API's KEY_PREFIX_MARKER. */
@@ -332,6 +333,19 @@ export function Developers(): JSX.Element {
       )}
 
       <UsingYourKey />
+
+      {/*
+        EN-C webhooks live HERE rather than behind their own nav entry.
+        Integration is one job — keys and delivery destinations are configured
+        by the same person in the same sitting — and a new nav item would need a
+        domain classification, which is what made an ID-N surface vanish for the
+        orgs that lacked that domain, taking the only control that could fix it
+        with it. This page is already gated to PlatformAdmin and OrgAdmin, which
+        is exactly who may manage webhooks.
+      */}
+      <div className="pt-2 border-t border-slate-200/70">
+        <Webhooks orgId={orgId} org={org} />
+      </div>
     </div>
   );
 }
