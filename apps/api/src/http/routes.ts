@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ApiKeyRecord, AssetRecord, CashflowRecord, CompanyProfile, CredentialRecord, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord, WebhookEndpointRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, issueCredential, issuerBindingAllows, normalizeUseCaseDefinition, ORG_OPERATING_ROLES, orgDomainEnabled, orgRoleEnabled, PolicyError, presentCredential, presentCredentials, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateCredentialUseCase, validateEventTypes, validateMetadata, scopeAllows, validateOrgCapabilities, validateScopes, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ApiScope, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type OrgDomain, type OrgOperatingRole, type OrgType, type Role, type UseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
+import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, issueCredential, issuerBindingAllows, modeAllows, normalizeUseCaseDefinition, ORG_OPERATING_ROLES, orgDomainEnabled, orgRoleEnabled, PolicyError, presentCredential, presentCredentials, SANDBOX_CHAIN_ID, sandboxChainsValid, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateCredentialUseCase, validateEventTypes, validateMetadata, scopeAllows, validateOrgCapabilities, validateScopes, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ApiScope, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type OrgDomain, type OrgOperatingRole, type OrgType, type ResourceMode, type Role, type UseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
 import qrcode from "qrcode";
 import type { AppDeps } from "../context.js";
 import { renderCredentialCertificate } from "../certificate.js";
@@ -183,8 +183,113 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     return e.count > loginMax;
   }
 
+  // === EN-D2: THE MODE GATE ==============================================
+  /**
+   * The mode this request is ACTING in: the authenticating key's own mode, or
+   * `null` for a human (JWT) session, which has no mode and may act on both.
+   * That asymmetry is core's, not this file's — see `modeAllows`.
+   */
+  function actorMode(request: FastifyRequest): ResourceMode | null {
+    return request.apiKey?.mode ?? null;
+  }
+
+  /**
+   * THE ONE PLACE A CROSS-ENVIRONMENT ACT IS REFUSED. Give it the RESOLVED use
+   * case (either domain) and it answers whether the caller may proceed, having
+   * already sent the 403 when the answer is no — the same shape as
+   * `apiKeyScope`, and for the same reason: a call site that forgets to act on
+   * a returned boolean is a hole, and a helper that has already replied cannot
+   * be forgotten quietly.
+   *
+   * `useCase === null` — the key names nothing we can resolve — counts as
+   * **live**, which is the column's default and therefore the mode of every row
+   * written before EN-D2. Two consequences, both wanted: a live key and a human
+   * session see EXACTLY the pre-EN-D2 behaviour (the route's own 404/UNKNOWN
+   * path runs, untouched), and a test key is refused rather than allowed to
+   * probe. Failing open on an unresolvable name would make "delete the use
+   * case" a way through the gate.
+   *
+   * `apps/api/test/mode-coverage.test.ts` fails the build for any route that
+   * resolves a use case and consults neither this nor a helper that does.
+   */
+  function modeGate(request: FastifyRequest, reply: FastifyReply, useCase: { key: string; sandbox?: boolean } | null): boolean {
+    const keyMode = actorMode(request);
+    const useCaseMode: ResourceMode = useCase?.sandbox ? "test" : "live";
+    if (modeAllows(keyMode, useCaseMode)) return true;
+    // A DISTINCT CODE, not a generic 403. "your test key hit a live use case"
+    // and "your key lacks a scope" have completely different fixes, and an
+    // integrator reading a log line should not have to guess which they hit.
+    reply.code(403).send({
+      error: "WRONG_MODE",
+      message: `a ${keyMode} API key may not act on the ${useCaseMode} use case '${useCase?.key ?? "unknown"}'`,
+      details: { keyMode, useCaseMode },
+    });
+    return false;
+  }
+
+  /**
+   * `modeGate` for a call site that holds a use-case KEY and not the record —
+   * user provisioning, which binds a member to a use case by name. A slug is
+   * unique across both domains, so both repos are consulted; an absent key
+   * binds nothing and so crosses nothing.
+   *
+   * Binding is gated for a reason that is easy to miss: the member created here
+   * is a HUMAN with a password, and a human session has no mode at all. A test
+   * key allowed to mint a member of a live use case would therefore have
+   * manufactured an unrestricted live principal out of a sandbox credential.
+   */
+  async function modeGateByKey(request: FastifyRequest, reply: FastifyReply, key: string | null): Promise<boolean> {
+    if (!key) return true;
+    const resolved = (await deps.useCases.get(key).catch(() => null))
+      ?? (await deps.credentialUseCases.get(key).catch(() => null));
+    return modeGate(request, reply, resolved);
+  }
+
+  /**
+   * The chain rule, AT THE WRITE. Enforcing it only at the read would leave a
+   * live use case persisted with the sandbox chain in its allowlist — real
+   * -looking assets on an in-memory ledger — waiting for the first reader who
+   * forgets to check. Returns true once the 400 has been sent.
+   */
+  function sandboxChainsRefused(reply: FastifyReply, def: { sandbox?: boolean; allowedChainIds: string[] }): boolean {
+    if (sandboxChainsValid(!!def.sandbox, def.allowedChainIds)) return false;
+    reply.code(400).send({
+      error: "INVALID_SANDBOX_CHAINS",
+      message: def.sandbox
+        ? `a sandbox use case may allow only the '${SANDBOX_CHAIN_ID}' chain, not: ${def.allowedChainIds.join(", ")}`
+        : `a live use case may not allow the '${SANDBOX_CHAIN_ID}' chain: ${def.allowedChainIds.join(", ")}`,
+      details: { sandbox: !!def.sandbox, allowedChainIds: def.allowedChainIds },
+    });
+    return true;
+  }
+
+  /**
+   * `sandbox` is set at creation and never after. Flipping it on a use case
+   * that already holds data would reclassify that data wholesale — sandbox
+   * assets appearing in a customer's real register, or a live register becoming
+   * invisible to the keys that maintain it. Returns true once the 409 has been
+   * sent; an ABSENT flag on the incoming body means "unchanged", so every
+   * pre-EN-D2 client that never sends the field is untouched.
+   */
+  function sandboxImmutable(reply: FastifyReply, existing: { key: string; sandbox?: boolean }, incoming: { sandbox?: boolean }): boolean {
+    if (incoming.sandbox === undefined || !!incoming.sandbox === !!existing.sandbox) return false;
+    reply.code(409).send({
+      error: "SANDBOX_IMMUTABLE",
+      message: `'${existing.key}' is ${existing.sandbox ? "a sandbox" : "a live"} use case and cannot be changed into the other — use clone-to-live (POST /use-cases/:key/clone-to-live) to create a live copy of a sandbox use case`,
+      details: { key: existing.key, sandbox: !!existing.sandbox },
+    });
+    return true;
+  }
+
   // Loads an asset and enforces use-case scope. Returns null after sending the
   // right error (404 for reads to hide existence; 403 for actions).
+  //
+  // EN-D2: it also applies the MODE gate, because every asset route in the file
+  // arrives through here — putting the check at the ten call sites instead is
+  // ten chances to forget. The asset's mode is its use case's (assets carry no
+  // flag of their own), so the use case is resolved here; a use case that
+  // cannot be resolved reads as live, leaving the pre-EN-D2 path exactly as it
+  // was for live keys and human sessions.
   async function scopedAsset(request: FastifyRequest, reply: FastifyReply, mode: "read" | "act"): Promise<AssetRecord | null> {
     const { id } = request.params as { id: string };
     const asset = await deps.assets.get(id);
@@ -197,6 +302,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       else reply.code(403).send({ error: "WRONG_USE_CASE", message: "asset belongs to another use case" });
       return null;
     }
+    if (!modeGate(request, reply, await deps.useCases.get(asset.useCaseKey).catch(() => null))) return null;
     return asset;
   }
 
@@ -433,7 +539,9 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     const { key } = request.params as { key: string };
     if (!scopedToCaller(request.user as TokenClaims, key)) return notFound(reply, `unknown use case '${key}'`);
     if (!(await deps.useCases.has(key))) return notFound(reply, `unknown use case '${key}'`);
-    return deps.useCases.get(key);
+    const useCase = await deps.useCases.get(key);
+    if (!modeGate(request, reply, useCase)) return reply;
+    return useCase;
   });
   app.post("/use-cases", { schema: S.createUseCase, ...authScoped("usecases:provision") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
@@ -451,6 +559,21 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       if (err instanceof PolicyError) return reply.code(400).send({ error: err.code, message: err.message });
       throw err;
     }
+    // EN-D2, AND THE HOLE D2-2 LEFT OPEN. `normalizeUseCaseDefinition` spreads
+    // the body, so `sandbox` arrives here straight from the client with no
+    // validation of its own — inert while nothing read the flag, a
+    // cross-environment forgery the moment anything did. Two checks, both at
+    // the WRITE:
+    //   * the chain rule, so a live use case can never be persisted allowing
+    //     the always-simulated sandbox chain (nor a sandbox one a real chain);
+    //   * the mode gate against the definition ITSELF, so a `tl_test_` key can
+    //     only ever create sandbox use cases and a `tl_live_` key only real
+    //     ones. Creation is the one act with no existing resource to gate
+    //     against, which is exactly why it needed saying explicitly.
+    // Both run before the key-collision checks and before any deploy, so an
+    // invalid combination costs nothing.
+    if (sandboxChainsRefused(reply, definition)) return reply;
+    if (!modeGate(request, reply, definition)) return reply;
     // A slug is unique across BOTH domains: reject a key already taken by a
     // credential use case (the credential-side route symmetrically checks this
     // repo too). Applies to both the OrgAdmin proposal and PlatformAdmin paths.
@@ -501,6 +624,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     if (!scopedToCaller(request.user as TokenClaims, key)) return notFound(reply, `unknown use case '${key}'`);
     if (!(await deps.useCases.has(key))) return notFound(reply, `unknown use case '${key}'`);
     const useCase = await deps.useCases.get(key);
+    if (!modeGate(request, reply, useCase)) return reply;
     const { chainId } = request.query as { chainId: string };
     if (!useCase.allowedChainIds.includes(chainId)) {
       return reply.code(400).send({ error: "CHAIN_NOT_ALLOWED", message: `chain '${chainId}' is not in the allowed chains for '${key}'` });
@@ -532,6 +656,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     const { key } = request.params as { key: string };
     if (!(await deps.useCases.has(key))) return notFound(reply, `unknown use case '${key}'`);
     const useCase = await deps.useCases.get(key);
+    if (!modeGate(request, reply, useCase)) return reply;
     const { chainId } = request.body as { chainId: string };
     if (!useCase.allowedChainIds.includes(chainId)) {
       return reply.code(400).send({ error: "CHAIN_NOT_ALLOWED", message: `chain '${chainId}' is not in the allowed chains for '${key}'` });
@@ -554,6 +679,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     const { key } = request.params as { key: string };
     if (!(await deps.useCases.has(key))) return notFound(reply, `unknown use case '${key}'`);
     const existing = await deps.useCases.get(key);
+    if (!modeGate(request, reply, existing)) return reply;
     const existingContracts = existing.contracts ?? {};
     const hasDeployed = Object.keys(existingContracts).length > 0;
 
@@ -565,6 +691,18 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       if (err instanceof PolicyError) return reply.code(400).send({ error: err.code, message: err.message });
       throw err;
     }
+    // EN-D2: `sandbox` is set at creation and never after — 409, pointing at
+    // clone-to-live (D2-6), which is the supported way to get a live copy of a
+    // sandbox programme. An absent flag means "unchanged", so a pre-EN-D2
+    // client that round-trips a definition without the field is untouched; and
+    // because the stored value is pinned below rather than taken from the body,
+    // even a body that omits it cannot silently clear the flag.
+    if (sandboxImmutable(reply, existing, incoming)) return reply;
+    incoming = { ...incoming, sandbox: existing.sandbox };
+    // The chain rule is re-checked on every update, not just at create: an
+    // edit that adds the sandbox chain to a live use case is the same forgery
+    // as creating one that way.
+    if (sandboxChainsRefused(reply, incoming)) return reply;
     // Once any contract is deployed, the contract-defining fields are immutable.
     if (hasDeployed) {
       if (incoming.tokenStandard !== existing.tokenStandard || incoming.symbol !== existing.symbol) {
@@ -590,6 +728,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
   app.get("/credential-use-cases/:key", { schema: S.getCredentialUseCase, ...auth }, async (request, reply) => {
     const cuc = await deps.credentialUseCases.get((request.params as { key: string }).key);
     if (!cuc) return notFound(reply, "credential use case not found");
+    if (!modeGate(request, reply, cuc)) return reply;
     return cuc;
   });
 
@@ -641,6 +780,12 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     const claims = request.user as TokenClaims;
     if (claims.role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only a platform admin may author credential use cases" });
     const def = request.body as CredentialUseCaseDefinition;
+    // EN-D2, the credential-domain half of the same hole: `sandbox` arrives
+    // from the client here too. There is no chain rule to apply — a credential
+    // use case names no chains — so the whole of the write-time validation is
+    // the mode gate against the definition itself: a `tl_test_` key may create
+    // only sandbox credential use cases, a `tl_live_` key only real ones.
+    if (!modeGate(request, reply, def)) return reply;
     if (await deps.credentialUseCases.has(def.key) || await deps.useCases.has(def.key)) {
       return reply.code(409).send({ error: "KEY_TAKEN", message: `use-case key '${def.key}' already exists` });
     }
@@ -664,7 +809,13 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     const key = (request.params as { key: string }).key;
     const existing = await deps.credentialUseCases.get(key);
     if (!existing) return notFound(reply, "credential use case not found");
-    const def = { ...(request.body as CredentialUseCaseDefinition), key };
+    if (!modeGate(request, reply, existing)) return reply;
+    const body = request.body as CredentialUseCaseDefinition;
+    // Same immutability rule as the token domain, and the same pinning: the
+    // stored flag wins, so neither a changed nor an omitted `sandbox` in the
+    // body can move a credential use case between environments.
+    if (sandboxImmutable(reply, existing, body)) return reply;
+    const def = { ...body, key, sandbox: existing.sandbox };
     const known = await referencedOrgs(def);
     try {
       validateCredentialUseCase(def, { orgExists: (id) => known.has(id) });
@@ -882,6 +1033,13 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     let useCase;
     let created = false;
     const existing = await deps.credentialUseCases.get(def.key);
+    // EN-D2. Gated against the EXISTING record when this is a re-provision and
+    // against the definition otherwise — a template names no `sandbox`, so a
+    // provisioned use case is always live and a `tl_test_` key is refused here
+    // outright. The rebind below also PINS the stored flag: the def rebuilt
+    // from the template carries no `sandbox`, and writing it back unpinned
+    // would quietly promote a sandbox programme to live on re-provision.
+    if (!modeGate(request, reply, existing ?? def)) return reply;
     if (existing) {
       // A re-provision may only rebind a use case the caller legitimately owns:
       // a PlatformAdmin may re-provision any; an OrgAdmin only one already owned by
@@ -900,7 +1058,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       } catch (err) {
         return reply.code(400).send({ error: "INVALID_CREDENTIAL_USECASE", message: (err as Error).message });
       }
-      useCase = await deps.credentialUseCases.update(def.key, { ...def, ownerOrgId: org.id });
+      useCase = await deps.credentialUseCases.update(def.key, { ...def, ownerOrgId: org.id, sandbox: existing.sandbox });
     } else {
       try {
         useCase = await createCredentialUseCaseFromDef(def, org.id, claims.id);
@@ -942,6 +1100,13 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
   // the use case WITHOUT being the cryptographic issuer; the VC is still signed
   // by the use case's bound issuer org (issuerOrg resolution below is unchanged).
   async function resolveIssuer(request: FastifyRequest, reply: FastifyReply, def: Awaited<ReturnType<typeof deps.credentialUseCases.get>>, key: string) {
+    // EN-D2 FIRST, before any binding reasoning: whether the caller MAY act in
+    // this environment at all precedes the question of whether they are the
+    // right issuer within it. Placed here rather than at the three call sites
+    // because every credential-issuing door in the file comes through this
+    // function — single issuance, batch issuance and the eligible-holders
+    // picker that must agree with them.
+    if (!modeGate(request, reply, def)) return null;
     const claims = request.user as TokenClaims;
     const isPlatformAdmin = claims.role === "PlatformAdmin";
     const scopedOperator = (claims.role === "UseCaseAdmin" || claims.role === "Issuer") && claims.useCaseKey === key;
@@ -1299,6 +1464,13 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
 
   app.post("/assets", { schema: S.issueAsset, ...authScoped("assets:issue") }, async (request, reply) => {
     const b = request.body as { useCaseKey: string; name: string; chainId: string; metadata?: Record<string, unknown>; treasuryAccount?: string; initialSupply?: string; sale?: { unitPrice: string; currency: string; treasuryAccount: string } };
+    // EN-D2. THE GATE SITS ON EACH DOOR, NOT INSIDE issueAssetCore: the core
+    // returns a result object rather than replying, so a gate placed there
+    // could only report through a channel the other door discards per row.
+    // Both doors are gated — this one directly, the invoice register's
+    // tokenize through `invoiceGate` — and mode-coverage.test.ts asserts that
+    // they agree, exactly as scope-coverage does for their scope.
+    if (!modeGate(request, reply, await deps.useCases.get(b.useCaseKey).catch(() => null))) return reply;
     const r = await issueAssetCore({ claims: request.user as TokenClaims, actor: actorOf(request), request, ...b });
     return r.ok ? reply.code(r.status).send(r.body) : reply.code(r.status).send({ error: r.error, message: r.message });
   });
@@ -1324,6 +1496,9 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     }
     const useCase = await deps.useCases.get(key).catch(() => null);
     if (!useCase) { notFound(reply, "use case not found"); return null; }
+    // EN-D2: every one of the six invoice-register routes arrives through here,
+    // including the tokenize door onto issueAssetCore.
+    if (!modeGate(request, reply, useCase)) return null;
     if (useCase.derivedFields?.invoiceHash !== "invoiceFingerprint") {
       reply.code(400).send({ error: "NOT_INVOICE_USECASE", message: "this use case does not tokenize invoices" });
       return null;
@@ -1703,6 +1878,10 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     const asset = await deps.assets.get((request.params as { id: string }).id);
     if (!asset) return notFound(reply, "asset not found");
     if (!scopedToCaller(request.user as TokenClaims, asset.useCaseKey)) return notFound(reply, "asset not found");
+    // EN-D2. This route resolves its own asset rather than going through
+    // `scopedAsset` (it 404s on scope instead of 403ing), so it needs the gate
+    // spelled out — the one asset route where delegating would have hidden it.
+    if (!modeGate(request, reply, await deps.useCases.get(asset.useCaseKey).catch(() => null))) return reply;
     if (asset.status !== "active") {
       return reply.code(409).send({ error: "ASSET_NOT_ACTIVE", message: `asset is ${asset.status}` });
     }
@@ -1832,6 +2011,10 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       notFound(reply, "listing not found");
       return null;
     }
+    // EN-D2: a listing's mode is its asset's, which is its use case's — the
+    // same chain of ownership `scopedAsset` follows, and gated here for the
+    // same reason (both listing routes come through this one helper).
+    if (!modeGate(request, reply, await deps.useCases.get(asset.useCaseKey).catch(() => null))) return null;
     return { listing, asset };
   }
 
@@ -2143,6 +2326,11 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     if (targetUseCaseKey && !targetDomain) {
       return reply.code(404).send({ error: "USE_CASE_NOT_FOUND", message: `no use case '${targetUseCaseKey}'` });
     }
+    // EN-D2 — see `modeGateByKey`. The key written on the member IS the
+    // member's authorization, and the member is a human whose session carries
+    // no mode at all, so a test key allowed to bind one to a live use case
+    // would have laundered a sandbox credential into an unrestricted live one.
+    if (!(await modeGateByKey(request, reply, targetUseCaseKey))) return reply;
     // Domain mismatch means the role doesn't exist in this domain AT ALL (e.g. a
     // tokenization-only "Buyer" targeting an identity use case) — use the broadest
     // (PlatformAdmin) roster for the domain so this check stays independent of the
@@ -2255,6 +2443,12 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       });
       targetKeys.add(targetUseCaseKey);
     }
+    // EN-D2, on the DISTINCT target keys and before anything is created — the
+    // same binding rule as the single route. A cross-mode row is not collected
+    // into `problems` (a 400 listing rows) because it is not a row-level
+    // validation failure: the caller may not act in that environment at all,
+    // and the answer to that is one 403 for the whole request.
+    for (const k of targetKeys) if (!(await modeGateByKey(request, reply, k))) return reply;
     if (problems.length) {
       return reply.code(400).send({ error: "BATCH_INVALID", message: `${problems.length} row(s) failed validation`, problems });
     }
@@ -2686,7 +2880,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
    * minted user is actually refused at /auth/login.
    */
   async function createOrgMember(
-    reply: FastifyReply, claims: TokenClaims, id: string, b: OrgMemberInput, kind: UserRecord["kind"],
+    request: FastifyRequest, reply: FastifyReply, claims: TokenClaims, id: string, b: OrgMemberInput, kind: UserRecord["kind"],
   ): Promise<{ org: OrganizationRecord; user: UserRecord; did: string } | null> {
     if (!orgScoped(claims, id)) { reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to add members to that organization" }); return null; }
     if (!canCreateOrgMember(claims.role, b.role)) { reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to create that member role" }); return null; }
@@ -2747,6 +2941,12 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       const domain = await resolveUseCaseDomain(memberUseCaseKey);
       // Same code the sibling POST /users route uses for an unknown key.
       if (!domain) { reply.code(404).send({ error: "USE_CASE_NOT_FOUND", message: `no use case '${memberUseCaseKey}'` }); return null; }
+      // EN-D2, and BEFORE the role-specific binding rules below, which are
+      // deliberately skipped for a PlatformAdmin caller: the mode of the
+      // environment a member is bound to is not a platform override to give
+      // away — a `tl_test_` key bound to a PlatformAdmin service user is still
+      // a sandbox credential. See `modeGateByKey` for what the binding buys.
+      if (!(await modeGateByKey(request, reply, memberUseCaseKey))) return null;
       // A BINDING failure, not a capability one — distinct error, and it bites
       // for a legacy (null-envelope) org too.
       const notBound = (message: string) => {
@@ -2796,7 +2996,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     const claims = request.user as TokenClaims;
     const { id } = request.params as { id: string };
     const b = request.body as OrgMemberInput;
-    const made = await createOrgMember(reply, claims, id, b, "human");
+    const made = await createOrgMember(request, reply, claims, id, b, "human");
     if (!made) return;
     return reply.code(201).send({ id: made.user.id, email: made.user.email, role: made.user.role, useCaseKey: made.user.useCaseKey, orgId: id, did: made.did, membershipVc: true });
   });
@@ -2881,7 +3081,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     // never be stronger than a member its creator could have added by hand.
     // `kind: "service"` is what makes it unable to log in interactively.
     const slug = b.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 24) || "key";
-    const made = await createOrgMember(reply, claims, id, {
+    const made = await createOrgMember(request, reply, claims, id, {
       email: `svc-${slug}-${randomUUID().slice(0, 8)}@service.tokenlayer.local`,
       // A service account has no usable password: this value is random, never
       // returned, and /auth/login refuses `kind === "service"` regardless.
@@ -3619,6 +3819,11 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     const { reason } = request.body as { reason: string };
     const cred = await deps.credentials.get(id);
     if (!cred) return notFound(reply, "credential not found");
+    // EN-D2: a credential's mode is its use case's. A closed-catalog credential
+    // (no `credentialUseCaseKey`) belongs to no use case at all and so has no
+    // mode to cross — `modeGateByKey` passes a null key through, leaving that
+    // pre-existing path exactly as it was.
+    if (!(await modeGateByKey(request, reply, cred.credentialUseCaseKey))) return reply;
     if (cred.revoked) return reply.code(409).send({ error: "ALREADY_REVOKED", message: "credential is already revoked" });
     // Only the ISSUING org may revoke: find the org whose parent DID signed it.
     const issuer = await deps.organizations.findByDid(cred.issuerDid);
@@ -3783,6 +3988,13 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
   app.post("/verification-requests", { schema: S.createVerificationRequest, ...authScoped("verifications:request") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const b = request.body as { holderDid: string; requestedTypes: string[]; purpose: string; credentialUseCaseKey?: string };
+    // EN-D2, once for BOTH branches below: the request is bound to a credential
+    // use case either explicitly (the body) or implicitly (a desk user's own
+    // claims), and a verification request against a live programme raised by a
+    // sandbox key would put a real holder's disclosure prompt in front of test
+    // traffic. An unbound request (neither key present) names no use case and
+    // so crosses nothing.
+    if (!(await modeGateByKey(request, reply, b.credentialUseCaseKey ?? claims.useCaseKey ?? null))) return reply;
 
     // F5 — a use-case-scoped Verifier desk user (no org). Authorized purely by
     // role + useCaseKey: they may only verify their OWN credential use case, and

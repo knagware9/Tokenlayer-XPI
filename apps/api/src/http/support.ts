@@ -1,5 +1,5 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { PolicyError, scopeAllows, type Actor, type ApiScope, type AssetContext, type Role } from "@tokenlayer/core";
+import { PolicyError, scopeAllows, type Actor, type ApiScope, type AssetContext, type ResourceMode, type Role } from "@tokenlayer/core";
 import { cachedVerification, prefixOf, rememberVerification, secretMatches } from "../api-keys.js";
 import type { ApiKeyRepository, AssetRecord, UserRecord, UserRepository } from "../persistence/types.js";
 
@@ -20,6 +20,18 @@ export interface TokenClaims {
 export interface ApiKeyPrincipal {
   id: string;
   scopes: string[];
+  /**
+   * EN-D2: the mode this request is acting in, taken from the KEY ROW — not from
+   * the marker on the secret, which `requirePrincipal` has already refused to
+   * trust on its own (the two must agree or the request never gets this far).
+   *
+   * Non-optional on purpose. `mode?: ResourceMode` would let the mode gate read
+   * `undefined` at a construction site that forgot it, and `undefined` is
+   * indistinguishable from "human session" — which is the ONE value that passes
+   * both directions. A missing field would therefore fail OPEN, silently, in
+   * exactly the place this whole sub-project exists to close.
+   */
+  mode: ResourceMode;
 }
 
 declare module "fastify" {
@@ -297,7 +309,7 @@ export function requirePrincipal(deps: {
     request.user = claimsOf(user);
     // Copy the scopes: the memory repo hands back its live array, and a route
     // must never be able to mutate what the store believes was granted.
-    request.apiKey = { id: key.id, scopes: [...key.scopes] };
+    request.apiKey = { id: key.id, scopes: [...key.scopes], mode: key.mode };
 
     // Compare-then-write, and only after the credential verified — a rejected
     // request must leave no trace that could be mistaken for legitimate use.

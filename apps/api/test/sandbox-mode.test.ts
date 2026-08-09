@@ -18,7 +18,7 @@ import {
   rowToUseCase,
   rowToWebhookEndpoint,
 } from "../src/persistence/prisma.js";
-import { auth, buildTestAppWithRepos, V1, type TestAppHandle } from "./helpers.js";
+import { auth, buildTestAppWithRepos, loginAs, V1, type TestAppHandle } from "./helpers.js";
 
 // NOTE: importing prisma.js constructs a PrismaClient at module load. That is a
 // pure construction — it opens no connection and needs no DATABASE_URL — which
@@ -412,5 +412,247 @@ describe("EN-D2 · the tl_test_ marker", () => {
     expect(me.statusCode).toBe(200);
     expect(me.json()).toMatchObject({ id: seeded.userId, role: "PlatformAdmin" });
     expect((await h.apiKeys.findById(seeded.keyId))?.lastUsedAt).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task D2-4 — THE ENFORCEMENT.
+//
+// Everything above this line proves the two modes can be STORED. What follows
+// proves they are kept apart: that a `tl_test_` key cannot reach a live use
+// case, that a `tl_live_` key cannot reach a sandbox one, that a human session
+// — which has no mode — reaches both, and that the flag itself cannot be
+// forged at the write or flipped afterwards.
+//
+// `mode-coverage.test.ts` is the other half of this task and answers a
+// different question: not "does the gate work" but "is it PRESENT on every
+// route that needs it". Neither test subsumes the other — a gate that works on
+// the two routes exercised here and is missing from thirty others would pass
+// this file completely.
+// ---------------------------------------------------------------------------
+
+/** A tokenization use case straight into the repo — no deploy, no chain. */
+async function seedUseCase(h: TestAppHandle, key: string, sandbox: boolean) {
+  return h.deps.useCases.create({
+    ...useCaseDef, key, name: key, sandbox,
+    allowedChainIds: sandbox ? [SANDBOX_CHAIN_ID] : ["fabric"],
+    defaultChainId: sandbox ? SANDBOX_CHAIN_ID : "fabric",
+  });
+}
+
+/** A credential use case bound to `orgId` as its issuer, in one mode or the other. */
+async function seedCredentialUseCase(h: TestAppHandle, key: string, sandbox: boolean, orgId: string) {
+  return h.deps.credentialUseCases.create({
+    ...credentialUseCaseDef, key, name: key, sandbox, issuer: { kind: "org", orgId }, ownerOrgId: orgId,
+  });
+}
+
+/**
+ * An org with a LEGACY (null) capability envelope and its OrgAdmin, built
+ * straight through the repos.
+ *
+ * The null envelope is deliberate: EN-A's capability checks all pass for a
+ * legacy org, so nothing but the mode gate can be the reason a request
+ * succeeds or fails below. A test whose control case could have been refused
+ * for a second reason proves nothing about the first.
+ */
+async function seedOrgAdmin(h: TestAppHandle): Promise<{ orgId: string; token: string }> {
+  const tag = Math.random().toString(36).slice(2, 10);
+  const org = await h.organizations.create({
+    name: `D2 Issuer ${tag}`, orgType: "issuer", registrationId: null, jurisdiction: null,
+    did: `did:key:zD2${tag}`, didSeedEncrypted: "enc", status: "active", verified: true,
+    verifiedAt: new Date().toISOString(), companyProfile: null, capabilities: null,
+  });
+  const email = `orgadmin-d2-${tag}@tokenlayer.dev`;
+  const password = `orgadmin-${tag}`;
+  await h.users.create({
+    email, passwordHash: bcrypt.hashSync(password, TEST_ROUNDS), role: "OrgAdmin",
+    useCaseKey: null, accountId: null, active: true, kycStatus: "approved", kyc: null,
+    orgId: org.id, kind: "human",
+  });
+  return { orgId: org.id, token: await loginAs(h.app, email, password) };
+}
+
+/** The one credential-issuance call both the keys and the human make below. */
+const issueOn = (h: TestAppHandle, key: string, cred: string) => h.app.inject({
+  method: "POST", url: `${V1}/credential-use-cases/${key}/credentials`, headers: auth(cred),
+  payload: { credentialType: "KycCredential", claims: { legalName: "Acme Ltd" } },
+});
+
+/** A whole world: an org, both credential use cases, both token use cases, both keys. */
+async function modeWorld() {
+  const h = await buildTestAppWithRepos();
+  const { orgId, token } = await seedOrgAdmin(h);
+  await seedCredentialUseCase(h, "d2-live-kyc", false, orgId);
+  await seedCredentialUseCase(h, "d2-test-kyc", true, orgId);
+  await seedUseCase(h, "d2-live-tok", false);
+  await seedUseCase(h, "d2-test-tok", true);
+  const liveKey = await seedKey(h, { mode: "live" });
+  const testKey = await seedKey(h, { mode: "test" });
+  return { h, orgAdmin: token, liveKey: liveKey.secret, testKey: testKey.secret };
+}
+
+describe("EN-D2 · the mode gate", () => {
+  it("a tl_test_ key is refused on a LIVE use case — 403 WRONG_MODE", async () => {
+    const w = await modeWorld();
+
+    // The act: issuing a credential against a live programme.
+    const issued = await issueOn(w.h, "d2-live-kyc", w.testKey);
+    expect(issued.statusCode).toBe(403);
+    expect(issued.json()).toMatchObject({
+      error: "WRONG_MODE",
+      details: { keyMode: "test", useCaseMode: "live" },
+    });
+
+    // The read: live CONFIGURATION is not a sandbox key's to see either.
+    const read = await w.h.app.inject({ method: "GET", url: `${V1}/use-cases/d2-live-tok`, headers: auth(w.testKey) });
+    expect(read.statusCode).toBe(403);
+    expect(read.json().error).toBe("WRONG_MODE");
+
+    // THE CONTROL, and the point of it: the very same key succeeds on the
+    // matching-mode use case. Without this the two assertions above would be
+    // satisfied by a key that could do nothing at all — an authorization test
+    // whose subject is broken proves only that broken things are refused.
+    const own = await w.h.app.inject({ method: "GET", url: `${V1}/credential-use-cases/d2-test-kyc`, headers: auth(w.testKey) });
+    expect(own.statusCode).toBe(200);
+    expect(own.json()).toMatchObject({ key: "d2-test-kyc", sandbox: true });
+  });
+
+  it("a tl_live_ key is refused on a SANDBOX use case — 403 WRONG_MODE", async () => {
+    // THE OTHER DIRECTION, and the one an implementation is most likely to
+    // forget: "keep test keys out of production" is the instinct, and a gate
+    // written as that instinct (`actor !== "test" || …`) leaves live keys free
+    // to mint into the sandbox — corrupting the very register an integrator is
+    // using to check their own work, with real credentials, invisibly.
+    const w = await modeWorld();
+
+    const issued = await issueOn(w.h, "d2-test-kyc", w.liveKey);
+    expect(issued.statusCode).toBe(403);
+    expect(issued.json()).toMatchObject({
+      error: "WRONG_MODE",
+      details: { keyMode: "live", useCaseMode: "test" },
+    });
+
+    const read = await w.h.app.inject({ method: "GET", url: `${V1}/use-cases/d2-test-tok`, headers: auth(w.liveKey) });
+    expect(read.statusCode).toBe(403);
+    expect(read.json().error).toBe("WRONG_MODE");
+
+    const own = await w.h.app.inject({ method: "GET", url: `${V1}/credential-use-cases/d2-live-kyc`, headers: auth(w.liveKey) });
+    expect(own.statusCode).toBe(200);
+    expect(own.json()).toMatchObject({ key: "d2-live-kyc", sandbox: false });
+  });
+
+  it("a human OrgAdmin succeeds on BOTH", async () => {
+    // THE SESSION ASYMMETRY, exercised rather than asserted about. A human has
+    // no mode, and an OrgAdmin who could not open their own sandbox could not
+    // configure it — which would make the whole feature unusable by the person
+    // it is for. It is the single asymmetry in the design and therefore the
+    // thing a later "tighten the gate" change is most likely to break.
+    const w = await modeWorld();
+
+    for (const key of ["d2-live-kyc", "d2-test-kyc"]) {
+      const read = await w.h.app.inject({ method: "GET", url: `${V1}/credential-use-cases/${key}`, headers: auth(w.orgAdmin) });
+      expect(read.statusCode, `${key} read`).toBe(200);
+
+      // And an ACT on both, not just a read. The request is deliberately
+      // incomplete (no subject), so the 400 it earns is proof it ran the whole
+      // issuer-binding gate and reached claim validation — i.e. that nothing
+      // about its ENVIRONMENT stopped it.
+      const issued = await issueOn(w.h, key, w.orgAdmin);
+      expect(issued.json().error, `${key} issue`).toBe("SUBJECT_REQUIRED");
+      expect(issued.statusCode).toBe(400);
+    }
+  });
+});
+
+describe("EN-D2 · sandbox is validated at the WRITE", () => {
+  /** POST /use-cases as the seeded PlatformAdmin. */
+  const create = (h: TestAppHandle, token: string, over: Record<string, unknown>) => h.app.inject({
+    method: "POST", url: `${V1}/use-cases`, headers: auth(token),
+    payload: { ...useCaseDef, ...over },
+  });
+
+  it("creating a live use case that names the sandbox chain is 400", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    // No `sandbox` at all — the default — reaching for the always-simulated
+    // chain. Allowed, this would deploy a REAL use case's contract to an
+    // in-memory ledger and hand its holders assets that do not exist.
+    const res = await create(h, admin, { key: "d2-live-on-sandbox", allowedChainIds: ["fabric", SANDBOX_CHAIN_ID], defaultChainId: "fabric" });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "INVALID_SANDBOX_CHAINS", details: { sandbox: false } });
+    expect(res.json().message).toContain(SANDBOX_CHAIN_ID);
+    expect(await h.deps.useCases.has("d2-live-on-sandbox")).toBe(false);
+  });
+
+  it("creating a sandbox use case that names besu is 400", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const res = await create(h, admin, { key: "d2-sandbox-on-besu", sandbox: true, allowedChainIds: ["besu"], defaultChainId: "besu" });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "INVALID_SANDBOX_CHAINS", details: { sandbox: true, allowedChainIds: ["besu"] } });
+    expect(await h.deps.useCases.has("d2-sandbox-on-besu")).toBe(false);
+  });
+
+  it("POST /use-cases cannot smuggle sandbox:true past validation", async () => {
+    // THE HOLE D2-2 LEFT OPEN, ON PURPOSE, FOR D2-4 TO CLOSE.
+    // `normalizeUseCaseDefinition` spreads the request body, so `sandbox`
+    // reached the repository untouched — no validator ever looked at it. It was
+    // harmless only for as long as nothing READ the flag; the moment the gate
+    // above started reading it, an unvalidated client-supplied boolean became
+    // the whole of a tenancy decision. Enforcing at the read is not enough:
+    // this is what closing it at the WRITE means.
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+
+    const smuggled = await create(h, admin, { key: "d2-smuggled", sandbox: true, allowedChainIds: ["fabric"], defaultChainId: "fabric" });
+    expect(smuggled.statusCode).toBe(400);
+    expect(smuggled.json().error).toBe("INVALID_SANDBOX_CHAINS");
+    expect(await h.deps.useCases.has("d2-smuggled")).toBe(false);
+
+    // And the mirror: the HONEST combination is accepted and persists the flag.
+    // Without this the test above would also pass against an implementation
+    // that simply refused every `sandbox: true` — proving a bug, not a rule.
+    const honest = await create(h, admin, { key: "d2-honest", sandbox: true, allowedChainIds: [SANDBOX_CHAIN_ID], defaultChainId: SANDBOX_CHAIN_ID });
+    expect(honest.statusCode).toBe(201);
+    expect(honest.json().sandbox).toBe(true);
+    expect((await h.deps.useCases.get("d2-honest")).sandbox).toBe(true);
+  });
+
+  it("changing sandbox on an existing use case is 409 SANDBOX_IMMUTABLE", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    await seedUseCase(h, "d2-immutable", true);
+
+    const flipped = await h.app.inject({
+      method: "PUT", url: `${V1}/use-cases/d2-immutable`, headers: auth(admin),
+      payload: { ...useCaseDef, key: "d2-immutable", sandbox: false, allowedChainIds: ["fabric"], defaultChainId: "fabric" },
+    });
+    expect(flipped.statusCode).toBe(409);
+    expect(flipped.json()).toMatchObject({ error: "SANDBOX_IMMUTABLE", details: { key: "d2-immutable", sandbox: true } });
+    // The message must point somewhere: "no" without a next step is how an
+    // integrator ends up deleting and recreating a programme by hand.
+    expect(flipped.json().message).toContain("clone-to-live");
+    expect((await h.deps.useCases.get("d2-immutable")).sandbox).toBe(true);
+
+    // An UNCHANGED flag is not a change — the update goes through. Every
+    // pre-EN-D2 client round-trips a definition without the field at all, and
+    // an omitted flag must neither 409 nor silently clear the stored one.
+    const renamed = await h.app.inject({
+      method: "PUT", url: `${V1}/use-cases/d2-immutable`, headers: auth(admin),
+      payload: { ...useCaseDef, key: "d2-immutable", name: "Renamed", allowedChainIds: [SANDBOX_CHAIN_ID], defaultChainId: SANDBOX_CHAIN_ID },
+    });
+    expect(renamed.statusCode).toBe(200);
+    expect(renamed.json()).toMatchObject({ name: "Renamed", sandbox: true });
+
+    // The credential domain has the same rule and the same 409.
+    await h.deps.credentialUseCases.create({ ...credentialUseCaseDef, key: "d2-cred-immutable", sandbox: true });
+    const cred = await h.app.inject({
+      method: "PATCH", url: `${V1}/credential-use-cases/d2-cred-immutable`, headers: auth(admin),
+      payload: { ...credentialUseCaseDef, key: "d2-cred-immutable", sandbox: false },
+    });
+    expect(cred.statusCode).toBe(409);
+    expect(cred.json().error).toBe("SANDBOX_IMMUTABLE");
+    expect((await h.deps.credentialUseCases.get("d2-cred-immutable"))?.sandbox).toBe(true);
   });
 });

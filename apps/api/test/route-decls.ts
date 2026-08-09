@@ -43,13 +43,25 @@ export const ANY_ROUTE_RE = /app\.(get|post|put|patch|delete)\("([^"]+)"/g;
  * than merely unlikely.
  */
 function optionsBody(src: string, openBrace: number): string | null {
+  return balanced(src, openBrace, "{", "}");
+}
+
+/**
+ * The generic of the above: the text between `open` and its matching close.
+ *
+ * EN-D2 needed the same balancing over PARENTHESES — a route's HANDLER, not
+ * just its options object — so the one implementation is parameterised rather
+ * than copied. Copying it is how the truncation bug documented above would come
+ * back in a second place, with only the first one fixed.
+ */
+function balanced(src: string, open: number, oc: string, cc: string): string | null {
   let depth = 0;
-  for (let i = openBrace; i < src.length; i++) {
+  for (let i = open; i < src.length; i++) {
     const c = src[i];
-    if (c === "{") depth += 1;
-    else if (c === "}") {
+    if (c === oc) depth += 1;
+    else if (c === cc) {
       depth -= 1;
-      if (depth === 0) return src.slice(openBrace + 1, i);
+      if (depth === 0) return src.slice(open + 1, i);
     }
   }
   return null; // unterminated — the caller reports it rather than guessing
@@ -63,6 +75,13 @@ export interface RouteDecl {
   authed: boolean;
   /** The `S.<name>` key in schemas.ts whose `security`/`description` document this route. */
   schema: string | null;
+  /**
+   * The WHOLE `app.<method>(…)` call — options object and handler body — or
+   * null when the parentheses did not balance. EN-D2's mode coverage asks what
+   * a handler DOES (does it resolve a use case? does it consult the gate?),
+   * which the options object alone cannot answer.
+   */
+  body: string | null;
 }
 
 export function declaredRoutes(): RouteDecl[] {
@@ -77,13 +96,84 @@ export function declaredRoutes(): RouteDecl[] {
     if (opts === null || opts.includes("app.")) continue;
     const scoped = /\.\.\.authScoped\("([^"]+)"\)/.exec(opts);
     const schema = /schema:\s*S\.(\w+)/.exec(opts);
+    // Same runaway rule for the handler: a body that swallowed the next route
+    // declaration is reported as unparsed rather than credited with that
+    // route's gate.
+    const call = balanced(src, src.indexOf("(", m.index), "(", ")");
     out.push({
       method: method.toUpperCase(),
       path,
       scope: scoped?.[1] ?? null,
       authed: opts.includes("...auth"),
       schema: schema?.[1] ?? null,
+      body: call === null || ANY_ROUTE_RE.test(call) ? null : call,
     });
+    ANY_ROUTE_RE.lastIndex = 0; // `g` regex used with .test — reset or it strides
+  }
+  return out;
+}
+
+/**
+ * The `{` that opens a function BODY, starting from just past its parameter
+ * list — i.e. the first brace at angle-bracket depth zero.
+ *
+ * The depth tracking is the whole point. `async function invoiceGate(…):
+ * Promise<{ useCase: UseCaseDefinition; … } | null> {` has TWO candidate
+ * braces, and taking the first would read the return TYPE as the function's
+ * body: a helper that plainly resolves a use case would then look like one that
+ * touches nothing, and every route delegating to it would drop out of the
+ * candidate set. A silent miss of exactly that shape is what the blind-spot
+ * assertion in mode-coverage.test.ts exists to catch, but not producing it in
+ * the first place is better.
+ */
+function bodyBrace(src: string, from: number): number {
+  let angle = 0;
+  for (let i = from; i < src.length; i++) {
+    const c = src[i];
+    if (c === "<") angle += 1;
+    else if (c === ">" && src[i - 1] !== "=") angle = Math.max(0, angle - 1);
+    else if (c === "{" && angle === 0) return i;
+    // A `;` OUTSIDE the type annotation ends a bodiless declaration (an
+    // overload signature). Inside one it is just a member separator —
+    // `Promise<{ useCase: UseCaseDefinition; … }>` is full of them, and
+    // treating those as the end of the declaration dropped `invoiceGate`,
+    // `scopedListing` and `issueAssetCore` out of the helper set entirely.
+    else if (c === ";" && angle === 0) return -1;
+  }
+  return -1;
+}
+
+/** A helper function declared inside `registerRoutes`: its name and its body. */
+export interface HelperDecl {
+  name: string;
+  body: string;
+}
+
+/**
+ * Every `function <name>(…) { … }` in routes.ts EXCEPT the ones that contain
+ * route declarations (i.e. `registerRoutes` itself).
+ *
+ * Why a coverage test needs these: routes delegate. `scopedAsset`,
+ * `invoiceGate` and `resolveIssuer` are where a use case is actually resolved
+ * and where the gate actually sits, and a scan that looked only at route bodies
+ * would call ten gated asset routes ungated and, worse, call them uninteresting.
+ * Discovering helpers by PARSING rather than by listing their names means a
+ * renamed or newly-added helper is picked up on its own.
+ */
+export function declaredHelpers(): HelperDecl[] {
+  const src = readFileSync(ROUTES_TS, "utf8");
+  const out: HelperDecl[] = [];
+  for (const m of src.matchAll(/(?:async\s+)?function\s+(\w+)\s*\(/g)) {
+    const openParen = m.index + m[0].length - 1;
+    const params = balanced(src, openParen, "(", ")");
+    if (params === null) continue;
+    const bodyOpen = bodyBrace(src, openParen + params.length + 1);
+    if (bodyOpen < 0) continue;
+    const body = balanced(src, bodyOpen, "{", "}");
+    if (body === null) continue;
+    if (ANY_ROUTE_RE.test(body)) { ANY_ROUTE_RE.lastIndex = 0; continue; }
+    ANY_ROUTE_RE.lastIndex = 0;
+    out.push({ name: m[1]!, body });
   }
   return out;
 }
