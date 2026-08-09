@@ -27,7 +27,27 @@ const GUIDES = [
   ["tokenize-an-asset", tokenizeAnAsset],
 ] as const;
 
-/** Walk the source once, counting only what is OUTSIDE a fenced block. */
+/**
+ * Walk the source once, counting only what is OUTSIDE a fenced block.
+ *
+ * THE COUNTER AND THE PARSER MUST AGREE ON WHAT A LIST ITEM IS. They did not:
+ * this matched `- ` at column 0 while `parseMarkdown` matches it after
+ * `trimStart()`, so the first nested bullet anyone wrote —
+ *
+ *     - top
+ *       - nested
+ *
+ * — would be one item to the counter and two to the parser, and "keeps every
+ * list item" would fail on correct markdown. The guides were just rewritten
+ * against a live run and will be edited again; a guard that fires on ordinary
+ * authoring is a guard that gets deleted. The parser is the definition here, so
+ * the counter follows it: indentation does not decide whether a line is a list
+ * item (`markdownIndentAgreement` below pins that both ways).
+ *
+ * Headings and table dividers are deliberately left as they were — the parser
+ * reads headings at column 0 too, and trims before testing a divider, so those
+ * two already agree.
+ */
 function expectedCounts(source: string): { fences: number; headings: number; tables: number; items: number } {
   let inFence = false;
   let fences = 0, headings = 0, tables = 0, items = 0;
@@ -40,7 +60,7 @@ function expectedCounts(source: string): { fences: number; headings: number; tab
     if (inFence) continue;
     if (/^#{1,6}\s/.test(line)) headings++;
     if (/^\|[\s:|-]+\|$/.test(line.trim())) tables++;
-    if (/^([-*]\s|\d+\.\s)/.test(line)) items++;
+    if (/^([-*]\s|\d+\.\s)/.test(line.trimStart())) items++;
   }
   return { fences, headings, tables, items };
 }
@@ -91,5 +111,35 @@ describe.each(GUIDES)("%s", (name, source) => {
 
   it(`parses ${name} into a document, not a single blob`, () => {
     expect(blocks.length).toBeGreaterThan(40);
+  });
+});
+
+/**
+ * The counter above is only an oracle if it means the same thing as the parser.
+ * The three guides do not currently contain a nested list, so the disagreement
+ * that made this fix necessary is invisible against them — it would have
+ * appeared on the next edit, as a failing test on markdown that was correct.
+ * These fixtures make the property hold on the input that exposes it.
+ */
+describe("markdownIndentAgreement", () => {
+  const items = (source: string): number =>
+    parseMarkdown(source).reduce((n, b) => n + (b.kind === "list" ? b.items.length : 0), 0);
+
+  it.each([
+    ["a nested bullet", "Intro.\n\n- top\n  - nested\n  - also nested\n- second top\n"],
+    ["a deeply nested bullet", "- a\n  - b\n    - c\n"],
+    ["a nested ordered item under a bullet", "- top\n  1. one\n  2. two\n"],
+    ["an indented list with no parent", "Text.\n\n  - indented\n  - twice\n"],
+    ["a flat list, unchanged", "- a\n- b\n\n1. one\n2. two\n"],
+    ["a list item shape inside a fence", "- real\n\n```bash\n- not a list item\n1. nor this\n```\n"],
+  ])("counts %s the same way the parser does", (_name, source) => {
+    expect(items(source)).toBe(expectedCounts(source).items);
+  });
+
+  it("actually sees the nested items, rather than agreeing on zero", () => {
+    // Guards the mutation "make both sides return 0": two broken halves that
+    // cancel out would satisfy every case above.
+    expect(items("- top\n  - nested\n  - also nested\n- second top\n")).toBe(4);
+    expect(expectedCounts("- top\n  - nested\n").items).toBe(2);
   });
 });

@@ -96,22 +96,81 @@ function isHttpMethod(key: string): key is HttpMethod {
 /* ────────────────────────────── try-it eligibility ─────────────────────── */
 
 /**
- * May this operation be executed from the documentation page?
+ * Is this METHOD eligible to be executed from the documentation page?
  *
  * GET ONLY, and the restriction is a product decision rather than a technical
  * one. A docs page that can POST is a docs page that can mint a credential,
  * onboard a user or move tokens against live production data with the reader's
  * own session — and on this API most of those return `202` into a real
  * maker-checker queue, so the "try" would leave a proposal behind for a human
- * to deal with. Reads have no such tail. Everything else gets a copyable curl
- * the integrator runs deliberately, from their own shell, against a deployment
- * they chose.
+ * to deal with. Everything else gets a copyable curl the integrator runs
+ * deliberately, from their own shell, against a deployment they chose.
+ *
+ * THIS IS HALF THE ANSWER, and it used to be presented as the whole one. The
+ * comment here previously said "reads have no such tail", which is false on
+ * this API: `GET /verification-requests/{id}/verify` is a read-shaped route
+ * that performs a one-way status transition, appends to a hash-chained audit
+ * log and fans a `verification.completed` event out to every webhook endpoint
+ * the organization has registered. A claim like that, with nothing enforcing
+ * it, is exactly what this branch has been removing. Callers must use
+ * `tryItAllowed`, which takes the whole route and so cannot forget the path.
  *
  * Case-insensitive because a document, a route table and a UI each spell the
  * method differently and none of them should be able to change the answer.
  */
 export function canTryIt(method: string): boolean {
   return method.trim().toLowerCase() === "get";
+}
+
+/**
+ * GET routes that MUTATE, keyed by normalised path, valued by what they do.
+ *
+ * A route lands here when its handler reaches a write primitive — an event
+ * emission, an audit append, a repository setter. It is not a style list: every
+ * entry is a side effect a reader would cause by pressing a button on a page
+ * that promises it will not act.
+ *
+ * DO NOT EMPTY THIS. `apps/web/test/try-it-safety.test.ts` derives the same
+ * answer from `apps/api/src/http/routes.ts` — it reads the GET handlers and
+ * finds the ones that call a write primitive — and fails if any of them is
+ * missing here. Deleting an entry does not make the route safe; it makes the
+ * test red.
+ */
+export const MUTATING_GET_PATHS: Record<string, string> = {
+  "/verification-requests/{}/verify":
+    "consumes the verification request: a one-way transition to a verified result, an entry in the append-only " +
+    "audit chain, and a `verification.completed` event delivered to every webhook endpoint the organization has " +
+    "registered. Pressing a button on a documentation page must not notify third parties.",
+};
+
+/**
+ * `/api/v1/orgs/:id/x` and `/orgs/{orgId}/x` both normalise to `/orgs/{}/x`.
+ *
+ * The portal reads DOCUMENT paths (`/api/v1/…/{id}/…`); the test that derives
+ * the denylist reads DECLARATION paths (`/…/:id/…`). Both have to key the same
+ * table, so neither spelling is privileged.
+ */
+export function normalizeRoutePath(raw: string): string {
+  const noPrefix = raw.replace(/^\/api\/v\d+(?=\/|$)/, "");
+  const params = noPrefix.replace(/\{[^}]*\}/g, "{}").replace(/(?<=\/):[A-Za-z0-9_]+/g, "{}");
+  return params.replace(/\/+$/, "") || "/";
+}
+
+/** Why this GET is refused a try-it button, or null when it is not refused. */
+export function mutatingGetReason(path: string): string | null {
+  return MUTATING_GET_PATHS[normalizeRoutePath(path)] ?? null;
+}
+
+/**
+ * May this OPERATION be executed from the documentation page?
+ *
+ * The one function the UI may call. It takes the whole route rather than a
+ * method string precisely so the path cannot be left out by accident: the
+ * method alone is not enough to answer this, and a signature that accepted only
+ * the method is how the answer was wrong before.
+ */
+export function tryItAllowed(route: { method: string; path: string }): boolean {
+  return canTryIt(route.method) && mutatingGetReason(route.path) === null;
 }
 
 /* ─────────────────────────── credentials and scopes ────────────────────── */

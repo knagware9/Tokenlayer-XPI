@@ -135,7 +135,15 @@ const description = `XI is one platform over two domains: **tokenization** (conf
 
 **Every request is additionally bounded by the caller organization's capability envelope.** Beyond role and scope, an organization is provisioned with the domains and operating roles it may exercise; an act outside that envelope is refused with \`403 ORG_CAPABILITY_MISSING\` regardless of how privileged the caller is.
 
-Events for anything durable are emitted to the event log and delivered to registered webhook endpoints, HMAC-signed.`;
+Events for anything durable are emitted to the event log and delivered to registered webhook endpoints, HMAC-signed.
+
+**Start with a guide, not with this document.** Three end-to-end walkthroughs are executed against a live deployment and corrected whenever they diverge from it — they are the fastest route from a key to a working integration, and they cover the maker-checker and signature-verification steps this reference can only describe one operation at a time:
+
+- \`docs/api/guides/tokenize-an-asset.md\` — configure a use case, mint on chain, transfer, and read back who holds what.
+- \`docs/api/guides/issue-a-credential.md\` — issue a verifiable credential, get it accepted, and prove to a third party that it is real.
+- \`docs/api/guides/receive-webhooks.md\` — register an endpoint, verify signatures, and survive duplicate or out-of-order deliveries.
+
+All three are rendered in the console under **Developers → Guides**, from those same files. \`docs/api/CHANGELOG.md\` records every change to this surface.`;
 
 /** The document's identity, as `@fastify/swagger` expects it. */
 export function openapiConfig(publicApiUrl: string) {

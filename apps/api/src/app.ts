@@ -38,8 +38,18 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     reply.header("X-Frame-Options", "DENY");
     reply.header("Referrer-Policy", "no-referrer");
     // Strict CSP for the JSON API; Swagger UI needs a relaxed policy, so skip it there.
-    // (/docs is no longer dev-only — outside development it is behind the auth gate below.)
-    if (!request.url.startsWith("/docs")) reply.header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
+    //
+    // ONLY OUTSIDE PRODUCTION, though. The production gate below is HEADER auth
+    // (`Authorization: Bearer …`), and a browser navigating to /docs cannot send
+    // one — so Swagger UI is not usable in a production browser at all, and
+    // dropping CSP for it there bought nothing while removing a header from a
+    // surface that serves HTML. In production the in-app Reference is the
+    // product (it fetches /openapi.json with the session it already holds); see
+    // docs/api/CHANGELOG.md. Registering the UI anyway keeps /docs a 401 rather
+    // than a 404 for an authenticated tool that does send the header.
+    if (deps.isProduction || !request.url.startsWith("/docs")) {
+      reply.header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
+    }
     return payload;
   });
 

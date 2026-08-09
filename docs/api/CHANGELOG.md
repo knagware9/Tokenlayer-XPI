@@ -8,8 +8,10 @@ Where a change could break a working integration it is marked **ACTION
 REQUIRED**. Where we are not certain whether something was breaking, the entry
 says what was checked rather than claiming a verdict.
 
-The published reference is the OpenAPI document at `GET /openapi.json` (Swagger
-UI at `/docs`). Its machine-readable surface — which credentials each route
+The published reference is the OpenAPI document at `GET /openapi.json`, rendered
+in the console under **Developers → Reference**. (Swagger UI is also mounted at
+`/docs`, but only usefully outside production — see the EN-D1 entry below.) Its
+machine-readable surface — which credentials each route
 accepts, which scope a key needs, which status codes it can answer — is
 committed at `apps/api/openapi.snapshot.json`, so any change to it appears in a
 diff. That file is generated, not written by hand; see the header of
@@ -56,6 +58,35 @@ telling you something false.
   API key. Previously they were registered only outside production, so a
   production deployment answered 404. If you were relying on that 404 as a
   signal, it is now a 401 for an anonymous caller.
+
+  **`/docs` is not browser-usable in production, and that is not a bug.** The
+  gate is *header* authentication — `Authorization: Bearer …` — and a browser
+  navigating to a URL cannot send one, so Swagger UI in production answers 401
+  to the page load and never gets as far as rendering. Nothing is going to make
+  it work short of a cookie session we deliberately do not have. Use one of:
+
+  - **the in-app reference** (console → Developers → Reference), which is the
+    product here: it fetches `/openapi.json` with the session you are already
+    signed in with, and adds the per-route credential-and-scope line the raw
+    document has no field for;
+  - **`GET /openapi.json` directly**, with a session token or an API key, and
+    point your own tooling at it.
+
+  The route stays registered so an authenticated *tool* — one that does send the
+  header — gets the UI rather than a 404, and so the production and development
+  surfaces do not differ in shape. What changed alongside this note: the strict
+  `Content-Security-Policy` is no longer skipped for `/docs` **in production**.
+  It was skipped because Swagger UI needs a relaxed policy, which is true only
+  where Swagger UI can actually run.
+
+- **Try it is refused on one GET.** The reference's read-only "Try it" button is
+  offered on GET routes. `GET /verification-requests/{id}/verify` is a GET that
+  *mutates*: it consumes the request, writes an entry to the append-only audit
+  chain, and delivers a `verification.completed` event to every webhook endpoint
+  your organization has registered. It now gets the copyable `curl` and a stated
+  reason instead of a button. **This changes nothing about the API** — the route,
+  its credentials and its behaviour are unchanged; only the documentation page
+  stopped offering to fire it for you.
 
 ---
 

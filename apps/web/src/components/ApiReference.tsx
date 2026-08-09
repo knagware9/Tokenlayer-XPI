@@ -26,16 +26,17 @@ import {
   type TagGroup,
   apiOrigin,
   bodySchema,
-  canTryIt,
   credentialInfo,
   credentialLine,
   curlFor,
   describeShape,
   fillPath,
   groupByTag,
+  mutatingGetReason,
   openapiUrl,
   resolveRef,
   responseMediaTypes,
+  tryItAllowed,
   withQuery,
 } from "../lib/openapi.js";
 import { Card, CopyBlock, EmptyState, Pill, Skeleton } from "./ui.js";
@@ -267,7 +268,10 @@ function Route({ route, doc, baseUrl }: { route: RouteEntry; doc: OpenApiDocumen
           <Parameters params={op.parameters} doc={doc} />
           <RequestBody route={route} doc={doc} />
           <Responses route={route} doc={doc} />
-          {canTryIt(method)
+          {/* `tryItAllowed`, never `canTryIt`: the method alone does not answer
+              this. One GET on this API consumes a verification request and
+              notifies every registered webhook endpoint. */}
+          {tryItAllowed(route)
             ? <TryIt route={route} />
             : <NoTryIt route={route} doc={doc} baseUrl={baseUrl} />}
         </div>
@@ -460,11 +464,32 @@ function TryIt({ route }: { route: RouteEntry }): JSX.Element {
 
   const tone = !result ? "" : result.status < 300 ? "text-emerald-700" : result.status < 500 ? "text-amber-700" : "text-red-700";
 
+  /**
+   * The URL this button will ACTUALLY call.
+   *
+   * Built from the same expression `run` uses, deliberately. The panel header
+   * above prints `documentBaseUrl(doc)` — the `servers[0].url` the deployment
+   * declares — and the button sends to `apiOrigin(API_BASE)`, the origin this
+   * browser build was pointed at. They agree in every normal deployment, and
+   * when they do not (a document declaring a public gateway while the console
+   * talks to an internal host, say) the reader would otherwise be told one
+   * thing and shown the answer from another. Showing the real target costs a
+   * line and removes the ambiguity.
+   */
+  const target = useMemo(
+    () => `${apiOrigin(API_BASE) || "(same origin)"}${withQuery(fillPath(route.path, pathValues).url, queryValues)}`,
+    [route.path, pathValues, queryValues],
+  );
+
   return (
     <section className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-3">
       <div className="flex items-center justify-between gap-3">
         <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Try it</h4>
         <span className="text-[11px] text-slate-500">Runs as you, with your signed-in session — not with an API key.</span>
+      </div>
+
+      <div className="text-[11px] text-slate-500">
+        Sends <span className="font-mono text-slate-700">GET {target}</span>
       </div>
 
       {(pathParams.length > 0 || queryParams.length > 0) && (
@@ -525,7 +550,7 @@ function TryIt({ route }: { route: RouteEntry }): JSX.Element {
 }
 
 /**
- * What every non-GET route gets instead of a button, and the honest reason.
+ * What every route with no button gets instead, and the honest reason.
  *
  * Naming the reason matters more than the curl does. An absent affordance with
  * no explanation reads as an unfinished page; an absent affordance with a
@@ -533,9 +558,14 @@ function TryIt({ route }: { route: RouteEntry }): JSX.Element {
  * documentation page must not be able to issue a credential or move tokens
  * against live data with the reader's own session, and on this API most
  * mutations answer `202` into a maker-checker queue a human then has to clear.
+ *
+ * A GET can land here too, and when it does the generic sentence would be a
+ * LIE — the reader can see it is a GET. So a mutating GET states its own,
+ * specific reason from `MUTATING_GET_PATHS` instead.
  */
 function NoTryIt({ route, doc, baseUrl }: { route: RouteEntry; doc: OpenApiDocument; baseUrl: string }): JSX.Element {
   const cred = credentialInfo(route.op);
+  const mutatingGet = mutatingGetReason(route.path);
   return (
     <section className="space-y-2">
       <div className="flex items-center justify-between gap-3">
@@ -543,12 +573,19 @@ function NoTryIt({ route, doc, baseUrl }: { route: RouteEntry; doc: OpenApiDocum
         <span className="text-[11px] text-slate-500">{route.method.toUpperCase()} — copy and run in your own shell</span>
       </div>
       <CopyBlock code={curlFor(route, baseUrl, doc)} language="bash" />
-      <p className="text-xs text-slate-500">
-        Interactive calls are read-only here: a documentation page should not issue a credential or move tokens against live
-        data, and most mutations on this API answer <span className="font-mono">202</span> with a proposal into a real
-        maker-checker queue that a second person then has to clear. Sandbox keys — a test mode where a mutation is safe to try —
-        arrive with EN-D2; until then this snippet is deliberately something you run deliberately.
-      </p>
+      {mutatingGet ? (
+        <p className="text-xs text-amber-700">
+          <span className="font-semibold">This GET is not read-only.</span> {mutatingGet} So it gets no button here even though
+          its method would normally earn one — run it when you mean to, against a request you intend to consume.
+        </p>
+      ) : (
+        <p className="text-xs text-slate-500">
+          Interactive calls are read-only here: a documentation page should not issue a credential or move tokens against live
+          data, and most mutations on this API answer <span className="font-mono">202</span> with a proposal into a real
+          maker-checker queue that a second person then has to clear. Sandbox keys — a test mode where a mutation is safe to try —
+          arrive with EN-D2; until then this snippet is deliberately something you run deliberately.
+        </p>
+      )}
       {cred.kind !== "public" && (
         <p className="text-xs text-slate-500">
           Set <span className="font-mono">{cred.kind === "session" ? "TL_SESSION" : "TL_API_KEY"}</span> first

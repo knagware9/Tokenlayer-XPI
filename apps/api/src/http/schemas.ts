@@ -584,7 +584,16 @@ export const components: Record<string, unknown>[] = [
       "system's whole lifetime — the 201 from create and the 200 from rotate — and nowhere else, ever.",
     properties: {
       id: { type: "string" },
-      orgId: { type: "string" },
+      // NULLABLE, and not optimistically. `ApiKey.orgId` is `String?` in the
+      // Prisma schema — null means a PLATFORM-OWNED key, bound to no tenant.
+      // No route mints one today, so this is unreachable; declaring it
+      // non-nullable anyway would make the first one that IS minted serialise
+      // as `""` rather than `null`, because fast-json-stringify coerces to the
+      // declared type instead of refusing. That exact ""-vs-null confusion is
+      // already confirmed live on `Proposal#`; one instance of it is enough.
+      // `required` stays: the KEY is always present, it is the VALUE that can
+      // be null, and dropping it would tell clients the field may be absent.
+      orgId: { type: "string", nullable: true, description: "The owning organization. null on a platform-owned key, which belongs to no tenant." },
       /** The service user this key authenticates as. Its role and use-case scope are the key's ceiling. */
       userId: { type: "string" },
       name: { type: "string" },
