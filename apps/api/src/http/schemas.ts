@@ -452,6 +452,43 @@ export const components: Record<string, unknown>[] = [
     required: ["id", "useCaseKey", "kind", "payload", "proposerId", "proposerLabel", "required", "approvals", "status", "createdAt"],
   },
   {
+    $id: "CredentialUseCaseTemplate",
+    type: "object",
+    additionalProperties: true,
+    description:
+      "A parameterised starter for a credential use case. `parameters` describes what you must supply; `body` is " +
+      "the skeleton those parameters are substituted into. Instantiate it with `POST " +
+      "/credential-use-case-templates/{key}/preview` (dry run) or `POST /credential-use-cases/provision` (for real).",
+    properties: {
+      key: { type: "string" },
+      name: { type: "string" },
+      category: { type: "string" },
+      description: { type: "string" },
+      parameters: {
+        type: "array",
+        description: "NOTE each parameter also carries a `default`, whose type follows `type` (string, number or boolean). It is left undeclared here rather than coerced to one of them.",
+        items: {
+          type: "object", additionalProperties: true,
+          properties: {
+            name: { type: "string", description: "The key to use in the `params` object you send." },
+            label: { type: "string" },
+            type: { type: "string", description: "e.g. `string`, `number`, `boolean`, `enum`." },
+            required: { type: "boolean" },
+            options: { type: "array", items: { type: "string" }, description: "enum params only." },
+            min: { type: "number", description: "number params only, inclusive." },
+            max: { type: "number", description: "number params only, inclusive." },
+            help: { type: "string" },
+          },
+        },
+      },
+      // ABSENT from the LIST route, which strips it — a listing carries the
+      // metadata only. Fetch one template by key to get its body.
+      body: { type: "object", additionalProperties: true, description: "The definition skeleton. Absent from the list route; present when you fetch or create a single template." },
+      builtIn: { type: "boolean", description: "true for a platform catalog template, false for one saved through the API." },
+    },
+    required: ["key", "name", "category", "parameters"],
+  },
+  {
     $id: "ProposalEnvelope",
     type: "object",
     additionalProperties: true,
@@ -733,10 +770,43 @@ export const S: Record<string, FastifySchema> = {
     },
   },
   me: { tags: ["Auth"], summary: "Current session principal", security: humanOnly,
-    response: { 200: { type: "object", additionalProperties: true }, ...errs(401) } },
+    description:
+      "The caller's own principal, self-describing enough to drive a UI: role, use-case scope, which domain that " +
+      "use case belongs to, and the org's capability envelope.\n\n" +
+      "**It does NOT return the caller's email, org id or DID** — those are in the JWT you already hold, and in the " +
+      "`user` object `POST /auth/login` returned. Do not expect `/me` to be a fuller record than login gave you; it " +
+      "is a narrower one.",
+    response: {
+      200: {
+        type: "object", additionalProperties: true,
+        properties: {
+          id: { type: "string" },
+          role: { type: "string" },
+          useCaseKey: { type: "string", nullable: true, description: "The desk this principal is scoped to, or null for an unscoped one." },
+          useCaseDomain: { type: "string", enum: ["tokenization", "identity"], nullable: true, description: "Which domain `useCaseKey` belongs to. null when there is no use case, or when the key resolves to neither." },
+          orgCapabilities: { type: "object", additionalProperties: true, nullable: true, description: "The org's EN-A envelope. null both for an org-less principal AND for a legacy, unrestricted org — the two are indistinguishable here." },
+        },
+        required: ["id", "role"],
+      },
+      ...errs(401),
+    } },
   config: {
     tags: ["Config"], summary: "Deployment configuration (enabled domains)", security: humanOnly,
-    response: { 200: { type: "object", additionalProperties: true }, ...errs(401) },
+    description: "What this DEPLOYMENT has switched on — not what the caller may do. A domain listed here can still be closed to a given org by its capability envelope.",
+    response: {
+      200: {
+        type: "object", additionalProperties: true,
+        properties: {
+          domains: {
+            type: "array",
+            items: { type: "string", enum: ["tokenization", "identity"] },
+            description: "The product domains this deployment serves. Routes of an absent domain are not mounted.",
+          },
+        },
+        required: ["domains"],
+      },
+      ...errs(401),
+    },
   },
 
   enrollLoginKey: {
@@ -746,20 +816,93 @@ export const S: Record<string, FastifySchema> = {
       "durable device credential is a human act.",
     body: { type: "object", additionalProperties: false, required: ["did", "label"], properties: { did: { type: "string" }, label: { type: "string", minLength: 1 } } },
     // 403 = MACHINE_PRINCIPAL: an API key has no device to enrol.
-    response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 409) },
+    response: {
+      201: {
+        type: "object", additionalProperties: true,
+        properties: {
+          id: { type: "string" },
+          did: { type: "string", description: "The `did:key` you enrolled. The PRIVATE key never leaves your device and this API never sees it." },
+          label: { type: "string" },
+          createdAt: { type: "string" },
+        },
+        required: ["id", "did", "label", "createdAt"],
+      },
+      ...errs(400, 401, 403, 409),
+    },
   },
   listLoginKeys: { tags: ["Auth"], summary: "The caller's enrolled device login keys", security: humanOnly,
-    response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401) } },
+    description: "The caller's OWN enrolled devices. `lastUsedAt` is how you spot a key that should be revoked.",
+    response: {
+      200: {
+        type: "array",
+        items: {
+          type: "object", additionalProperties: true,
+          properties: {
+            id: { type: "string" },
+            did: { type: "string" },
+            label: { type: "string" },
+            createdAt: { type: "string" },
+            lastUsedAt: { type: "string", nullable: true, description: "null for a key that has never completed a QR login." },
+          },
+          required: ["id", "did", "label", "createdAt"],
+        },
+      },
+      ...errs(401),
+    } },
   removeLoginKey: { tags: ["Auth"], summary: "Revoke a device login key", security: humanOnly,
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } }, response: { 204: { type: "null" }, ...errs(401, 404) } },
-  qrStart: { tags: ["Auth"], summary: "Begin a passwordless QR login session", response: { 200: { type: "object", additionalProperties: true } } },
-  qrPoll: { tags: ["Auth"], summary: "Poll a QR login session", params: { type: "object", required: ["id"], properties: { id: { type: "string" } } }, response: { 200: { type: "object", additionalProperties: true }, ...errs(404) } },
+  qrStart: { tags: ["Auth"], summary: "Begin a passwordless QR login session", 
+    description: "Public. Opens a short-lived session: render `qrSvg`, have an enrolled device sign the challenge, and poll `GET /auth/qr/{id}` for the token.",
+    response: {
+      200: {
+        type: "object", additionalProperties: true,
+        properties: {
+          sessionId: { type: "string", description: "Poll `GET /auth/qr/{sessionId}` with this." },
+          challenge: { type: "string", description: "The device signs `qr-login:{sessionId}:{challenge}` — not the challenge alone." },
+          signUrl: { type: "string", description: "The web URL encoded in the QR code." },
+          qrSvg: { type: "string", description: "The QR code itself, as an inline SVG document." },
+          expiresAt: { type: "string" },
+        },
+        required: ["sessionId", "challenge", "signUrl", "qrSvg", "expiresAt"],
+      },
+    } },
+  qrPoll: { tags: ["Auth"], summary: "Poll a QR login session",
+    description:
+      "Public. Until the device has signed, the body is `{ status }` alone. Once it has, the FIRST poll to see it " +
+      "returns the JWT — **and consumes it**: a second poll of the same session no longer carries a token. Capture " +
+      "it on the response that has it.",
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    response: {
+      200: {
+        type: "object", additionalProperties: true,
+        properties: {
+          status: { type: "string", description: "`pending` until the device signs, then `authenticated`." },
+          token: { type: "string", description: "The session JWT. Present on the ONE poll that consumes the authenticated session, and never again." },
+          user: {
+            type: "object", additionalProperties: true, nullable: true,
+            description: "The signed-in principal — the same shape `POST /auth/login` returns, plus `walletAddress`, `useCaseDomain` and `orgCapabilities`. Accompanies `token` only.",
+          },
+        },
+        required: ["status"],
+      },
+      ...errs(404),
+    } },
   qrAuthenticate: {
     tags: ["Auth"], summary: "Authenticate a QR login session by signing its challenge",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: { type: "object", additionalProperties: false, required: ["did", "signature"], properties: { did: { type: "string" }, signature: { type: "string" } } },
     // 403 = SERVICE_ACCOUNT: the other JWT-minting path refuses service users too.
-    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404, 410, 429) },
+    // A BARE ACKNOWLEDGEMENT, deliberately: the signing DEVICE is not the thing
+    // logging in, so the token goes to whoever is polling the session, never
+    // back on this response.
+    response: {
+      200: {
+        type: "object", additionalProperties: true,
+        properties: { ok: { type: "boolean", description: "Always `true`. The session's JWT is delivered to the POLLING client, not to the signing device." } },
+        required: ["ok"],
+      },
+      ...errs(401, 403, 404, 410, 429),
+    },
   },
 
   chains: { tags: ["Catalog"], summary: "List configured chains/DLTs", security: humanOnly,
@@ -772,8 +915,25 @@ export const S: Record<string, FastifySchema> = {
   currencies: { tags: ["Catalog"], summary: "List supported settlement currencies", security: humanOnly,
     response: { 200: { type: "array", items: { $ref: "Currency#" } }, ...errs(401) } },
   accounts: { tags: ["Catalog"], summary: "List demo accounts", security: eitherCredential,
-    description: "Requires the `assets:read` scope. Lists the demo settlement accounts.",
-    response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401) } },
+    description:
+      "Requires the `assets:read` scope. The settlement accounts within the caller's scope — a Platform Admin sees " +
+      "every one, anyone else sees only those linked to users of their own use case. It carries NO balances; those " +
+      "come from `GET /cash/balances`.",
+    response: {
+      200: {
+        type: "array",
+        items: {
+          type: "object", additionalProperties: true,
+          properties: {
+            id: { type: "string", description: "The account id — what a user record's `accountId` points at." },
+            address: { type: "string", description: "The on-chain address. This is what you pass as a treasury or counterparty." },
+            label: { type: "string" },
+          },
+          required: ["id", "address", "label"],
+        },
+      },
+      ...errs(401),
+    } },
 
   listUseCases: { tags: ["Use Cases"], summary: "List use cases", security: humanOnly,
     response: { 200: { type: "array", items: { $ref: "UseCase#" } }, ...errs(401) } },
@@ -834,6 +994,12 @@ export const S: Record<string, FastifySchema> = {
   },
 
   credentialTemplates: { tags: ["Credential Use Cases"], summary: "Editable starter credential-type templates", security: humanOnly,
+    description:
+      "A MAP, not a list: the object is keyed by credential-type NAME (`KycCredential`, `MCACredential`, " +
+      "`GSTINCredential`, …) and each value is a credential-type spec — `name`, `title`, `validityDays`, " +
+      "`requiredApprovals` and a `claimSchema`. Because the keys are data rather than a fixed field set, they " +
+      "cannot be enumerated as `properties` here; the value shape is the same one that appears in a credential use " +
+      "case's `credentialTypes`.",
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401) } },
   listCredentialUseCases: { tags: ["Credential Use Cases"], summary: "List credential use cases", security: humanOnly,
     response: { 200: { type: "array", items: { $ref: "CredentialUseCase#" } }, ...errs(401) } },
@@ -862,12 +1028,21 @@ export const S: Record<string, FastifySchema> = {
 
   listUseCaseTemplates: {
     tags: ["Credential Use Cases"], summary: "List the credential-use-case template catalog (built-in + saved)", security: humanOnly,
-    response: { 200: { type: "object", additionalProperties: true }, ...errs(401) },
+    description: "Built-in catalog templates and saved ones together. The `body` skeleton is STRIPPED here — fetch a template by key to get it.",
+    response: {
+      200: {
+        type: "object", additionalProperties: true,
+        properties: { templates: { type: "array", items: { $ref: "CredentialUseCaseTemplate#" } } },
+        required: ["templates"],
+      },
+      ...errs(401),
+    },
   },
   getUseCaseTemplate: {
     tags: ["Credential Use Cases"], summary: "Get a credential-use-case template by key (built-in or saved)", security: humanOnly,
+    description: "A built-in catalog template shadows a saved one of the same key. Unlike the list route, this includes the `body` skeleton.",
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
-    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 404) },
+    response: { 200: { $ref: "CredentialUseCaseTemplate#" }, ...errs(401, 404) },
   },
   createUseCaseTemplate: {
     tags: ["Credential Use Cases"], summary: "Save a custom credential-use-case template (PlatformAdmin/OrgAdmin)", security: eitherCredential,
@@ -875,16 +1050,37 @@ export const S: Record<string, FastifySchema> = {
       "Requires the `usecases:provision` scope. Saves a reusable credential-use-case template. A template is " +
       "authoring input and confers nothing until it is instantiated.",
     body: { type: "object", additionalProperties: true, required: ["key", "name", "category", "parameters", "body"] },
-    response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 409) },
+    // The stored template. `builtIn` comes back FALSE whatever you sent — the
+    // route forces it, so a saved template can never impersonate a catalog one.
+    response: { 201: { $ref: "CredentialUseCaseTemplate#" }, ...errs(400, 401, 403, 409) },
   },
   previewUseCaseTemplate: {
     tags: ["Credential Use Cases"], summary: "Preview the CredentialUseCaseDefinition a template instantiates to, given param values", security: humanOnly,
+    description:
+      "A DRY RUN. Nothing is created, no key is claimed, and the returned `definition` is not stored anywhere — it " +
+      "is what `POST /credential-use-cases/provision` would build from the same template and params. Note the " +
+      "`issuer` binding is still the template's; provisioning overwrites it with the resolved issuer org.",
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     body: { type: "object", additionalProperties: true, properties: { params: { type: "object", additionalProperties: true } } },
     // 400 is overridden (not the shared Error# ref) so `problems` — an array of
     // human-readable per-param validation failures — survives fast-json-stringify's
     // response serialization instead of being stripped as an unlisted property.
-    response: { 200: { type: "object", additionalProperties: true }, 400: { type: "object", additionalProperties: true }, ...errs(401, 404) },
+    response: {
+      200: {
+        type: "object", additionalProperties: true,
+        properties: { definition: { $ref: "CredentialUseCase#" } },
+        required: ["definition"],
+      },
+      400: {
+        type: "object", additionalProperties: true,
+        properties: {
+          error: { type: "string" },
+          message: { type: "string" },
+          problems: { type: "array", items: { type: "string" }, description: "Human-readable per-parameter validation failures." },
+        },
+      },
+      ...errs(401, 404),
+    },
   },
   provisionUseCase: {
     tags: ["Credential Use Cases"], summary: "One-step enterprise provisioning from a template: ensure the issuer org, instantiate the bound credential use case, and optionally create scoped desk users (PlatformAdmin; OrgAdmin scoped to their own org)", security: eitherCredential,
@@ -905,9 +1101,70 @@ export const S: Record<string, FastifySchema> = {
     // plaintext credential returned exactly once. A strict/ref response schema
     // would silently strip it (the G3 trap).
     response: {
-      200: { type: "object", additionalProperties: true },
-      201: { type: "object", additionalProperties: true },
-      400: { type: "object", additionalProperties: true },
+      // 200 = the use case ALREADY EXISTED and was updated in place; 201 = it was
+      // created. Both bodies are the same shape.
+      200: {
+        type: "object", additionalProperties: true,
+        properties: {
+          org: {
+            type: "object", additionalProperties: true,
+            description: "The issuer organization this use case is now bound to — found by name, or created if it did not exist.",
+            properties: { id: { type: "string" }, name: { type: "string" }, did: { type: "string" } },
+          },
+          useCase: { $ref: "CredentialUseCase#" },
+          deskUsers: {
+            type: "array",
+            description:
+              "Desk accounts created by THIS call — empty unless `provisioning.createDeskUsers` was set, and empty " +
+              "for any role whose email already existed (the route is idempotent). The PASSWORDS are one-time " +
+              "plaintext returned here and NOWHERE ELSE.",
+            items: {
+              type: "object", additionalProperties: true,
+              properties: {
+                email: { type: "string" },
+                password: { type: "string", description: "A one-time credential. It is not stored in plaintext and cannot be retrieved again — only reset." },
+                role: { type: "string", enum: ["Issuer", "Holder", "Verifier"] },
+              },
+            },
+          },
+        },
+        required: ["org", "useCase", "deskUsers"],
+      },
+      201: {
+        type: "object", additionalProperties: true,
+        properties: {
+          org: {
+            type: "object", additionalProperties: true,
+            description: "The issuer organization this use case is now bound to — found by name, or created if it did not exist.",
+            properties: { id: { type: "string" }, name: { type: "string" }, did: { type: "string" } },
+          },
+          useCase: { $ref: "CredentialUseCase#" },
+          deskUsers: {
+            type: "array",
+            description:
+              "Desk accounts created by THIS call — empty unless `provisioning.createDeskUsers` was set, and empty " +
+              "for any role whose email already existed (the route is idempotent). The PASSWORDS are one-time " +
+              "plaintext returned here and NOWHERE ELSE.",
+            items: {
+              type: "object", additionalProperties: true,
+              properties: {
+                email: { type: "string" },
+                password: { type: "string", description: "A one-time credential. It is not stored in plaintext and cannot be retrieved again — only reset." },
+                role: { type: "string", enum: ["Issuer", "Holder", "Verifier"] },
+              },
+            },
+          },
+        },
+        required: ["org", "useCase", "deskUsers"],
+      },
+      400: {
+        type: "object", additionalProperties: true,
+        properties: {
+          error: { type: "string" },
+          message: { type: "string" },
+          problems: { type: "array", items: { type: "string" }, description: "Per-parameter validation failures, when the template could not be instantiated." },
+        },
+      },
       ...errs(401, 403, 404, 409, 502, 503),
     },
   },

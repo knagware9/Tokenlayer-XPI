@@ -393,6 +393,13 @@ const INTEGRATION_SURFACE = new Set([
 /** Integration-surface routes whose response is deliberately not enumerated. */
 const DOCUMENTATION_DEFERRED: Record<string, string> = {
   "GET /credentials/:id/certificate.pdf": "returns opaque PDF bytes, not a JSON object",
+  // A MAP keyed by credential-type NAME, so its keys are data rather than a
+  // fixed field set — there is nothing to put in `properties`. Enumerating
+  // today's built-in keys would pin a core constant into the response schema
+  // and, worse, declaring their value shape would let fast-json-stringify
+  // coerce it. The route's `description` documents the map and its value shape
+  // instead; that is the honest form of this particular answer.
+  "GET /credential-templates": "a map keyed by credential-type name — data-shaped keys, not enumerable properties",
 };
 
 type ResponseSchema = { response?: Record<string, unknown>; tags?: string[]; description?: string };
