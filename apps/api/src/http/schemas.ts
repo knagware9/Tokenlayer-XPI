@@ -1317,10 +1317,36 @@ export const S: Record<string, FastifySchema> = {
         jurisdiction: { type: "string" },
       },
     },
-    response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 409, 502, 503) },
+    // Deliberately a NARROWER projection than `Organization`: no companyProfile,
+    // no capabilities (a platform-created org starts legacy/unrestricted), no
+    // createdAt. Read the full record back from GET /orgs/{id}.
+    response: {
+      201: {
+        type: "object", additionalProperties: true,
+        properties: {
+          id: { type: "string" },
+          name: { type: "string" },
+          did: { type: "string", description: "The organization's parent DID, registered on-chain before this returns." },
+          orgType: { type: "string" },
+          registrationId: { type: "string", nullable: true },
+          jurisdiction: { type: "string", nullable: true },
+          verified: { type: "boolean" },
+          status: { type: "string", enum: ["pending", "active", "rejected"] },
+        },
+        required: ["id", "name", "did", "orgType", "verified", "status"],
+      },
+      ...errs(400, 401, 403, 409, 502, 503),
+    },
   },
   registerOrg: {
     tags: ["Organizations"], summary: "Public corporate self-registration (pending platform approval)",
+    description:
+      "Public — no credential. Creates the organization in `pending` and its admin user INACTIVE, then waits for a " +
+      "Platform Admin to approve or reject it.\n\n" +
+      "**This 202 is NOT a maker-checker proposal** — unlike almost every other 202 in this API, no `proposal` is " +
+      "created and there is nothing to poll under `/proposals`. The organization row exists immediately; what is " +
+      "pending is its ADMISSION. Nobody can log in until approval, which is also when the DID is anchored on-chain " +
+      "and the platform-signed `OrganizationCredential` is issued.",
     body: {
       type: "object", additionalProperties: false, required: ["company", "admin"],
       properties: {
@@ -1356,11 +1382,22 @@ export const S: Record<string, FastifySchema> = {
         capabilities: { type: "object", additionalProperties: true },
       },
     },
-    response: { 202: { type: "object", additionalProperties: true }, ...errs(400, 409, 429) },
+    response: {
+      202: {
+        type: "object", additionalProperties: true,
+        properties: {
+          organizationId: { type: "string", description: "The pending organization's id. Quote it when chasing the review — it is NOT a proposal id." },
+          status: { type: "string", enum: ["pending"], description: "Always `pending` here; approval is a separate platform act." },
+        },
+        required: ["organizationId", "status"],
+      },
+      ...errs(400, 409, 429),
+    },
   },
   listOrgs: { tags: ["Organizations"], summary: "List organizations in scope", security: eitherCredential,
     description: "Requires the `org:read` scope. Organizations within the caller's existing scope.",
-    querystring: { type: "object", properties: { status: { type: "string" } } }, response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403) } },
+    querystring: { type: "object", properties: { status: { type: "string" } } },
+    response: { 200: { type: "array", items: { $ref: "Organization#" } }, ...errs(401, 403) } },
   approveOrg: {
     tags: ["Organizations"], summary: "Approve a pending org (registers its DID on-chain, activates the admin)", security: humanOnly,
     description:
@@ -1368,7 +1405,26 @@ export const S: Record<string, FastifySchema> = {
       "governance, not integration.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: { type: "object", additionalProperties: false, properties: {} },
-    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404, 409, 502) },
+    // The ISSUANCE CEREMONY's receipt, not an Organization: approval anchors the
+    // org DID on-chain, activates its admin, and has the platform issuer sign an
+    // OrganizationCredential — `issuerDid`/`orgCredentialId` are that credential.
+    response: {
+      200: {
+        type: "object", additionalProperties: true,
+        properties: {
+          id: { type: "string" },
+          name: { type: "string" },
+          did: { type: "string" },
+          orgType: { type: "string" },
+          status: { type: "string", enum: ["active"] },
+          verified: { type: "boolean" },
+          issuerDid: { type: "string", nullable: true, description: "The platform issuer org's DID. null when the org had no admin user to activate." },
+          orgCredentialId: { type: "string", nullable: true, description: "The OrganizationCredential minted by the ceremony. null when the org had no admin user." },
+        },
+        required: ["id", "name", "did", "orgType", "status", "verified"],
+      },
+      ...errs(401, 403, 404, 409, 502),
+    },
   },
   rejectOrg: {
     tags: ["Organizations"], summary: "Reject a pending org", security: humanOnly,
@@ -1377,13 +1433,21 @@ export const S: Record<string, FastifySchema> = {
       "governance, not integration.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: { type: "object", additionalProperties: false, required: ["reason"], properties: { reason: { type: "string", minLength: 1 } } },
-    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404, 409) },
+    // Two fields only. The rejection `reason` goes to the audit log, not back here.
+    response: {
+      200: {
+        type: "object", additionalProperties: true,
+        properties: { id: { type: "string" }, status: { type: "string", enum: ["rejected"] } },
+        required: ["id", "status"],
+      },
+      ...errs(401, 403, 404, 409),
+    },
   },
   getOrg: {
     tags: ["Organizations"], summary: "Get an organization by id", security: eitherCredential,
     description: "Requires the `org:read` scope. The projection never includes the organization's encrypted DID seed.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
-    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404) },
+    response: { 200: { $ref: "Organization#" }, ...errs(401, 403, 404) },
   },
   patchOrgCapabilities: {
     tags: ["Organizations"], summary: "Set (or clear with null) an org's capability envelope (PlatformAdmin)", security: humanOnly,
@@ -1396,19 +1460,24 @@ export const S: Record<string, FastifySchema> = {
       // Loose object-or-null: the route runs validateOrgCapabilities for the real validation.
       properties: { capabilities: { type: ["object", "null"], additionalProperties: true } },
     },
-    response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
+    // The updated org. `credentials` is absent here — this route returns the bare
+    // record, not the read routes' held-credentials view.
+    response: { 200: { $ref: "Organization#" }, ...errs(400, 401, 403, 404) },
   },
   requestOrgCapabilities: {
     tags: ["Organizations"], summary: "Request a capability-envelope change (OrgAdmin; PlatformAdmin approval applies it)", security: humanOnly,
     description:
       "Drafts a capability change only. It applies through an approval that no API key may give, so a key can ask " +
-      "for a wider envelope but can never grant itself one.",
+      "for a wider envelope but can never grant itself one.\n\n" +
+      "**202 means nothing has changed yet.** The response carries a maker-checker `proposal`; the envelope is " +
+      "still whatever it was until a Platform Admin approves that proposal. `proposal.id` is the request's id, not " +
+      "the organization's.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: {
       type: "object", additionalProperties: false, required: ["capabilities"],
       properties: { capabilities: { type: "object", additionalProperties: true } },
     },
-    response: { 202: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
+    response: { 202: { $ref: "ProposalEnvelope#" }, ...errs(400, 401, 403, 404) },
   },
   createMember: {
     tags: ["Organizations"], summary: "Add a member (sub-DID + membership VC)", security: eitherCredential,
@@ -1432,13 +1501,50 @@ export const S: Record<string, FastifySchema> = {
         kyc: { type: "object", additionalProperties: false, properties: { legalName: { type: "string" }, country: { type: "string" }, idType: { type: "string" }, idNumber: { type: "string" }, documentRef: { type: "string" } } },
       },
     },
-    response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
+    // NOT a full user record: no `active`, no `kycStatus`, no `accountId`.
+    response: {
+      201: {
+        type: "object", additionalProperties: true,
+        properties: {
+          id: { type: "string" },
+          email: { type: "string" },
+          role: { type: "string" },
+          useCaseKey: { type: "string", nullable: true },
+          orgId: { type: "string" },
+          did: { type: "string", description: "The member's own sub-DID, minted here. If minting fails the user is rolled back, so a 201 always means both exist." },
+          membershipVc: { type: "boolean", description: "Always `true` — a constant confirming the org-signed membership credential was issued alongside the DID." },
+        },
+        required: ["id", "email", "role", "orgId", "did", "membershipVc"],
+      },
+      ...errs(400, 401, 403, 404),
+    },
   },
   listMembers: {
     tags: ["Organizations"], summary: "List an organization's members", security: eitherCredential,
     description: "Requires the `org:read` scope. The organization's members and their roles.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
-    response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403, 404) },
+    // Includes SERVICE members — the principals API keys authenticate as. They
+    // are ordinary rows here; what marks one is that it backs a key in
+    // GET /orgs/{id}/api-keys, and that it cannot log in interactively.
+    response: {
+      200: {
+        type: "array",
+        items: {
+          type: "object", additionalProperties: true,
+          properties: {
+            id: { type: "string" },
+            email: { type: "string" },
+            role: { type: "string" },
+            useCaseKey: { type: "string", nullable: true },
+            did: { type: "string", nullable: true },
+            active: { type: "boolean" },
+            kycStatus: { type: "string", enum: ["pending", "approved", "rejected"] },
+          },
+          required: ["id", "email", "role", "active", "kycStatus"],
+        },
+      },
+      ...errs(401, 403, 404),
+    },
   },
 
   // --- API keys (EN-B). Loose response objects throughout: the key view carries
@@ -1941,13 +2047,36 @@ export const S: Record<string, FastifySchema> = {
     description:
       "Requires the `users:read` scope. Users within the caller's existing scope — the scope narrows that set, it " +
       "never widens it.",
-    response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403) } },
+    response: {
+      200: {
+        type: "array",
+        items: {
+          type: "object", additionalProperties: true,
+          properties: {
+            id: { type: "string" },
+            email: { type: "string" },
+            role: { type: "string" },
+            useCaseKey: { type: "string", nullable: true },
+            accountId: { type: "string", nullable: true, description: "The linked settlement account, when the user has a wallet address." },
+            active: { type: "boolean" },
+            kycStatus: { type: "string", enum: ["pending", "approved", "rejected"] },
+            kyc: { type: "object", additionalProperties: true, nullable: true, description: "The captured KYC detail (legalName, country, id type/number, documentRef). PERSONAL DATA — `users:read` is what gates it." },
+          },
+          required: ["id", "email", "role", "active", "kycStatus"],
+        },
+      },
+      ...errs(401, 403),
+    } },
   createUser: {
     tags: ["Users"], summary: "Create a user (scoped)", security: eitherCredential,
     description:
       "Requires the `users:onboard` scope. Returns **201** when onboarding is direct, or **202 with a proposal** " +
       "where the organization runs maker-checker — in which case no account exists until a second authorized " +
-      "principal approves it. The approver needs this same scope.",
+      "principal approves it. The approver needs this same scope.\n\n" +
+      "**Which one you get is decided by the CALLER, not by the body.** A caller who belongs to an organization " +
+      "onboards directly (201, with the member's DID minted inline); an org-less caller — a Platform Admin, a " +
+      "use-case-scoped desk operator — always drafts a proposal (202). Branch on the STATUS CODE, never on the " +
+      "presence of a field.",
     body: {
       type: "object",
       required: ["email", "password", "role"],
@@ -1964,7 +2093,27 @@ export const S: Record<string, FastifySchema> = {
         },
       },
     },
-    response: { 201: { type: "object", additionalProperties: true }, 202: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
+    response: {
+      // 201: the user EXISTS. Note there is no `active` here and no `kyc` echo —
+      // a directly onboarded member is created active with kycStatus "pending".
+      201: {
+        type: "object", additionalProperties: true,
+        properties: {
+          id: { type: "string" },
+          email: { type: "string" },
+          role: { type: "string" },
+          useCaseKey: { type: "string", nullable: true },
+          accountId: { type: "string", nullable: true },
+          kycStatus: { type: "string", enum: ["pending", "approved", "rejected"] },
+          orgId: { type: "string", nullable: true },
+          did: { type: "string", nullable: true, description: "The member's sub-DID, minted inline. null when the caller's org could not be resolved." },
+        },
+        required: ["id", "email", "role", "kycStatus"],
+      },
+      // 202: the user DOES NOT EXIST YET.
+      202: { $ref: "ProposalEnvelope#" },
+      ...errs(400, 401, 403, 404),
+    },
   },
   createUsersBatch: {
     tags: ["Users"], summary: "Batch-onboard users from parsed CSV rows (one maker-checker proposal; draft-time all-or-nothing, execution-time per-row)", security: eitherCredential,
@@ -1996,12 +2145,28 @@ export const S: Record<string, FastifySchema> = {
       },
     },
     response: {
-      202: { type: "object", additionalProperties: true },
+      // ONE proposal for the WHOLE batch — not one per row. Approving it onboards
+      // every row; rejecting it onboards none.
+      202: { $ref: "ProposalEnvelope#" },
       // 400 is overridden (not the shared Error# ref) so `problems` — the
       // per-row draft-time validation report — survives fast-json-stringify's
       // response serialization instead of being stripped as an unlisted
       // property (the ID-G lesson).
-      400: { type: "object", additionalProperties: true },
+      400: {
+        type: "object", additionalProperties: true,
+        properties: {
+          error: { type: "string" },
+          message: { type: "string" },
+          problems: {
+            type: "array",
+            description: "Every row that failed draft-time validation. `index` is the row's position in your request.",
+            items: {
+              type: "object", additionalProperties: true,
+              properties: { index: { type: "integer" }, error: { type: "string" } },
+            },
+          },
+        },
+      },
       ...errs(401, 403),
     },
   },
@@ -2012,7 +2177,8 @@ export const S: Record<string, FastifySchema> = {
       "authorized principal approves the revocation. A `reason` is mandatory and is recorded with it.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: { type: "object", additionalProperties: false, required: ["reason"], properties: { reason: { type: "string", minLength: 1 } } },
-    response: { 202: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404, 409) },
+    // 409 ALREADY_PENDING when a revoke proposal for this user is already open.
+    response: { 202: { $ref: "ProposalEnvelope#" }, ...errs(400, 401, 403, 404, 409) },
   },
   uploadDocument: {
     tags: ["Documents"], summary: "Upload a document (base64); returns its URL + sha256", security: humanOnly,
@@ -2071,7 +2237,23 @@ export const S: Record<string, FastifySchema> = {
       type: "object",
       properties: { password: { type: "string", minLength: 6 }, active: { type: "boolean" }, kycStatus: { type: "string", enum: ["approved", "rejected"] } },
     },
-    response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
+    // The updated user — the same projection as GET /users MINUS `kyc`.
+    response: {
+      200: {
+        type: "object", additionalProperties: true,
+        properties: {
+          id: { type: "string" },
+          email: { type: "string" },
+          role: { type: "string" },
+          useCaseKey: { type: "string", nullable: true },
+          accountId: { type: "string", nullable: true },
+          active: { type: "boolean" },
+          kycStatus: { type: "string", enum: ["pending", "approved", "rejected"] },
+        },
+        required: ["id", "email", "role", "active", "kycStatus"],
+      },
+      ...errs(400, 401, 403, 404),
+    },
   },
 
   identityChallenge: {
