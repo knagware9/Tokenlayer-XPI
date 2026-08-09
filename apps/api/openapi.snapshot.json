@@ -159,6 +159,7 @@
     "Event": [
       "data",
       "id",
+      "mode",
       "occurredAt",
       "orgId",
       "seq",
@@ -301,6 +302,7 @@
       "failingSince",
       "id",
       "lastDeliveryAt",
+      "mode",
       "orgId",
       "status",
       "url",

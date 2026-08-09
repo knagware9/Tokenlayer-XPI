@@ -216,14 +216,31 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     const keyMode = actorMode(request);
     const useCaseMode: ResourceMode = useCase?.sandbox ? "test" : "live";
     if (modeAllows(keyMode, useCaseMode)) return true;
-    // A DISTINCT CODE, not a generic 403. "your test key hit a live use case"
-    // and "your key lacks a scope" have completely different fixes, and an
-    // integrator reading a log line should not have to guess which they hit.
-    reply.code(403).send({
-      error: "WRONG_MODE",
-      message: `a ${keyMode} API key may not act on the ${useCaseMode} use case '${useCase?.key ?? "unknown"}'`,
-      details: { keyMode, useCaseMode },
-    });
+    return wrongMode(
+      reply,
+      `a ${keyMode} API key may not act on the ${useCaseMode} use case '${useCase?.key ?? "unknown"}'`,
+      { keyMode, useCaseMode },
+    );
+  }
+
+  /**
+   * THE ONE PLACE A CROSS-ENVIRONMENT 403 IS SENT, and `mode-coverage.test.ts`
+   * fails the build if a second appears.
+   *
+   * A DISTINCT CODE, not a generic 403: "your test key hit a live use case" and
+   * "your key lacks a scope" have completely different fixes, and an integrator
+   * reading a log line should not have to guess which they hit. Funnelled
+   * through one function because a hand-rolled second copy is how the refusal
+   * drifts — one that forgets `details`, or states the direction backwards.
+   *
+   * `details` is the caller's because the thing on the far side of the boundary
+   * differs: a USE CASE for `modeGate` (`useCaseMode`), a webhook ENDPOINT at
+   * registration (`endpointMode`). Naming an endpoint a use case would send an
+   * integrator hunting for a use case that does not exist. Always returns
+   * `false`, so a gate can `return wrongMode(…)` and read as one decision.
+   */
+  function wrongMode(reply: FastifyReply, message: string, details: Record<string, unknown>): false {
+    reply.code(403).send({ error: "WRONG_MODE", message, details });
     return false;
   }
 
@@ -3203,6 +3220,10 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       consecutiveFailures: e.consecutiveFailures, consecutiveGuardFailures: e.consecutiveGuardFailures,
       failingSince: e.failingSince, deletedAt: e.deletedAt, createdBy: e.createdBy, createdAt: e.createdAt,
       lastDeliveryAt: e.lastDeliveryAt,
+      // EN-D2. WHICH STREAM this endpoint is on. Present on the read routes and
+      // not only in the 201, because a field an integrator can see once and
+      // never audit afterwards is a field they cannot trust.
+      mode: e.mode,
     };
   }
 
@@ -3303,9 +3324,28 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
   app.post("/orgs/:id/webhooks", { schema: S.createWebhook, ...authScoped("webhooks:write") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const { id } = request.params as { id: string };
-    const b = request.body as { url: string; description?: string; eventTypes: unknown; useCaseKey?: string };
+    const b = request.body as { url: string; description?: string; eventTypes: unknown; useCaseKey?: string; mode?: ResourceMode };
     const org = await webhookOrg(request, reply, id);
     if (!org) return;
+
+    // EN-D2. THE STREAM THIS ENDPOINT JOINS, defaulting to "live" — the mode of
+    // every endpoint registered before this feature, and of every client that
+    // has not heard of the field.
+    //
+    // THE GATE BELOW IS NOT `modeGate`, and cannot be: an endpoint is not a use
+    // case, so nothing here resolves one and the coverage test never looks at
+    // this route. Without it a `tl_test_` key holding `webhooks:write` could
+    // register a LIVE endpoint — the sandbox credential quietly wiring itself a
+    // production subscription, which is the crossing D2-4 refuses everywhere a
+    // use case IS in play. `modeAllows` is the same predicate, so a human
+    // session (no mode) still registers either, which is what leaves an OrgAdmin
+    // able to configure their own sandbox.
+    const endpointMode: ResourceMode = b.mode ?? "live";
+    const keyMode = actorMode(request);
+    if (!modeAllows(keyMode, endpointMode)) {
+      wrongMode(reply, `a ${keyMode} API key may not register a ${endpointMode} webhook endpoint`, { keyMode, endpointMode });
+      return reply;
+    }
 
     // ORDER MATTERS. Vocabulary (400) before entitlement (403) before
     // reachability (400): a typo'd event type must not be reported as a missing
@@ -3327,13 +3367,14 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       useCaseKey: b.useCaseKey || null,
       secretEncrypted: deps.secretBox.seal(secret),
       createdBy: claims.id,
+      mode: endpointMode,
     });
     // The ENDPOINT ID and what it subscribed to are the audit trail. The SECRET
     // is never audited, logged, or returned by any read route — the 201 below is
     // its only life, exactly as with an API key.
     await deps.audit.append({
       actorId: claims.id, action: "webhook-created" as LifecycleAction,
-      payload: { orgId: id, endpointId: endpoint.id, url: endpoint.url, eventTypes: endpoint.eventTypes, useCaseKey: endpoint.useCaseKey },
+      payload: { orgId: id, endpointId: endpoint.id, url: endpoint.url, eventTypes: endpoint.eventTypes, useCaseKey: endpoint.useCaseKey, mode: endpoint.mode },
     });
     return reply.code(201).send({ endpoint: webhookView(endpoint), secret });
   });
@@ -3632,9 +3673,18 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       if (!claims.orgId) return { events: [], nextAfter: after };
       scope.orgId = claims.orgId;
     }
+    // EN-D2. A MACHINE PRINCIPAL READS ONLY ITS OWN ENVIRONMENT. Found while
+    // wiring the emit path: the cursor is the documented catch-up route for a
+    // missed delivery, so leaving it unfiltered would have handed a `tl_test_`
+    // key the full text of every LIVE event its org ever produced — the same
+    // crossing `modeGate` refuses on every configuration and issuance route,
+    // reachable with a sandbox credential and one GET. An absent `mode` means
+    // both environments, which is what a human session (no mode) reads.
+    const keyMode = actorMode(request);
     const events = await deps.events.listAfter(after, {
       ...scope,
       ...(q.type ? { type: q.type } : {}),
+      ...(keyMode ? { mode: keyMode } : {}),
       limit,
     });
     return { events, nextAfter: events.length > 0 ? events[events.length - 1]!.seq : after };

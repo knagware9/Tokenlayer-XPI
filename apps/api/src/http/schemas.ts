@@ -644,8 +644,15 @@ export const components: Record<string, unknown>[] = [
       createdBy: { type: "string" },
       createdAt: { type: "string" },
       lastDeliveryAt: { type: "string", nullable: true },
+      mode: {
+        type: "string", enum: ["live", "test"],
+        description:
+          "Which stream this endpoint receives. A `test` endpoint hears ONLY sandbox events and a `live` one ONLY " +
+          "real ones — the two never cross, so a sandbox event can never reach a production handler. Fixed at " +
+          "registration: an endpoint cannot be moved between streams.",
+      },
     },
-    required: ["id", "url", "eventTypes", "status", "consecutiveFailures", "consecutiveGuardFailures", "createdBy", "createdAt"],
+    required: ["id", "url", "eventTypes", "status", "consecutiveFailures", "consecutiveGuardFailures", "createdBy", "createdAt", "mode"],
   },
   {
     $id: "WebhookDelivery",
@@ -688,8 +695,15 @@ export const components: Record<string, unknown>[] = [
       subjectId: { type: "string", nullable: true, description: "The id of the thing the event is about (asset, credential, verification request…)." },
       data: { type: "object", additionalProperties: true, description: "Per-type payload. Its shape follows `type`; treat unknown keys as forward-compatible additions." },
       occurredAt: { type: "string" },
+      mode: {
+        type: "string", enum: ["live", "test"],
+        description:
+          "`test` if the use case that produced this fact is a sandbox one, else `live`. DERIVED from that use case " +
+          "— never set by the caller — and an event with no use case is `live`. You do not need to check it to stay " +
+          "safe: a `test` event is only ever delivered to a `test` endpoint. It is here so a fact is self-describing.",
+      },
     },
-    required: ["seq", "id", "type", "data", "occurredAt"],
+    required: ["seq", "id", "type", "data", "occurredAt", "mode"],
   },
   {
     $id: "VerificationRequest",
@@ -1948,7 +1962,9 @@ export const S: Record<string, FastifySchema> = {
     tags: ["Webhooks"], summary: "Register a webhook endpoint (signing secret returned once, never again)", security: eitherCredential,
     description:
       "Requires the `webhooks:write` scope. The signing secret is returned in **this response only** and is never " +
-      "retrievable afterwards — store it before you acknowledge the call, or rotate to get a new one.",
+      "retrievable afterwards — store it before you acknowledge the call, or rotate to get a new one. `mode` picks " +
+      "which stream the endpoint joins and defaults to `live`; a `tl_test_` key may register only `test` endpoints " +
+      "and a `tl_live_` key only `live` ones (**403 `WRONG_MODE`**), while a human session may register either.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: {
       type: "object", additionalProperties: false, required: ["url", "eventTypes"],
@@ -1959,6 +1975,13 @@ export const S: Record<string, FastifySchema> = {
         // (400 UNKNOWN_EVENT_TYPE), so the catalog lives in exactly one place.
         eventTypes: { type: "array", items: { type: "string" } },
         useCaseKey: { type: "string" },
+        // Enumerated HERE, unlike eventTypes: there is no route-level validator
+        // for a mode and never will be — two values, closed, and a third one is
+        // a typo that must not be taken for "live".
+        mode: {
+          type: "string", enum: ["live", "test"],
+          description: "`live` (default) or `test`. FIXED at registration — an endpoint cannot be moved between streams afterwards.",
+        },
       },
     },
     response: {

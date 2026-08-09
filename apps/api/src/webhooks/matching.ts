@@ -33,6 +33,19 @@ export function endpointMatches(ep: WebhookEndpointRecord, ev: EventRecord): boo
     || (ev.orgId !== null && ep.orgId === ev.orgId); // org-scope: only its own
   if (!orgOk) return false;
 
+  // MODE IS EQUALITY, WHERE ORG (directly above) IS A DISJUNCTION — and the two
+  // rules sitting side by side and behaving differently is precisely what a
+  // later reader will get wrong, so: a platform-scope endpoint LEGITIMATELY
+  // spans orgs, which is why that rule needed a second branch. NOTHING
+  // legitimately spans modes. There is no "sees both environments" endpoint to
+  // write a second branch for, and inventing one would rebuild the design this
+  // feature rejected — "one endpoint, filter on a `mode` field" — where the
+  // burden of remembering the check falls on every consumer and forgetting it
+  // is silent. Isolation is structural instead: a sandbox issuance has NO ROUTE
+  // to a production handler, so it cannot be processed as a real credential by
+  // an integrator who never thought about modes at all.
+  if (ep.mode !== ev.mode) return false;
+
   // A null filter means "no filter". Only a set filter narrows, and it narrows
   // to an exact match — a use-case-scoped endpoint must not receive an event
   // that carries no use case at all.

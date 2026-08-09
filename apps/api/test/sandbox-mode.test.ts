@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import { describe, expect, it } from "vitest";
 import { KEY_PREFIX_MARKERS, mintSecret, prefixOf } from "../src/api-keys.js";
 import { buildChainRegistry } from "../src/chains.js";
+import { emitEvent, type EmitInput } from "../src/events.js";
 import {
   MemoryApiKeyRepository,
   MemoryCredentialUseCaseRepository,
@@ -489,7 +490,7 @@ async function modeWorld() {
   await seedUseCase(h, "d2-test-tok", true);
   const liveKey = await seedKey(h, { mode: "live" });
   const testKey = await seedKey(h, { mode: "test" });
-  return { h, orgAdmin: token, liveKey: liveKey.secret, testKey: testKey.secret };
+  return { h, orgId, orgAdmin: token, liveKey: liveKey.secret, testKey: testKey.secret };
 }
 
 describe("EN-D2 · the mode gate", () => {
@@ -654,5 +655,343 @@ describe("EN-D2 · sandbox is validated at the WRITE", () => {
     expect(cred.statusCode).toBe(409);
     expect(cred.json().error).toBe("SANDBOX_IMMUTABLE");
     expect((await h.deps.credentialUseCases.get("d2-cred-immutable"))?.sandbox).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task D2-5 — EVENTS AND WEBHOOK DELIVERY.
+//
+// The accident this whole block exists to prevent: a SANDBOX issuance arriving
+// at a PRODUCTION webhook handler and being processed as a real credential.
+// That is why the design rejected "one endpoint, filter on a `mode` field" —
+// it puts the burden on every consumer to remember a check, and forgetting it
+// is silent. Isolation is structural instead: a test event has no route to a
+// live endpoint at all.
+//
+// Two properties carry it, and they are tested separately because they fail
+// separately. (1) `Event.mode` is DERIVED inside `emitEvent` from the acting
+// use case, so no call site can mislabel one. (2) `endpointMatches` compares
+// modes for EQUALITY, so a mislabelled subscription cannot bridge them either.
+// ---------------------------------------------------------------------------
+
+/** Swallows the deliberate console.error in the unresolvable-use-case cases. */
+const quiet = { error: () => {} };
+
+/** A publicly routable literal — no DNS, and not in any blocked range. */
+const HOOK = "https://203.0.113.10/hooks";
+
+/** An endpoint straight into the repo, in one mode or the other. */
+function seedEndpoint(h: TestAppHandle, opts: { orgId: string | null; mode: ResourceMode }) {
+  return h.deps.webhookEndpoints.create({
+    orgId: opts.orgId, url: HOOK, description: null, eventTypes: ["*"],
+    useCaseKey: null, secretEncrypted: "cipher", createdBy: "test", mode: opts.mode,
+  });
+}
+
+/** How many deliveries this endpoint was handed. */
+const deliveries = async (h: TestAppHandle, endpointId: string) =>
+  (await h.deps.webhookDeliveries.listByEndpoint(endpointId, 50)).length;
+
+/** The most recently appended event row — the STORED fact, not the input. */
+const lastEvent = async (h: TestAppHandle) =>
+  (await h.deps.events.listAfter(0, { limit: 500 })).at(-1);
+
+/** A service user + API key BOUND TO `orgId`, in one mode or the other. */
+async function seedOrgKey(h: TestAppHandle, orgId: string, mode: ResourceMode, scopes: string[] = ["*"]): Promise<string> {
+  const tag = Math.random().toString(36).slice(2, 10);
+  const svc = await h.users.create({
+    email: `svc-d2org-${tag}@tokenlayer.dev`, passwordHash: bcrypt.hashSync(`unguessable-${tag}`, TEST_ROUNDS),
+    role: "OrgAdmin", useCaseKey: null, accountId: null, active: true, kycStatus: "approved",
+    kyc: null, orgId, kind: "service",
+  });
+  const minted = await mintSecret(TEST_ROUNDS, mode);
+  await h.apiKeys.create({
+    orgId, userId: svc.id, name: `key ${tag}`, prefix: minted.prefix, secretHash: minted.hash,
+    scopes, expiresAt: null, createdBy: "test", mode,
+  });
+  return minted.secret;
+}
+
+/** One emit, with everything but the use-case key held constant. */
+const emitOn = (h: TestAppHandle, orgId: string | null, useCaseKey: string | null, extra: Record<string, unknown> = {}) =>
+  emitEvent(h.deps, { type: "asset.issued", orgId, useCaseKey, subjectId: "subj1", data: {}, ...extra } as EmitInput, quiet);
+
+describe("EN-D2 · Event.mode is derived, never supplied", () => {
+  it("an event carries the mode of the use case that produced it", async () => {
+    const w = await modeWorld();
+
+    // The tokenization domain, both ways round.
+    await emitOn(w.h, w.orgId, "d2-test-tok");
+    expect((await lastEvent(w.h))?.mode).toBe("test");
+    await emitOn(w.h, w.orgId, "d2-live-tok");
+    expect((await lastEvent(w.h))?.mode).toBe("live");
+
+    // AND the credential domain. A use-case key is unique across both, and an
+    // implementation that consulted only `deps.useCases` would label every
+    // sandbox credential event "live" — which is the exact failure this task
+    // exists to prevent, arriving through the domain that issues credentials.
+    await emitOn(w.h, w.orgId, "d2-test-kyc", { type: "credential.issued" });
+    expect((await lastEvent(w.h))?.mode).toBe("test");
+    await emitOn(w.h, w.orgId, "d2-live-kyc", { type: "credential.issued" });
+    expect((await lastEvent(w.h))?.mode).toBe("live");
+  });
+
+  it("a caller CANNOT set an event's mode", async () => {
+    // Proved on the STORED ROW, deliberately. A type-level argument is worth
+    // nothing here: no test directory in this repo is typechecked, so a cast
+    // compiles silently and a `@ts-expect-error` is inert. The only evidence
+    // that survives is what the outbox actually holds.
+    const w = await modeWorld();
+
+    // A live use case, with `mode: "test"` smuggled in. This is the direction
+    // that would matter least; do it anyway, because the rule is that the field
+    // is IGNORED, not that it is clamped one way.
+    await emitOn(w.h, w.orgId, "d2-live-tok", { mode: "test" });
+    expect((await lastEvent(w.h))?.mode).toBe("live");
+
+    // THE DANGEROUS DIRECTION: a sandbox use case relabelled live. If a caller
+    // could do this, one sloppy emit site turns a sandbox fact into a real one
+    // and hands it to the production handler.
+    const liveEp = await seedEndpoint(w.h, { orgId: w.orgId, mode: "live" });
+    const testEp = await seedEndpoint(w.h, { orgId: w.orgId, mode: "test" });
+    await emitOn(w.h, w.orgId, "d2-test-tok", { mode: "live" });
+    expect((await lastEvent(w.h))?.mode).toBe("test");
+    // …and the DELIVERY follows the derived mode, not the claimed one.
+    expect(await deliveries(w.h, liveEp.id)).toBe(0);
+    expect(await deliveries(w.h, testEp.id)).toBe(1);
+  });
+
+  it("an event with no use case follows the stated default", async () => {
+    // THE STATED RULE: no use case => "live". It is the column's default and
+    // the pre-EN-D2 world, so a governance event (`proposal.executed` with no
+    // use-case key) behaves exactly as it did before this feature existed.
+    const w = await modeWorld();
+    const liveEp = await seedEndpoint(w.h, { orgId: w.orgId, mode: "live" });
+    const testEp = await seedEndpoint(w.h, { orgId: w.orgId, mode: "test" });
+
+    await emitOn(w.h, w.orgId, null, { type: "proposal.executed" });
+    expect((await lastEvent(w.h))?.mode).toBe("live");
+
+    // "" is not a use case either — it is what a legacy row stores — and it must
+    // reach the same default rather than becoming a lookup for the empty key.
+    await emitOn(w.h, w.orgId, "", { type: "proposal.executed" });
+    expect((await lastEvent(w.h))?.mode).toBe("live");
+
+    // A key that resolves to NOTHING (deleted, or never existed) also lands on
+    // the default, and — the property that matters — does not take the emit down
+    // with it: the event is still recorded and still fanned out.
+    await emitOn(w.h, w.orgId, "d2-vanished-use-case");
+    const vanished = await lastEvent(w.h);
+    expect(vanished?.mode).toBe("live");
+    expect(vanished?.useCaseKey).toBe("d2-vanished-use-case");
+
+    expect(await deliveries(w.h, liveEp.id)).toBe(3);
+    expect(await deliveries(w.h, testEp.id)).toBe(0);
+  });
+
+  it("still never throws into its caller when the use-case lookup itself fails", async () => {
+    // The derivation added a REPOSITORY READ to a function whose contract is
+    // that observing must not break acting. A use-case repo that is down must
+    // therefore lose the label, not the event.
+    const w = await modeWorld();
+    w.h.deps.useCases.get = async () => { throw new Error("use-case repo is down"); };
+    w.h.deps.credentialUseCases.get = async () => { throw new Error("use-case repo is down"); };
+
+    await expect(emitOn(w.h, w.orgId, "d2-test-tok")).resolves.toBeUndefined();
+    expect((await lastEvent(w.h))?.mode).toBe("live");
+  });
+});
+
+describe("EN-D2 · mode-scoped webhook delivery", () => {
+  it("a TEST event reaches a test endpoint and NOT a live endpoint of the same org", async () => {
+    const w = await modeWorld();
+    const liveEp = await seedEndpoint(w.h, { orgId: w.orgId, mode: "live" });
+    const testEp = await seedEndpoint(w.h, { orgId: w.orgId, mode: "test" });
+
+    await emitOn(w.h, w.orgId, "d2-test-tok");
+
+    expect((await lastEvent(w.h))?.mode).toBe("test");
+    expect(await deliveries(w.h, testEp.id)).toBe(1);
+    // THE POINT OF THE WHOLE TASK. Same org, same `["*"]` subscription, same
+    // event — and the production handler never hears about it.
+    expect(await deliveries(w.h, liveEp.id)).toBe(0);
+  });
+
+  it("a LIVE event reaches a live endpoint and not a test one", async () => {
+    // The mirror, and not merely for symmetry: an implementation written as
+    // "keep test events out of live endpoints" (`ev.mode !== "test" || …`)
+    // passes the test above and fails this one, leaving every real issuance
+    // copied into the sandbox subscriber an integrator is debugging against.
+    const w = await modeWorld();
+    const liveEp = await seedEndpoint(w.h, { orgId: w.orgId, mode: "live" });
+    const testEp = await seedEndpoint(w.h, { orgId: w.orgId, mode: "test" });
+
+    await emitOn(w.h, w.orgId, "d2-live-tok");
+
+    expect((await lastEvent(w.h))?.mode).toBe("live");
+    expect(await deliveries(w.h, liveEp.id)).toBe(1);
+    expect(await deliveries(w.h, testEp.id)).toBe(0);
+  });
+
+  it("a platform-scope endpoint still only sees its own mode", async () => {
+    // MODE IS EQUALITY WHERE ORG IS A DISJUNCTION, and this is where the two
+    // rules visibly differ. A platform endpoint (orgId null) legitimately spans
+    // every org — so it must still receive an ORG's event — but nothing
+    // legitimately spans modes, so it must not receive the other stream's.
+    const w = await modeWorld();
+    const platformLive = await seedEndpoint(w.h, { orgId: null, mode: "live" });
+    const platformTest = await seedEndpoint(w.h, { orgId: null, mode: "test" });
+
+    await emitOn(w.h, w.orgId, "d2-test-tok");
+    expect(await deliveries(w.h, platformTest.id)).toBe(1);
+    expect(await deliveries(w.h, platformLive.id)).toBe(0);
+
+    await emitOn(w.h, w.orgId, "d2-live-tok");
+    expect(await deliveries(w.h, platformLive.id)).toBe(1);
+    expect(await deliveries(w.h, platformTest.id)).toBe(1);
+
+    // The org disjunction is UNTOUCHED: a platform endpoint of the matching
+    // mode still receives a platform-scope (orgId null) event too. Without this
+    // the mode clause could have been written as something that quietly broke
+    // the org rule and no assertion above would have noticed.
+    await emitOn(w.h, null, "d2-live-tok");
+    expect(await deliveries(w.h, platformLive.id)).toBe(2);
+    expect(await deliveries(w.h, platformTest.id)).toBe(1);
+  });
+});
+
+describe("EN-D2 · endpoint mode at registration", () => {
+  /** POST /orgs/:id/webhooks as the org's own admin. */
+  const register = (h: TestAppHandle, token: string, orgId: string, body: Record<string, unknown>) =>
+    h.app.inject({ method: "POST", url: `${V1}/orgs/${orgId}/webhooks`, headers: auth(token), payload: { url: HOOK, eventTypes: ["*"], ...body } });
+
+  it("defaults to live and accepts an explicit test endpoint", async () => {
+    const h = await buildTestAppWithRepos();
+    const { orgId, token } = await seedOrgAdmin(h);
+
+    // NO `mode` AT ALL — every endpoint registered before EN-D2, and every
+    // client that has not heard of the field.
+    const dflt = await register(h, token, orgId, {});
+    expect(dflt.statusCode).toBe(201);
+    expect(dflt.json().endpoint.mode).toBe("live");
+    expect((await h.deps.webhookEndpoints.findById(dflt.json().endpoint.id))?.mode).toBe("live");
+
+    const test = await register(h, token, orgId, { mode: "test" });
+    expect(test.statusCode).toBe(201);
+    expect(test.json().endpoint.mode).toBe("test");
+    expect((await h.deps.webhookEndpoints.findById(test.json().endpoint.id))?.mode).toBe("test");
+
+    // The READ route surfaces it too — a field that only exists in the 201 is a
+    // field an integrator cannot audit afterwards.
+    const list = await h.app.inject({ method: "GET", url: `${V1}/orgs/${orgId}/webhooks`, headers: auth(token) });
+    expect(list.json().endpoints.map((e: { mode: string }) => e.mode).sort()).toEqual(["live", "test"]);
+
+    // A third value is not a mode. Refused by the schema, so nothing is stored.
+    const bogus = await register(h, token, orgId, { mode: "staging" });
+    expect(bogus.statusCode).toBe(400);
+  });
+
+  it("an endpoint cannot be MOVED between streams afterwards", async () => {
+    // The secret and the delivery history would follow it across the boundary,
+    // so `mode` is deliberately absent from the update patch AND from the
+    // repository's patch type — a re-point, not a re-registration, is how a live
+    // handler would inherit a sandbox history.
+    //
+    // The PATCH is a 200, not a 400: fastify's ajv runs with `removeAdditional`,
+    // so an undeclared `mode` is STRIPPED before the handler sees it. That makes
+    // "the stored row did not move" the only assertion worth anything here — a
+    // status code would have been satisfied by a route that accepted the field
+    // and applied it.
+    const h = await buildTestAppWithRepos();
+    const { orgId, token } = await seedOrgAdmin(h);
+    const whId = (await register(h, token, orgId, { mode: "test" })).json().endpoint.id as string;
+
+    const moved = await h.app.inject({
+      method: "PATCH", url: `${V1}/orgs/${orgId}/webhooks/${whId}`, headers: auth(token),
+      payload: { mode: "live", description: "still test" },
+    });
+    expect(moved.statusCode).toBe(200);
+    expect(moved.json().endpoint).toMatchObject({ description: "still test", mode: "test" });
+    expect((await h.deps.webhookEndpoints.findById(whId))?.mode).toBe("test");
+  });
+
+  it("a tl_test_ key may not register a LIVE endpoint, and a tl_live_ key may not register a test one", async () => {
+    // FOUND WHILE WIRING THIS UP, and closed here. Endpoint mode is not a use
+    // case, so `modeGate` never sees this route: without a check, a sandbox key
+    // holding `webhooks:write` could register a LIVE endpoint and start
+    // receiving production events — the very crossing D2-4 refuses everywhere
+    // else. `modeAllows` is the same predicate, so a human session (no mode)
+    // still registers either, which is what makes the sandbox configurable.
+    const h = await buildTestAppWithRepos();
+    const { orgId } = await seedOrgAdmin(h);
+    const testKey = await seedOrgKey(h, orgId, "test");
+    const liveKey = await seedOrgKey(h, orgId, "live");
+
+    // The default is still "live", so a test key that says nothing is refused
+    // rather than quietly handed a production subscription.
+    const implicit = await register(h, testKey, orgId, {});
+    expect(implicit.statusCode).toBe(403);
+    expect(implicit.json()).toMatchObject({ error: "WRONG_MODE", details: { keyMode: "test", endpointMode: "live" } });
+
+    const explicit = await register(h, liveKey, orgId, { mode: "test" });
+    expect(explicit.statusCode).toBe(403);
+    expect(explicit.json().error).toBe("WRONG_MODE");
+
+    // THE CONTROL: each key succeeds on its own side, so the two refusals above
+    // are about mode and not about a key that could do nothing at all.
+    expect((await register(h, testKey, orgId, { mode: "test" })).json().endpoint.mode).toBe("test");
+    expect((await register(h, liveKey, orgId, { mode: "live" })).json().endpoint.mode).toBe("live");
+    expect((await h.deps.webhookEndpoints.listByOrg(orgId))).toHaveLength(2);
+  });
+});
+
+describe("EN-D2 · the event cursor is mode-scoped too", () => {
+  it("a tl_test_ key reads ONLY sandbox events, and a tl_live_ key only real ones", async () => {
+    // FOUND WHILE WIRING THE EMIT PATH, and closed here. `GET /events` is the
+    // documented catch-up route for a missed delivery — so isolating DELIVERY
+    // and leaving the cursor open would have left the same crossing reachable
+    // with a sandbox credential and one GET: the full payload of every LIVE
+    // event the org ever produced, handed to a `tl_test_` key.
+    const w = await modeWorld();
+    const testKey = await seedOrgKey(w.h, w.orgId, "test", ["webhooks:read"]);
+    const liveKey = await seedOrgKey(w.h, w.orgId, "live", ["webhooks:read"]);
+
+    await emitOn(w.h, w.orgId, "d2-live-tok", { subjectId: "live-asset" });
+    await emitOn(w.h, w.orgId, "d2-test-tok", { subjectId: "test-asset" });
+    await emitOn(w.h, w.orgId, null, { type: "proposal.executed", subjectId: "governance" });
+
+    const read = async (cred: string) =>
+      (await w.h.app.inject({ method: "GET", url: `${V1}/events`, headers: auth(cred) })).json();
+
+    const asTest = await read(testKey);
+    expect(asTest.events.map((e: { subjectId: string }) => e.subjectId)).toEqual(["test-asset"]);
+    // Not merely absent from the list — absent from the RAW TEXT. A payload
+    // nested one level deeper than the assertion looked is how this leak comes
+    // back.
+    const rawTest = await w.h.app.inject({ method: "GET", url: `${V1}/events`, headers: auth(testKey) });
+    expect(rawTest.payload).not.toContain("live-asset");
+
+    // The live key sees the live event AND the use-case-less governance one,
+    // which follows the stated default — so the sandbox key's page above is a
+    // narrowing, not an empty log.
+    const asLive = await read(liveKey);
+    expect(asLive.events.map((e: { subjectId: string }) => e.subjectId)).toEqual(["live-asset", "governance"]);
+
+    // The HUMAN, who has no mode, still reads both — the same asymmetry as the
+    // gate, and the reason an OrgAdmin can inspect their own sandbox.
+    const asHuman = (await w.h.app.inject({ method: "GET", url: `${V1}/events`, headers: auth(w.orgAdmin) })).json();
+    expect(asHuman.events).toHaveLength(3);
+    // …and `mode` survives the serializer. fast-json-stringify SILENTLY STRIPS
+    // an undeclared field, so a fact that cannot say which environment it came
+    // from is one schema omission away at all times.
+    expect(asHuman.events.map((e: { mode: string }) => e.mode)).toEqual(["live", "test", "live"]);
+
+    // THE CURSOR CONTRACT SURVIVES THE NARROWING: `nextAfter` still comes from
+    // rows the caller was actually shown, so the documented `after = nextAfter`
+    // loop neither re-reads nor skips. A post-fetch filter would have broken
+    // exactly this.
+    expect(asTest.nextAfter).toBe(asTest.events.at(-1).seq);
+    const nothingNew = await w.h.app.inject({ method: "GET", url: `${V1}/events?after=${asTest.nextAfter}`, headers: auth(testKey) });
+    expect(nothingNew.json()).toEqual({ events: [], nextAfter: asTest.nextAfter });
   });
 });

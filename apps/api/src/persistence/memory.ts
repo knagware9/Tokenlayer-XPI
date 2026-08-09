@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { auditGenesis, auditEntryHash, normalizeUseCaseDefinition, PolicyError, type OrgCapabilities, type UseCaseDefinition, type CredentialUseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
+import { auditGenesis, auditEntryHash, normalizeUseCaseDefinition, PolicyError, type OrgCapabilities, type ResourceMode, type UseCaseDefinition, type CredentialUseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
 import type {
   AccountRecord,
   AccountRepository,
@@ -777,10 +777,14 @@ export class MemoryEventRepository implements EventRepository {
     this.rows.push(rec);
     return this.clone(rec);
   }
-  /** `orgId: undefined` means EVERY org (PlatformAdmin); `orgId: null` means platform-scope rows only. */
-  async listAfter(after: number, opts: { orgId?: string | null; type?: string; limit: number }): Promise<EventRecord[]> {
+  /**
+   * `orgId: undefined` means EVERY org (PlatformAdmin); `orgId: null` means
+   * platform-scope rows only. `mode: undefined` means BOTH environments.
+   */
+  async listAfter(after: number, opts: { orgId?: string | null; type?: string; mode?: ResourceMode; limit: number }): Promise<EventRecord[]> {
     return this.rows
-      .filter((r) => r.seq > after && (opts.orgId === undefined || r.orgId === opts.orgId) && (!opts.type || r.type === opts.type))
+      .filter((r) => r.seq > after && (opts.orgId === undefined || r.orgId === opts.orgId) && (!opts.type || r.type === opts.type)
+        && (opts.mode === undefined || r.mode === opts.mode))
       .sort((a, b) => a.seq - b.seq)
       .slice(0, opts.limit)
       .map((r) => this.clone(r));

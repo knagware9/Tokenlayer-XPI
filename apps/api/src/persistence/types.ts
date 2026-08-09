@@ -642,8 +642,16 @@ export type EventAppendInput = Omit<EventRecord, "seq" | "id" | "occurredAt" | "
 
 export interface EventRepository {
   append(input: EventAppendInput): Promise<EventRecord>;
-  /** Cursor read, seq-ascending. `orgId: undefined` = every org (PlatformAdmin). */
-  listAfter(after: number, opts: { orgId?: string | null; type?: string; limit: number }): Promise<EventRecord[]>;
+  /**
+   * Cursor read, seq-ascending. `orgId: undefined` = every org (PlatformAdmin).
+   *
+   * `mode: undefined` = BOTH environments, which is what a human session reads;
+   * an API key narrows to its own. Filtering here rather than in the route is
+   * what keeps the documented cursor contract true — a post-fetch filter would
+   * return short (or empty) pages while rows remained, and `nextAfter` would
+   * have to be computed from rows the caller never saw.
+   */
+  listAfter(after: number, opts: { orgId?: string | null; type?: string; mode?: ResourceMode; limit: number }): Promise<EventRecord[]>;
   findById(id: string): Promise<EventRecord | null>;
 }
 

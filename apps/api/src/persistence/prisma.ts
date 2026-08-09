@@ -1126,13 +1126,17 @@ export class PrismaEventRepository implements EventRepository {
       },
     }));
   }
-  /** `orgId: undefined` means EVERY org (PlatformAdmin); `orgId: null` means platform-scope rows only. */
-  async listAfter(after: number, opts: { orgId?: string | null; type?: string; limit: number }): Promise<EventRecord[]> {
+  /**
+   * `orgId: undefined` means EVERY org (PlatformAdmin); `orgId: null` means
+   * platform-scope rows only. `mode: undefined` means BOTH environments.
+   */
+  async listAfter(after: number, opts: { orgId?: string | null; type?: string; mode?: ResourceMode; limit: number }): Promise<EventRecord[]> {
     return (await prisma.event.findMany({
       where: {
         seq: { gt: after },
         ...(opts.orgId === undefined ? {} : { orgId: opts.orgId }),
         ...(opts.type ? { type: opts.type } : {}),
+        ...(opts.mode === undefined ? {} : { mode: opts.mode }),
       },
       orderBy: { seq: "asc" },
       take: opts.limit,

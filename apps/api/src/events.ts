@@ -30,7 +30,7 @@
  *    every authorization gate. `redact` is the belt to the call sites' braces;
  *    call sites must still pass only what they mean to publish.
  */
-import type { EventType } from "@tokenlayer/core";
+import type { EventType, ResourceMode } from "@tokenlayer/core";
 import { KEY_PREFIX_MARKERS } from "./api-keys.js";
 import type { AppDeps } from "./context.js";
 import { endpointMatches } from "./webhooks/matching.js";
@@ -89,6 +89,53 @@ export interface EmitInput {
   useCaseKey?: string | null;
   subjectId?: string | null;
   data: Record<string, unknown>;
+  /**
+   * THERE IS DELIBERATELY NO `mode` HERE (EN-D2). The row's mode is DERIVED
+   * below from the use case that produced the fact, and a caller-supplied one
+   * is ignored even if a cast smuggles it in — see `deriveMode`.
+   */
+}
+
+/**
+ * The mode of a fact, from the use case that produced it. NEVER from the
+ * caller (EN-D2, task D2-5).
+ *
+ * WHY DERIVED AND NOT PASSED. There are ~11 emit sites and more will be added.
+ * If `EmitInput` carried `mode`, one of them would eventually mislabel one —
+ * and a mislabelled event is a SANDBOX FACT DELIVERED AS REAL, arriving at a
+ * production webhook handler that has no reason to doubt it. One derivation,
+ * in one place, cannot be forgotten at a call site that does not exist yet.
+ *
+ * THE RULE FOR AN EVENT WITH NO USE CASE IS `"live"`, and it is stated here
+ * rather than left implicit at the `?? "live"`. Governance events
+ * (`proposal.executed` with a null `useCaseKey`) and closed-catalog credential
+ * issuance have no use case to take a mode from. `"live"` is the column's
+ * default and therefore the mode of every row written before EN-D2, so those
+ * events behave EXACTLY as they did before this feature existed — no
+ * pre-existing subscription changes what it receives.
+ *
+ * A FAILED LOOKUP LANDS ON THE SAME DEFAULT, for the same reason and one more:
+ * this function feeds a call that must not fail its caller. Losing the label
+ * must never mean losing the event, so the lookup has its own catch rather than
+ * falling through to `emitEvent`'s. Note what the window actually is — every
+ * emit site sits immediately after a route resolved and mode-gated that very
+ * use case, so an unresolvable key here means a transient repository failure,
+ * not a sandbox programme quietly passing itself off as live.
+ *
+ * BOTH DOMAINS ARE CONSULTED. A use-case key is unique across tokenization and
+ * identity, and an implementation that knew only `deps.useCases` would label
+ * every sandbox CREDENTIAL event "live" — the exact accident this task exists
+ * to prevent, arriving through the domain that issues credentials.
+ */
+async function deriveMode(deps: AppDeps, useCaseKey: string | null): Promise<ResourceMode> {
+  if (!useCaseKey) return "live";
+  try {
+    const uc = (await deps.useCases.get(useCaseKey).catch(() => null))
+      ?? (await deps.credentialUseCases.get(useCaseKey).catch(() => null));
+    return uc?.sandbox ? "test" : "live";
+  } catch {
+    return "live";
+  }
 }
 
 /** The Fastify `request.log` shape; `console` satisfies it too. */
@@ -113,12 +160,18 @@ export async function emitEvent(deps: AppDeps, input: EmitInput, log: EmitLogger
     // would make it a MATCHABLE value in `endpointMatches`, which is the same
     // ""-vs-null gate bypass this codebase has already been bitten by twice.
     // Normalised once, here, so no call site can forget.
+    const useCaseKey = input.useCaseKey || null;
+    // EN-D2. Derived, and written LAST, so that even a caller who smuggled a
+    // `mode` past the type (no test directory here is typechecked, so a cast
+    // compiles silently) cannot reach the row: this object names every field it
+    // stores and never spreads `input`.
     const event = await deps.events.append({
       type: input.type,
       orgId: input.orgId || null,
-      useCaseKey: input.useCaseKey || null,
+      useCaseKey,
       subjectId: input.subjectId ?? null,
       data: redact(input.data) as Record<string, unknown>,
+      mode: await deriveMode(deps, useCaseKey),
     });
     for (const ep of await deps.webhookEndpoints.listActive()) {
       if (!endpointMatches(ep, event)) continue;
