@@ -22,6 +22,11 @@ export const API_SCOPES = [
   "users:read",
   "users:onboard",
   "org:read",
+  // EN-C: manage this org's own webhook endpoints and read its event log.
+  // Split read/write because an integration that only consumes the cursor API
+  // has no business rotating a secret or repointing a delivery URL.
+  "webhooks:read",
+  "webhooks:write",
   // Authoring/provisioning configuration: use cases, templates, and the
   // one-step provisioner. Distinct from `users:onboard` because provisioning
   // creates an ORG and a USE CASE, not people — conflating them would let a key
