@@ -21,6 +21,7 @@ import {
   PrismaProposalRepository,
   PrismaCashRepository,
   PrismaDocumentRepository,
+  PrismaEventRepository,
   PrismaListingRepository,
   PrismaLoginKeyRepository,
   PrismaRegistryDeploymentRepository,
@@ -30,6 +31,8 @@ import {
   PrismaUseCaseRepository,
   PrismaUserRepository,
   PrismaVerificationRequestRepository,
+  PrismaWebhookDeliveryRepository,
+  PrismaWebhookEndpointRepository,
 } from "./persistence/prisma.js";
 import { resolveIdentityRegistry } from "./registry.js";
 import { seedDefaults } from "./seed.js";
@@ -59,6 +62,9 @@ async function main(): Promise<void> {
   const stagedInvoices = new PrismaStagedInvoiceRepository();
   const loginKeys = new PrismaLoginKeyRepository();
   const apiKeys = new PrismaApiKeyRepository();
+  const events = new PrismaEventRepository();
+  const webhookEndpoints = new PrismaWebhookEndpointRepository();
+  const webhookDeliveries = new PrismaWebhookDeliveryRepository();
   const keystore = createKeystore(env.didMasterKey);
   // Demo users/accounts (with predictable passwords) are seeded only outside production.
   if (env.nodeEnv !== "production") await seedDefaults(users, accounts);
@@ -97,6 +103,9 @@ async function main(): Promise<void> {
     verificationRequests,
     stagedInvoices,
     apiKeys,
+    events,
+    webhookEndpoints,
+    webhookDeliveries,
     keystore,
     didMasterConfigured: env.didMasterConfigured,
     challenges: createMemoryChallengeStore(),

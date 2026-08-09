@@ -18,6 +18,7 @@ import type {
   CredentialUseCaseRepository,
   CredentialUseCaseTemplateRepository,
   DocumentRepository,
+  EventRepository,
   ListingRepository,
   LoginKeyRepository,
   OrganizationRepository,
@@ -26,6 +27,8 @@ import type {
   UseCaseRepository,
   UserRepository,
   VerificationRequestRepository,
+  WebhookDeliveryRepository,
+  WebhookEndpointRepository,
 } from "./persistence/types.js";
 import type { IdentityRegistry } from "./registry.js";
 
@@ -52,6 +55,10 @@ export interface AppDeps {
   stagedInvoices: StagedInvoiceRepository;
   /** Machine credentials (EN-B): the auth seam resolves `tl_live_…` bearers through this. */
   apiKeys: ApiKeyRepository;
+  /** EN-C event outbox: the durable, globally ordered log integrators read. */
+  events: EventRepository;
+  webhookEndpoints: WebhookEndpointRepository;
+  webhookDeliveries: WebhookDeliveryRepository;
   keystore: Keystore;
   /** True iff DID_MASTER_KEY was explicitly configured (production must set it). */
   didMasterConfigured: boolean;

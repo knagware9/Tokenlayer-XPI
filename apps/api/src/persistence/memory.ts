@@ -20,6 +20,8 @@ import type {
   CredentialRepository,
   DocumentRecord,
   DocumentRepository,
+  EventRecord,
+  EventRepository,
   ListingRecord,
   ListingRepository,
   LoginKeyRecord,
@@ -47,6 +49,10 @@ import type {
   VerificationRequestRecord,
   VerificationRequestRepository,
   VerificationStatus,
+  WebhookDeliveryRecord,
+  WebhookDeliveryRepository,
+  WebhookEndpointRecord,
+  WebhookEndpointRepository,
 } from "./types.js";
 import { ListingConflictError } from "./types.js";
 
@@ -738,5 +744,177 @@ export class MemoryLoginKeyRepository implements LoginKeyRepository {
   async touch(keyId: string, at: string): Promise<void> {
     const rec = this.byId.get(keyId);
     if (rec) rec.lastUsedAt = at;
+  }
+}
+
+export class MemoryEventRepository implements EventRepository {
+  private readonly rows: EventRecord[] = [];
+  /** The global cursor. An array index would break the moment anything filtered. */
+  private nextSeq = 1;
+  // `data` is a caller-owned object, so copy in AND out — the stored row must
+  // not alias whatever the emitter happened to hand us.
+  private clone(r: EventRecord): EventRecord {
+    return { ...r, data: { ...r.data } };
+  }
+  async append(input: Omit<EventRecord, "seq" | "id" | "occurredAt"> & { occurredAt?: string }): Promise<EventRecord> {
+    const rec: EventRecord = {
+      ...input,
+      data: { ...input.data },
+      seq: this.nextSeq++,
+      id: `evt_${randomUUID().replace(/-/g, "").slice(0, 20)}`,
+      occurredAt: input.occurredAt ?? now(),
+    };
+    this.rows.push(rec);
+    return this.clone(rec);
+  }
+  /** `orgId: undefined` means EVERY org (PlatformAdmin); `orgId: null` means platform-scope rows only. */
+  async listAfter(after: number, opts: { orgId?: string | null; type?: string; limit: number }): Promise<EventRecord[]> {
+    return this.rows
+      .filter((r) => r.seq > after && (opts.orgId === undefined || r.orgId === opts.orgId) && (!opts.type || r.type === opts.type))
+      .sort((a, b) => a.seq - b.seq)
+      .slice(0, opts.limit)
+      .map((r) => this.clone(r));
+  }
+  async findById(eventId: string): Promise<EventRecord | null> {
+    const r = this.rows.find((e) => e.id === eventId);
+    return r ? this.clone(r) : null;
+  }
+}
+
+export class MemoryWebhookEndpointRepository implements WebhookEndpointRepository {
+  private readonly byId = new Map<string, WebhookEndpointRecord>();
+  private clone(r: WebhookEndpointRecord): WebhookEndpointRecord {
+    return { ...r, eventTypes: [...r.eventTypes] };
+  }
+  async create(input: Omit<WebhookEndpointRecord, "id" | "createdAt" | "status" | "disabledReason" | "disabledAt" | "consecutiveFailures" | "deletedAt" | "lastDeliveryAt">): Promise<WebhookEndpointRecord> {
+    const rec: WebhookEndpointRecord = {
+      ...input,
+      eventTypes: [...input.eventTypes],
+      id: id("whep"),
+      status: "active",
+      disabledReason: null,
+      disabledAt: null,
+      consecutiveFailures: 0,
+      deletedAt: null,
+      createdAt: now(),
+      lastDeliveryAt: null,
+    };
+    this.byId.set(rec.id, rec);
+    return this.clone(rec);
+  }
+  async findById(endpointId: string): Promise<WebhookEndpointRecord | null> {
+    const r = this.byId.get(endpointId);
+    return r ? this.clone(r) : null;
+  }
+  /** Soft-deleted rows are filtered: unlike an api key, a dead endpoint is not an audit trail. */
+  async listByOrg(orgId: string | null): Promise<WebhookEndpointRecord[]> {
+    return [...this.byId.values()]
+      .filter((r) => r.orgId === orgId && r.deletedAt === null)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map((r) => this.clone(r));
+  }
+  async listActive(): Promise<WebhookEndpointRecord[]> {
+    return [...this.byId.values()]
+      .filter((r) => r.status === "active" && r.deletedAt === null)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .map((r) => this.clone(r));
+  }
+  async update(endpointId: string, patch: Partial<Pick<WebhookEndpointRecord, "url" | "description" | "eventTypes" | "useCaseKey" | "secretEncrypted" | "status" | "disabledReason" | "disabledAt" | "consecutiveFailures" | "deletedAt" | "lastDeliveryAt">>): Promise<WebhookEndpointRecord> {
+    const rec = this.byId.get(endpointId);
+    if (!rec) throw new Error(`unknown webhook endpoint '${endpointId}'`);
+    // An ABSENT key leaves the column alone; an explicit `null` clears it
+    // (re-enabling clears disabledReason/disabledAt). A key present but
+    // `undefined` must behave as absent — which is exactly what the prisma
+    // side's `!== undefined` spread does, so it must do so here too.
+    for (const [k, v] of Object.entries(patch)) {
+      if (v !== undefined) Object.assign(rec, { [k]: v });
+    }
+    if (patch.eventTypes) rec.eventTypes = [...patch.eventTypes];
+    return this.clone(rec);
+  }
+}
+
+export class MemoryWebhookDeliveryRepository implements WebhookDeliveryRepository {
+  private readonly byId = new Map<string, WebhookDeliveryRecord>();
+  async enqueue(input: { endpointId: string; eventId: string; eventSeq: number }): Promise<WebhookDeliveryRecord> {
+    // Mirror the DB's @@unique([endpointId, eventId]): that pair IS the fan-out
+    // idempotency key, so a duplicate returns the EXISTING row rather than
+    // throwing — the same emulate-the-constraint duty MemoryApiKeyRepository
+    // has for its unique prefix, with the opposite (upsert) resolution.
+    const existing = [...this.byId.values()].find((d) => d.endpointId === input.endpointId && d.eventId === input.eventId);
+    if (existing) return { ...existing };
+    const rec: WebhookDeliveryRecord = {
+      ...input,
+      id: id("whd"),
+      status: "pending",
+      attempts: 0,
+      nextAttemptAt: now(),
+      lastAttemptAt: null,
+      responseStatus: null,
+      responseError: null,
+      durationMs: null,
+      claimedAt: null,
+      claimedBy: null,
+      createdAt: now(),
+    };
+    this.byId.set(rec.id, rec);
+    return { ...rec };
+  }
+  async findById(deliveryId: string): Promise<WebhookDeliveryRecord | null> {
+    const rec = this.byId.get(deliveryId);
+    return rec ? { ...rec } : null;
+  }
+  /** Newest event first. Ordered by `eventSeq`, not `createdAt`: a fan-out writes every row in the same millisecond. */
+  async listByEndpoint(endpointId: string, limit: number): Promise<WebhookDeliveryRecord[]> {
+    return [...this.byId.values()]
+      .filter((d) => d.endpointId === endpointId)
+      .sort((a, b) => b.eventSeq - a.eventSeq)
+      .slice(0, limit)
+      .map((d) => ({ ...d }));
+  }
+  async listDue(at: string, limit: number): Promise<WebhookDeliveryRecord[]> {
+    // Compare parsed INSTANTS, not strings: prisma compares Dates, so an ISO
+    // string carrying an offset (…+05:30) rather than Z would order one way here
+    // and the other way there — a divergence no memory-harness test can see.
+    const cutoff = Date.parse(at);
+    return [...this.byId.values()]
+      .filter((d) => (d.status === "pending" || d.status === "failed") && Date.parse(d.nextAttemptAt) <= cutoff)
+      .sort((a, b) => Date.parse(a.nextAttemptAt) - Date.parse(b.nextAttemptAt) || a.eventSeq - b.eventSeq)
+      .slice(0, limit)
+      .map((d) => ({ ...d }));
+  }
+  // claim/reclaimStale are each a single synchronous mutation (no await between
+  // the status check and the write) → atomic w.r.t. concurrent requests, as
+  // MemoryProposalRepository.claimDecided already relies on.
+  async claim(deliveryId: string, workerId: string, at: string): Promise<WebhookDeliveryRecord | null> {
+    const rec = this.byId.get(deliveryId);
+    // The status predicate IS the compare half of the compare-and-set: drop it
+    // and two dispatchers both "win" the same row and double-POST it.
+    if (!rec || (rec.status !== "pending" && rec.status !== "failed")) return null;
+    rec.status = "inflight";
+    rec.claimedAt = at;
+    rec.claimedBy = workerId;
+    return { ...rec };
+  }
+  async reclaimStale(before: string): Promise<number> {
+    const cutoff = Date.parse(before);
+    let count = 0;
+    for (const rec of this.byId.values()) {
+      if (rec.status !== "inflight" || rec.claimedAt === null || !(Date.parse(rec.claimedAt) < cutoff)) continue;
+      rec.status = "pending";
+      rec.claimedAt = null;
+      rec.claimedBy = null;
+      count += 1;
+    }
+    return count;
+  }
+  async update(deliveryId: string, patch: Partial<Pick<WebhookDeliveryRecord, "status" | "attempts" | "nextAttemptAt" | "lastAttemptAt" | "responseStatus" | "responseError" | "durationMs" | "claimedAt" | "claimedBy">>): Promise<WebhookDeliveryRecord> {
+    const rec = this.byId.get(deliveryId);
+    if (!rec) throw new Error(`unknown webhook delivery '${deliveryId}'`);
+    // Same present-vs-undefined discipline as the endpoint patch above.
+    for (const [k, v] of Object.entries(patch)) {
+      if (v !== undefined) Object.assign(rec, { [k]: v });
+    }
+    return { ...rec };
   }
 }

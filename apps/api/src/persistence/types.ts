@@ -595,3 +595,96 @@ export interface ApiKeyRepository {
   /** Soft revoke: sets `revokedAt`/`revokedBy`, keeping the row for the audit trail. */
   revoke(id: string, input: { by: string; at: string }): Promise<ApiKeyRecord>;
 }
+
+/**
+ * One durable, globally ordered fact (EN-C). Deliberately NOT an AuditEntry:
+ * the audit log is per-asset hash-chained for tamper evidence and has no global
+ * cursor, and delivery concerns must not get a say in that structure.
+ */
+export interface EventRecord {
+  /** Global monotonic cursor. */
+  seq: number;
+  /** Public, stable id sent to integrators as Tokenlayer-Event-Id. */
+  id: string;
+  type: string;
+  /** The single owning org — the tenancy key. null = platform-scope. */
+  orgId: string | null;
+  useCaseKey: string | null;
+  subjectId: string | null;
+  data: Record<string, unknown>;
+  occurredAt: string;
+}
+
+export interface EventRepository {
+  append(input: Omit<EventRecord, "seq" | "id" | "occurredAt"> & { occurredAt?: string }): Promise<EventRecord>;
+  /** Cursor read, seq-ascending. `orgId: undefined` = every org (PlatformAdmin). */
+  listAfter(after: number, opts: { orgId?: string | null; type?: string; limit: number }): Promise<EventRecord[]>;
+  findById(id: string): Promise<EventRecord | null>;
+}
+
+/** An org's declared interest in some slice of the event stream. */
+export interface WebhookEndpointRecord {
+  id: string;
+  orgId: string | null;
+  url: string;
+  description: string | null;
+  eventTypes: string[];
+  useCaseKey: string | null;
+  /** AES-256-GCM ciphertext. NEVER returned by any read route. */
+  secretEncrypted: string;
+  status: "active" | "disabled";
+  disabledReason: string | null;
+  disabledAt: string | null;
+  consecutiveFailures: number;
+  deletedAt: string | null;
+  createdBy: string;
+  createdAt: string;
+  lastDeliveryAt: string | null;
+}
+
+export interface WebhookEndpointRepository {
+  /** Lifecycle columns (`status`/`disabled*`/`consecutiveFailures`/`deletedAt`/`lastDeliveryAt`) are repo-managed. */
+  create(input: Omit<WebhookEndpointRecord, "id" | "createdAt" | "status" | "disabledReason" | "disabledAt" | "consecutiveFailures" | "deletedAt" | "lastDeliveryAt">): Promise<WebhookEndpointRecord>;
+  findById(id: string): Promise<WebhookEndpointRecord | null>;
+  /** Live endpoints of one org. `null` lists platform-scope endpoints. */
+  listByOrg(orgId: string | null): Promise<WebhookEndpointRecord[]>;
+  /** Every active, non-deleted endpoint — the fan-out candidate set. */
+  listActive(): Promise<WebhookEndpointRecord[]>;
+  update(id: string, patch: Partial<Pick<WebhookEndpointRecord, "url" | "description" | "eventTypes" | "useCaseKey" | "secretEncrypted" | "status" | "disabledReason" | "disabledAt" | "consecutiveFailures" | "deletedAt" | "lastDeliveryAt">>): Promise<WebhookEndpointRecord>;
+}
+
+/** One attempt chain for one (event, endpoint) pair. */
+export interface WebhookDeliveryRecord {
+  id: string;
+  endpointId: string;
+  eventId: string;
+  eventSeq: number;
+  status: "pending" | "inflight" | "delivered" | "failed" | "dead";
+  attempts: number;
+  nextAttemptAt: string;
+  lastAttemptAt: string | null;
+  responseStatus: number | null;
+  responseError: string | null;
+  durationMs: number | null;
+  claimedAt: string | null;
+  claimedBy: string | null;
+  createdAt: string;
+}
+
+export interface WebhookDeliveryRepository {
+  /** Idempotent on (endpointId, eventId): a duplicate returns the existing row. */
+  enqueue(input: { endpointId: string; eventId: string; eventSeq: number }): Promise<WebhookDeliveryRecord>;
+  findById(id: string): Promise<WebhookDeliveryRecord | null>;
+  listByEndpoint(endpointId: string, limit: number): Promise<WebhookDeliveryRecord[]>;
+  /** Due = (pending|failed) and nextAttemptAt <= now, oldest first. */
+  listDue(now: string, limit: number): Promise<WebhookDeliveryRecord[]>;
+  /**
+   * CAS claim: pending|failed -> inflight, ONLY if still unclaimed. Returns the
+   * claimed row or null if another instance won. Mirrors ProposalRepository's
+   * claimDecided — this is what makes two dispatchers safe.
+   */
+  claim(id: string, workerId: string, now: string): Promise<WebhookDeliveryRecord | null>;
+  /** Rows stuck inflight since before `before` — crash recovery. */
+  reclaimStale(before: string): Promise<number>;
+  update(id: string, patch: Partial<Pick<WebhookDeliveryRecord, "status" | "attempts" | "nextAttemptAt" | "lastAttemptAt" | "responseStatus" | "responseError" | "durationMs" | "claimedAt" | "claimedBy">>): Promise<WebhookDeliveryRecord>;
+}

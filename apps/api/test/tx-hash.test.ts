@@ -31,6 +31,7 @@ import {
   MemoryCredentialUseCaseRepository,
   MemoryCredentialUseCaseTemplateRepository,
   MemoryDocumentRepository,
+  MemoryEventRepository,
   MemoryListingRepository,
   MemoryLoginKeyRepository,
   MemoryOrganizationRepository,
@@ -39,6 +40,8 @@ import {
   MemoryUseCaseRepository,
   MemoryUserRepository,
   MemoryVerificationRequestRepository,
+  MemoryWebhookDeliveryRepository,
+  MemoryWebhookEndpointRepository,
 } from "../src/persistence/memory.js";
 import { ensurePlatformIssuerOrg } from "../src/platform-org.js";
 import { createMemoryQrLoginStore } from "../src/qr-login-sessions.js";
@@ -75,7 +78,9 @@ async function buildAppWithDeps(registry?: IdentityRegistry): Promise<TestApp> {
     cash: new MemoryCashRepository(), listings: new MemoryListingRepository(), documents: new MemoryDocumentRepository(),
     cashflows: new MemoryCashflowRepository(), proposals: new MemoryProposalRepository(),
     organizations: new MemoryOrganizationRepository(), credentials, verificationRequests: new MemoryVerificationRequestRepository(),
-    stagedInvoices: new MemoryStagedInvoiceRepository(), apiKeys: new MemoryApiKeyRepository(), keystore: createKeystore("11".repeat(32)), didMasterConfigured: true,
+    stagedInvoices: new MemoryStagedInvoiceRepository(), apiKeys: new MemoryApiKeyRepository(),
+    events: new MemoryEventRepository(), webhookEndpoints: new MemoryWebhookEndpointRepository(), webhookDeliveries: new MemoryWebhookDeliveryRepository(),
+    keystore: createKeystore("11".repeat(32)), didMasterConfigured: true,
     challenges: createMemoryChallengeStore(), loginKeys: new MemoryLoginKeyRepository(), qrLogin: createMemoryQrLoginStore(),
     publicWebUrl: "http://localhost:5173", enabledDomains: ["tokenization", "identity"],
     currencies: loadCurrencies(), jwtSecret: "test-secret", publicApiUrl: "http://test.local/api/v1",

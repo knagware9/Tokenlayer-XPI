@@ -21,6 +21,7 @@ import {
   MemoryProposalRepository,
   MemoryCashRepository,
   MemoryDocumentRepository,
+  MemoryEventRepository,
   MemoryListingRepository,
   MemoryStagedInvoiceRepository,
   MemoryCredentialUseCaseRepository,
@@ -28,6 +29,8 @@ import {
   MemoryUseCaseRepository,
   MemoryUserRepository,
   MemoryVerificationRequestRepository,
+  MemoryWebhookDeliveryRepository,
+  MemoryWebhookEndpointRepository,
 } from "../src/persistence/memory.js";
 import { ensurePlatformIssuerOrg } from "../src/platform-org.js";
 import type { IdentityRegistry } from "../src/registry.js";
@@ -81,6 +84,9 @@ export async function buildTestAppWithRepos(opts: TestAppOptions = {}): Promise<
   const verificationRequests = new MemoryVerificationRequestRepository();
   const stagedInvoices = new MemoryStagedInvoiceRepository();
   const apiKeys = new MemoryApiKeyRepository();
+  const events = new MemoryEventRepository();
+  const webhookEndpoints = new MemoryWebhookEndpointRepository();
+  const webhookDeliveries = new MemoryWebhookDeliveryRepository();
   const loginKeys = new MemoryLoginKeyRepository();
   const keystore = createKeystore("11".repeat(32));
   // seedDefaults now creates the second PlatformAdmin (admin2@tokenlayer.dev) so
@@ -96,7 +102,7 @@ export async function buildTestAppWithRepos(opts: TestAppOptions = {}): Promise<
   // The suite makes many logins from one IP; raise the throttle unless a test opts into it.
   const deps: AppDeps = {
     useCases, credentialUseCases, credentialTemplates, rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents, cashflows, proposals,
-    organizations, credentials, verificationRequests, stagedInvoices, apiKeys, keystore, didMasterConfigured: opts.didMasterConfigured ?? true,
+    organizations, credentials, verificationRequests, stagedInvoices, apiKeys, events, webhookEndpoints, webhookDeliveries, keystore, didMasterConfigured: opts.didMasterConfigured ?? true,
     challenges: createMemoryChallengeStore(), loginKeys, qrLogin: createMemoryQrLoginStore(), publicWebUrl: "http://localhost:5173", enabledDomains: opts.enabledDomains ?? ["tokenization", "identity"], trustedKycIssuers: opts.trustedKycIssuers,
     devIssuerSeed: opts.devIssuerSeed, isProduction: opts.isProduction,
     currencies: loadCurrencies(), jwtSecret: "test-secret", publicApiUrl: "http://test.local/api/v1",
