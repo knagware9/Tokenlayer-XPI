@@ -6,6 +6,7 @@
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit",
     "test": "vitest run",
+    "openapi:snapshot": "tsx scripts/write-openapi-snapshot.ts",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push --skip-generate",
     "db:setup": "prisma generate && prisma db push --skip-generate",
