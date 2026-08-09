@@ -492,3 +492,156 @@ describe("every 202 route explains the proposal", () => {
     expect(failures, `\n${failures.join("\n")}\n`).toEqual([]);
   });
 });
+
+/**
+ * ═══ A PATH NAMED IN PROSE MUST BE A PATH THAT EXISTS ═══
+ *
+ * The checks above police STRUCTURE — that security matches the gate, that a
+ * response names its fields, that a 202 says "proposal". None of them read the
+ * English, and the English is what an integrator actually follows.
+ *
+ * MEASURED, not hypothetical: EN-D1's own `ProposalEnvelope` description told
+ * every integrator to "Poll `GET /proposals/:id`" — the first instruction they
+ * meet after their first successful mutation — and that route has never
+ * existed. `/proposals` is a LIST; the single-proposal GET was never built.
+ * Every structural test above stayed green, because a sentence is not a schema.
+ *
+ * So prose is checked against the document's own path table. Any `/…` token in
+ * any `description` or `summary` anywhere in the schema surface must resolve to
+ * a real path, and where the prose names a method too, that method must exist
+ * at that path.
+ *
+ * The exclusion list below is deliberately tiny and each entry carries its
+ * reason. A slash-token this test cannot resolve fails LOUDLY rather than being
+ * skipped by a cleverer heuristic: a filter that quietly drops what it does not
+ * recognise would have dropped `/proposals/:id` too, and this test would have
+ * been written, merged, and useless.
+ */
+
+/**
+ * Slash-tokens that appear in prose and are NOT API paths. Narrow by
+ * construction — the value is the reason it is not a route. Empty today, and
+ * that is the point: across the whole schema surface every slash-token in
+ * English resolves to a real route, so nothing has to be hand-waved.
+ *
+ * NOT the place for a description that mentions a route to say it does not
+ * exist ("there is no `GET /proposals/{id}`"). This test cannot tell that
+ * sentence from an instruction, and neither can a reader skimming — reword it
+ * to name the route that DOES answer the question instead.
+ */
+const NOT_API_PATHS: Record<string, string> = {};
+
+type Prose = { where: string; text: string };
+
+/** Every `description` and `summary` string in the schema surface, with its location. */
+function allProse(): Prose[] {
+  const out: Prose[] = [];
+  const seen = new Set<unknown>();
+  const walk = (node: unknown, where: string): void => {
+    if (!node || typeof node !== "object") return;
+    if (seen.has(node)) return;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      node.forEach((child, i) => walk(child, `${where}[${i}]`));
+      return;
+    }
+    for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+      if ((k === "description" || k === "summary") && typeof v === "string") out.push({ where: `${where}.${k}`, text: v });
+      else walk(v, `${where}.${k}`);
+    }
+  };
+  for (const [name, schema] of Object.entries(S)) walk(schema, `S.${name}`);
+  for (const c of components) walk(c, `${(c as { $id: string }).$id}#`);
+  return out;
+}
+
+/** `/api/v1/orgs/:id/x` and `/orgs/{orgId}/x` both normalise to `/orgs/{}/x`. */
+function normalisePath(raw: string): string {
+  const noPrefix = raw.replace(/^\/api\/v\d+(?=\/|$)/, "");
+  const params = noPrefix.replace(/\{[^}]*\}/g, "{}").replace(/(?<=\/):[A-Za-z0-9_]+/g, "{}");
+  return params.replace(/\/+$/, "") || "/";
+}
+
+/** Slash-tokens in a string, each with the HTTP method that immediately precedes it (if any). */
+function pathMentions(text: string): { method: string | null; raw: string }[] {
+  const re = /\b(GET|POST|PUT|PATCH|DELETE)\s+`?(\/[^\s`"]*)|(?<![\w/])(\/[A-Za-z0-9_{}:.-][^\s`"]*)/g;
+  const out: { method: string | null; raw: string }[] = [];
+  for (const m of text.matchAll(re)) {
+    const method = m[1] ?? null;
+    // Prose punctuation is not part of the path: "…see `GET /events`, which…".
+    const raw = (m[2] ?? m[3] ?? "").replace(/[.,;:)\]]+$/, "");
+    if (!raw || raw.includes("//")) continue; // `https://…` — a URL, not a path on this API
+    out.push({ method, raw });
+  }
+  return out;
+}
+
+describe("no description points an integrator at a route that does not exist", () => {
+  it("every path named in prose resolves to a real path in the document", async () => {
+    const app = await buildTestApp();
+    await app.ready(); // @fastify/swagger builds the document at ready(); calling swagger() before it throws.
+    const doc = app.swagger() as unknown as { paths: Record<string, Record<string, unknown>> };
+
+    // The document's own path table is the oracle — the same table the portal
+    // renders and `every operation traces back to a declaration` already pins.
+    const methodsByPath = new Map<string, Set<string>>();
+    for (const [path, ops] of Object.entries(doc.paths)) {
+      const key = normalisePath(path);
+      const set = methodsByPath.get(key) ?? new Set<string>();
+      for (const method of Object.keys(ops)) set.add(method.toUpperCase());
+      methodsByPath.set(key, set);
+    }
+    expect(methodsByPath.size).toBeGreaterThan(100); // the oracle is populated, not an empty map that passes everything
+
+    // Which schema objects belong to which route, so a failure names the route
+    // an integrator would have been reading, not just a schema key.
+    const routesBySchema = new Map<string, string[]>();
+    for (const r of declaredRoutes()) if (r.schema) routesBySchema.set(r.schema, [...(routesBySchema.get(r.schema) ?? []), routeKey(r)]);
+    const locate = (where: string): string => {
+      const owner = /^S\.(\w+)/.exec(where)?.[1];
+      const routes = owner ? routesBySchema.get(owner) : undefined;
+      return routes?.length ? `${where} (${routes.join(", ")})` : where;
+    };
+
+    const failures: string[] = [];
+    let checked = 0;
+    for (const { where, text } of allProse()) {
+      for (const { method, raw } of pathMentions(text)) {
+        if (raw in NOT_API_PATHS) continue;
+        checked += 1;
+        const norm = normalisePath(raw);
+        const methods = methodsByPath.get(norm);
+        if (!methods) {
+          failures.push(
+            `${locate(where)} sends an integrator to \`${method ? `${method} ` : ""}${raw}\` — no such path exists in the ` +
+              `document. Point at a route that does exist, or add \`${raw}\` to NOT_API_PATHS with the reason it is not one.`,
+          );
+          continue;
+        }
+        if (method && !methods.has(method)) {
+          failures.push(
+            `${locate(where)} names \`${method} ${raw}\`, but ${norm} answers only ${[...methods].filter((x) => x !== "HEAD").sort().join(", ")}.`,
+          );
+        }
+      }
+    }
+    // THE TEST'S OWN BLIND SPOT, closed. A green run above means either "every
+    // path in the prose is real" or "the extractor matched nothing at all", and
+    // those are opposite facts. 21 mentions were found when this was written;
+    // the floor sits well below that so ordinary editing does not trip it, but a
+    // regex that stops matching cannot pass silently.
+    expect(checked, "no path mentions were extracted at all — pathMentions() has stopped matching").toBeGreaterThan(15);
+    // Collected rather than thrown one at a time: one run should print the whole
+    // work queue, not just whichever description sorts first.
+    expect(failures, `\n${failures.join("\n")}\n`).toEqual([]);
+  });
+
+  it("the not-a-path list has no stale entries", () => {
+    // Same discipline as every other exemption list here: an exclusion nobody
+    // needs any more is an exclusion nobody re-examines — and this one's whole
+    // job is to stay small enough to read.
+    const mentioned = new Set(allProse().flatMap(({ text }) => pathMentions(text).map((m) => m.raw)));
+    const stale = Object.keys(NOT_API_PATHS).filter((p) => !mentioned.has(p));
+    expect(stale, `no longer mentioned in any description — drop from NOT_API_PATHS: ${stale.join(", ")}`).toEqual([]);
+  });
+});

@@ -496,7 +496,8 @@ export const components: Record<string, unknown>[] = [
       "THE 202 BODY. What a gated mutation answers with instead of the thing you asked it to create. The operation " +
       "has NOT happened: a proposal is a request captured pending approval, and `proposal.id` is the id of that " +
       "request — never of the user, credential or asset named in it, which may never exist at all if a checker " +
-      "rejects it. Poll `GET /proposals/:id`, or subscribe to `proposal.executed`, to learn the outcome.",
+      "rejects it. There is NO single-proposal GET: to learn the outcome, list `GET /proposals` and match on the " +
+      "id, or — for a machine integration — subscribe to the `proposal.executed` event instead of polling.",
     // NOT `$ref: "Proposal#"`, and the reason is a live wire fact rather than
     // taste. `Proposal#` declares `useCaseKey` as a NON-NULLABLE required string
     // while `ProposalRecord.useCaseKey` is `string | null`, so referencing it
@@ -509,7 +510,7 @@ export const components: Record<string, unknown>[] = [
         type: "object",
         additionalProperties: true,
         properties: {
-          id: { type: "string", description: "The PROPOSAL's id — not the id of the thing it will create. Poll `GET /proposals/{id}` with it." },
+          id: { type: "string", description: "The PROPOSAL's id — not the id of the thing it will create. Match on it in `GET /proposals`; there is no fetch-one route." },
           kind: { type: "string", description: "What is being proposed, e.g. `onboard-user`, `issue-usecase-credential`, `revoke-credential`, `org-capability-change`." },
           useCaseKey: { type: "string", nullable: true, description: "null for proposals that belong to an org rather than a use case — credential and capability kinds." },
           orgId: { type: "string", nullable: true, description: "Set for org-scoped kinds; null for token kinds." },
@@ -587,8 +588,14 @@ export const components: Record<string, unknown>[] = [
       /** The service user this key authenticates as. Its role and use-case scope are the key's ceiling. */
       userId: { type: "string" },
       name: { type: "string" },
-      /** The key's public, non-secret identifier — the `tl_live_…` prefix. */
-      prefix: { type: "string" },
+      /**
+       * The key's public, non-secret identifier. NOT the `tl_live_` marker —
+       * that is stripped (see `prefixOf` in api-keys.ts). This is the first 8
+       * characters of the secret's BODY, i.e. of what follows `tl_live_`, which
+       * is what makes it a usable lookup key: the marker is the same on every
+       * key and would identify none of them.
+       */
+      prefix: { type: "string", description: "The first 8 characters of the secret's body — what follows `tl_live_`, with the marker itself stripped. Public and safe to display; it identifies a key without revealing it." },
       scopes: { type: "array", items: { type: "string" } },
       role: { type: "string", nullable: true, description: "The bound service user's role. null if that user has vanished." },
       useCaseKey: { type: "string", nullable: true },
@@ -1503,7 +1510,10 @@ export const S: Record<string, FastifySchema> = {
     tags: ["Proposals"], summary: "List maker-checker proposals (use-case scoped)", security: humanOnly,
     description:
       "Documented as session-only because a key's view is narrowed at runtime rather than by a scope: a key " +
-      "principal sees only the proposals it could itself decide, and payloads are redacted for every caller.",
+      "principal sees only the proposals it could itself decide, and payloads are redacted for every caller. " +
+      "This LIST is the only read route for proposals — there is no fetch-one — so to follow up a 202, list and " +
+      "match on the `proposal.id` it returned. The listing is narrowed to your use case and organization, so an " +
+      "empty `?status=pending` result means that proposal is no longer pending, not that it never existed.",
     querystring: {
       type: "object",
       additionalProperties: false,
