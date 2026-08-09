@@ -13,6 +13,7 @@ import { deployAndCreateUseCase } from "../use-cases.js";
 import { computeAnalytics } from "../analytics.js";
 import { computeIdentityDashboard } from "../identity-analytics.js";
 import { issueCredentialFor, revokeCredentialById } from "../credential-issuance.js";
+import { emitEvent, ownerOrgOfUseCase } from "../events.js";
 import { mintOrgMembership } from "../membership.js";
 import { ensurePlatformIssuerOrg, PLATFORM_ORG_NAME } from "../platform-org.js";
 import { computeActivity, computePortfolio } from "../investor.js";
@@ -1264,6 +1265,25 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       throw err;
     }
     const finalAsset = await deps.assets.get(id);
+    // EN-C. Only on the UNGATED path — the gated branch above returned 202 with
+    // the asset `pending_approval` and its mint DEFERRED, so nothing has been
+    // issued yet and claiming otherwise would be a lie an integrator acts on.
+    // The gated issuance surfaces as `proposal.executed` on approval.
+    // NOTE `metadata` is deliberately absent: for an invoice use case it is the
+    // commercial detail (debtor, amount, terms) and is not the event's business.
+    await emitEvent(deps, {
+      type: "asset.issued",
+      orgId: useCase.ownerOrgId ?? null,
+      useCaseKey: bUseCaseKey,
+      subjectId: id,
+      data: {
+        assetId: id, name, useCaseKey: bUseCaseKey, chainId,
+        tokenType: result.tokenType, tokenStandard: useCase.tokenStandard,
+        symbol: useCase.symbol, contractRef: result.ref.contractRef,
+        status: finalAsset?.status ?? null, txHash: result.txHash,
+        initialSupply: wantsSupply ? initialSupply : null,
+      },
+    }, input.request.log);
     return { ok: true, status: 201, body: { asset: finalAsset, txHash: result.txHash, ...(issuanceFeeCharged ? { issuanceFee: issuanceFeeCharged } : {}) } };
   }
 
@@ -2996,6 +3016,16 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     return cred;
   }
 
+  /**
+   * EN-C tenancy key for the credential lifecycle events. The owning org of a
+   * credential is the org that SIGNED it, resolved from its issuer DID — not the
+   * acting principal's org, which on these routes is the HOLDER's. Null (⇒
+   * platform-scope) only if that org has vanished; never throws, because it
+   * feeds an emit that must not fail the route.
+   */
+  const issuerOrgIdOf = async (cred: CredentialRecord): Promise<string | null> =>
+    (await deps.organizations.findByDid(cred.issuerDid).catch(() => null))?.id ?? null;
+
   // EN-B: the three holder-lifecycle routes below are DELIBERATELY UNSCOPED.
   // They act only on a credential the caller ALREADY holds and confer no
   // authority over anyone else: accepting/rejecting/asking-for-changes changes
@@ -3007,6 +3037,19 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     if (!cred) return reply;
     const updated = await deps.credentials.setAcceptance(cred.id, { acceptance: "accepted", at: new Date().toISOString(), note: null });
     await deps.audit.append({ actorId: (request.user as TokenClaims).id, action: "credential-accepted" as LifecycleAction, payload: { credentialId: cred.id } });
+    // EN-C: the ISSUER is the party waiting on this answer, so the event is
+    // theirs — a holder does not register webhook endpoints.
+    await emitEvent(deps, {
+      type: "credential.accepted",
+      orgId: await issuerOrgIdOf(cred),
+      useCaseKey: cred.credentialUseCaseKey,
+      subjectId: cred.id,
+      data: {
+        credentialId: cred.id, credentialType: cred.type, subjectDid: cred.holderDid,
+        issuerDid: cred.issuerDid, credentialUseCaseKey: cred.credentialUseCaseKey,
+        acceptance: updated.acceptance, acceptedAt: updated.acceptanceAt,
+      },
+    }, request.log);
     return { id: updated.id, acceptance: updated.acceptance, acceptanceAt: updated.acceptanceAt };
   });
 
@@ -3019,6 +3062,21 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     await revokeCredentialById(deps, cred.id, { reason: note ? `holder rejected: ${note}` : "holder rejected", by: claims.id, at: new Date().toISOString() });
     const updated = await deps.credentials.setAcceptance(cred.id, { acceptance: "rejected", at: new Date().toISOString(), note });
     await deps.audit.append({ actorId: claims.id, action: "credential-rejected" as LifecycleAction, payload: { credentialId: cred.id, note } });
+    // EN-C: a holder rejection legitimately produces TWO events — the
+    // `credential.revoked` that revokeCredentialById above already emitted (the
+    // credential is now dead on-chain) and this one, which says WHY. Both facts
+    // are true and an integrator subscribed to either should see it.
+    await emitEvent(deps, {
+      type: "credential.rejected",
+      orgId: await issuerOrgIdOf(cred),
+      useCaseKey: cred.credentialUseCaseKey,
+      subjectId: cred.id,
+      data: {
+        credentialId: cred.id, credentialType: cred.type, subjectDid: cred.holderDid,
+        issuerDid: cred.issuerDid, credentialUseCaseKey: cred.credentialUseCaseKey,
+        acceptance: updated.acceptance, rejectedAt: updated.acceptanceAt, note, revoked: true,
+      },
+    }, request.log);
     return { id: updated.id, acceptance: updated.acceptance, revoked: true };
   });
 
@@ -3285,6 +3343,22 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
         expiresAt: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
       });
       await deps.audit.append({ actorId: claims.id, action: "verification-requested" as LifecycleAction, payload: { requestId: rec.id, verifierUserId: claims.id, holderDid: b.holderDid, types: b.requestedTypes, credentialUseCaseKey: rec.credentialUseCaseKey } });
+      // EN-C. `verifierOrgId || null`, not `?? null`: an ORG-LESS desk operator
+      // stores "" here (see the `verifierScoped` comment), and "" is not an org —
+      // it must degrade to platform-scope, or `endpointMatches` would hand this
+      // request to any endpoint whose orgId happened to be "".
+      await emitEvent(deps, {
+        type: "verification.requested",
+        orgId: rec.verifierOrgId || null,
+        useCaseKey: rec.credentialUseCaseKey,
+        subjectId: rec.id,
+        data: {
+          requestId: rec.id, verifierOrgId: rec.verifierOrgId || null, holderDid: rec.holderDid,
+          requestedTypes: rec.requestedTypes, purpose: rec.purpose,
+          credentialUseCaseKey: rec.credentialUseCaseKey, status: rec.status,
+          expiresAt: rec.expiresAt,
+        },
+      }, request.log);
       return reply.code(201).send(vreqView(rec));
     }
 
@@ -3325,6 +3399,20 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
       expiresAt: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
     });
     await deps.audit.append({ actorId: claims.id, action: "verification-requested" as LifecycleAction, payload: { requestId: rec.id, verifierOrgId: org.id, holderDid: b.holderDid, types: b.requestedTypes, credentialUseCaseKey: rec.credentialUseCaseKey } });
+    // EN-C — the OrgAdmin path of the same route (see the desk-operator branch
+    // above for why this is `|| null`).
+    await emitEvent(deps, {
+      type: "verification.requested",
+      orgId: rec.verifierOrgId || null,
+      useCaseKey: rec.credentialUseCaseKey,
+      subjectId: rec.id,
+      data: {
+        requestId: rec.id, verifierOrgId: rec.verifierOrgId || null, holderDid: rec.holderDid,
+        requestedTypes: rec.requestedTypes, purpose: rec.purpose,
+        credentialUseCaseKey: rec.credentialUseCaseKey, status: rec.status,
+        expiresAt: rec.expiresAt,
+      },
+    }, request.log);
     return reply.code(201).send(vreqView(rec));
   });
 
@@ -3502,6 +3590,24 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     const result = { valid: core.valid && requestedCovered, holderDid: core.holderDid ?? null, reason: core.reason ?? null, purpose: r.purpose, credentials, verifiedAt: new Date().toISOString() };
     await deps.verificationRequests.setVerifierResult(r.id, { result, at: result.verifiedAt });
     await deps.audit.append({ actorId: claims.id, action: "verification-verified" as LifecycleAction, payload: { requestId: r.id, valid: result.valid, holderDid: core.holderDid ?? null } });
+    // EN-C. The VERDICT ONLY. `result` carries each presented credential's
+    // decoded `claims` — the private content the holder consented to disclose to
+    // ONE verifier, for ONE purpose. Publishing that to a webhook would re-share
+    // it with every endpoint the org has registered, outside the consent the
+    // holder actually gave. So: ids, types, per-credential valid flags, nothing
+    // else. Same reason `vreqView` never exposes verifierResult.
+    await emitEvent(deps, {
+      type: "verification.completed",
+      orgId: r.verifierOrgId || null,
+      useCaseKey: r.credentialUseCaseKey,
+      subjectId: r.id,
+      data: {
+        requestId: r.id, verifierOrgId: r.verifierOrgId || null, holderDid: result.holderDid,
+        credentialUseCaseKey: r.credentialUseCaseKey, purpose: r.purpose,
+        valid: result.valid, reason: result.reason, verifiedAt: result.verifiedAt,
+        credentials: credentials.map((c) => ({ id: c.id, type: c.type, valid: c.valid, reason: c.reason })),
+      },
+    }, request.log);
     return result; // 200 even when valid:false
   });
 
@@ -3838,7 +3944,29 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps): void {
     }
     try {
       await executeProposal(request, p, { id: proposerUser.id, role: proposerUser.role });
-      return { proposal: proposalView(await deps.proposals.setStatus(p.id, "executed")) };
+      const executed = await deps.proposals.setStatus(p.id, "executed");
+      // EN-C. AFTER executeProposal returns, so the event means "it happened",
+      // not "it was approved" — the catch below turns a failed execution into a
+      // `failed` proposal and emits nothing.
+      // `p.orgId` is null for token kinds (they carry useCaseKey instead), so
+      // fall back to the OWNING ORG OF THE USE CASE rather than letting a
+      // tokenization proposal degrade to platform-scope and reach nobody.
+      // The payload is NOT `p.payload`: proposal payloads are internal command
+      // arguments and have already been found to carry a bcrypt passwordHash
+      // (EN-B final review). Kind + ids only.
+      await emitEvent(deps, {
+        type: "proposal.executed",
+        orgId: p.orgId || (p.useCaseKey ? await ownerOrgOfUseCase(deps, p.useCaseKey) : null),
+        useCaseKey: p.useCaseKey,
+        subjectId: p.id,
+        data: {
+          proposalId: p.id, kind: p.kind, orgId: p.orgId, useCaseKey: p.useCaseKey,
+          assetId: p.assetId, status: executed.status,
+          proposerId: p.proposerId, approvals: executed.approvals.length,
+          required: executed.required, decidedAt: executed.decidedAt,
+        },
+      }, request.log);
+      return { proposal: proposalView(executed) };
     } catch (err) {
       const code = err instanceof CodedError ? err.code : err instanceof PolicyError ? err.code : "EXECUTION_FAILED";
       // A gated issuance that fails to activate keeps no fee (parity with reject).
