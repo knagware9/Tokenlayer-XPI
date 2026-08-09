@@ -1,8 +1,10 @@
 # Receive webhooks
 
-> **Draft.** These steps have not yet been executed end to end against a live
-> deployment. They are written from the route handlers, the dispatcher and their
-> tests; task D1-7 runs them verbatim and corrects whatever diverges.
+> **Verified.** Every step below was executed against a live deployment (task
+> D1-7), including the signature recipe in §4 — copied verbatim out of this file
+> into a real receiver, which verified real `ping` and `credential.issued`
+> deliveries, rejected a one-byte-tampered body, and stopped verifying the
+> instant the secret was rotated.
 
 Register an endpoint, verify signatures correctly, survive duplicate and
 out-of-order deliveries, and recover a window you missed. Base URL throughout:
@@ -18,7 +20,20 @@ log has no business rotating a signing secret or repointing a delivery URL.
 | step | scope |
 |---|---|
 | register / update / rotate / delete / test / replay (1–2, 8–10) | `webhooks:write` |
-| list endpoints, read deliveries, read the event cursor (7, 9) | `webhooks:read` |
+| list endpoints, read deliveries, read the event cursor (7, 9, 10) | `webhooks:read` |
+
+The split is strict in both directions, and `GET /events` sits on the **read**
+side even though nothing about it mentions webhooks. A `webhooks:write`-only key
+walking the cursor gets
+
+```
+403 { "error": "INSUFFICIENT_SCOPE", "message": "this API key lacks the 'webhooks:read' scope",
+      "details": { "required": "webhooks:read", "granted": ["webhooks:write"] } }
+```
+
+An integration that both manages its endpoints and runs the recovery loop of
+step 7 therefore needs **both** scopes on the same key. One that only consumes
+needs only `webhooks:read`.
 
 Unlike API-key management, these routes **do** accept a machine principal: a
 webhook endpoint confers no authority, it only ever receives events the org can
@@ -91,10 +106,14 @@ umask 077; printf '%s' '<paste the secret>' > /etc/tokenlayer/webhook.secret
 The event catalog is closed. The v1 types are `credential.issued`,
 `credential.accepted`, `credential.rejected`, `credential.revoked`,
 `verification.requested`, `verification.completed`, `asset.issued`,
-`asset.transferred`, `asset.redeemed`, `proposal.executed`. Anything else is
-`400 UNKNOWN_EVENT_TYPE`. `["*"]` subscribes to everything your org is entitled
-to; there are no partial wildcards, no duplicates, and an empty array is a
-`400`.
+`asset.transferred`, `asset.redeemed`, `proposal.executed`. `["*"]` subscribes
+to everything your org is entitled to; there are no partial wildcards and no
+duplicates. The two rejections are distinct errors:
+
+```
+400 { "error": "UNKNOWN_EVENT_TYPE", "message": "unknown event type 'asset.exploded'", "details": {} }
+400 { "error": "INVALID_EVENT_TYPES", "message": "subscribe to at least one event type", "details": {} }
+```
 
 `useCaseKey` narrows delivery to one use case. Omit it (or send `null`) for the
 whole org's stream. Sending `""` is not a filter — it is an empty string; the
@@ -111,7 +130,9 @@ curl -sS -i -X POST https://<host>/api/v1/orgs/$ORG_ID/webhooks/$WH_ID/test \
 202 Accepted
 { "delivery": { "id": "whd_…", "endpointId": "whe_…", "eventId": "evt_…",
                 "eventSeq": 8814, "status": "pending", "attempts": 0,
-                "nextAttemptAt": "2026-08-09T…", "createdAt": "2026-08-09T…" },
+                "nextAttemptAt": "2026-08-09T…", "createdAt": "2026-08-09T…",
+                "lastAttemptAt": null, "responseStatus": null, "responseError": null,
+                "durationMs": null, "claimedAt": null, "claimedBy": null },
   "event": { "id": "evt_…", "seq": 8814, "type": "ping", "occurredAt": "2026-08-09T…" } }
 ```
 
@@ -151,7 +172,16 @@ Tokenlayer-Signature: t=1786000000,v1=9f2c…
 
 **Redirects are not followed.** A `3xx` from your endpoint counts as a failed
 attempt, never a hop. Only `2xx` counts as delivered — `< 400` would treat a
-`302` to a redirector as success.
+`302` to a redirector as success. An endpoint that answered `302` recorded
+
+```json
+{ "status": "failed", "attempts": 1, "responseStatus": 302,
+  "responseError": "endpoint returned 302" }
+```
+
+so a delivery URL behind a redirect — a trailing-slash rule, an HTTP→HTTPS
+upgrade, a load balancer's canonical host — silently burns all six attempts and
+dead-letters. Register the URL your server actually serves.
 
 ## 4. Verify the signature — over the raw bytes
 
@@ -215,6 +245,17 @@ app.post("/tokenlayer", express.raw({ type: "application/json" }), (req, res) =>
 fastify.addContentTypeParser("application/json", { parseAs: "string" },
   (req, body, done) => { req.rawBody = body; done(null, JSON.parse(body)); });
 ```
+
+*This recipe has been run against real deliveries.* Against a live `ping` and a
+live `credential.issued` it returned `true`; against the same signature with one
+byte of the body changed it returned `false`. The header it verified looked like
+
+```
+Tokenlayer-Signature: t=1786275764,v1=f3b0ea76def06079632bb0589493793c77520dbd9d224feb25aa31476bf65b8e
+```
+
+and the four `Tokenlayer-*` headers in §3 are exactly the ones that arrive —
+there is no separate timestamp header, `t` lives only inside the signature.
 
 The 300-second tolerance does **not** stop a replay inside the window — that is
 inherent to a stateless MAC. Which is what step 5 is for.
@@ -297,7 +338,11 @@ while :; do
 done
 ```
 
-`limit` defaults to 100 and caps at 500. `type` filters to one event type.
+`limit` defaults to 100 and caps at 500. `type` filters to one event type — and
+`nextAfter` is then the seq of the last *matching* event, so a filtered loop
+advances straight past everything it filtered out. **Never share a cursor
+between a filtered and an unfiltered loop**, or the unfiltered one will resume
+from a point it never read. Keep one cursor per filter, or do not filter.
 
 **Feed recovered events through the same deduped handler as webhook deliveries.**
 That is the whole point: the cursor and the webhook carry the same object with
@@ -326,7 +371,10 @@ curl -sS -X POST https://<host>/api/v1/orgs/$ORG_ID/webhooks/$WH_ID/rotate \
 ```
 
 **There is no overlap window, deliberately.** The moment this returns,
-deliveries are signed with the new secret and the old one verifies nothing. A
+deliveries are signed with the new secret and the old one verifies nothing. Run
+live: rotate, then fire a `ping` without redeploying, and the receiver's
+`verify()` returns `false` on the very next delivery; write the new secret and
+the following `ping` verifies again. There is no grace period to notice. A
 grace period would mean a leaked secret stays valid for exactly as long as the
 window, which is the opposite of what rotation is for. Deploy the new secret
 promptly; if you cannot deploy atomically, accept either secret in your verifier
@@ -456,6 +504,21 @@ invite a double send.
 A delivery id belonging to another org answers `404`, not `403`. So does an
 endpoint id. That is deliberate: a `403` would be an existence oracle, letting
 one org confirm which ids another org holds by reading status codes.
+
+```
+GET /orgs/{YOUR_ORG}/webhooks/{their-endpoint-id}/deliveries
+404 { "error": "NOT_FOUND", "message": "webhook endpoint not found" }
+```
+
+**That only holds when the org id in the path is your own.** Put *their* org id
+in the path and you get the tenancy guard instead, which is a `403` — it is
+answering about the org, which you already named, not about an id you were
+guessing:
+
+```
+GET /orgs/{THEIR_ORG}/webhooks/…
+403 { "error": "FORBIDDEN", "message": "not allowed to manage that organization's webhooks" }
+```
 
 ---
 

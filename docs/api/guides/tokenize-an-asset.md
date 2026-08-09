@@ -1,8 +1,11 @@
 # Tokenize an asset
 
-> **Draft.** These steps have not yet been executed end to end against a live
-> deployment. They are written from the route handlers and their tests; task
-> D1-7 runs them verbatim against Besu and corrects whatever diverges.
+> **Verified.** Every call below was executed against a live deployment on Besu
+> (task D1-7), on both an ungated and a gated use case, and the balances were
+> reconciled against the chain's own RPC. Status codes, error codes and response
+> shapes are what the server actually returned. Ids in the samples are
+> illustrative: assets are UUIDs, use cases are the keys you chose, everything
+> else is an opaque cuid.
 
 Configure a use case, mint an asset on chain, transfer it, and read back who
 holds it and what happened. Base URL throughout: `https://<host>/api/v1`.
@@ -76,11 +79,29 @@ intuition from one guide into the other.
 
 | step | scope |
 |---|---|
-| configure a use case (1) | `usecases:provision` |
+| configure a use case, deploy a chain (1, 2) | `usecases:provision` |
+| onboard the desk member (3) | `users:onboard` |
 | issue an asset (5) | `assets:issue` |
 | transfer (6) | `assets:transfer` |
-| read holders, audit, assets (2, 7, 8) | `assets:read` |
-| onboard the desk member (3) | `users:onboard` |
+| read holders, audit, the asset (7, 8, *Verify* 1–2) | `assets:read` |
+| read the use case itself (2) | *none* |
+
+`GET /use-cases` and `GET /use-cases/{key}` need authentication and no scope at
+all: a use case is configuration, not holdings. `POST /audit/anchor` also takes
+no scope — see *Verify it independently*.
+
+**Approving a proposal needs the scope of the operation, not of the route.**
+A `transfer` proposal is decided under `assets:transfer`; an `issue` proposal
+under `assets:issue`. A checker key that holds only `assets:read` gets
+
+```
+403 { "error": "INSUFFICIENT_SCOPE",
+      "message": "this API key lacks the 'assets:transfer' scope required to decide a 'transfer' proposal",
+      "details": { "required": "assets:transfer", "granted": ["assets:issue","assets:read"] } }
+```
+
+and that scope check runs **before** the role check, so a wrongly-scoped key
+never learns whether its role was eligible either.
 
 **Credentials in transit.** Always `Authorization: Bearer …`, never a query
 string. Read secrets from a file or a prompt; a secret typed inline lands in
@@ -97,8 +118,23 @@ compliance, fee and approval policy every asset under it inherits.
 or capability check is reached.** The required fields are `key`, `name`,
 `tokenStandard`, `symbol`, `allowedChainIds`, `defaultChainId`,
 `metadataSchema`, a full **`lifecycle`**, a **`compliance`** object, and a
-**non-empty `roles`** array. Omit `lifecycle` or send `roles: []` and you get a
-validation error, not a helpful gate message.
+**non-empty `roles`** array. There are two different 400s and they come from
+different layers:
+
+```
+# omitted `lifecycle` — JSON-schema layer
+400 { "error": "VALIDATION_ERROR", "message": "body must have required property 'lifecycle'",
+      "details": { "issues": [ … ] } }
+
+# `roles: []` — domain layer
+400 { "error": "INVALID_USECASE", "message": "use case 'zz-y' needs a non-empty 'roles' array" }
+```
+
+**`compliance: {}` is not enough.** The object must actually carry the flags:
+`compliance.allowlist` must be a boolean, and omitting it is
+`400 INVALID_USECASE` — "use case 'globex-bond' compliance.allowlist must be a
+boolean" — which arrives *before* the duplicate-key check, so a half-filled
+`compliance` will mask a `key` collision you also have.
 
 ```bash
 curl -sS -i -X POST https://<host>/api/v1/use-cases \
@@ -150,9 +186,21 @@ curl -sS -X POST https://<host>/api/v1/proposals/$PROPOSAL_ID/approve \
 `status: "executed"` is the success signal. `403 SELF_APPROVAL` if you are the
 proposer — the checker must be a different principal, always.
 
-Other answers: `409 USECASE_EXISTS` / `409 KEY_TAKEN` (the slug is unique across
-*both* the tokenization and credential domains), `400 NO_DEPLOYABLE_CHAIN` if no
-allowed chain could be reached.
+Other answers, and note the two collisions are **not** symmetric:
+
+```
+# the key is taken by another TOKENIZATION use case
+400 { "error": "INVALID_USECASE", "message": "use case 'globex-bond' already exists",
+      "details": { "key": "globex-bond" } }
+
+# the key is taken by a CREDENTIAL use case
+409 { "error": "KEY_TAKEN", "message": "use-case key 'domicile-certificate-tehsildar-office' already exists" }
+```
+
+The slug is unique across *both* domains, but only the cross-domain clash is a
+`409`; a same-domain duplicate comes back through the definition validator as a
+`400`. If you are branching on status to decide "retry with a new slug", handle
+both. `400 NO_DEPLOYABLE_CHAIN` if no allowed chain could be reached.
 
 ## 2. Confirm the contract actually deployed
 
@@ -163,11 +211,18 @@ curl -sS https://<host>/api/v1/use-cases/globex-bond -H "authorization: Bearer $
 ```
 200 OK
 { "key": "globex-bond", "name": "Globex Bond", "symbol": "GXB",
+  "description": "Senior unsecured notes",
   "tokenStandard": "ERC-20", "tokenType": "fungible",
   "allowedChainIds": ["besu"], "defaultChainId": "besu",
-  "contracts": { "besu": { "contractRef": "0x…", "deployTxHash": "0x…" } },
-  "ownerOrgId": "org_…", "lifecycle": { … }, "compliance": { … }, "roles": [ … ] }
+  "metadataSchema": { … },
+  "contracts": { "besu": { "contractRef": "0x5846ab79…", "deployTxHash": "0x53ad1ded…" } },
+  "lifecycle": { … }, "compliance": { … }, "roles": [ … ] }
 ```
+
+`ownerOrgId` is **absent**, not null, on a platform-owned use case — one created
+by a `PlatformAdmin`, whose session carries no org. Test for presence, not for a
+value. `workflow` is likewise absent when nothing is gated, which is the `null`
+case from the section above.
 
 An empty `contracts` object means nothing deployed. Deploy one chain explicitly
 (PlatformAdmin only, `usecases:provision`):
@@ -249,23 +304,54 @@ curl -sS -i -X POST https://<host>/api/v1/assets \
 
 ```
 201 Created
-{ "asset": { "id": "ast_…", "useCaseKey": "globex-bond", "name": "Bond Series A",
-             "symbol": "GXB", "chainId": "besu", "contractRef": "0x…",
+{ "asset": { "id": "9f1f555d-c7ab-4ac8-8971-ddf18ee84750",
+             "useCaseKey": "globex-bond", "name": "Bond Series A",
+             "symbol": "GXB", "chainId": "besu", "contractRef": "0x5846ab79…",
              "tokenType": "fungible", "tokenStandard": "ERC-20",
-             "status": "active", "totalSupply": "1000",
-             "treasuryAccount": "0x…", "createdAt": "2026-08-09T…" },
-  "txHash": "0x…" }
+             "status": "active", "metadata": {},
+             "unitPrice": null, "currency": null,
+             "treasuryAccount": null, "uniqueKey": null,
+             "createdBy": "cmslqa0pg…", "createdAt": "2026-08-09T…" },
+  "txHash": "0x53ad1ded…" }
 ```
+
+**Three things in that body are not what they look like, and all three have
+cost somebody an afternoon:**
+
+- **There is no `totalSupply`.** Not `null` — absent. The created-asset row does
+  not carry supply; supply is read live from the ledger by
+  `GET /assets/{id}`. If your client asserts on `asset.totalSupply` here it will
+  read `undefined` on a mint that entirely succeeded.
+- **`treasuryAccount` is `null`** even though you just sent one. That field is
+  the *marketplace seller*, populated from `sale.treasuryAccount`, not from the
+  top-level `treasuryAccount` that received the mint. The address you sent did
+  get the tokens — check step 7, not this field.
+- **`txHash` is the use case's contract deployment**, not the mint. It is the
+  same `deployTxHash` step 2 showed you, identical for every asset under this
+  use case, because assets share the use case's contract. **The mint has its own
+  transaction and it is in the audit trail** (step 8) as the `mint` entry. If
+  you store this hash as "the mint tx", every asset in the use case will point
+  at the same block.
+
+So: `POST /assets` returning `201` does mean the supply was minted — verified on
+chain below — but the response body is about the *asset*, and the evidence of
+the mint is one call further on.
 
 **Gated use case (`workflow.approvals.issue` set) — `202`, and it is not:**
 
 ```
 202 Accepted
-{ "proposal": { "id": "prp_…", "kind": "issue", "useCaseKey": "globex-bond",
-                "assetId": "ast_…", "payload": { "initialSupply": "1000", "treasury": "0x…" },
-                "required": 1, "approvals": [], "status": "pending" },
-  "asset": { "id": "ast_…", "status": "pending_approval", "totalSupply": null, … } }
+{ "proposal": { "id": "cmslqc7mm…", "kind": "issue", "useCaseKey": "globex-gated",
+                "orgId": null,
+                "assetId": "d43c4dd1-37da-4884-863b-6390492f7390",
+                "payload": { "initialSupply": "1000", "treasury": "0x15d34AAf…" },
+                "required": 1, "approvals": [], "status": "pending",
+                "error": null, "result": null, "decidedAt": null },
+  "asset": { "id": "d43c4dd1-…", "status": "pending_approval", … } }
 ```
+
+The asset object here has no `totalSupply` key either — for the opposite reason:
+nothing has been minted at all.
 
 *What just happened.* On the gated path an asset **row** exists at
 `pending_approval` and carries an id — but it is frozen: no actions, no buys, no
@@ -285,11 +371,18 @@ Read `proposal.status`: `"executed"` means it minted; `"failed"` — with the
 reason in the proposal's **`error`** field — means the approval landed and the
 mint then threw, and the issuance fee, if one was charged, is refunded.
 
-Other answers on this route: `403 WRONG_USE_CASE` (a key may not issue into
-another use case), `400 INVALID_SUPPLY` / `400 MISSING_TREASURY`,
-`400 SUPPLY_UNSUPPORTED` (initial supply is fungible-only),
-`409 DUPLICATE_ASSET` when the use case declares `uniqueBy` and that metadata
-value is already tokenized.
+Other answers on this route: `400 INVALID_SUPPLY` / `400 MISSING_TREASURY`,
+`400 SUPPLY_UNSUPPORTED` (initial supply is fungible-only), `409 DUPLICATE_ASSET`
+when the use case declares `uniqueBy` and that metadata value is already
+tokenized.
+
+And `403 WRONG_USE_CASE`, "cannot issue into another use case" — which is the
+error an `OrgAdmin` key actually gets, *not* the `403 FORBIDDEN` you would
+expect from the role matrix. An `OrgAdmin` key carries no `useCaseKey` at all,
+so the use-case scope check fails first and the role never gets examined. Do not
+read `WRONG_USE_CASE` as "wrong slug" and go hunting for a typo; on an OrgAdmin
+key it means "this principal has no use case, and only `PlatformAdmin` may skip
+that check".
 
 ## 6. Transfer
 
@@ -327,8 +420,23 @@ moves the tokens.
 Token proposals are **use-case scoped**, not org scoped: an approver must have
 `useCaseKey == "globex-bond"` (or be `PlatformAdmin`) to see it at all, and must
 hold the `transfer` capability — so `Trader`, `UseCaseAdmin` or `PlatformAdmin`.
-An `Issuer` gets `403 NOT_ELIGIBLE`; a member of a different use case gets
-`404`.
+Live, in order of which check fires first:
+
+```
+# right use case, wrong role — but only once the SCOPE is right
+403 { "error": "NOT_ELIGIBLE", "message": "role 'Issuer' may not decide 'transfer' proposals" }
+
+# an Issuer key WITHOUT assets:transfer never reaches that check
+403 { "error": "INSUFFICIENT_SCOPE",
+      "message": "this API key lacks the 'assets:transfer' scope required to decide a 'transfer' proposal" }
+
+# a member of a different use case — and an OrgAdmin key, which has none
+404 { "error": "NOT_FOUND", "message": "proposal not found" }
+```
+
+An `OrgAdmin` key landing on `404` rather than a role error is the same
+mirror-image as the credential guide, running the other way: there, `OrgAdmin`
+is the only role that can approve; here it cannot see the proposal at all.
 
 Other answers: `409 ASSET_NOT_ACTIVE` (the asset is matured, retired, or still
 `pending_approval` from an unapproved gated issuance), `403 FORBIDDEN` from
@@ -342,9 +450,15 @@ curl -sS https://<host>/api/v1/assets/$ASSET_ID/accounts -H "authorization: Bear
 
 ```
 200 OK
-[ { "address": "0x…", "label": "Globex Treasury", "balance": "750", "frozen": false, "allowed": true },
-  { "address": "0x…", "label": "Acme Custody",    "balance": "250", "frozen": false, "allowed": true } ]
+[ { "address": "0x70997970…", "label": "Alice",    "balance": "250", "frozen": false, "allowed": false },
+  { "address": "0x15d34AAf…", "label": "Treasury", "balance": "750", "frozen": false, "allowed": false } ]
 ```
+
+**`allowed: false` is not a problem.** It reports membership of the use case's
+allowlist, and this use case set `compliance.allowlist: false`, so nothing is on
+one and nothing needs to be. Read `allowed` only when `compliance.allowlist` is
+`true`; on a use case without an allowlist it is `false` for every holder,
+including ones that just transferred successfully.
 
 Holder data is exactly why reads are scoped: results are already narrowed to the
 caller's use-case scope, and a key never sees more than the service user it is
@@ -360,17 +474,30 @@ curl -sS "https://<host>/api/v1/assets/$ASSET_ID/audit?limit=100&offset=0" \
 ```
 200 OK
 { "data": [
-    { "id": "aud_…", "assetId": "ast_…", "actorId": "usr_…", "action": "issue",
-      "payload": { … }, "txHash": "0x…", "chainId": "besu", "createdAt": "2026-08-09T…" },
-    { "id": "aud_…", "assetId": "ast_…", "actorId": "usr_…", "action": "transfer",
-      "payload": { "from": "0x…", "to": "0x…", "amount": "250" },
-      "txHash": "0x…", "chainId": "besu", "createdAt": "2026-08-09T…" }
+    { "id": "cmslqab2z…", "assetId": "9f1f555d-…", "actorId": "cmslqa0pg…", "action": "mint",
+      "payload": { "to": "0x15d34AAf…", "amount": "1000", "actorRole": "Issuer" },
+      "txHash": "0xc2208e79…", "chainId": "besu", "createdAt": "2026-08-09T…",
+      "seq": 1, "prevHash": "0x38b5cff3…", "hash": "0x89dd546f…" },
+    { "id": "cmslqa7v8…", "assetId": "9f1f555d-…", "actorId": "cmslqa0pg…", "action": "issue",
+      "payload": { "useCaseKey": "globex-bond", "symbol": "GXB", "tokenStandard": "ERC-20",
+                   "contractRef": "0x5846ab79…", "actorRole": "Issuer" },
+      "txHash": "0x53ad1ded…", "chainId": "besu", "createdAt": "2026-08-09T…",
+      "seq": 0, "prevHash": "0x3e744955…", "hash": "0x38b5cff3…" }
   ],
   "pagination": { "limit": 100, "offset": 0, "total": 2 } }
 ```
 
-The log is append-only and hash-chained. Note that a gated operation appears
-here **once, at execution**, under the *proposer's* `actorId` — not under the
+**`data` is newest-first.** Sort by `seq` ascending if you want the story in
+order; `offset` pages backwards through history, it does not walk it forwards.
+
+Note that `issue` and `mint` are **two entries**, and it is the `mint` one that
+carries the transaction that moved supply — `0xc2208e79…` above, which is not
+the `0x53ad1ded…` that `POST /assets` handed back. This is where you get the
+mint's real `txHash`.
+
+The log is append-only and hash-chained: each entry carries its `seq`, the
+`prevHash` it extends and its own `hash`. A gated operation appears here
+**once, at execution**, under the *proposer's* `actorId` — not under the
 approver's, and not at propose time.
 
 ---
@@ -391,17 +518,65 @@ curl -sS https://<host>/api/v1/assets/$ASSET_ID -H "authorization: Bearer $ISSUE
 `GET /assets/{id}` reads total supply live from the chain on every call. If it
 disagrees with what you expect, the chain is right and your model is wrong.
 
-**2. Verify the audit chain against its on-ledger anchor.**
+**2. Verify the audit chain against its on-ledger anchor — but write an anchor
+first.**
 
 ```bash
 curl -sS https://<host>/api/v1/assets/$ASSET_ID/audit/verify -H "authorization: Bearer $ISSUER"
 ```
 
-This recomputes the asset's audit hash chain and compares it against the anchor
-written on the ledger. It is the check that catches a tampered log — a log that
-merely *reads* consistently proves nothing about itself.
+On a freshly issued asset this answers:
 
-There is also `GET /audit/verify` for a whole-scope summary.
+```json
+{ "assetId": "9f1f555d-…", "valid": true, "count": 3, "head": "0x487bd741…",
+  "brokenAt": null, "reason": null,
+  "lastAnchor": null, "anchorConsistent": true }
+```
+
+**`anchorConsistent: true` with `lastAnchor: null` means no comparison was
+made.** Anchors are not written automatically by issuing or transferring —
+nothing on the happy path writes one — so out of the box this route recomputes
+the hash chain and finds it internally consistent, which a tampering attacker
+who rewrote the whole chain would also achieve. Read `lastAnchor` first and
+treat `null` as "unanchored", never as "verified".
+
+Write the anchor yourself. `POST /audit/anchor` anchors the head of every asset
+in your scope and takes **no scope** — it discloses nothing and confers nothing,
+it only spends gas — but it does require a role with the `issue` capability, or
+`Auditor`:
+
+```bash
+curl -sS -X POST https://<host>/api/v1/audit/anchor \
+  -H "authorization: Bearer $ISSUER" -H 'content-type: application/json' -d '{}'
+```
+
+```json
+{ "anchored": [ { "assetId": "9f1f555d-…", "seq": 2, "txHash": "0x6dce9b72…" } ] }
+```
+
+Now the same verify call is worth something:
+
+```json
+{ "assetId": "9f1f555d-…", "valid": true, "count": 3, "head": "0x487bd741…",
+  "lastAnchor": { "seq": 2, "hash": "0x487bd741…", "txHash": "0x6dce9b72…",
+                  "chainId": "besu", "at": "2026-08-09T…" },
+  "anchorConsistent": true }
+```
+
+`anchorConsistent` now really is a comparison against a hash on the ledger, and
+that is the check that catches a tampered log — a log that merely *reads*
+consistently proves nothing about itself. Anchor on a schedule; each anchor
+freezes everything up to its `seq`.
+
+There is also `GET /audit/verify` for a whole-scope summary — and it reports
+`anchoredAssets`, which is the number you should be watching:
+
+```json
+{ "assets": 1, "verified": 1, "tampered": [], "anchoredAssets": 1 }
+```
+
+`anchoredAssets: 0` with `verified` equal to `assets` is the same trap one level
+up: everything self-consistent, nothing actually pinned to a chain.
 
 **3. Go around the API entirely.** You have `contractRef` (the deployed token
 contract) and every `txHash` from the receipts and the audit trail. Against the
@@ -412,8 +587,32 @@ curl -sS -X POST http://<rpc-host>:8545 -H 'content-type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"eth_getTransactionReceipt","params":["0x…"]}'
 ```
 
+```json
+{ "status": "0x1", "blockNumber": "0x20a6a", "to": "0x5846ab79…" }
+```
+
 A receipt with `status: "0x1"` at that `blockNumber` is the mint or the transfer,
-confirmed by the ledger with this platform out of the loop. For an ERC-20 use
-case, an `eth_call` of `balanceOf(address)` against `contractRef` must agree
-with the `balance` that step 7 reported for that address. If those two numbers
-disagree, do not ship — say so.
+confirmed by the ledger with this platform out of the loop. `to` is the use
+case's `contractRef`. Take the hash from the **audit trail**, not from the
+`POST /assets` body — see step 5.
+
+For an ERC-20 use case, an `eth_call` of `balanceOf(address)` against
+`contractRef` must agree with the `balance` that step 7 reported for that
+address. On the live run, after minting 1000 to the treasury and transferring
+250:
+
+```
+balanceOf(0x15d34AAf…)  750      # step 7 said "750"
+balanceOf(0x70997970…)  250      # step 7 said "250"
+totalSupply()          1000      # GET /assets/{id} said "1000"
+```
+
+If those numbers disagree, do not ship — say so.
+
+**One thing that looks like a disagreement and is not.** The token contract
+reports `decimals() == 18`, the ERC-20 default, but the platform mints and
+accounts in **whole base units**: an `initialSupply` of `"1000"` is 1000 wei-like
+units on chain, not 1000 × 10¹⁸. So a raw `balanceOf` matches the API exactly,
+while any wallet or library that applies `formatUnits(balance, 18)` will show
+`0.00000000000000075`. Compare raw values, and if you surface these balances in
+a UI that assumes ERC-20 decimals, scale them yourself.
