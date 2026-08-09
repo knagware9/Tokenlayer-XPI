@@ -80,6 +80,7 @@ async function buildAppWithDeps(registry?: IdentityRegistry): Promise<TestApp> {
     organizations: new MemoryOrganizationRepository(), credentials, verificationRequests: new MemoryVerificationRequestRepository(),
     stagedInvoices: new MemoryStagedInvoiceRepository(), apiKeys: new MemoryApiKeyRepository(),
     events: new MemoryEventRepository(), webhookEndpoints: new MemoryWebhookEndpointRepository(), webhookDeliveries: new MemoryWebhookDeliveryRepository(),
+    webhooksAllowInsecure: false,
     keystore: createKeystore("11".repeat(32)), didMasterConfigured: true,
     challenges: createMemoryChallengeStore(), loginKeys: new MemoryLoginKeyRepository(), qrLogin: createMemoryQrLoginStore(),
     publicWebUrl: "http://localhost:5173", enabledDomains: ["tokenization", "identity"],

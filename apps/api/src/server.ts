@@ -37,6 +37,8 @@ import {
 import { resolveIdentityRegistry } from "./registry.js";
 import { seedDefaults } from "./seed.js";
 import { seedUseCases } from "./use-cases.js";
+import { httpSender, startDispatcher } from "./webhooks/dispatcher.js";
+import { createSecretBox } from "./webhooks/secret-box.js";
 
 async function main(): Promise<void> {
   const rbac = new RbacPolicy();
@@ -106,6 +108,7 @@ async function main(): Promise<void> {
     events,
     webhookEndpoints,
     webhookDeliveries,
+    webhooksAllowInsecure: env.webhooksAllowInsecure,
     keystore,
     didMasterConfigured: env.didMasterConfigured,
     challenges: createMemoryChallengeStore(),
@@ -168,6 +171,39 @@ async function main(): Promise<void> {
   await app.listen({ port: env.port, host: "0.0.0.0" });
   const chainList = chains.list().map((c) => c.id).join(", ");
   console.log(`TokenLayer API listening on http://localhost:${env.port}  (chains: ${chainList})`);
+
+  // Started HERE and nowhere else — deliberately NOT inside buildApp, so the
+  // test harness (which builds hundreds of apps) never starts a live timer that
+  // outlives the test that created it.
+  //
+  // The dispatcher is in-process: while this API is down, the emit path is down
+  // with it, so nothing accumulates AND nothing is delivered. An integrator that
+  // missed deliveries catches up through the cursor API (GET /events?after=),
+  // which is the documented recovery path — not this worker.
+  if (env.webhooksEnabled) {
+    const stop = startDispatcher(
+      {
+        events,
+        webhookEndpoints,
+        webhookDeliveries,
+        secretBox: createSecretBox(env.didMasterKey),
+        send: httpSender,
+        // The SAME guard posture the registration route uses, or a URL that was
+        // legal to save would be permanently undeliverable.
+        guard: { allowInsecureLoopback: env.webhooksAllowInsecure },
+      },
+      env.webhooksPollMs,
+    );
+    // Stop polling before exit so an in-flight pass is not killed mid-settle,
+    // leaving a row inflight for the next process to reclaim.
+    for (const sig of ["SIGTERM", "SIGINT"] as const) {
+      process.once(sig, () => {
+        stop();
+        process.exit(0);
+      });
+    }
+    console.log(`[webhooks] dispatcher polling every ${env.webhooksPollMs}ms`);
+  }
 }
 
 main().catch((err) => {

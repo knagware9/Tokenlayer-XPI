@@ -111,6 +111,25 @@ export interface Env {
   registryChainId: string;
   /** Domains this deployment runs (tokenization, identity). Empty/all-unknown ⇒ both. */
   enabledDomains: string[];
+  /**
+   * Whether THIS process runs the webhook dispatcher (EN-C). Default on.
+   *
+   * The CAS claim makes several instances SAFE (no row is ever sent twice) but
+   * not COORDINATED (there is no fair distribution of work, and every instance
+   * polls the same table). An operator running replicas therefore sets
+   * WEBHOOKS_ENABLED=0 on all but one to keep exactly one dispatcher.
+   */
+  webhooksEnabled: boolean;
+  /** Dispatcher poll interval. The floor on delivery latency for a fresh event. */
+  webhooksPollMs: number;
+  /**
+   * Dev/demo only: permits an http:// webhook URL pointing at loopback, so a
+   * local receiver can be a legal endpoint. NEVER set in production — it is what
+   * stands between an org-supplied URL and the operator's own localhost services.
+   */
+  webhooksAllowInsecure: boolean;
+  /** Per-attempt HTTP timeout. Bounds how long one bad endpoint holds a worker. */
+  webhooksTimeoutMs: number;
 }
 
 const platformFeeAccount =
@@ -151,6 +170,10 @@ export const env: Env = {
     if (parsed.length === 0) { if (raw.length) console.warn("[env] ENABLED_DOMAINS had no known domains — defaulting to both"); return known; }
     return parsed; // empty/all-unknown ⇒ both (never zero)
   })(),
+  webhooksEnabled: process.env.WEBHOOKS_ENABLED !== "0",
+  webhooksPollMs: process.env.WEBHOOKS_POLL_MS ? Number(process.env.WEBHOOKS_POLL_MS) : 2000,
+  webhooksAllowInsecure: process.env.WEBHOOKS_ALLOW_INSECURE === "1",
+  webhooksTimeoutMs: process.env.WEBHOOKS_TIMEOUT_MS ? Number(process.env.WEBHOOKS_TIMEOUT_MS) : 10_000,
 };
 
 if (!env.didMasterConfigured) {

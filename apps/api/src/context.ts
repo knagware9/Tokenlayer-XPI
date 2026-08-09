@@ -59,6 +59,16 @@ export interface AppDeps {
   events: EventRepository;
   webhookEndpoints: WebhookEndpointRepository;
   webhookDeliveries: WebhookDeliveryRepository;
+  /**
+   * Dev/demo only: permits an http:// webhook endpoint on loopback. REQUIRED,
+   * not optional, so that every construction site has to state its posture —
+   * an omitted-and-therefore-undefined flag would silently mean "secure" in one
+   * harness and be forgotten in the one that mattered. The registration-time URL
+   * guard and the dispatcher's delivery-time re-check must be given the SAME
+   * value, or a URL that was legal to save becomes undeliverable (or worse, the
+   * reverse).
+   */
+  webhooksAllowInsecure: boolean;
   keystore: Keystore;
   /** True iff DID_MASTER_KEY was explicitly configured (production must set it). */
   didMasterConfigured: boolean;

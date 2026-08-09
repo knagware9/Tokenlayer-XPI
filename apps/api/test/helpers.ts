@@ -102,7 +102,12 @@ export async function buildTestAppWithRepos(opts: TestAppOptions = {}): Promise<
   // The suite makes many logins from one IP; raise the throttle unless a test opts into it.
   const deps: AppDeps = {
     useCases, credentialUseCases, credentialTemplates, rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents, cashflows, proposals,
-    organizations, credentials, verificationRequests, stagedInvoices, apiKeys, events, webhookEndpoints, webhookDeliveries, keystore, didMasterConfigured: opts.didMasterConfigured ?? true,
+    organizations, credentials, verificationRequests, stagedInvoices, apiKeys, events, webhookEndpoints, webhookDeliveries,
+    // The harness never delivers anything (no dispatcher runs in tests); this is
+    // the registration-time posture, and the secure default is the right one to
+    // exercise by default.
+    webhooksAllowInsecure: false,
+    keystore, didMasterConfigured: opts.didMasterConfigured ?? true,
     challenges: createMemoryChallengeStore(), loginKeys, qrLogin: createMemoryQrLoginStore(), publicWebUrl: "http://localhost:5173", enabledDomains: opts.enabledDomains ?? ["tokenization", "identity"], trustedKycIssuers: opts.trustedKycIssuers,
     devIssuerSeed: opts.devIssuerSeed, isProduction: opts.isProduction,
     currencies: loadCurrencies(), jwtSecret: "test-secret", publicApiUrl: "http://test.local/api/v1",
