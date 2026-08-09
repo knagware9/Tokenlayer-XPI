@@ -460,7 +460,43 @@ export const components: Record<string, unknown>[] = [
       "has NOT happened: a proposal is a request captured pending approval, and `proposal.id` is the id of that " +
       "request — never of the user, credential or asset named in it, which may never exist at all if a checker " +
       "rejects it. Poll `GET /proposals/:id`, or subscribe to `proposal.executed`, to learn the outcome.",
-    properties: { proposal: { $ref: "Proposal#" } },
+    // NOT `$ref: "Proposal#"`, and the reason is a live wire fact rather than
+    // taste. `Proposal#` declares `useCaseKey` as a NON-NULLABLE required string
+    // while `ProposalRecord.useCaseKey` is `string | null`, so referencing it
+    // here would make fast-json-stringify coerce a credential proposal's null
+    // key to `""` — changing what these 202s put on the wire, which this task
+    // must not do. (The `/proposals` read routes DO reference it and so already
+    // emit `""`; that pre-existing coercion is left exactly as it is.)
+    properties: {
+      proposal: {
+        type: "object",
+        additionalProperties: true,
+        properties: {
+          id: { type: "string", description: "The PROPOSAL's id — not the id of the thing it will create. Poll `GET /proposals/{id}` with it." },
+          kind: { type: "string", description: "What is being proposed, e.g. `onboard-user`, `issue-usecase-credential`, `revoke-credential`, `org-capability-change`." },
+          useCaseKey: { type: "string", nullable: true, description: "null for proposals that belong to an org rather than a use case — credential and capability kinds." },
+          orgId: { type: "string", nullable: true, description: "Set for org-scoped kinds; null for token kinds." },
+          assetId: { type: "string", nullable: true },
+          payload: { type: "object", additionalProperties: true, description: "The captured request, with secrets redacted." },
+          proposerId: { type: "string" },
+          proposerLabel: { type: "string" },
+          required: { type: "integer", description: "How many approvals this needs. The proposer's own does not count toward it." },
+          approvals: {
+            type: "array",
+            items: {
+              type: "object", additionalProperties: true,
+              properties: { userId: { type: "string" }, email: { type: "string" }, at: { type: "string" } },
+            },
+          },
+          status: { type: "string", enum: ["pending", "approved", "rejected", "executed", "failed"], description: "Always `pending` in a 202. `executed` is the only state in which the operation has actually happened; `failed` means it was approved and then could not be carried out." },
+          error: { type: "string", nullable: true },
+          result: { type: "object", additionalProperties: true, nullable: true, description: "The executor's report once run — a batch's per-row outcomes, for instance." },
+          createdAt: { type: "string" },
+          decidedAt: { type: "string", nullable: true },
+        },
+        required: ["id", "kind", "payload", "proposerId", "proposerLabel", "required", "approvals", "status", "createdAt"],
+      },
+    },
     required: ["proposal"],
   },
   {
@@ -1845,23 +1881,63 @@ export const S: Record<string, FastifySchema> = {
     // fast-json-stringify under a typed schema (the standing lesson).
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403) },
   },
+  // The three holder-acceptance routes each answer with a MINIMAL acknowledgement
+  // — id plus the fields that just changed — never the whole credential.
   acceptCredential: {
     tags: ["Credentials"], summary: "Holder accepts a pending credential", security: humanOnly,
+    description: "Session-only, and only the holder of the credential may call it. Valid from `pending` or `changes_requested`; anything else is a **409**.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: { type: "object", additionalProperties: false, properties: { note: { type: "string" } } },
-    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 404, 409) },
+    response: {
+      200: {
+        type: "object", additionalProperties: true,
+        properties: {
+          id: { type: "string" },
+          acceptance: { type: "string", enum: ["accepted"] },
+          acceptanceAt: { type: "string", nullable: true },
+        },
+        required: ["id", "acceptance"],
+      },
+      ...errs(401, 404, 409),
+    },
   },
   rejectHeldCredential: {
     tags: ["Credentials"], summary: "Holder rejects a pending credential (revokes it)", security: humanOnly,
+    description:
+      "Session-only, holder of the credential only. **Rejection REVOKES the credential** — it is not merely a " +
+      "status flag, so this is irreversible and the issuer must re-issue rather than re-offer.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: { type: "object", additionalProperties: false, properties: { note: { type: "string" } } },
-    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 404, 409) },
+    response: {
+      200: {
+        type: "object", additionalProperties: true,
+        properties: {
+          id: { type: "string" },
+          acceptance: { type: "string", enum: ["rejected"] },
+          revoked: { type: "boolean", description: "Always `true` — rejecting a held credential revokes it." },
+        },
+        required: ["id", "acceptance", "revoked"],
+      },
+      ...errs(401, 404, 409),
+    },
   },
   requestCredentialChanges: {
     tags: ["Credentials"], summary: "Holder requests changes on a pending credential", security: humanOnly,
+    description: "Session-only, holder of the credential only. Valid from `pending` ALONE — a credential already in `changes_requested` answers **409**.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: { type: "object", additionalProperties: false, required: ["note"], properties: { note: { type: "string", minLength: 1 } } },
-    response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 404, 409) },
+    response: {
+      200: {
+        type: "object", additionalProperties: true,
+        properties: {
+          id: { type: "string" },
+          acceptance: { type: "string", enum: ["changes_requested"] },
+          acceptanceNote: { type: "string", nullable: true, description: "The note you sent, echoed back — this is what the issuer reads." },
+        },
+        required: ["id", "acceptance"],
+      },
+      ...errs(400, 401, 404, 409),
+    },
   },
   didDocument: {
     tags: ["Identity"], summary: "Resolve a did:key into a W3C DID document", security: humanOnly,
@@ -1875,7 +1951,28 @@ export const S: Record<string, FastifySchema> = {
   },
 
   credentialTypes: { tags: ["Credentials"], summary: "The credential-type catalog", security: humanOnly,
-    response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401) } },
+    description:
+      "The PLATFORM-BUILT-IN credential types, the vocabulary `POST /credentials/requests` accepts. It is not the " +
+      "list of types a credential USE CASE defines — those come from the use case itself.",
+    response: {
+      200: {
+        type: "array",
+        items: {
+          type: "object", additionalProperties: true,
+          properties: {
+            type: { type: "string", description: "The type name, e.g. `KycCredential`. This is what you send as `type`." },
+            description: { type: "string" },
+            allowedIssuerOrgTypes: { type: "array", items: { type: "string" }, description: "An org of any other type is refused with 403 ISSUER_NOT_PERMITTED." },
+            requiredApprovals: { type: "integer", description: "Maker-checker depth: how many approvals the resulting proposal needs before anything is issued." },
+            validityDays: { type: "integer" },
+            selfIssuedOnly: { type: "boolean", description: "When true the subject must be a member of the issuing org." },
+            claimSchema: { type: "object", additionalProperties: true, description: "The schema your `claims` object is validated against (400 INVALID_METADATA on a mismatch)." },
+          },
+          required: ["type", "allowedIssuerOrgTypes", "requiredApprovals"],
+        },
+      },
+      ...errs(401),
+    } },
   requestCredential: {
     tags: ["Credentials"], summary: "Request a credential (gated by the type's approval depth)", security: eitherCredential,
     description:
@@ -1891,7 +1988,7 @@ export const S: Record<string, FastifySchema> = {
         issuerOrgId: { type: "string" },
       },
     },
-    response: { 202: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
+    response: { 202: { $ref: "ProposalEnvelope#" }, ...errs(400, 401, 403, 404) },
   },
   issueUsecaseCredential: {
     tags: ["Credentials"], summary: "Issue a configured credential type (gated by the type's approval depth)", security: eitherCredential,
@@ -1908,7 +2005,7 @@ export const S: Record<string, FastifySchema> = {
         claims: { type: "object", additionalProperties: true },
       },
     },
-    response: { 202: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
+    response: { 202: { $ref: "ProposalEnvelope#" }, ...errs(400, 401, 403, 404) },
   },
   issueUsecaseCredentialsBatch: {
     tags: ["Credentials"], summary: "Batch-issue a configured credential type from parsed CSV rows (one maker-checker proposal; draft-time all-or-nothing, execution-time per-row)", security: eitherCredential,
@@ -1934,12 +2031,28 @@ export const S: Record<string, FastifySchema> = {
       },
     },
     response: {
-      202: { type: "object", additionalProperties: true },
+      // ONE proposal for the WHOLE batch. Its `result` field, once executed,
+      // carries the per-row outcomes.
+      202: { $ref: "ProposalEnvelope#" },
       // 400 is overridden (not the shared Error# ref) so `problems` — the
       // per-row draft-time validation report — survives fast-json-stringify's
       // response serialization instead of being stripped as an unlisted
       // property (the ID-G lesson).
-      400: { type: "object", additionalProperties: true },
+      400: {
+        type: "object", additionalProperties: true,
+        properties: {
+          error: { type: "string" },
+          message: { type: "string" },
+          problems: {
+            type: "array",
+            description: "Every row that failed draft-time validation. `index` is the row's position in your request.",
+            items: {
+              type: "object", additionalProperties: true,
+              properties: { index: { type: "integer" }, error: { type: "string" } },
+            },
+          },
+        },
+      },
       ...errs(401, 403, 404),
     },
   },
@@ -1947,10 +2060,25 @@ export const S: Record<string, FastifySchema> = {
     tags: ["Credentials"], summary: "Users eligible to hold a credential of this use case", security: eitherCredential,
     description:
       "Requires the `users:read` scope rather than a credential scope: what it discloses is a list of people, not " +
-      "of credentials.",
+      "of credentials.\n\n" +
+      "Despite the name it returns ORGANIZATIONS as well as users — an org can hold a credential in its entity " +
+      "wallet — so read `kind` rather than assuming a person.",
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     response: {
-      200: { type: "array", items: { type: "object", additionalProperties: true } },
+      200: {
+        type: "array",
+        items: {
+          type: "object", additionalProperties: true,
+          properties: {
+            kind: { type: "string", enum: ["user", "org"] },
+            id: { type: "string", description: "A user id or an organization id, per `kind`. Pass it as `subjectUserId` or `subjectOrgId` when issuing." },
+            label: { type: "string", description: "The user's email, or the organization's name." },
+            did: { type: "string", description: "The holder DID the credential would be issued to. A candidate without one is never listed." },
+            subLabel: { type: "string", nullable: true, description: "For a user: their organization's name (null if none). For an org: its orgType." },
+          },
+          required: ["kind", "id", "label", "did"],
+        },
+      },
       ...errs(401, 403, 404),
     },
   },
@@ -1961,12 +2089,43 @@ export const S: Record<string, FastifySchema> = {
       "that issues cannot also un-issue. Returns **202 with a proposal**, and a `reason` is mandatory.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: { type: "object", additionalProperties: false, required: ["reason"], properties: { reason: { type: "string", minLength: 1 } } },
-    response: { 202: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404, 409) },
+    response: { 202: { $ref: "ProposalEnvelope#" }, ...errs(400, 401, 403, 404, 409) },
   },
   credentialStatus: {
     tags: ["Credentials"], summary: "Public revocation status of a credential (no auth — verifiers must resolve it)",
+    description:
+      "Public — no credential required, because a third-party verifier must be able to resolve revocation without a " +
+      "platform account.\n\n" +
+      "**Read `source` before you trust `revoked`.** `chain` means the answer came from the on-chain VC registry; " +
+      "`database` means it did not — either nothing is anchored, or the chain read FAILED and this fell back to our " +
+      "own record. The two are indistinguishable in `source` alone, so a verifier with a hard requirement on " +
+      "on-chain proof must require `source === \"chain\"` rather than merely reading `revoked`.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
-    response: { 200: { type: "object", additionalProperties: true }, ...errs(404) },
+    response: {
+      200: {
+        type: "object", additionalProperties: true,
+        properties: {
+          id: { type: "string" },
+          revoked: { type: "boolean" },
+          revokedAt: { type: "string", nullable: true },
+          reason: { type: "string", nullable: true },
+          // Present only when acceptance is anything other than a silent, never
+          // touched "accepted" — a legacy credential predating the acceptance
+          // lifecycle simply omits it.
+          acceptance: { type: "string", enum: ["pending", "accepted", "rejected", "changes_requested"], description: "The holder's acceptance state. ABSENT for a credential that predates the acceptance lifecycle." },
+          anchored: { type: "boolean", description: "Whether this credential was found in the on-chain registry." },
+          source: { type: "string", enum: ["chain", "database"], description: "Where `revoked` came from. `database` also covers an on-chain read that failed." },
+          chainId: { type: "string", description: "Chain-source only." },
+          registry: { type: "string", description: "The VC registry contract address. Chain-source only." },
+          vcHash: { type: "string", description: "The anchored hash of the credential. Chain-source only." },
+          anchorTxHash: { type: "string", nullable: true, description: "Chain-source only." },
+          anchorChainId: { type: "string", nullable: true, description: "Chain-source only." },
+          revokeTxHash: { type: "string", nullable: true, description: "Chain-source only." },
+        },
+        required: ["id", "revoked", "anchored", "source"],
+      },
+      ...errs(404),
+    },
   },
   credentialCertificate: {
     tags: ["Credentials"], summary: "Public: download a credential's PDF certificate (when its type enables one)",
@@ -1979,9 +2138,32 @@ export const S: Record<string, FastifySchema> = {
   },
   orgCredentials: {
     tags: ["Credentials"], summary: "Credentials issued by an organization", security: eitherCredential,
-    description: "Requires the `credentials:read` scope. Credentials this organization has issued.",
+    description:
+      "Requires the `credentials:read` scope. Credentials this organization has ISSUED — the ones where it is the " +
+      "issuer. For what it HOLDS, see `GET /orgs/{id}/wallet`.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
-    response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401, 403, 404) },
+    // No `vcJwt` here: this is the issuer's register, not a wallet.
+    response: {
+      200: {
+        type: "array",
+        items: {
+          type: "object", additionalProperties: true,
+          properties: {
+            id: { type: "string" },
+            type: { type: "string", description: "Comma-joined when the credential carries more than one type." },
+            holderDid: { type: "string" },
+            claims: { type: "object", additionalProperties: true, description: "The credential subject's claims, as issued." },
+            issuedAt: { type: "string" },
+            expiresAt: { type: "string", nullable: true },
+            revoked: { type: "boolean" },
+            revokedAt: { type: "string", nullable: true },
+            revokedReason: { type: "string", nullable: true },
+          },
+          required: ["id", "type", "holderDid", "issuedAt", "revoked"],
+        },
+      },
+      ...errs(401, 403, 404),
+    },
   },
   orgWallet: {
     tags: ["Identity"], summary: "Credentials held by an organization (entity wallet)", security: eitherCredential,
@@ -2006,18 +2188,23 @@ export const S: Record<string, FastifySchema> = {
         credentialUseCaseKey: { type: "string" },
       },
     },
-    response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403) },
+    response: { 201: { $ref: "VerificationRequest#" }, ...errs(400, 401, 403) },
   },
   myVerificationRequests: { tags: ["Verification"], summary: "The caller's inbound verification requests", security: eitherCredential,
-    description: "Requires the `verifications:read` scope. The requests addressed to the principal the credential belongs to.",
-    response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401) } },
+    description:
+      "Requires the `verifications:read` scope. The requests addressed to the principal the credential belongs to.\n\n" +
+      "Each row is enriched with `eligibleCredentials` — the caller's own unrevoked, accepted credentials of a " +
+      "requested type — which is what you pass as `credentialIds` when consenting. A caller with no DID gets an " +
+      "empty array rather than an error.",
+    response: { 200: { type: "array", items: { $ref: "VerificationRequest#" } }, ...errs(401) } },
   getVerificationRequest: {
     tags: ["Verification"], summary: "One verification request (holder or verifier org)", security: eitherCredential,
     description:
       "Requires the `verifications:read` scope. Readable by the holder and by the requesting verifier organization " +
       "— but never carries the verifier's RESULT, which needs `verifications:verify`.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
-    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 404) },
+    // 404 — never 403 — for someone else's request: no existence oracle.
+    response: { 200: { $ref: "VerificationRequest#" }, ...errs(401, 404) },
   },
   consentVerificationRequest: {
     tags: ["Verification"], summary: "Holder consents, selecting credentials to disclose", security: eitherCredential,
@@ -2026,21 +2213,82 @@ export const S: Record<string, FastifySchema> = {
       "credentials to disclose, so it is gated as a read of those credentials.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: { type: "object", additionalProperties: false, required: ["credentialIds"], properties: { credentialIds: { type: "array", items: { type: "string" }, minItems: 1 } } },
-    response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404, 409, 410) },
+    // The request, now `consented`. The signed presentation itself is NOT
+    // returned — it is held for the verifier, who reads its verdict from
+    // GET /verification-requests/{id}/verify.
+    response: { 200: { $ref: "VerificationRequest#" }, ...errs(400, 401, 403, 404, 409, 410) },
   },
   rejectVerificationRequest: {
     tags: ["Verification"], summary: "Holder declines a verification request", security: humanOnly,
+    description: "Session-only, and only the holder named in the request may decline it. Valid from `pending` alone; anything else is a **409**.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
-    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404, 409) },
+    response: { 200: { $ref: "VerificationRequest#" }, ...errs(401, 403, 404, 409) },
   },
   verifyVerificationRequest: {
     tags: ["Verification"], summary: "The verifier runs verification on the consented presentation", security: eitherCredential,
     description:
       "Requires the `verifications:verify` scope. Runs verification over the consented presentation and returns the " +
       "result. It is separate from `verifications:read` because the result is a stronger disclosure than the " +
-      "request.",
+      "request.\n\n" +
+      "**A failed verification is a 200, not an error.** `valid: false` is the answer to a well-formed question; " +
+      "only a request that is not yet consented is a 409. Read `valid`, never the status code.\n\n" +
+      "`valid` is stricter than the credentials it lists: it is true only if the presentation itself verifies AND " +
+      "every one of the request's `requestedTypes` is covered by a credential that is itself valid. So a " +
+      "presentation of three good credentials that misses one requested type is `valid: false` with no invalid " +
+      "credential in the array.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
-    response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403, 404, 409) },
+    response: {
+      200: {
+        type: "object", additionalProperties: true,
+        properties: {
+          valid: { type: "boolean", description: "The overall verdict: the presentation verified AND every requested type is covered by a valid credential." },
+          holderDid: { type: "string", nullable: true },
+          reason: { type: "string", nullable: true, description: "Why the PRESENTATION failed, when it did. Per-credential reasons live on each entry." },
+          purpose: { type: "string", description: "Echoed from the request, so the verdict is self-describing in a log." },
+          verifiedAt: { type: "string" },
+          credentials: {
+            type: "array",
+            description: "One entry per credential in the presentation, in presentation order.",
+            items: {
+              type: "object", additionalProperties: true,
+              properties: {
+                id: { type: "string", nullable: true, description: "The credential's id (its JWT `jti`). null when the presented JWT could not be decoded." },
+                type: { type: "string", nullable: true, description: "From OUR record. null for a credential this platform did not issue." },
+                issuer: { type: "string", nullable: true, description: "The issuer DID." },
+                claims: { type: "object", additionalProperties: true, nullable: true, description: "The disclosed subject claims — the actual payload the holder consented to share." },
+                reason: { type: "string", nullable: true, description: "e.g. BAD_ISSUER_SIGNATURE, UNTRUSTED_ISSUER, CREDENTIAL_EXPIRED, SUBJECT_MISMATCH." },
+                valid: { type: "boolean" },
+                checks: {
+                  type: "object", additionalProperties: true,
+                  description: "The individual verdicts behind `valid`. Note `notRevoked` is a BOOLEAN here: an unknown revocation state reads as false, so this credential fails closed.",
+                  properties: {
+                    signature: { type: "boolean" },
+                    trusted: { type: "boolean" },
+                    notExpired: { type: "boolean" },
+                    subjectBound: { type: "boolean" },
+                    notRevoked: { type: "boolean" },
+                  },
+                },
+                issuerResolution: {
+                  type: "object", additionalProperties: true, nullable: true,
+                  description: "On-chain issuer trust, when the issuer DID resolved from a chain. null when it did not — including when there is no registry configured at all.",
+                  properties: {
+                    registered: { type: "boolean" },
+                    active: { type: "boolean" },
+                    chainId: { type: "string" },
+                  },
+                },
+                anchorTxHash: { type: "string", nullable: true },
+                anchorChainId: { type: "string", nullable: true },
+                revokeTxHash: { type: "string", nullable: true },
+              },
+            },
+          },
+        },
+        required: ["valid", "purpose", "credentials", "verifiedAt"],
+      },
+      ...errs(401, 403, 404, 409),
+    },
   },
 
   listUsers: { tags: ["Users"], summary: "List users in scope", security: eitherCredential,
