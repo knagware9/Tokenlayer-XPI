@@ -26,3 +26,6 @@ apps/web/dist/
 
 # Fabric runtime artifacts (wallet + connection profile emitted by fabric-up.sh)
 infra/fabric/.runtime/
+
+# Local screen recordings / demo captures — never committed (large binaries)
+tmp-videos/
