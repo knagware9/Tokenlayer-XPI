@@ -4,9 +4,10 @@ import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
 import Fastify, { type FastifyInstance } from "fastify";
 import type { AppDeps } from "./context.js";
+import { openapiConfig } from "./http/openapi.js";
 import { components } from "./http/schemas.js";
 import { registerRoutes } from "./http/routes.js";
-import { errorHandler } from "./http/support.js";
+import { errorHandler, requirePrincipal } from "./http/support.js";
 
 /** JWT lifetime — tokens expire so a leaked/stale token is not valid forever. */
 const TOKEN_TTL_MS = 1000 * 60 * 60 * 8; // 8 hours
@@ -36,53 +37,67 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     reply.header("X-Content-Type-Options", "nosniff");
     reply.header("X-Frame-Options", "DENY");
     reply.header("Referrer-Policy", "no-referrer");
-    // Strict CSP for the JSON API; Swagger UI (dev-only) needs a relaxed policy, so skip it there.
-    if (!request.url.startsWith("/docs")) reply.header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
+    // Strict CSP for the JSON API; Swagger UI needs a relaxed policy, so skip it there.
+    //
+    // ONLY OUTSIDE PRODUCTION, though. The production gate below is HEADER auth
+    // (`Authorization: Bearer …`), and a browser navigating to /docs cannot send
+    // one — so Swagger UI is not usable in a production browser at all, and
+    // dropping CSP for it there bought nothing while removing a header from a
+    // surface that serves HTML. In production the in-app Reference is the
+    // product (it fetches /openapi.json with the session it already holds); see
+    // docs/api/CHANGELOG.md. Registering the UI anyway keeps /docs a 401 rather
+    // than a 404 for an authenticated tool that does send the header.
+    if (deps.isProduction || !request.url.startsWith("/docs")) {
+      reply.header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
+    }
     return payload;
   });
 
-  // API docs are a recon aid — expose only outside production.
-  if (!deps.isProduction) {
-    await app.register(swagger, {
-      openapi: {
-        info: {
-          title: "XI Tokenize API",
-          version: "1.0.0",
-          description:
-            "Chain-agnostic asset-tokenization REST API: configure use cases, issue assets across DLTs and token standards (ERC-20/721/3643), run the compliance-aware lifecycle, and read holders + audit trail.",
-        },
-        components: {
-          securitySchemes: { bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" } },
-        },
-        tags: [
-          { name: "Auth", description: "Authentication" },
-          { name: "Catalog", description: "Chains and accounts" },
-          { name: "Use Cases", description: "Low-code asset-type definitions" },
-          { name: "Assets", description: "Tokenized asset issuance and queries" },
-          { name: "Lifecycle", description: "Mint / transfer / burn / freeze / allow" },
-          { name: "Users", description: "Scoped user provisioning" },
-        ],
-      },
-    });
-    await app.register(swaggerUi, { routePrefix: "/docs" });
-  }
+  // ONE principal preHandler for the whole app: it owns the per-key rate-limit
+  // and failed-attempt counters, so the docs gate below and every /api/v1 route
+  // must share this instance rather than each build its own.
+  const principal = requirePrincipal(deps);
+
+  // The OpenAPI document is ALWAYS generated (EN-D1): the in-app developer
+  // portal renders from it and the contract test reads it, so it cannot be
+  // conditional on the environment. What production changes is EXPOSURE, not
+  // existence — see the gated plugin below.
+  await app.register(swagger, openapiConfig(deps.publicApiUrl));
 
   // Shared schema components (referenced by routes via $ref and by OpenAPI).
   for (const component of components) app.addSchema(component);
 
   app.setErrorHandler(errorHandler);
 
+  /**
+   * Docs surface: the raw OpenAPI 3 document plus Swagger UI.
+   *
+   * Both live in ONE encapsulated plugin so a single preHandler covers them.
+   * An UNAUTHENTICATED spec is a recon aid — it enumerates every route, every
+   * field name and every error code to anyone who asks — while an
+   * AUTHENTICATED one is the product an integrator was sold. So in production
+   * we require a principal; outside it, the docs stay open because that is what
+   * makes local development and the demo scripts usable.
+   *
+   * The gate reuses `principal` — the very preHandler every /api/v1 route runs.
+   * There is deliberately no second authentication path here: a docs-only
+   * credential check would be a second place for the session rules (expiry,
+   * deactivated users, revoked keys) to drift out of agreement with the API's.
+   * A machine caller's API key is accepted too; reading the document is the one
+   * thing every key holder legitimately needs to do.
+   */
+  await app.register(async (docs) => {
+    if (deps.isProduction) docs.addHook("preHandler", principal);
+    await docs.register(swaggerUi, { routePrefix: "/docs" });
+    docs.get("/openapi.json", { schema: { hide: true } }, async () => docs.swagger());
+  });
+
   await app.register(
     async (instance) => {
-      registerRoutes(instance, deps);
+      registerRoutes(instance, deps, principal);
     },
     { prefix: "/api/v1" },
   );
-
-  // Raw OpenAPI 3 document — only when docs are enabled (non-production).
-  if (!deps.isProduction) {
-    app.get("/openapi.json", { schema: { hide: true } }, async () => app.swagger());
-  }
 
   return app;
 }

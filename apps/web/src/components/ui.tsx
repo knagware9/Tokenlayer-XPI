@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 // Shared UI primitives for the TokenLayer console — cards, pills, stats,
 // empty states, skeletons and a small inline icon set. Zero dependencies;
 // everything is Tailwind + hand-drawn SVG so screens stay consistent.
@@ -223,6 +225,59 @@ export function EmptyState(props: {
       <div className="text-sm font-medium text-slate-700">{title}</div>
       {hint && <p className="text-xs text-slate-500 mt-1 max-w-xs">{hint}</p>}
       {action && <div className="mt-4">{action}</div>}
+    </div>
+  );
+}
+
+/**
+ * A code block with a copy button (EN-D1).
+ *
+ * Shared because the developer portal has exactly two kinds of thing worth
+ * copying and they must behave identically: the `curl` the API reference offers
+ * in place of a "Try it" button, and every fenced block in the integration
+ * guides. A snippet an integrator has to select by hand is a snippet they will
+ * paste with a stray character in it.
+ *
+ * The failure arm is not decoration. `navigator.clipboard` rejects on an
+ * insecure origin and when the permission is denied, and a button that silently
+ * does nothing reads as a broken page — so a failure says so and points at the
+ * manual route, exactly as the one-time-secret panel does.
+ */
+export function CopyBlock(props: { code: string; language?: string; className?: string }): JSX.Element {
+  const [state, setState] = useState<"idle" | "ok" | "fail">("idle");
+
+  async function copy(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(props.code);
+      setState("ok");
+      window.setTimeout(() => setState("idle"), 1500);
+    } catch {
+      setState("fail");
+    }
+  }
+
+  return (
+    <div className={`relative group ${props.className ?? ""}`}>
+      <pre className="overflow-x-auto rounded-lg bg-slate-900 text-slate-100 font-mono text-xs p-4 pr-20 leading-5">
+        <code>{props.code}</code>
+      </pre>
+      {props.language && (
+        <span className="absolute left-3 -top-2 rounded bg-slate-700 text-slate-200 px-1.5 text-[10px] font-medium uppercase tracking-wide">
+          {props.language}
+        </span>
+      )}
+      <button
+        type="button"
+        onClick={() => void copy()}
+        className="absolute top-2.5 right-2.5 rounded border border-slate-600 bg-slate-800/90 text-slate-200 px-2 py-1 text-[11px] font-medium hover:bg-slate-700"
+      >
+        {state === "ok" ? "Copied" : state === "fail" ? "Copy failed" : "Copy"}
+      </button>
+      {state === "fail" && (
+        <p className="text-[11px] text-red-600 mt-1">
+          The clipboard is unavailable here (an insecure origin, or a denied permission) — select the block and copy it manually.
+        </p>
+      )}
     </div>
   );
 }

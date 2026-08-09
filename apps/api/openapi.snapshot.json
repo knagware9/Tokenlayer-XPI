@@ -1,0 +1,3339 @@
+{
+  "openapi": "3.0.3",
+  "securitySchemes": {
+    "apiKeyAuth": {
+      "type": "http",
+      "scheme": "bearer",
+      "bearerFormat": null
+    },
+    "bearerAuth": {
+      "type": "http",
+      "scheme": "bearer",
+      "bearerFormat": "JWT"
+    }
+  },
+  "components": {
+    "AccountState": [
+      "address",
+      "allowed",
+      "balance",
+      "frozen",
+      "label"
+    ],
+    "Analytics": [
+      "activity",
+      "byLedger",
+      "byUseCase",
+      "recent",
+      "scope",
+      "totals",
+      "useCaseKey"
+    ],
+    "ApiKeyView": [
+      "createdAt",
+      "createdBy",
+      "expiresAt",
+      "id",
+      "lastUsedAt",
+      "name",
+      "orgId",
+      "prefix",
+      "revokedAt",
+      "revokedBy",
+      "role",
+      "scopes",
+      "status",
+      "useCaseKey",
+      "userId"
+    ],
+    "Asset": [
+      "availableSupply",
+      "chainId",
+      "contractRef",
+      "createdAt",
+      "createdBy",
+      "currency",
+      "id",
+      "metadata",
+      "name",
+      "status",
+      "symbol",
+      "tokenStandard",
+      "tokenType",
+      "totalSupply",
+      "treasuryAccount",
+      "unitPrice",
+      "useCaseKey"
+    ],
+    "AssetList": [
+      "data",
+      "pagination"
+    ],
+    "AuditEntry": [
+      "action",
+      "actorId",
+      "assetId",
+      "chainId",
+      "createdAt",
+      "id",
+      "payload",
+      "txHash"
+    ],
+    "AuditList": [
+      "data",
+      "pagination"
+    ],
+    "Cashflow": [
+      "amount",
+      "assetId",
+      "currency",
+      "dueDate",
+      "executedAt",
+      "id",
+      "kind",
+      "seq",
+      "status"
+    ],
+    "Chain": [
+      "available",
+      "configured",
+      "currencySymbol",
+      "expectedChainId",
+      "explorerUrl",
+      "family",
+      "faucetUrl",
+      "id",
+      "kind",
+      "label",
+      "mode",
+      "rpcHost"
+    ],
+    "ChainStatus": [
+      "balance",
+      "chainId",
+      "error",
+      "id",
+      "mode",
+      "operator",
+      "reachable"
+    ],
+    "ContractCode": [
+      "chainId",
+      "constructorArgs",
+      "deployed",
+      "family",
+      "filename",
+      "language",
+      "mode",
+      "source"
+    ],
+    "CredentialUseCase": [
+      "credentialTypes",
+      "description",
+      "holderPolicy",
+      "issuer",
+      "key",
+      "name",
+      "ownerOrgId",
+      "status",
+      "verifier"
+    ],
+    "CredentialUseCaseTemplate": [
+      "body",
+      "builtIn",
+      "category",
+      "description",
+      "key",
+      "name",
+      "parameters"
+    ],
+    "Currency": [
+      "code",
+      "label"
+    ],
+    "Error": [
+      "details",
+      "error",
+      "message"
+    ],
+    "Event": [
+      "data",
+      "id",
+      "occurredAt",
+      "orgId",
+      "seq",
+      "subjectId",
+      "type",
+      "useCaseKey"
+    ],
+    "Listing": [
+      "assetId",
+      "createdAt",
+      "currency",
+      "id",
+      "quantity",
+      "seller",
+      "status",
+      "unitPrice",
+      "updatedAt"
+    ],
+    "MetadataSchema": [
+      "properties",
+      "required",
+      "type"
+    ],
+    "Organization": [
+      "capabilities",
+      "companyProfile",
+      "createdAt",
+      "credentials",
+      "did",
+      "id",
+      "jurisdiction",
+      "name",
+      "orgType",
+      "registrationId",
+      "status",
+      "verified"
+    ],
+    "Pagination": [
+      "limit",
+      "offset",
+      "total"
+    ],
+    "PropertySchema": [
+      "description",
+      "enum",
+      "max",
+      "min",
+      "pattern",
+      "type"
+    ],
+    "Proposal": [
+      "approvals",
+      "assetId",
+      "createdAt",
+      "decidedAt",
+      "error",
+      "id",
+      "kind",
+      "payload",
+      "proposerId",
+      "proposerLabel",
+      "required",
+      "result",
+      "status",
+      "useCaseKey"
+    ],
+    "ProposalEnvelope": [
+      "proposal"
+    ],
+    "Receipt": [
+      "blockNumber",
+      "chainId",
+      "timestamp",
+      "txHash"
+    ],
+    "TokenInfo": [
+      "frozen",
+      "owner",
+      "ownerLabel",
+      "tokenId"
+    ],
+    "UseCase": [
+      "allowedChainIds",
+      "compliance",
+      "contracts",
+      "defaultChainId",
+      "description",
+      "fees",
+      "key",
+      "lifecycle",
+      "metadataSchema",
+      "name",
+      "roles",
+      "saleTermsDefault",
+      "symbol",
+      "tokenStandard",
+      "tokenType"
+    ],
+    "VerificationRequest": [
+      "consentedAt",
+      "consentedCredentialIds",
+      "createdAt",
+      "credentialUseCaseKey",
+      "eligibleCredentials",
+      "expiresAt",
+      "holderDid",
+      "id",
+      "purpose",
+      "requestedTypes",
+      "status",
+      "verifiedAt",
+      "verifierOrgId"
+    ],
+    "WebhookDelivery": [
+      "attempts",
+      "claimedAt",
+      "claimedBy",
+      "createdAt",
+      "durationMs",
+      "endpointId",
+      "eventId",
+      "eventSeq",
+      "id",
+      "lastAttemptAt",
+      "nextAttemptAt",
+      "responseError",
+      "responseStatus",
+      "status"
+    ],
+    "WebhookEndpoint": [
+      "consecutiveFailures",
+      "consecutiveGuardFailures",
+      "createdAt",
+      "createdBy",
+      "deletedAt",
+      "description",
+      "disabledAt",
+      "disabledReason",
+      "eventTypes",
+      "failingSince",
+      "id",
+      "lastDeliveryAt",
+      "orgId",
+      "status",
+      "url",
+      "useCaseKey"
+    ]
+  },
+  "paths": {
+    "/api/v1/accounts": {
+      "get": {
+        "tags": [
+          "Catalog"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "assets:read"
+        ],
+        "parameters": [],
+        "requestBody": false,
+        "responses": {
+          "200": "[{address,id,label}]",
+          "401": "#Error"
+        }
+      }
+    },
+    "/api/v1/analytics": {
+      "get": {
+        "tags": [
+          "Analytics"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "assets:read"
+        ],
+        "parameters": [
+          "query:days",
+          "query:useCaseKey"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "#Analytics",
+          "401": "#Error"
+        }
+      }
+    },
+    "/api/v1/assets": {
+      "get": {
+        "tags": [
+          "Assets"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "assets:read"
+        ],
+        "parameters": [
+          "query:chainId",
+          "query:limit",
+          "query:offset",
+          "query:status",
+          "query:useCaseKey"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "#AssetList",
+          "401": "#Error"
+        }
+      },
+      "post": {
+        "tags": [
+          "Assets"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "assets:issue"
+        ],
+        "parameters": [],
+        "requestBody": true,
+        "responses": {
+          "201": "{asset,issuanceFee,txHash}",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error"
+        }
+      }
+    },
+    "/api/v1/assets/{id}": {
+      "get": {
+        "tags": [
+          "Assets"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "assets:read"
+        ],
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "#Asset",
+          "401": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/assets/{id}/accounts": {
+      "get": {
+        "tags": [
+          "Assets"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "assets:read"
+        ],
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "[#AccountState]",
+          "401": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/assets/{id}/actions/{action}": {
+      "post": {
+        "tags": [
+          "Lifecycle"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "assets:transfer"
+        ],
+        "parameters": [
+          "path:action!",
+          "path:id!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "oneOf({receipt}|{ok})",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/assets/{id}/audit": {
+      "get": {
+        "tags": [
+          "Assets"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "assets:read"
+        ],
+        "parameters": [
+          "path:id!",
+          "query:limit",
+          "query:offset"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "#AuditList",
+          "401": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/assets/{id}/audit/verify": {
+      "get": {
+        "tags": [
+          "Audit"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "assets:read"
+        ],
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "{}",
+          "401": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/assets/{id}/buy": {
+      "post": {
+        "tags": [
+          "Marketplace"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "assets:transfer"
+        ],
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "{}",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/assets/{id}/cashflows": {
+      "get": {
+        "tags": [
+          "Cashflows"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "assets:read"
+        ],
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "{cashflows,preview}",
+          "401": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/assets/{id}/cashflows/{cfId}/execute": {
+      "post": {
+        "tags": [
+          "Cashflows"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "assets:transfer"
+        ],
+        "parameters": [
+          "path:cfId!",
+          "path:id!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "{cashflow}",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error",
+          "409": "#Error"
+        }
+      }
+    },
+    "/api/v1/assets/{id}/listings": {
+      "get": {
+        "tags": [
+          "Marketplace"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "assets:read"
+        ],
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "[{createdAt,currency,id,quantity,seller,unitPrice}]",
+          "401": "#Error",
+          "404": "#Error",
+          "503": "#Error"
+        }
+      },
+      "post": {
+        "tags": [
+          "Marketplace"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "assets:transfer"
+        ],
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "201": "#Listing",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error",
+          "503": "#Error"
+        }
+      }
+    },
+    "/api/v1/assets/{id}/tokens": {
+      "get": {
+        "tags": [
+          "Assets"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "assets:read"
+        ],
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "[#TokenInfo]",
+          "401": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/assets/{id}/trades": {
+      "get": {
+        "tags": [
+          "Marketplace"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "assets:read"
+        ],
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "[{amount,at,currency,from,secondary,to,unitPrice}]",
+          "401": "#Error",
+          "404": "#Error",
+          "503": "#Error"
+        }
+      }
+    },
+    "/api/v1/audit/anchor": {
+      "post": {
+        "tags": [
+          "Audit"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [],
+        "requestBody": true,
+        "responses": {
+          "200": "{}",
+          "401": "#Error",
+          "403": "#Error"
+        }
+      }
+    },
+    "/api/v1/audit/verify": {
+      "get": {
+        "tags": [
+          "Audit"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "assets:read"
+        ],
+        "parameters": [],
+        "requestBody": false,
+        "responses": {
+          "200": "{}",
+          "401": "#Error"
+        }
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "security": null,
+        "scopes": null,
+        "parameters": [],
+        "requestBody": true,
+        "responses": {
+          "200": "{token,user}",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error"
+        }
+      }
+    },
+    "/api/v1/auth/qr/start": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "security": null,
+        "scopes": null,
+        "parameters": [],
+        "requestBody": false,
+        "responses": {
+          "200": "{challenge,expiresAt,qrSvg,sessionId,signUrl}"
+        }
+      }
+    },
+    "/api/v1/auth/qr/{id}": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "security": null,
+        "scopes": null,
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "{status,token,user}",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/auth/qr/{id}/authenticate": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "security": null,
+        "scopes": null,
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "{ok}",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error",
+          "410": "#Error",
+          "429": "#Error"
+        }
+      }
+    },
+    "/api/v1/cash/balances": {
+      "get": {
+        "tags": [
+          "Cash"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "assets:read"
+        ],
+        "parameters": [
+          "query:address"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "[{}]",
+          "401": "#Error",
+          "403": "#Error"
+        }
+      }
+    },
+    "/api/v1/cash/credit": {
+      "post": {
+        "tags": [
+          "Cash"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "assets:transfer"
+        ],
+        "parameters": [],
+        "requestBody": true,
+        "responses": {
+          "200": "{}",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error"
+        }
+      }
+    },
+    "/api/v1/chains": {
+      "get": {
+        "tags": [
+          "Catalog"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [],
+        "requestBody": false,
+        "responses": {
+          "200": "[#Chain]",
+          "401": "#Error"
+        }
+      }
+    },
+    "/api/v1/chains/{id}/status": {
+      "get": {
+        "tags": [
+          "Catalog"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "#ChainStatus",
+          "401": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/config": {
+      "get": {
+        "tags": [
+          "Config"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [],
+        "requestBody": false,
+        "responses": {
+          "200": "{domains}",
+          "401": "#Error"
+        }
+      }
+    },
+    "/api/v1/credential-templates": {
+      "get": {
+        "tags": [
+          "Credential Use Cases"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [],
+        "requestBody": false,
+        "responses": {
+          "200": "{}",
+          "401": "#Error"
+        }
+      }
+    },
+    "/api/v1/credential-types": {
+      "get": {
+        "tags": [
+          "Credentials"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [],
+        "requestBody": false,
+        "responses": {
+          "200": "[{allowedIssuerOrgTypes,claimSchema,description,requiredApprovals,selfIssuedOnly,type,validityDays}]",
+          "401": "#Error"
+        }
+      }
+    },
+    "/api/v1/credential-use-case-templates": {
+      "get": {
+        "tags": [
+          "Credential Use Cases"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [],
+        "requestBody": false,
+        "responses": {
+          "200": "{templates}",
+          "401": "#Error"
+        }
+      },
+      "post": {
+        "tags": [
+          "Credential Use Cases"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "usecases:provision"
+        ],
+        "parameters": [],
+        "requestBody": true,
+        "responses": {
+          "201": "#CredentialUseCaseTemplate",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "409": "#Error"
+        }
+      }
+    },
+    "/api/v1/credential-use-case-templates/{key}": {
+      "get": {
+        "tags": [
+          "Credential Use Cases"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [
+          "path:key!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "#CredentialUseCaseTemplate",
+          "401": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/credential-use-case-templates/{key}/preview": {
+      "post": {
+        "tags": [
+          "Credential Use Cases"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [
+          "path:key!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "{definition}",
+          "400": "{error,message,problems}",
+          "401": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/credential-use-cases": {
+      "get": {
+        "tags": [
+          "Credential Use Cases"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [],
+        "requestBody": false,
+        "responses": {
+          "200": "[#CredentialUseCase]",
+          "401": "#Error"
+        }
+      },
+      "post": {
+        "tags": [
+          "Credential Use Cases"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "usecases:provision"
+        ],
+        "parameters": [],
+        "requestBody": true,
+        "responses": {
+          "201": "#CredentialUseCase",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "409": "#Error"
+        }
+      }
+    },
+    "/api/v1/credential-use-cases/provision": {
+      "post": {
+        "tags": [
+          "Credential Use Cases"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "usecases:provision"
+        ],
+        "parameters": [],
+        "requestBody": true,
+        "responses": {
+          "200": "{deskUsers,org,useCase}",
+          "201": "{deskUsers,org,useCase}",
+          "400": "{error,message,problems}",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error",
+          "409": "#Error",
+          "502": "#Error",
+          "503": "#Error"
+        }
+      }
+    },
+    "/api/v1/credential-use-cases/{key}": {
+      "get": {
+        "tags": [
+          "Credential Use Cases"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [
+          "path:key!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "#CredentialUseCase",
+          "401": "#Error",
+          "404": "#Error"
+        }
+      },
+      "patch": {
+        "tags": [
+          "Credential Use Cases"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "usecases:provision"
+        ],
+        "parameters": [
+          "path:key!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "#CredentialUseCase",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/credential-use-cases/{key}/credentials": {
+      "post": {
+        "tags": [
+          "Credentials"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "credentials:issue"
+        ],
+        "parameters": [
+          "path:key!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "202": "#ProposalEnvelope",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/credential-use-cases/{key}/credentials/batch": {
+      "post": {
+        "tags": [
+          "Credentials"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "credentials:issue"
+        ],
+        "parameters": [
+          "path:key!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "202": "#ProposalEnvelope",
+          "400": "{error,message,problems}",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/credential-use-cases/{key}/eligible-holders": {
+      "get": {
+        "tags": [
+          "Credentials"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "users:read"
+        ],
+        "parameters": [
+          "path:key!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "[{did,id,kind,label,subLabel}]",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/credentials/requests": {
+      "post": {
+        "tags": [
+          "Credentials"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "credentials:issue"
+        ],
+        "parameters": [],
+        "requestBody": true,
+        "responses": {
+          "202": "#ProposalEnvelope",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/credentials/{id}/certificate.pdf": {
+      "get": {
+        "tags": [
+          "Credentials"
+        ],
+        "security": null,
+        "scopes": null,
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/credentials/{id}/revoke": {
+      "post": {
+        "tags": [
+          "Credentials"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "credentials:revoke"
+        ],
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "202": "#ProposalEnvelope",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error",
+          "409": "#Error"
+        }
+      }
+    },
+    "/api/v1/credentials/{id}/status": {
+      "get": {
+        "tags": [
+          "Credentials"
+        ],
+        "security": null,
+        "scopes": null,
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "{acceptance,anchorChainId,anchorTxHash,anchored,chainId,id,reason,registry,revokeTxHash,revoked,revokedAt,source,vcHash}",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/currencies": {
+      "get": {
+        "tags": [
+          "Catalog"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [],
+        "requestBody": false,
+        "responses": {
+          "200": "[#Currency]",
+          "401": "#Error"
+        }
+      }
+    },
+    "/api/v1/dids/{did}/document": {
+      "get": {
+        "tags": [
+          "Identity"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [
+          "path:did!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "{}",
+          "400": "#Error",
+          "401": "#Error"
+        }
+      }
+    },
+    "/api/v1/dids/{did}/resolve": {
+      "get": {
+        "tags": [
+          "Identity"
+        ],
+        "security": null,
+        "scopes": null,
+        "parameters": [
+          "path:did!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "{}"
+        }
+      }
+    },
+    "/api/v1/documents": {
+      "post": {
+        "tags": [
+          "Documents"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [],
+        "requestBody": true,
+        "responses": {
+          "201": "{id,sha256,size,url}",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "413": "#Error"
+        }
+      }
+    },
+    "/api/v1/documents/{id}": {
+      "get": {
+        "tags": [
+          "Documents"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "assets:read"
+        ],
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "401": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/events": {
+      "get": {
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "webhooks:read"
+        ],
+        "parameters": [
+          "query:after",
+          "query:limit",
+          "query:type"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "{events,nextAfter}",
+          "401": "#Error"
+        }
+      }
+    },
+    "/api/v1/identity/dashboard": {
+      "get": {
+        "tags": [
+          "Identity"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "credentials:read"
+        ],
+        "parameters": [],
+        "requestBody": false,
+        "responses": {
+          "200": "{}",
+          "401": "#Error",
+          "403": "#Error"
+        }
+      }
+    },
+    "/api/v1/identity/mint": {
+      "post": {
+        "tags": [
+          "Identity"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [],
+        "requestBody": true,
+        "responses": {
+          "200": "{}",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/listings/{id}": {
+      "delete": {
+        "tags": [
+          "Marketplace"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "assets:transfer"
+        ],
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "204": "none",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error",
+          "503": "#Error"
+        }
+      }
+    },
+    "/api/v1/listings/{id}/take": {
+      "post": {
+        "tags": [
+          "Marketplace"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "assets:transfer"
+        ],
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "{fee,listing,txHash}",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error",
+          "503": "#Error"
+        }
+      }
+    },
+    "/api/v1/me": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [],
+        "requestBody": false,
+        "responses": {
+          "200": "{id,orgCapabilities,role,useCaseDomain,useCaseKey}",
+          "401": "#Error"
+        }
+      }
+    },
+    "/api/v1/me/activity": {
+      "get": {
+        "tags": [
+          "Investor"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "assets:read"
+        ],
+        "parameters": [],
+        "requestBody": false,
+        "responses": {
+          "200": "[{}]",
+          "400": "#Error",
+          "401": "#Error"
+        }
+      }
+    },
+    "/api/v1/me/credentials": {
+      "get": {
+        "tags": [
+          "Identity"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "credentials:read"
+        ],
+        "parameters": [],
+        "requestBody": false,
+        "responses": {
+          "200": "[{}]",
+          "401": "#Error"
+        }
+      }
+    },
+    "/api/v1/me/credentials/{id}/accept": {
+      "post": {
+        "tags": [
+          "Credentials"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "{acceptance,acceptanceAt,id}",
+          "401": "#Error",
+          "404": "#Error",
+          "409": "#Error"
+        }
+      }
+    },
+    "/api/v1/me/credentials/{id}/reject": {
+      "post": {
+        "tags": [
+          "Credentials"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "{acceptance,id,revoked}",
+          "401": "#Error",
+          "404": "#Error",
+          "409": "#Error"
+        }
+      }
+    },
+    "/api/v1/me/credentials/{id}/request-changes": {
+      "post": {
+        "tags": [
+          "Credentials"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "{acceptance,acceptanceNote,id}",
+          "400": "#Error",
+          "401": "#Error",
+          "404": "#Error",
+          "409": "#Error"
+        }
+      }
+    },
+    "/api/v1/me/login-keys": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [],
+        "requestBody": false,
+        "responses": {
+          "200": "[{createdAt,did,id,label,lastUsedAt}]",
+          "401": "#Error"
+        }
+      },
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [],
+        "requestBody": true,
+        "responses": {
+          "201": "{createdAt,did,id,label}",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "409": "#Error"
+        }
+      }
+    },
+    "/api/v1/me/login-keys/{id}": {
+      "delete": {
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "204": "none",
+          "401": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/me/portfolio": {
+      "get": {
+        "tags": [
+          "Investor"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "assets:read"
+        ],
+        "parameters": [],
+        "requestBody": false,
+        "responses": {
+          "200": "{}",
+          "400": "#Error",
+          "401": "#Error"
+        }
+      }
+    },
+    "/api/v1/me/verification-requests": {
+      "get": {
+        "tags": [
+          "Verification"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "verifications:read"
+        ],
+        "parameters": [],
+        "requestBody": false,
+        "responses": {
+          "200": "[#VerificationRequest]",
+          "401": "#Error"
+        }
+      }
+    },
+    "/api/v1/orgs": {
+      "get": {
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "org:read"
+        ],
+        "parameters": [
+          "query:status"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "[#Organization]",
+          "401": "#Error",
+          "403": "#Error"
+        }
+      },
+      "post": {
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "usecases:provision"
+        ],
+        "parameters": [],
+        "requestBody": true,
+        "responses": {
+          "201": "{did,id,jurisdiction,name,orgType,registrationId,status,verified}",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "409": "#Error",
+          "502": "#Error",
+          "503": "#Error"
+        }
+      }
+    },
+    "/api/v1/orgs/register": {
+      "post": {
+        "tags": [
+          "Organizations"
+        ],
+        "security": null,
+        "scopes": null,
+        "parameters": [],
+        "requestBody": true,
+        "responses": {
+          "202": "{organizationId,status}",
+          "400": "#Error",
+          "409": "#Error",
+          "429": "#Error"
+        }
+      }
+    },
+    "/api/v1/orgs/register/documents": {
+      "post": {
+        "tags": [
+          "Documents"
+        ],
+        "security": null,
+        "scopes": null,
+        "parameters": [],
+        "requestBody": true,
+        "responses": {
+          "201": "{id,sha256,size}",
+          "400": "#Error",
+          "413": "#Error",
+          "415": "#Error",
+          "429": "#Error"
+        }
+      }
+    },
+    "/api/v1/orgs/{id}": {
+      "get": {
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "org:read"
+        ],
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "#Organization",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/orgs/{id}/api-keys": {
+      "get": {
+        "tags": [
+          "API Keys"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "[#ApiKeyView]",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      },
+      "post": {
+        "tags": [
+          "API Keys"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "201": "{key,secret}",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/orgs/{id}/api-keys/{keyId}": {
+      "delete": {
+        "tags": [
+          "API Keys"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [
+          "path:id!",
+          "path:keyId!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "{key}",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/orgs/{id}/api-keys/{keyId}/rotate": {
+      "post": {
+        "tags": [
+          "API Keys"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [
+          "path:id!",
+          "path:keyId!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "{key,secret}",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error",
+          "409": "#Error"
+        }
+      }
+    },
+    "/api/v1/orgs/{id}/approve": {
+      "post": {
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "{did,id,issuerDid,name,orgCredentialId,orgType,status,verified}",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error",
+          "409": "#Error",
+          "502": "#Error"
+        }
+      }
+    },
+    "/api/v1/orgs/{id}/capabilities": {
+      "patch": {
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "#Organization",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/orgs/{id}/capabilities/request": {
+      "post": {
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "202": "#ProposalEnvelope",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/orgs/{id}/credentials": {
+      "get": {
+        "tags": [
+          "Credentials"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "credentials:read"
+        ],
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "[{claims,expiresAt,holderDid,id,issuedAt,revoked,revokedAt,revokedReason,type}]",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/orgs/{id}/members": {
+      "get": {
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "org:read"
+        ],
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "[{active,did,email,id,kycStatus,role,useCaseKey}]",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/orgs/{id}/reject": {
+      "post": {
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "{id,status}",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error",
+          "409": "#Error"
+        }
+      }
+    },
+    "/api/v1/orgs/{id}/users": {
+      "post": {
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "users:onboard"
+        ],
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "201": "{did,email,id,membershipVc,orgId,role,useCaseKey}",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/orgs/{id}/wallet": {
+      "get": {
+        "tags": [
+          "Identity"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "credentials:read"
+        ],
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "[{}]",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/orgs/{id}/webhooks": {
+      "get": {
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "webhooks:read"
+        ],
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "{endpoints}",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      },
+      "post": {
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "webhooks:write"
+        ],
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "201": "{endpoint,secret}",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/orgs/{id}/webhooks/{whId}": {
+      "delete": {
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "webhooks:write"
+        ],
+        "parameters": [
+          "path:id!",
+          "path:whId!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "{endpoint}",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      },
+      "patch": {
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "webhooks:write"
+        ],
+        "parameters": [
+          "path:id!",
+          "path:whId!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "{endpoint}",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/orgs/{id}/webhooks/{whId}/deliveries": {
+      "get": {
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "webhooks:read"
+        ],
+        "parameters": [
+          "path:id!",
+          "path:whId!",
+          "query:limit"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "{deliveries}",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/orgs/{id}/webhooks/{whId}/deliveries/{dId}/replay": {
+      "post": {
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "webhooks:write"
+        ],
+        "parameters": [
+          "path:dId!",
+          "path:id!",
+          "path:whId!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "{delivery}",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/orgs/{id}/webhooks/{whId}/rotate": {
+      "post": {
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "webhooks:write"
+        ],
+        "parameters": [
+          "path:id!",
+          "path:whId!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "{endpoint,secret}",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/orgs/{id}/webhooks/{whId}/test": {
+      "post": {
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "webhooks:write"
+        ],
+        "parameters": [
+          "path:id!",
+          "path:whId!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "202": "{delivery,event}",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error",
+          "409": "#Error"
+        }
+      }
+    },
+    "/api/v1/proposals": {
+      "get": {
+        "tags": [
+          "Proposals"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [
+          "query:status",
+          "query:useCaseKey"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "[#Proposal]",
+          "401": "#Error"
+        }
+      }
+    },
+    "/api/v1/proposals/{id}/approve": {
+      "post": {
+        "tags": [
+          "Proposals"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "{proposal}",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error",
+          "409": "#Error"
+        }
+      }
+    },
+    "/api/v1/proposals/{id}/reject": {
+      "post": {
+        "tags": [
+          "Proposals"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "{proposal}",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error",
+          "409": "#Error"
+        }
+      }
+    },
+    "/api/v1/registry": {
+      "get": {
+        "tags": [
+          "Identity"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [],
+        "requestBody": false,
+        "responses": {
+          "200": "{}",
+          "401": "#Error"
+        }
+      }
+    },
+    "/api/v1/use-cases": {
+      "get": {
+        "tags": [
+          "Use Cases"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [],
+        "requestBody": false,
+        "responses": {
+          "200": "[#UseCase]",
+          "401": "#Error"
+        }
+      },
+      "post": {
+        "tags": [
+          "Use Cases"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "usecases:provision"
+        ],
+        "parameters": [],
+        "requestBody": true,
+        "responses": {
+          "201": "#UseCase",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error"
+        }
+      }
+    },
+    "/api/v1/use-cases/preview-code": {
+      "post": {
+        "tags": [
+          "Use Cases"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [],
+        "requestBody": true,
+        "responses": {
+          "200": "#ContractCode",
+          "400": "#Error",
+          "401": "#Error"
+        }
+      }
+    },
+    "/api/v1/use-cases/{key}": {
+      "get": {
+        "tags": [
+          "Use Cases"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [
+          "path:key!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "#UseCase",
+          "401": "#Error",
+          "404": "#Error"
+        }
+      },
+      "put": {
+        "tags": [
+          "Use Cases"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "usecases:provision"
+        ],
+        "parameters": [
+          "path:key!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "#UseCase",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/use-cases/{key}/code": {
+      "get": {
+        "tags": [
+          "Use Cases"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [
+          "path:key!",
+          "query:chainId!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "#ContractCode",
+          "400": "#Error",
+          "401": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/use-cases/{key}/deploy": {
+      "post": {
+        "tags": [
+          "Use Cases"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "usecases:provision"
+        ],
+        "parameters": [
+          "path:key!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "#UseCase",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error",
+          "502": "#Error"
+        }
+      }
+    },
+    "/api/v1/use-cases/{key}/invoices": {
+      "get": {
+        "tags": [
+          "Invoice Register"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "assets:read"
+        ],
+        "parameters": [
+          "path:key!",
+          "query:status"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "[{}]",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      },
+      "post": {
+        "tags": [
+          "Invoice Register"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "assets:issue"
+        ],
+        "parameters": [
+          "path:key!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "201": "{}",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error",
+          "409": "#Error"
+        }
+      }
+    },
+    "/api/v1/use-cases/{key}/invoices/import": {
+      "post": {
+        "tags": [
+          "Invoice Register"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "assets:issue"
+        ],
+        "parameters": [
+          "path:key!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "{}",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error",
+          "409": "#Error"
+        }
+      }
+    },
+    "/api/v1/use-cases/{key}/invoices/pull-erp": {
+      "post": {
+        "tags": [
+          "Invoice Register"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "assets:issue"
+        ],
+        "parameters": [
+          "path:key!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "{}",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error",
+          "409": "#Error"
+        }
+      }
+    },
+    "/api/v1/use-cases/{key}/invoices/tokenize": {
+      "post": {
+        "tags": [
+          "Invoice Register"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "assets:issue"
+        ],
+        "parameters": [
+          "path:key!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "{}",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error",
+          "409": "#Error"
+        }
+      }
+    },
+    "/api/v1/use-cases/{key}/invoices/{id}": {
+      "delete": {
+        "tags": [
+          "Invoice Register"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "assets:issue"
+        ],
+        "parameters": [
+          "path:id!",
+          "path:key!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "{}",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error",
+          "409": "#Error"
+        }
+      }
+    },
+    "/api/v1/users": {
+      "get": {
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "users:read"
+        ],
+        "parameters": [],
+        "requestBody": false,
+        "responses": {
+          "200": "[{accountId,active,email,id,kyc,kycStatus,role,useCaseKey}]",
+          "401": "#Error",
+          "403": "#Error"
+        }
+      },
+      "post": {
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "users:onboard"
+        ],
+        "parameters": [],
+        "requestBody": true,
+        "responses": {
+          "201": "{accountId,did,email,id,kycStatus,orgId,role,useCaseKey}",
+          "202": "#ProposalEnvelope",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/users/batch": {
+      "post": {
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "users:onboard"
+        ],
+        "parameters": [],
+        "requestBody": true,
+        "responses": {
+          "202": "#ProposalEnvelope",
+          "400": "{error,message,problems}",
+          "401": "#Error",
+          "403": "#Error"
+        }
+      }
+    },
+    "/api/v1/users/{id}": {
+      "delete": {
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "users:onboard"
+        ],
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "204": "none",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      },
+      "patch": {
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "users:onboard"
+        ],
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "{accountId,active,email,id,kycStatus,role,useCaseKey}",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/users/{id}/identity/challenge": {
+      "post": {
+        "tags": [
+          "Identity"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "users:onboard"
+        ],
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "{}",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/users/{id}/identity/verify": {
+      "post": {
+        "tags": [
+          "Identity"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "users:onboard"
+        ],
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "{}",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/users/{id}/revoke-identity": {
+      "post": {
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "users:onboard"
+        ],
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "202": "#ProposalEnvelope",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error",
+          "409": "#Error"
+        }
+      }
+    },
+    "/api/v1/verification-requests": {
+      "post": {
+        "tags": [
+          "Verification"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "verifications:request"
+        ],
+        "parameters": [],
+        "requestBody": true,
+        "responses": {
+          "201": "#VerificationRequest",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error"
+        }
+      }
+    },
+    "/api/v1/verification-requests/{id}": {
+      "get": {
+        "tags": [
+          "Verification"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "verifications:read"
+        ],
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "#VerificationRequest",
+          "401": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/verification-requests/{id}/consent": {
+      "post": {
+        "tags": [
+          "Verification"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "credentials:read"
+        ],
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "#VerificationRequest",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error",
+          "409": "#Error",
+          "410": "#Error"
+        }
+      }
+    },
+    "/api/v1/verification-requests/{id}/reject": {
+      "post": {
+        "tags": [
+          "Verification"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "#VerificationRequest",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error",
+          "409": "#Error"
+        }
+      }
+    },
+    "/api/v1/verification-requests/{id}/verify": {
+      "get": {
+        "tags": [
+          "Verification"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "verifications:verify"
+        ],
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "200": "{credentials,holderDid,purpose,reason,valid,verifiedAt}",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error",
+          "409": "#Error"
+        }
+      }
+    }
+  }
+}

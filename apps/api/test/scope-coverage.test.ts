@@ -1,7 +1,6 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { API_SCOPES } from "@tokenlayer/core";
 import { describe, expect, it } from "vitest";
+import { declaredRoutes, routeKey as key } from "./route-decls.js";
 
 /**
  * EN-B: THE SCOPE MAP IS FAIL-OPEN BY OMISSION, SO THIS TEST CLOSES IT.
@@ -27,26 +26,19 @@ import { describe, expect, it } from "vitest";
  * It reads the source rather than Fastify's route table because what is under
  * test is the DECLARATION — the shape a future author will copy — and because a
  * runtime table cannot tell "no scope gate" from "a scope gate that passes".
+ *
+ * EN-D1 moved the parser itself to ./route-decls.ts, where it also captures each
+ * route's `schema: S.<name>` and now BALANCES braces rather than stopping at the
+ * first `}`. That last change strengthens the gate below as well as the document:
+ * the old capture truncated at a nested brace, so
+ * `{ schema: S.x, config: { … }, ...authScoped("y") }` read as UNSCOPED here and
+ * would have been quietly filed as an undecided route rather than a gated one.
+ *
+ * openapi-contract.test.ts checks that the PUBLISHED document agrees with the
+ * gate below, and it must read the declarations exactly as this file does — a
+ * second parser could drift and let a route be scoped here yet undocumented
+ * there, with both files green.
  */
-const ROUTES_TS = fileURLToPath(new URL("../src/http/routes.ts", import.meta.url));
-
-/** `app.post("/path", { …options… }` — the options object never nests braces. */
-const ROUTE_RE = /app\.(get|post|put|patch|delete)\("([^"]+)",\s*\{([^}]*)\}/g;
-
-type Decl = { method: string; path: string; scope: string | null; authed: boolean };
-
-function declaredRoutes(): Decl[] {
-  const src = readFileSync(ROUTES_TS, "utf8");
-  const out: Decl[] = [];
-  for (const m of src.matchAll(ROUTE_RE)) {
-    const [, method, path, opts] = m as unknown as [string, string, string, string];
-    const scoped = /\.\.\.authScoped\("([^"]+)"\)/.exec(opts);
-    out.push({ method: method.toUpperCase(), path, scope: scoped?.[1] ?? null, authed: opts.includes("...auth") });
-  }
-  return out;
-}
-
-const key = (d: { method: string; path: string }): string => `${d.method} ${d.path}`;
 
 /**
  * Routes that deliberately carry NO scope gate. Each entry states WHY. Adding a

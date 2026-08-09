@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { API_BASE, ApiError, api } from "../api.js";
 import { useAuth } from "../auth.js";
 import { isOrgOperatingRole, orgRoleEnabled } from "../lib/capabilities.js";
-import { setNavGuard } from "../lib/nav-guard.js";
+import { confirmNavigation, setNavGuard } from "../lib/nav-guard.js";
 import { API_SCOPES, type ApiKeyView, type ApiScope, type OrgCapabilities, type Organization, type Role } from "../types.js";
+import { ApiReference } from "./ApiReference.js";
+import { Guides } from "./Guides.js";
 import { Webhooks } from "./Webhooks.js";
 import { Card, EmptyState, Pill, SectionHeader } from "./ui.js";
 
@@ -71,21 +73,38 @@ export function canRotate(status: ApiKeyView["status"]): boolean {
 }
 
 /**
- * The Developers surface: an organization's machine credentials.
+ * The five faces of the developer portal.
  *
- * SECRET HYGIENE — the one invariant this file exists to hold. A secret is
- * returned exactly once, by create and by rotate. It is held in the `revealed`
- * state below and NOWHERE ELSE: not localStorage, not sessionStorage, not the
- * URL, not a query param, not a ref that outlives the panel. This component
- * unmounts whenever the console navigates away (App.tsx renders one panel at a
- * time), so navigating is itself a discard. Nothing reads a secret back — no
- * list route returns one — so a dismissed secret is gone for good, which is
- * precisely what the acknowledgement checkbox is warning about.
+ * TABS, NOT NAV ENTRIES — and that is a decision with a scar behind it. A new
+ * sidebar entry needs a domain classification (see `src/domains.ts`), and the
+ * ID-N self-lockout is what happens when that classification is wrong: a
+ * surface was filed under a domain, vanished for every org that lacked it, and
+ * took with it the only control that could have fixed the problem. Integration
+ * is also one job — keys, delivery destinations, the reference and the guides
+ * are read and configured by the same person in the same sitting — so they
+ * belong on one page, which is already gated to PlatformAdmin and OrgAdmin.
+ */
+const DEV_TABS = [
+  { id: "overview", label: "Overview" },
+  { id: "keys", label: "API keys" },
+  { id: "webhooks", label: "Webhooks" },
+  { id: "reference", label: "Reference" },
+  { id: "guides", label: "Guides" },
+] as const;
+
+type DevTab = (typeof DEV_TABS)[number]["id"];
+
+/** Which tabs are about a particular organization, and therefore need the org
+ * picker above them. The reference and the guides describe the API itself. */
+const ORG_SCOPED_TABS: readonly DevTab[] = ["keys", "webhooks"];
+
+/**
+ * The Developers surface: an organization's machine credentials, its delivery
+ * destinations, and the documentation for both.
  *
- * Because navigating IS a discard, every exit is confirmed while a secret is
- * unacknowledged: the Done button needs the checkbox, and the sidebar and the
- * browser's own reload/close are gated by the effect below. The discard is
- * always a decision, never a side effect of a stray click.
+ * The shell owns the ORGANIZATION — one fetch, one picker — because the keys
+ * panel and the webhooks panel are two views of the same tenant and switching
+ * between them must not reset which tenant you were looking at.
  */
 export function Developers(): JSX.Element {
   const { token, user } = useAuth();
@@ -94,6 +113,142 @@ export function Developers(): JSX.Element {
   // `GET /orgs` already scopes itself: an OrgAdmin gets exactly their own org,
   // so the picker below only ever appears for a PlatformAdmin.
   const [orgId, setOrgId] = useState<string | null>(null);
+  const [orgError, setOrgError] = useState<string | null>(null);
+  const [tab, setTab] = useState<DevTab>("overview");
+
+  useEffect(() => {
+    if (!token) return;
+    let live = true;
+    api.orgs(token)
+      .then((rows) => { if (!live) return; setOrgs(rows); setOrgId((cur) => cur ?? user?.orgId ?? rows[0]?.id ?? null); })
+      .catch((err) => { if (live) setOrgError(errMessage(err, "Failed to load organizations")); });
+    return () => { live = false; };
+  }, [token, user?.orgId]);
+
+  const org = orgs.find((o) => o.id === orgId) ?? null;
+
+  /**
+   * A TAB CLICK IS AN UNMOUNT, so it is a discard.
+   *
+   * The keys panel and the webhooks panel each hold a one-time secret in
+   * component state and nowhere else; leaving either one destroys it, and no
+   * route will ever hand it back. Before the tabs existed, "leaving" only meant
+   * a sidebar click, a reload or a closed tab — all three already guarded. A
+   * tab is a fourth way out and would otherwise have been the one silent one.
+   * It runs the SAME aggregate guard the shell's sidebar runs, so the two can
+   * never disagree about whether it is safe to leave.
+   */
+  const go = (next: DevTab): void => {
+    if (next === tab) return;
+    if (!confirmNavigation()) return;
+    setTab(next);
+  };
+
+  const needsOrg = ORG_SCOPED_TABS.includes(tab);
+
+  return (
+    <div className="space-y-5">
+      <SectionHeader
+        title="Developers"
+        description="Everything a system needs to call TokenLayer without a person signing in: credentials, event delivery, the full API reference and worked integrations."
+      />
+
+      <div className="flex flex-wrap gap-1 border-b border-slate-200">
+        {DEV_TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => go(t.id)}
+            aria-current={t.id === tab ? "page" : undefined}
+            className={`-mb-px rounded-t-lg border-b-2 px-3.5 py-2 text-sm font-medium ${
+              t.id === tab
+                ? "border-brand-600 text-brand-700"
+                : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {orgError && needsOrg && <p className="text-sm text-red-600">{orgError}</p>}
+
+      {needsOrg && isPlatform && orgs.length > 1 && (
+        <div className="flex items-center gap-2">
+          <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Organization</label>
+          <select
+            className="select max-w-xs"
+            value={orgId ?? ""}
+            onChange={(e) => { if (confirmNavigation()) setOrgId(e.target.value || null); }}
+          >
+            {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+        </div>
+      )}
+
+      {tab === "overview" && <Overview />}
+      {tab === "keys" && <ApiKeys orgId={orgId} org={org} />}
+      {tab === "webhooks" && <Webhooks orgId={orgId} org={org} />}
+      {tab === "reference" && <ApiReference />}
+      {tab === "guides" && <Guides />}
+    </div>
+  );
+}
+
+/** The landing tab: what the credentials are, and where to go next. */
+function Overview(): JSX.Element {
+  return (
+    <div className="space-y-4">
+      <Card
+        title="Two credentials, one header"
+        description="Both travel in the same Authorization: Bearer header and are told apart by the token's shape."
+      >
+        <div className="text-sm text-slate-600 space-y-2">
+          <p>
+            A <strong className="font-semibold text-slate-800">human session</strong> is a JWT from{" "}
+            <span className="font-mono text-xs">POST /auth/login</span>, valid for 8 hours, carrying the signed-in user&rsquo;s
+            identity and role. Service accounts cannot log in.
+          </p>
+          <p>
+            An <strong className="font-semibold text-slate-800">organization API key</strong> is an opaque{" "}
+            <span className="font-mono text-xs">{KEY_MARKER}…</span> secret shown once at creation and stored only as a hash. It
+            authenticates <em>as</em> its bound service user, so that user&rsquo;s role, their organization&rsquo;s capability
+            envelope and maker-checker all still apply. A key&rsquo;s scopes only ever narrow that — they can never widen it.
+          </p>
+          <p>
+            <strong className="font-semibold text-slate-800">Most mutations answer <span className="font-mono text-xs">202</span> with a proposal,
+            not the object you asked for.</strong> Maker-checker is the default posture: the request records an intent, and the
+            work happens when a second, distinct authorized person approves it. Read <span className="font-mono text-xs">proposal.id</span>{" "}
+            from a 202 and follow it to a terminal state — treating a 202 as a completed create is the most common integration
+            mistake made here.
+          </p>
+        </div>
+      </Card>
+      <UsingYourKey />
+    </div>
+  );
+}
+
+/**
+ * The API keys panel: an organization's machine credentials.
+ *
+ * SECRET HYGIENE — the one invariant this component exists to hold. A secret is
+ * returned exactly once, by create and by rotate. It is held in the `revealed`
+ * state below and NOWHERE ELSE: not localStorage, not sessionStorage, not the
+ * URL, not a query param, not a ref that outlives the panel. This component
+ * unmounts whenever the console navigates away or the portal switches tab, so
+ * either is itself a discard. Nothing reads a secret back — no list route
+ * returns one — so a dismissed secret is gone for good, which is precisely what
+ * the acknowledgement checkbox is warning about.
+ *
+ * Because leaving IS a discard, every exit is confirmed while a secret is
+ * unacknowledged: the Done button needs the checkbox, and the sidebar, the tab
+ * bar, the org picker and the browser's own reload/close are gated by the
+ * effect below. The discard is always a decision, never a side effect of a
+ * stray click.
+ */
+function ApiKeys({ orgId, org }: { orgId: string | null; org: Organization | null }): JSX.Element {
+  const { token } = useAuth();
   const [keys, setKeys] = useState<ApiKeyView[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -104,15 +259,6 @@ export function Developers(): JSX.Element {
   const [revealed, setRevealed] = useState<{ name: string; secret: string; rotated: boolean; seq: number } | null>(null);
   const reveal = (name: string, secret: string, rotated: boolean): void =>
     setRevealed((cur) => ({ name, secret, rotated, seq: (cur?.seq ?? 0) + 1 }));
-
-  useEffect(() => {
-    if (!token) return;
-    let live = true;
-    api.orgs(token)
-      .then((rows) => { if (!live) return; setOrgs(rows); setOrgId((cur) => cur ?? user?.orgId ?? rows[0]?.id ?? null); })
-      .catch((err) => { if (live) setError(errMessage(err, "Failed to load organizations")); });
-    return () => { live = false; };
-  }, [token, user?.orgId]);
 
   /**
    * Every key load is generation-guarded. A PlatformAdmin can switch from org A
@@ -135,14 +281,20 @@ export function Developers(): JSX.Element {
   // are leaving is discarded rather than applied.
   useEffect(() => { reload(); return () => { loadGen.current++; }; }, [token, orgId]);
 
-  const org = orgs.find((o) => o.id === orgId) ?? null;
+  // Close the create form when the org changes. The picker used to live in this
+  // component and did this inline; now that it is in the shell, the reset has to
+  // follow the id — otherwise a half-filled draft for org A stays on screen
+  // under org B's heading and submits against B.
+  useEffect(() => { setCreating(false); }, [orgId]);
 
   /**
    * The secret lives in `revealed` and NOWHERE else, so unmounting this panel
-   * destroys it. Guard both ways out while one is unacknowledged: the console's
-   * own sidebar (via the shared nav guard, which App.tsx consults before swapping
-   * panels) and the browser's reload/close (via `beforeunload`). The Done button
-   * already required an acknowledgement; these are the paths that did not.
+   * destroys it. Guard every way out while one is unacknowledged: the console's
+   * own sidebar AND the portal's tab bar and org picker (all via the shared nav
+   * guard — App.tsx consults it before swapping panels, and the shell above
+   * consults it before swapping tabs) and the browser's reload/close (via
+   * `beforeunload`). The Done button already required an acknowledgement; these
+   * are the paths that did not.
    */
   useEffect(() => {
     if (!revealed) return;
@@ -192,8 +344,8 @@ export function Developers(): JSX.Element {
   return (
     <div className="space-y-5">
       <SectionHeader
-        title="Developers"
-        description="API keys let a system call TokenLayer without a person signing in. A key acts as a service account with a role, and its scopes can only narrow what that role may already do."
+        title="API keys"
+        description="A key lets a system call TokenLayer without a person signing in. It acts as a service account with a role, and its scopes can only narrow what that role may already do."
         actions={
           // Gated on the RESOLVED org, not just its id: the create form needs the
           // org's capability envelope to filter the role list, so it renders on
@@ -209,19 +361,6 @@ export function Developers(): JSX.Element {
           ) : undefined
         }
       />
-
-      {isPlatform && orgs.length > 1 && (
-        <div className="flex items-center gap-2">
-          <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Organization</label>
-          <select
-            className="select max-w-xs"
-            value={orgId ?? ""}
-            onChange={(e) => { setOrgId(e.target.value || null); setCreating(false); }}
-          >
-            {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-          </select>
-        </div>
-      )}
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
@@ -332,20 +471,12 @@ export function Developers(): JSX.Element {
         </div>
       )}
 
-      <UsingYourKey />
-
       {/*
-        EN-C webhooks live HERE rather than behind their own nav entry.
-        Integration is one job — keys and delivery destinations are configured
-        by the same person in the same sitting — and a new nav item would need a
-        domain classification, which is what made an ID-N surface vanish for the
-        orgs that lacked that domain, taking the only control that could fix it
-        with it. This page is already gated to PlatformAdmin and OrgAdmin, which
-        is exactly who may manage webhooks.
+        EN-C webhooks used to hang off the bottom of this panel, and EN-D1 moved
+        them to their own tab in the shell above rather than to their own nav
+        entry — same reasoning, more room. `UsingYourKey` likewise moved to the
+        Overview tab, where it is the first thing a new integrator reads.
       */}
-      <div className="pt-2 border-t border-slate-200/70">
-        <Webhooks orgId={orgId} org={org} />
-      </div>
     </div>
   );
 }
