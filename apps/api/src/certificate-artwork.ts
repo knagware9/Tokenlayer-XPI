@@ -7,6 +7,9 @@
  * instead of attempts to parse a PDF. `drawCertificate` (Task 5) is a dumb
  * adapter that executes ops and does no arithmetic.
  */
+import { inflateSync } from "node:zlib";
+import PDFDocument from "pdfkit";
+import QRCode from "qrcode";
 import {
   AUTO_QR_PLACEMENT,
   DEFAULT_COLOR,
@@ -109,4 +112,132 @@ export function certificateDrawList(input: CertificateDrawListInput): DrawOp[] {
   if (banner) ops.push({ kind: "watermark", label: banner.label, detail: banner.detail });
 
   return ops;
+}
+
+/** pdfkit's standard-14 names for our three families × weight. */
+const PDF_FONTS: Record<CertificateFont, { normal: string; bold: string }> = {
+  sans: { normal: "Helvetica", bold: "Helvetica-Bold" },
+  serif: { normal: "Times-Roman", bold: "Times-Bold" },
+  mono: { normal: "Courier", bold: "Courier-Bold" },
+};
+
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+/**
+ * Open the artwork, and prove it can actually be DRAWN — not merely parsed.
+ *
+ * `openImage` reads a PNG's IHDR and stops; the pixels are inflated much later,
+ * while pdfkit flushes the document, inside a zlib callback that `throw`s on a
+ * bad stream. That throw surfaces as an uncaughtException — no try/catch around
+ * the render and no rejected promise can see it — so a PNG with a valid header
+ * and a truncated IDAT (an interrupted upload) would take the API process down
+ * on every fetch of a public certificate URL. Inflating here converts that into
+ * an ordinary synchronous throw the route can catch and fall back from, which is
+ * the whole point of having a fallback.
+ */
+function openArtwork(bytes: Buffer): { width: number; height: number } {
+  // `openImage` is real and public on pdfkit's mixin chain but absent from
+  // @types/pdfkit, so the cast is the type gap, not a claim about the value.
+  const probe = new PDFDocument({ size: "A4" }) as unknown as {
+    openImage(b: Buffer): { width: number; height: number; imgData?: Buffer };
+  };
+  const img = probe.openImage(bytes);
+  // PNG only: a JPEG's `imgData` is the raw scan, not a zlib stream.
+  if (bytes.subarray(0, PNG_MAGIC.length).equals(PNG_MAGIC) && Buffer.isBuffer(img.imgData)) inflateSync(img.imgData);
+  return img;
+}
+
+/**
+ * Execute a draw list. NO ARITHMETIC HAPPENS HERE — every coordinate arrived
+ * absolute. Throws if the artwork cannot be opened; the route catches that and
+ * falls back to the built-in layout, because a deleted document must not turn
+ * every certificate for that type into a 500.
+ */
+export async function drawCertificate(
+  ops: readonly DrawOp[],
+  artworkBytes: Buffer,
+  page: { width: number; height: number },
+): Promise<Buffer> {
+  // Before anything is emitted, so an undecodable image rejects this promise
+  // instead of exploding mid-flush. Callers that already measured pay one extra
+  // inflate; a caller that did not would otherwise pay with the process.
+  openArtwork(artworkBytes);
+
+  const doc = new PDFDocument({ size: [page.width, page.height], margin: 0 });
+  const chunks: Buffer[] = [];
+  doc.on("data", (d: Buffer) => chunks.push(d));
+  const done = new Promise<Buffer>((resolve) => doc.on("end", () => resolve(Buffer.concat(chunks))));
+
+  // Pre-render QR images: doc.image needs bytes, and QRCode.toBuffer is async
+  // while the draw loop below is not.
+  const qrPngs = new Map<string, Buffer>();
+  for (const op of ops) {
+    if (op.kind === "qr" && !qrPngs.has(op.url)) {
+      qrPngs.set(op.url, await QRCode.toBuffer(op.url, { type: "png", margin: 1, width: 320 }));
+    }
+  }
+
+  // In list order, always: the watermark is last because `certificateDrawList`
+  // put it last, and reordering or skipping here would undo the one rule config
+  // cannot override.
+  for (const op of ops) {
+    switch (op.kind) {
+      case "image":
+        doc.image(artworkBytes, op.x, op.y, { width: op.w, height: op.h });
+        break;
+      case "text": {
+        const family = PDF_FONTS[op.font];
+        doc.font(op.bold ? family.bold : family.normal).fontSize(op.fontSize).fillColor(op.color);
+        // With a width, pdfkit wraps and honours `align` inside the box. Without
+        // one, `align` has nothing to align against, so the box is the rest of
+        // the page from x — which makes centre/right behave as the designer
+        // expects rather than silently doing nothing. The floor keeps a
+        // placement pinned at the right edge from asking for a <=0 box.
+        const width = op.width ?? Math.max(1, page.width - op.x);
+        doc.text(op.text, op.x, op.y, { width, align: op.align, lineBreak: op.width !== null });
+        break;
+      }
+      case "qr": {
+        doc.image(qrPngs.get(op.url)!, op.x, op.y, { width: op.size, height: op.size });
+        if (op.caption) {
+          doc.font("Helvetica").fontSize(8).fillColor("#64748b")
+            .text(op.caption, op.x, op.y - 11, { width: op.size, align: "center" });
+        }
+        break;
+      }
+      case "sample":
+        doc.save().font("Helvetica-Bold").fontSize(Math.max(18, page.width * 0.05)).fillColor("#0ea5e9").opacity(0.35)
+          .rotate(-24, { origin: [page.width / 2, page.height / 2] })
+          .text("SAMPLE — NOT A CREDENTIAL", 0, page.height / 2 - 24, { width: page.width, align: "center" })
+          .restore();
+        break;
+      case "watermark":
+        doc.save().font("Helvetica-Bold").fontSize(Math.max(28, page.width * 0.08)).fillColor("#dc2626").opacity(0.28)
+          .rotate(-18, { origin: [page.width / 2, page.height / 2] })
+          .text(op.label, 0, page.height / 2 - 30, { width: page.width, align: "center" })
+          .restore();
+        if (op.detail) {
+          doc.opacity(1).font("Helvetica-Bold").fontSize(10).fillColor("#dc2626")
+            .text(op.detail, page.width * 0.1, page.height * 0.08, { width: page.width * 0.8, align: "center" });
+        }
+        break;
+    }
+  }
+
+  doc.end();
+  return done;
+}
+
+/**
+ * Measure artwork without rendering it. Throws on unusable bytes.
+ *
+ * The draw list resolves every coordinate against the page it is GIVEN and
+ * trusts it, so a page built by hand with a zero or non-finite edge would yield
+ * a QR of size 0 — rule 1 satisfied structurally and vacuous in fact, a QR
+ * nobody can scan. Every caller must derive the page from THIS measurement via
+ * `certificatePageSize`, which guards the degenerate cases.
+ */
+export function artworkDimensions(bytes: Buffer): { width: number; height: number } {
+  const img = openArtwork(bytes);
+  return { width: img.width, height: img.height };
 }

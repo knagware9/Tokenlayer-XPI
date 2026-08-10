@@ -3,10 +3,12 @@ import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ApiKeyRecord, AssetRecord, CashflowRecord, CompanyProfile, CredentialRecord, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord, WebhookEndpointRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, issueCredential, issuerBindingAllows, modeAllows, normalizeUseCaseDefinition, ORG_OPERATING_ROLES, orgDomainEnabled, orgRoleEnabled, PolicyError, presentCredential, presentCredentials, SANDBOX_CHAIN_ID, sandboxChainsValid, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateCredentialUseCase, validateEventTypes, validateMetadata, scopeAllows, validateOrgCapabilities, validateScopes, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ApiScope, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type OrgDomain, type OrgOperatingRole, type OrgType, type ResourceMode, type Role, type UseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
+import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, certificatePageSize, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, issueCredential, issuerBindingAllows, modeAllows, normalizeUseCaseDefinition, ORG_OPERATING_ROLES, orgDomainEnabled, orgRoleEnabled, PolicyError, presentCredential, presentCredentials, SANDBOX_CHAIN_ID, sandboxChainsValid, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateCredentialUseCase, validateEventTypes, validateMetadata, scopeAllows, validateOrgCapabilities, validateScopes, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ApiScope, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type OrgDomain, type OrgOperatingRole, type OrgType, type ResourceMode, type Role, type UseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
 import qrcode from "qrcode";
 import type { AppDeps } from "../context.js";
-import { renderCredentialCertificate } from "../certificate.js";
+import { certificateStatusBanner, renderCredentialCertificate } from "../certificate.js";
+import { artworkDimensions, certificateDrawList, drawCertificate } from "../certificate-artwork.js";
+import { resolveCertificateFields } from "../certificate-fields.js";
 import { isSupportedCurrency } from "../currencies.js";
 import { renderContractCode } from "../contract-code.js";
 import { deployAndCreateUseCase } from "../use-cases.js";
@@ -4541,10 +4543,48 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
         if (onChain.exists) status = { revoked: onChain.revoked, revokedAt: onChain.revokedAt ? new Date(onChain.revokedAt * 1000).toISOString() : null, revokedReason: cred.revokedReason };
       } catch (err) { request.log.error({ err }, "cert on-chain status read failed"); }
     }
-    let logoBytes: Buffer | null = null;
-    if (spec.certificate?.logoDocumentId) { try { logoBytes = (await deps.documents.get(spec.certificate.logoDocumentId))?.bytes ?? null; } catch { logoBytes = null; } }
+    const nowMs = Date.now();
 
-    const pdf = await renderCredentialCertificate({ credential: cred, spec, issuerName, statusUrl, status, logoBytes, nowMs: Date.now() });
+    // EN-F: the PRESENCE of artwork selects the renderer. With it the built-in
+    // layout is replaced entirely and only `placements` print; without it,
+    // nothing below this block changes.
+    let pdf: Buffer | null = null;
+    const background = spec.certificate?.background;
+    if (background) {
+      try {
+        const bytes = (await deps.documents.get(background.documentId))?.bytes;
+        if (!bytes) throw new Error(`certificate background document '${background.documentId}' not found`);
+        // The page comes from a REAL measurement, never a hand-built object:
+        // `certificateDrawList` resolves every coordinate against the page it is
+        // handed and trusts it, so a zero or non-finite edge would silently
+        // produce a QR of size 0 — a certificate that satisfies "a QR is always
+        // drawn" and is still unverifiable. `certificatePageSize` is where the
+        // degenerate cases are guarded, and `artworkDimensions` throws rather
+        // than returning one.
+        const measured = artworkDimensions(bytes);
+        const page = certificatePageSize(measured.width, measured.height);
+        const ops = certificateDrawList({
+          placements: spec.certificate?.placements ?? [],
+          values: resolveCertificateFields({ credential: cred, spec, issuerName }),
+          page,
+          statusUrl,
+          banner: certificateStatusBanner({ status, expiresAt: cred.expiresAt, nowMs }),
+        });
+        pdf = await drawCertificate(ops, bytes, page);
+      } catch (err) {
+        // Deleting a document must not turn every certificate of that type into
+        // an error, so this degrades to the built-in layout. At `error` and with
+        // both ids, because it means a live config now names a document that is
+        // gone or unreadable — a thing to fix, not a routine miss.
+        request.log.error({ err, credentialId: cred.id, documentId: background.documentId }, "certificate artwork unusable; falling back to the built-in layout");
+      }
+    }
+
+    if (!pdf) {
+      let logoBytes: Buffer | null = null;
+      if (spec.certificate?.logoDocumentId) { try { logoBytes = (await deps.documents.get(spec.certificate.logoDocumentId))?.bytes ?? null; } catch { logoBytes = null; } }
+      pdf = await renderCredentialCertificate({ credential: cred, spec, issuerName, statusUrl, status, logoBytes, nowMs });
+    }
     const fname = `${(spec.name || "credential").replace(/[^a-zA-Z0-9._-]/g, "_")}-${cred.id}.pdf`;
     return reply
       .header("content-type", "application/pdf")
