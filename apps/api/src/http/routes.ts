@@ -3131,6 +3131,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       jurisdiction: "IN", did, didSeedEncrypted,
       status: "pending", verified: false, verifiedAt: null, companyProfile,
       capabilities, // the validated requested envelope — part of what the reviewer approves
+      brandLogoDocumentId: null, brandAccent: null, // EN-E: a new org starts on the platform look
     });
     try {
       await deps.users.create({
@@ -3215,6 +3216,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       name, orgType, registrationId: opts.registrationId ?? null, jurisdiction: opts.jurisdiction ?? null,
       did, didSeedEncrypted, status: "active", verified: true, verifiedAt: new Date().toISOString(), companyProfile: null,
       capabilities: null, // platform-created orgs stay unrestricted legacy until an envelope is set
+      brandLogoDocumentId: null, brandAccent: null, // EN-E: a new org starts on the platform look
     });
     // `didRegistered` is in the trail because "this org's DID is not on the
     // registry" is otherwise invisible: nothing on the record says so, and a

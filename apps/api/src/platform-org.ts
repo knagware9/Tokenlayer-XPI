@@ -45,6 +45,7 @@ export async function ensureNamedOrg(
     verifiedAt: new Date().toISOString(),
     companyProfile: null,
     capabilities: null, // platform boot org keeps the unrestricted legacy envelope
+    brandLogoDocumentId: null, brandAccent: null, // EN-E: a new org starts on the platform look
   });
   if (deps.registry) await ensureDidRegistered(deps.registry, did);
   return org;

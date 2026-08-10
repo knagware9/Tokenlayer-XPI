@@ -463,6 +463,7 @@ async function seedOrgAdmin(h: TestAppHandle): Promise<{ orgId: string; token: s
     name: `D2 Issuer ${tag}`, orgType: "issuer", registrationId: null, jurisdiction: null,
     did: `did:key:zD2${tag}`, didSeedEncrypted: "enc", status: "active", verified: true,
     verifiedAt: new Date().toISOString(), companyProfile: null, capabilities: null,
+    brandLogoDocumentId: null, brandAccent: null,
   });
   const email = `orgadmin-d2-${tag}@tokenlayer.dev`;
   const password = `orgadmin-${tag}`;
