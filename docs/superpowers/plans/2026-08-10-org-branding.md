@@ -23,7 +23,9 @@
 - **Never weaken or delete an existing assertion.** The suites are the back-compat oracle. The one exception is adding a justified row to a coverage allowlist (`DELIBERATELY_UNSCOPED`, `DOCUMENTATION_DEFERRED`, `MODE_EXEMPT`) — those tables' own failure messages instruct you to, and each has a staleness check. Say so in your report; never add one silently.
 - **THE PARITY RULE (Task 2 especially):** a new persisted field must land in the Prisma schema + record type + row type + mapper + create/update literals in **both** the memory and prisma repos + `prisma generate`, in ONE commit. Memory-harness tests cannot catch a prisma-side drop.
 - **THE ADDITIVITY RULE:** `fast-json-stringify` silently strips undeclared response fields. You may ADD `properties`; never remove `additionalProperties: true`; never narrow a schema. A field you forget to declare simply will not appear on the wire.
-- **`authScoped(...)` is NOT an authorization gate for humans.** `requireScope` short-circuits on `if (!key) return`. Any route that must be restricted needs an explicit role predicate as well.
+- **BOTH HALVES OF THE GATE, and each was learned the hard way.**
+  - `authScoped(...)` is NOT an authorization gate for HUMANS: `requireScope` short-circuits on `if (!key) return`, so a scope narrows API keys and nothing else. A route that must be restricted needs an explicit role predicate too. (EN-F's final review, proven with a Buyer.)
+  - Omitting `authScoped` does NOT withhold the route from MACHINES: a key authenticates through the same preHandler and then presents its bound user's role, which a role predicate cannot distinguish from a session. A **zero-scope** key is the widest hole of all, because scopes are never consulted. A route that is genuinely session-only must refuse `machinePrincipal(request)` **explicitly**. (Task 3 of this plan, measured: a PlatformAdmin service key with `scopes: []` rewrote an organization's brand.)
 - Comments explain WHY. Calibrate against `packages/core/src/modes.ts` and `apps/api/src/certificate-artwork.ts`. Do not restate the code.
 - **NO test directory in this monorepo is typechecked.** `apps/api/tsconfig.json` and `packages/core/tsconfig.json` both `"include": ["src"]`, and vitest runs no typecheck. So a test literal can carry an invalid enum value and stay green forever — Task 2's implementer found exactly that in this plan's own test (`orgType: "issuer"`, which is not an `OrgType`; the valid set is `bank | corporate | msme | government | verifier`). **When a type gains a required field, find the affected test literals by GREP, not by `tsc`** — the compiler will not tell you.
 - **Run `npx prisma generate` from `apps/api`, never from the repo root.** Root `npx` resolves a different prisma major and misses `apps/api/.env`, so `DATABASE_URL` does not resolve.
@@ -556,6 +558,65 @@ Report that you added it.
 ```bash
 git add apps/api/src/http/ apps/api/openapi.snapshot.json apps/api/test/
 git commit -m "feat(api): organization branding route, on /me and the org view"
+```
+
+---
+
+## Task 3b: API — an OrgAdmin can actually upload a logo
+
+**Files:**
+- Modify: `apps/api/src/http/routes.ts`, `apps/api/src/http/schemas.ts`
+- Test: `apps/api/test/org-branding-upload.test.ts`
+
+**Why this task exists.** Task 3's implementer measured it: `POST /documents` gates on `rbac.can(role, "issue")`, and `MATRIX.OrgAdmin` is `["read"]` alone (`packages/core/src/rbac.ts:12`). **An OrgAdmin gets 403 from the document store.** So the brand editor in Task 6 would have no working upload path for the exact role it is built for — which is EN-F's finding 7 repeating itself, and the reason that feature shipped unusable by its intended user.
+
+**The chosen fix, and why not the other two.** A dedicated upload route scoped to branding. Widening `POST /documents` for OrgAdmins would change the authorization of a route that also serves KYB documents, certificate artwork and asset attachments — a much larger blast radius for a logo. Having a PlatformAdmin upload on the org's behalf is exactly the unusable-feature outcome. There is precedent for a dedicated door: `POST /orgs/register/documents` exists because the general store was not reachable at signup either.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `apps/api/test/org-branding-upload.test.ts`. Reuse the `org()` helper shape from `apps/api/test/org-branding-route.test.ts` (read it — and note its organization literal uses a VALID `OrgType`). Assert:
+
+```ts
+// 1. An OrgAdmin of THIS org uploads a PNG -> 201 with a document id, and that
+//    id is immediately usable as brandLogoDocumentId on PATCH .../branding.
+// 2. An OrgAdmin of ANOTHER org -> 403. The cross-tenant check, again.
+// 3. A non-admin member of this org (Buyer) -> 403.
+// 4. A PlatformAdmin -> 201.
+// 5. A non-image contentType -> 415 UNSUPPORTED_DOCUMENT_TYPE (the shared
+//    storeUploadedDocument already answers this; assert it still does).
+// 6. A machine principal (any API key, any scopes, including []) -> 403
+//    MACHINE_PRINCIPAL, matching PATCH .../branding. Uploading brand assets is
+//    the same console act.
+```
+
+- [ ] **Step 2:** Run it → FAIL (404).
+
+- [ ] **Step 3: Implement**
+
+Add `POST /orgs/:id/branding/logo`, gated **identically to `PATCH /orgs/:id/branding`** — the same `machinePrincipal` refusal, the same PlatformAdmin-or-own-OrgAdmin predicate — with `bodyLimit: DOC_UPLOAD_BODY_LIMIT` and the body shape `{ contentType, dataBase64 }` that `storeUploadedDocument` already takes.
+
+Restrict the accepted types to images at this door, even though the shared helper's allowlist is wider:
+
+```ts
+    // Narrower than the shared allowlist ON PURPOSE. This route exists so an
+    // OrgAdmin can upload a MARK; a PDF or a text file stored through it would
+    // only ever fail later, at the point something tries to draw it.
+    if (!b.contentType.startsWith("image/")) {
+      return reply.code(415).send({ error: "UNSUPPORTED_DOCUMENT_TYPE", message: "a brand logo must be an image" });
+    }
+```
+
+Return `201 { id, sha256, size }`, matching `POST /orgs/register/documents`.
+
+Add the schema entry with `security: humanOnly`, a description that states the session-only reason, and the same `DELIBERATELY_UNSCOPED` treatment as the branding route (one row, quoted in your report).
+
+- [ ] **Step 4:** Run the new test, `scope-coverage`, `openapi-contract`, then regenerate and READ the openapi snapshot diff (one added path). Whole api suite + `npx tsc --noEmit -p apps/api`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add apps/api/src/http/ apps/api/openapi.snapshot.json apps/api/test/org-branding-upload.test.ts
+git commit -m "feat(api): an OrgAdmin can upload their own brand logo"
 ```
 
 ---
