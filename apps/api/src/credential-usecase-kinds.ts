@@ -50,6 +50,11 @@ export const issueUsecaseCredentialKind: ProposalKindHandler = {
       issuerOrg: org, subjectDid: pl.subjectDid, type: spec.name, claims: pl.claims,
       validityDays: spec.validityDays, credentialUseCaseKey: def.key, proposalId: p.id,
       initialAcceptance: def.holderAcceptance ? "pending" : "accepted",
+      // EN-D2, and read off the FRESHLY RE-RESOLVED `def` above for the same
+      // reason its claim schema is: never sign — or anchor — against stale
+      // config. This is the path the live walkthrough took when it spent a real
+      // transaction on a sandbox issuance.
+      sandbox: def.sandbox === true,
     });
   },
 };
@@ -114,6 +119,7 @@ export const issueUsecaseCredentialBatchKind: ProposalKindHandler = {
           issuerOrg: org, subjectDid: user.did, type: spec.name, claims: row.claims,
           validityDays: spec.validityDays, credentialUseCaseKey: def.key, proposalId: p.id,
           initialAcceptance: def.holderAcceptance ? "pending" : "accepted",
+          sandbox: def.sandbox === true, // EN-D2 — same `def`, so a batch cannot differ from a single issuance
         });
         rows.push({ index: i, subjectEmail: row.subjectEmail, status: "ok", credentialId: cred.id });
       } catch (err) {

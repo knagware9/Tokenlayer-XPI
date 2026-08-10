@@ -94,6 +94,29 @@ export interface EmitInput {
    * below from the use case that produced the fact, and a caller-supplied one
    * is ignored even if a cast smuggles it in — see `deriveMode`.
    */
+  /**
+   * The use case whose MODE this fact takes, when the row's own `useCaseKey`
+   * cannot say (EN-D2, the walkthrough fix). Still a derivation INPUT, never a
+   * mode: the derivation itself stays in `deriveMode`, so the guarantee above
+   * is intact and a caller can no more assert "this is live" than it could
+   * before.
+   *
+   * IT EXISTS FOR PROPOSALS. A maker-checker proposal for a CREDENTIAL use case
+   * is org-scoped, so its `useCaseKey` COLUMN is null and the use case it is
+   * about appears only inside its payload (`credentialUseCaseKey`) — the exact
+   * three-shape problem `proposalTarget` was written for on the gate side. The
+   * emit side had no such thing, so `proposal.executed` for a SANDBOX
+   * credential issuance was labelled `live`: it was delivered to the org's
+   * PRODUCTION webhook endpoints, and the `tl_test_` key that drafted it could
+   * not read back its own approval. `create-use-case` is the same story — its
+   * column is null too, so provisioning a sandbox programme published a live
+   * fact about it.
+   *
+   * The row's `useCaseKey`, `orgId` and payload are UNCHANGED by this; only the
+   * mode label is, and only for a proposal that names a sandbox use case
+   * nowhere but its payload. A live proposal derives `live` exactly as before.
+   */
+  modeUseCaseKey?: string | null;
 }
 
 /**
@@ -171,7 +194,10 @@ export async function emitEvent(deps: AppDeps, input: EmitInput, log: EmitLogger
       useCaseKey,
       subjectId: input.subjectId ?? null,
       data: redact(input.data) as Record<string, unknown>,
-      mode: await deriveMode(deps, useCaseKey),
+      // `modeUseCaseKey` first, and `|| null` for the same ""-vs-null reason.
+      // It is only ever set where the row's own key CANNOT answer, so this
+      // falls through to the pre-existing derivation everywhere else.
+      mode: await deriveMode(deps, (input.modeUseCaseKey || null) ?? useCaseKey),
     });
     for (const ep of await deps.webhookEndpoints.listActive()) {
       if (!endpointMatches(ep, event)) continue;

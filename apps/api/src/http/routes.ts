@@ -1323,7 +1323,13 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       org = own;
     } else {
       try {
-        org = await ensureOrg(orgName, prov.issuerOrgType ?? "verifier", { actorId: claims.id });
+        // EN-D2 (the walkthrough defect), THE THIRD PATH TO A REAL CHAIN.
+        // `ensureOrg` mints a custodial DID and REGISTERS IT ON THE REAL
+        // DidRegistry — a genuine transaction on `REGISTRY_CHAIN_ID`, reached
+        // through `deps.registry`, which knows nothing about sandbox. Passing
+        // the flag is what withholds it; see `ensureOrg` for what a
+        // sandbox-created org is and how it catches up.
+        org = await ensureOrg(orgName, prov.issuerOrgType ?? "verifier", { actorId: claims.id, sandbox });
       } catch (err) {
         if (err instanceof CodedError && err.code === "REGISTRY_UNAVAILABLE") return reply.code(502).send({ error: err.code, message: err.message });
         throw err;
@@ -2972,20 +2978,57 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
   // what makes provisioning re-runnable. Throws coded(502) on registry failure;
   // callers map that to the same 502 the direct route returned (the shared error
   // handler only maps 4xx CodedErrors, so a 502 must be caught explicitly).
+  //
+  // EN-D2: `sandbox` WITHHOLDS THE ON-CHAIN DID REGISTRATION. This is the third
+  // path a sandbox act had to a real chain — provisioning a sandbox programme
+  // for an org that does not exist yet reached `registerDid` on the real
+  // DidRegistry, which is a transaction and real gas, and neither the chain rule
+  // nor the mode gate stands anywhere near it.
+  //
+  // WHAT A SANDBOX-CREATED ORG IS. A real tenant record with a real custodial
+  // DID that is simply not on the registry yet. Everything the sandbox needs
+  // works: it signs credentials (the DID's key material is ours, not the
+  // chain's), it owns programmes, it appears in every list. What it lacks is the
+  // public on-chain claim to that DID — and the sandbox is exactly the context
+  // in which nobody should be relying on one. The catch-up below is the other
+  // half of the bargain: the first LIVE provision that reaches this org pays for
+  // the registration the sandbox would not.
   async function ensureOrg(
     name: string,
     orgType: OrgType,
-    opts: { registrationId?: string | null; jurisdiction?: string | null; actorId?: string } = {},
+    opts: { registrationId?: string | null; jurisdiction?: string | null; actorId?: string; sandbox?: boolean } = {},
   ): Promise<OrganizationRecord> {
     const existing = await deps.organizations.findByName(name);
-    if (existing) return existing;
+    if (existing) {
+      // THE CATCH-UP, and it is deliberately BEST-EFFORT. An org created by a
+      // sandbox provision has no on-chain registration; the first live one
+      // repairs that. Check-then-register for the same reason
+      // `POST /orgs/:id/approve` does it — `registerDid` reverts
+      // AlreadyRegistered — so for every org created the ordinary way this is a
+      // single read that changes nothing. A failure is LOGGED AND SWALLOWED
+      // rather than turned into a 502: re-provisioning an existing org
+      // succeeded before this line existed and must keep succeeding, or a
+      // registry outage would start failing calls that never touched a chain.
+      if (!opts.sandbox && deps.registry) {
+        try {
+          const { registered } = await deps.registry.anchor.didRegistration(deps.registry.didRegistry, existing.did);
+          if (!registered) {
+            await deps.registry.anchor.registerDid(deps.registry.didRegistry, existing.did);
+            await deps.audit.append({ actorId: opts.actorId ?? "provisioning", action: "org-did-registered" as LifecycleAction, payload: { orgId: existing.id, did: existing.did, reason: "first live use of a sandbox-created org" } });
+          }
+        } catch (err) {
+          app.log.error({ err, orgId: existing.id }, "deferred org DID registration failed — continuing (the org is unchanged)");
+        }
+      }
+      return existing;
+    }
     const seed = deps.keystore.newSeed();
     const didSeedEncrypted = deps.keystore.encryptSeed(seed);
     const did = deps.keystore.keyOf(didSeedEncrypted).did;
     // Register on-chain BEFORE persisting, so a chain failure needs no rollback:
     // nothing has been written yet. (Contrast mintMembership, which must delete
     // the user row because the row precedes the VC.)
-    if (deps.registry) {
+    if (deps.registry && !opts.sandbox) {
       try {
         await deps.registry.anchor.registerDid(deps.registry.didRegistry, did);
       } catch (err) {
@@ -2998,7 +3041,11 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       did, didSeedEncrypted, status: "active", verified: true, verifiedAt: new Date().toISOString(), companyProfile: null,
       capabilities: null, // platform-created orgs stay unrestricted legacy until an envelope is set
     });
-    await deps.audit.append({ actorId: opts.actorId ?? "provisioning", action: "org-created" as LifecycleAction, payload: { orgId: org.id, name: org.name, did: org.did } });
+    // `didRegistered` is in the trail because "this org's DID is not on the
+    // registry" is otherwise invisible: nothing on the record says so, and a
+    // reader looking at an unresolvable DID months later has no other way to
+    // learn whether it was withheld on purpose or a registration failed.
+    await deps.audit.append({ actorId: opts.actorId ?? "provisioning", action: "org-created" as LifecycleAction, payload: { orgId: org.id, name: org.name, did: org.did, didRegistered: !opts.sandbox } });
     return org;
   }
 
@@ -3146,7 +3193,11 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
             ...(p.gstin ? { gstin: p.gstin } : {}),
           } : {}),
         };
-        const cred = await issueCredentialFor(deps, { issuerOrg: platformOrg, subjectDid: org.did, type: "OrganizationCredential", claims: kybClaims, validityDays: credentialTypeDef("OrganizationCredential").validityDays, proposalId: null });
+        // EN-D2 `sandbox: false`: the KYB approval ceremony is platform
+        // governance on a REAL organization — it is refused to machine
+        // principals entirely (`platformGovernanceRefused`) and has no sandbox
+        // counterpart, so its OrganizationCredential anchors exactly as before.
+        const cred = await issueCredentialFor(deps, { issuerOrg: platformOrg, subjectDid: org.did, type: "OrganizationCredential", claims: kybClaims, validityDays: credentialTypeDef("OrganizationCredential").validityDays, proposalId: null, sandbox: false });
         issuerDid = platformOrg.did;
         orgCredentialId = cred.id;
       } catch (err) {
@@ -4351,6 +4402,18 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       id: cred.id, revoked: cred.revoked, revokedAt: cred.revokedAt, reason: cred.revokedReason,
       ...(cred.acceptance !== "accepted" || cred.acceptanceAt !== null ? { acceptance: cred.acceptance } : {}),
     };
+    // EN-D2, THE FOURTH ANSWER, and it is not the `database` one. A sandbox
+    // credential is unanchored BY DESIGN — nothing was written, nothing ever
+    // will be — and folding that into `source: "database"` would make it
+    // indistinguishable from the case immediately below, where the anchor was
+    // meant to happen and did not. A verifier told "database" reasonably asks
+    // whether the platform is broken; told "sandbox" it knows this credential
+    // has no on-chain existence and never claimed one. Both `source` and the
+    // explicit boolean are sent: the boolean is what a machine branches on, the
+    // `source` value is what keeps the provenance field honest for a reader who
+    // only looks there. Reading the row's marker (not the use case) keeps this
+    // PUBLIC route to the single lookup it has always made.
+    if (cred.anchorChainId === SANDBOX_CHAIN_ID) return { ...fromDb, anchored: false, source: "sandbox", sandbox: true };
     if (!deps.registry) return { ...fromDb, anchored: false, source: "database" };
     let onChain;
     try {
@@ -4396,7 +4459,10 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     const issuerName = (await deps.organizations.findByDid(cred.issuerDid))?.name ?? null;
     const statusUrl = `${deps.publicApiUrl}/credentials/${cred.id}/status`;
     let status = { revoked: cred.revoked, revokedAt: cred.revokedAt, revokedReason: cred.revokedReason };
-    if (deps.registry) {
+    // EN-D2: a sandbox credential has no on-chain record, so asking a real chain
+    // about it is a pointless RPC round-trip whose only possible answer is
+    // "absent" — the database status below is already the right one.
+    if (deps.registry && cred.anchorChainId !== SANDBOX_CHAIN_ID) {
       try {
         const onChain = await deps.registry.anchor.credentialStatusOf(deps.registry.vcRegistry, cred.id);
         if (onChain.exists) status = { revoked: onChain.revoked, revokedAt: onChain.revokedAt ? new Date(onChain.revokedAt * 1000).toISOString() : null, revokedReason: cred.revokedReason };
@@ -5193,10 +5259,23 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       // The payload is NOT `p.payload`: proposal payloads are internal command
       // arguments and have already been found to carry a bcrypt passwordHash
       // (EN-B final review). Kind + ids only.
+      // EN-D2. THE MODE OF A PROPOSAL IS NOT ALWAYS ON ITS `useCaseKey` COLUMN.
+      // Credential-use-case proposals are ORG-scoped, so that column is null and
+      // the use case lives in the payload; `create-use-case` names a key that
+      // did not exist when the proposal was drafted (it does now — this runs
+      // AFTER execution). `proposalTarget` already resolves all three shapes for
+      // the approval gate, so the emit uses the same resolver rather than a
+      // second, subtly different one. Without it, executing a SANDBOX
+      // credential issuance published a `live` fact: straight to the org's
+      // production webhook endpoints, and invisible to the test key that drafted
+      // it. Only the mode label changes — the row's own `useCaseKey`, `orgId`
+      // and payload are exactly what they were.
+      const modeTarget = await proposalTarget(p);
       await emitEvent(deps, {
         type: "proposal.executed",
         orgId: p.orgId || (p.useCaseKey ? await ownerOrgOfUseCase(deps, p.useCaseKey) : null),
         useCaseKey: p.useCaseKey,
+        modeUseCaseKey: modeTarget?.key ?? null,
         subjectId: p.id,
         data: {
           proposalId: p.id, kind: p.kind, orgId: p.orgId, useCaseKey: p.useCaseKey,

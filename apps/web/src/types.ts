@@ -663,14 +663,18 @@ export interface IdentityRegistryInfo {
 }
 
 /** Revocation status of a credential (GET /credentials/:id/status — public, no auth).
- * `source` says where the answer came from: the chain registry, or the database when unanchored. */
+ * `source` says where the answer came from: the chain registry, the database when
+ * unanchored — or `sandbox` (EN-D2), which is NOT the database fallback: a sandbox
+ * credential was never anchored and never will be, by design. */
 export interface CredentialStatusInfo {
   id: string;
   revoked: boolean;
   revokedAt: string | null;
   reason: string | null;
   anchored: boolean;
-  source: "chain" | "database";
+  source: "chain" | "database" | "sandbox";
+  /** True only for a credential issued in a SANDBOX use case (EN-D2): unanchored by design. */
+  sandbox?: boolean;
   acceptance?: string;
   /** Present only when source === "chain". */
   chainId?: string;

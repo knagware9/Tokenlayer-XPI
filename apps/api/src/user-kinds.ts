@@ -9,6 +9,7 @@ import { issueCredentialFor, revokeCredentialById } from "./credential-issuance.
 import { coded } from "./executors.js";
 import type { TokenClaims } from "./http/support.js";
 import { PLATFORM_ORG_NAME } from "./platform-org.js";
+import { isSandboxUseCase } from "./sandbox.js";
 import type { ProposalKindHandler } from "./proposal-kinds.js";
 import type { ProposalRecord } from "./persistence/types.js";
 
@@ -79,6 +80,13 @@ async function onboardSingle(deps: AppDeps, proposer: Actor, pl: OnboardUserPayl
         issuerOrg, subjectDid: did, type: "KycCredential",
         claims: { legalName: pl.kyc.legalName, country: pl.kyc.country },
         validityDays: credentialTypeDef("KycCredential").validityDays, proposalId: p.id,
+        // EN-D2, AND THE CASE THAT PROVES `sandbox` COULD NOT HAVE BEEN DERIVED
+        // FROM `credentialUseCaseKey`. This credential stores none — it belongs
+        // to the closed catalog — yet the act it is part of is governed by
+        // `pl.useCaseKey`, a TOKENIZATION use case, which may perfectly well be
+        // a sandbox one. Onboarding a rehearsal user into a sandbox programme
+        // must not anchor their KYC credential on a real chain.
+        sandbox: await isSandboxUseCase(deps, pl.useCaseKey),
       });
       issuedCredentialId = cred.id;
       await deps.users.update(created.id, {

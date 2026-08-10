@@ -2563,7 +2563,10 @@ export const S: Record<string, FastifySchema> = {
       "**Read `source` before you trust `revoked`.** `chain` means the answer came from the on-chain VC registry; " +
       "`database` means it did not — either nothing is anchored, or the chain read FAILED and this fell back to our " +
       "own record. The two are indistinguishable in `source` alone, so a verifier with a hard requirement on " +
-      "on-chain proof must require `source === \"chain\"` rather than merely reading `revoked`.",
+      "on-chain proof must require `source === \"chain\"` rather than merely reading `revoked`.\n\n" +
+      "`sandbox` is the third value (EN-D2): the credential was issued in a SANDBOX use case, so it was never " +
+      "anchored and never will be — nothing about it exists on any chain. That is a design property, not a failure, " +
+      "and it is reported separately from `database` precisely so it cannot be mistaken for one.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: {
       200: {
@@ -2578,7 +2581,10 @@ export const S: Record<string, FastifySchema> = {
           // lifecycle simply omits it.
           acceptance: { type: "string", enum: ["pending", "accepted", "rejected", "changes_requested"], description: "The holder's acceptance state. ABSENT for a credential that predates the acceptance lifecycle." },
           anchored: { type: "boolean", description: "Whether this credential was found in the on-chain registry." },
-          source: { type: "string", enum: ["chain", "database"], description: "Where `revoked` came from. `database` also covers an on-chain read that failed." },
+          source: { type: "string", enum: ["chain", "database", "sandbox"], description: "Where `revoked` came from. `database` also covers an on-chain read that failed. `sandbox` means the credential belongs to a sandbox use case and is unanchored by design." },
+          // Declared, or fast-json-stringify strips it and the honest answer
+          // above silently becomes the ambiguous one.
+          sandbox: { type: "boolean", description: "Present and true only for a credential issued in a SANDBOX use case: never anchored, by design (EN-D2)." },
           chainId: { type: "string", description: "Chain-source only." },
           registry: { type: "string", description: "The VC registry contract address. Chain-source only." },
           vcHash: { type: "string", description: "The anchored hash of the credential. Chain-source only." },

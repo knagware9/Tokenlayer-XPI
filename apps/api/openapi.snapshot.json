@@ -1435,7 +1435,7 @@
         ],
         "requestBody": false,
         "responses": {
-          "200": "{acceptance,anchorChainId,anchorTxHash,anchored,chainId,id,reason,registry,revokeTxHash,revoked,revokedAt,source,vcHash}",
+          "200": "{acceptance,anchorChainId,anchorTxHash,anchored,chainId,id,reason,registry,revokeTxHash,revoked,revokedAt,sandbox,source,vcHash}",
           "404": "#Error"
         }
       }
