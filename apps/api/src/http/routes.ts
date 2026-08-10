@@ -432,6 +432,27 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       || (claims.role === "Verifier" && !!r.credentialUseCaseKey && claims.useCaseKey === r.credentialUseCaseKey);
   }
 
+  /**
+   * EN-D2 review: `verifierScoped` narrows by ORG and ROLE, and a mode is
+   * neither, so a `tl_test_` key refused at `POST /verification-requests` could
+   * still read a LIVE request — holder DID, requested types, purpose — and,
+   * once consented, drive `/verify` and stamp `verifierResult` on a live row.
+   *
+   * These routes resolve no use case from a path parameter, so
+   * `mode-coverage.test.ts` structurally cannot see them; they are on its
+   * hand-written list for exactly that reason. An unbound request
+   * (`credentialUseCaseKey` null) is LIVE, not mode-less — the same fail-closed
+   * reading `modeGate` gives a null use case everywhere else.
+   */
+  async function vreqModeAllows(request: FastifyRequest, r: VerificationRequestRecord): Promise<boolean> {
+    const keyMode = actorMode(request);
+    if (keyMode === null) return true; // a human session has no mode
+    const uc = r.credentialUseCaseKey
+      ? await deps.credentialUseCases.get(r.credentialUseCaseKey).catch(() => null)
+      : null;
+    return modeAllows(keyMode, uc?.sandbox ? "test" : "live");
+  }
+
   // Resolve a use-case key to its product domain the SAME way GET /me does —
   // shared by the login + QR-poll responses (which populate the web SessionUser)
   // and the /me handler, so the domain a session carries never drifts. Null when
@@ -2884,6 +2905,16 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     const target = await deps.users.findById(id);
     if (!target) return notFound(reply, "user not found");
     if (!canAdministerUser(claims, target)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to revoke that user's identity" });
+    // EN-D2 review (LOW-6): the executor revokes EVERY credential this user
+    // holds, and revoking a live one is a real chain write. `canAdministerUser`
+    // narrows by role and desk, neither of which is a mode. A user bound to no
+    // desk resolves to null → live, so a `tl_test_` key is refused rather than
+    // being handed the platform's unscoped users.
+    const targetUseCase = target.useCaseKey
+      ? (await deps.useCases.get(target.useCaseKey).catch(() => null))
+        ?? (await deps.credentialUseCases.get(target.useCaseKey).catch(() => null))
+      : null;
+    if (!modeGate(request, reply, targetUseCase)) return reply;
     // null useCaseKey → scans all pending; the userId match below still scopes it.
     const pending = await deps.proposals.list(target.useCaseKey ?? undefined, "pending");
     if (pending.some((p) => p.kind === "revoke-user-identity" && (p.payload as { userId: string }).userId === id)) {
@@ -3768,9 +3799,30 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
    * point of the no-oracle rule is that "not yours" and "not there" are
    * indistinguishable from outside.
    */
-  async function orgEndpoint(reply: FastifyReply, orgId: string, whId: string): Promise<WebhookEndpointRecord | null> {
+  /**
+   * THE ONE DOOR TO A SINGLE ENDPOINT — every per-endpoint route (patch, rotate,
+   * delete, ping, deliveries, redeliver) goes through it, which is why the mode
+   * check belongs HERE rather than at each call site.
+   *
+   * EN-D2 review: registration was mode-gated and nothing else was, so a
+   * `tl_test_` key refused a live endpoint at `POST` could still PATCH one's URL
+   * to a host of its choosing, rotate its signing secret, or delete it. `mode`
+   * is deliberately absent from the update patch so an endpoint cannot be MOVED
+   * between streams — but repointing its URL achieves the same delivery outcome
+   * without ever touching the field, so guarding the field was never the guard.
+   *
+   * 404, not 403: an endpoint in the other environment should not be
+   * distinguishable from one that does not exist. The registration gate answers
+   * 403 WRONG_MODE because there the caller supplied the mode and needs telling
+   * which one was refused; here the id is the caller's guess about a resource
+   * they have no business enumerating.
+   */
+  async function orgEndpoint(request: FastifyRequest, reply: FastifyReply, orgId: string, whId: string): Promise<WebhookEndpointRecord | null> {
     const e = await deps.webhookEndpoints.findById(whId);
-    if (!e || e.orgId !== orgId || e.deletedAt !== null) { notFound(reply, "webhook endpoint not found"); return null; }
+    if (!e || e.orgId !== orgId || e.deletedAt !== null || !modeAllows(actorMode(request), e.mode)) {
+      notFound(reply, "webhook endpoint not found");
+      return null;
+    }
     return e;
   }
 
@@ -3855,7 +3907,13 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
   app.get("/orgs/:id/webhooks", { schema: S.listWebhooks, ...authScoped("webhooks:read") }, async (request, reply) => {
     const { id } = request.params as { id: string };
     if (!(await webhookOrg(request, reply, id))) return;
-    return { endpoints: (await deps.webhookEndpoints.listByOrg(id)).map(webhookView) };
+    // MODE-NARROWED, on the same terms as every other list: a key sees its own
+    // environment and a human session sees both. Not cosmetic — the unfiltered
+    // listing is how a sandbox key LEARNED the id of a live endpoint, and an id
+    // is the only thing the per-endpoint routes ask for.
+    const keyMode = actorMode(request);
+    const endpoints = (await deps.webhookEndpoints.listByOrg(id)).filter((e) => modeAllows(keyMode, e.mode));
+    return { endpoints: endpoints.map(webhookView) };
   });
 
   app.patch("/orgs/:id/webhooks/:whId", { schema: S.updateWebhook, ...authScoped("webhooks:write") }, async (request, reply) => {
@@ -3867,7 +3925,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     };
     const org = await webhookOrg(request, reply, id);
     if (!org) return;
-    const endpoint = await orgEndpoint(reply, id, whId);
+    const endpoint = await orgEndpoint(request, reply, id, whId);
     if (!endpoint) return;
 
     const patch: Parameters<typeof deps.webhookEndpoints.update>[1] = {};
@@ -3924,7 +3982,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     const claims = request.user as TokenClaims;
     const { id, whId } = request.params as { id: string; whId: string };
     if (!(await webhookOrg(request, reply, id))) return;
-    const endpoint = await orgEndpoint(reply, id, whId);
+    const endpoint = await orgEndpoint(request, reply, id, whId);
     if (!endpoint) return;
 
     // NO OVERLAP WINDOW, deliberately: the moment this returns, deliveries are
@@ -3946,7 +4004,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     const claims = request.user as TokenClaims;
     const { id, whId } = request.params as { id: string; whId: string };
     if (!(await webhookOrg(request, reply, id))) return;
-    const endpoint = await orgEndpoint(reply, id, whId);
+    const endpoint = await orgEndpoint(request, reply, id, whId);
     if (!endpoint) return;
 
     // SOFT delete: the row stays so its delivery history keeps a destination to
@@ -4004,7 +4062,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     const claims = request.user as TokenClaims;
     const { id, whId } = request.params as { id: string; whId: string };
     if (!(await webhookOrg(request, reply, id))) return;
-    const endpoint = await orgEndpoint(reply, id, whId);
+    const endpoint = await orgEndpoint(request, reply, id, whId);
     if (!endpoint) return;
     // A disabled endpoint's delivery is dead on arrival (the dispatcher settles
     // it `dead` without sending), so queueing one would report success for
@@ -4033,7 +4091,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     const { id, whId } = request.params as { id: string; whId: string };
     const q = request.query as { limit?: string };
     if (!(await webhookOrg(request, reply, id))) return;
-    const endpoint = await orgEndpoint(reply, id, whId);
+    const endpoint = await orgEndpoint(request, reply, id, whId);
     if (!endpoint) return;
     // A delivery row carries no payload — ids, status, attempt counts and the
     // endpoint's own HTTP answer. The event body is read from GET /events, which
@@ -4045,7 +4103,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     const claims = request.user as TokenClaims;
     const { id, whId, dId } = request.params as { id: string; whId: string; dId: string };
     if (!(await webhookOrg(request, reply, id))) return;
-    const endpoint = await orgEndpoint(reply, id, whId);
+    const endpoint = await orgEndpoint(request, reply, id, whId);
     if (!endpoint) return;
     const delivery = await deps.webhookDeliveries.findById(dId);
     // 404, NOT 403, for a delivery belonging to another org — and the check is
@@ -4304,6 +4362,15 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     if (claims.role !== "PlatformAdmin" && claims.role !== "OrgAdmin") {
       return reply.code(403).send({ error: "FORBIDDEN", message: "only a Platform Admin or an Org Admin may request credentials" });
     }
+    // EN-D2. THE CLOSED CATALOG IS ALWAYS LIVE — it has no use case, so it has
+    // no sandbox variant, and `issueCredentialFor` anchors it on the platform's
+    // real registry. `null` is therefore the honest target, and `modeGate` reads
+    // null as live: a human session passes, a `tl_live_` key passes, a
+    // `tl_test_` key is refused HERE rather than at approval. Refusing at the
+    // door is not redundant with the decide-time gate — a proposal a test key
+    // can draft but never approve is a trap, and the 403 an integrator gets
+    // here names the actual problem.
+    if (!modeGate(request, reply, null)) return reply;
     // An OrgAdmin may only ever issue as their OWN org — any issuerOrgId in the
     // body is ignored, never honoured (it would be a privilege escalation).
     const issuerOrgId = claims.role === "OrgAdmin" ? claims.orgId : b.issuerOrgId;
@@ -4343,10 +4410,16 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     const cred = await deps.credentials.get(id);
     if (!cred) return notFound(reply, "credential not found");
     // EN-D2: a credential's mode is its use case's. A closed-catalog credential
-    // (no `credentialUseCaseKey`) belongs to no use case at all and so has no
-    // mode to cross — `modeGateByKey` passes a null key through, leaving that
-    // pre-existing path exactly as it was.
-    if (!(await modeGateByKey(request, reply, cred.credentialUseCaseKey))) return reply;
+    // (no `credentialUseCaseKey`) belongs to no use case — and is therefore
+    // LIVE, not mode-less: it was anchored on the platform's real registry, and
+    // revoking it writes there again. `modeGateByKey` would pass a null key
+    // through as "binds nothing", which is right where it is used (binding a
+    // member to a desk) and wrong here, so this resolves the use case itself and
+    // hands `modeGate` the null that means live.
+    const credUseCase = cred.credentialUseCaseKey
+      ? await deps.credentialUseCases.get(cred.credentialUseCaseKey).catch(() => null)
+      : null;
+    if (!modeGate(request, reply, credUseCase)) return reply;
     if (cred.revoked) return reply.code(409).send({ error: "ALREADY_REVOKED", message: "credential is already revoked" });
     // Only the ISSUING org may revoke: find the org whose parent DID signed it.
     const issuer = await deps.organizations.findByDid(cred.issuerDid);
@@ -4647,7 +4720,10 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
   app.get("/me/verification-requests", { schema: S.myVerificationRequests, ...authScoped("verifications:read") }, async (request) => {
     const claims = request.user as TokenClaims;
     if (!claims.did) return [];
-    const rows = await deps.verificationRequests.listByHolder(claims.did);
+    const all = await deps.verificationRequests.listByHolder(claims.did);
+    // Narrowed like every other list: a key sees its own environment only.
+    const allowed = await Promise.all(all.map((r) => vreqModeAllows(request, r)));
+    const rows = all.filter((_, i) => allowed[i]);
     const mine = await deps.credentials.listByHolder(claims.did);
     return rows.map((r) => ({
       ...vreqView(r),
@@ -4663,7 +4739,12 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     const r = await deps.verificationRequests.get(id);
     const isHolder = !!claims.did && claims.did === r?.holderDid;
     const isVerifier = !!r && verifierScoped(claims, r);
-    if (!r || (!isHolder && !isVerifier)) return notFound(reply, "verification request not found");
+    // 404 rather than 403 for the mode miss, to match the two authorization
+    // misses beside it: a request in the other environment is indistinguishable
+    // from one that does not exist.
+    if (!r || (!isHolder && !isVerifier) || !(await vreqModeAllows(request, r))) {
+      return notFound(reply, "verification request not found");
+    }
     return vreqView(r);
   });
 
@@ -4672,7 +4753,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     const { id } = request.params as { id: string };
     const { credentialIds } = request.body as { credentialIds: string[] };
     const r = await deps.verificationRequests.get(id);
-    if (!r) return notFound(reply, "verification request not found");
+    if (!r || !(await vreqModeAllows(request, r))) return notFound(reply, "verification request not found");
     // Holder ONLY — one person authorizing disclosure of their OWN credentials.
     if (!claims.did || claims.did !== r.holderDid) {
       return reply.code(403).send({ error: "FORBIDDEN", message: "only the holder may consent to this request" });
@@ -4711,7 +4792,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     const claims = request.user as TokenClaims;
     const { id } = request.params as { id: string };
     const r = await deps.verificationRequests.get(id);
-    if (!r) return notFound(reply, "verification request not found");
+    if (!r || !(await vreqModeAllows(request, r))) return notFound(reply, "verification request not found");
     if (!claims.did || claims.did !== r.holderDid) {
       return reply.code(403).send({ error: "FORBIDDEN", message: "only the holder may reject this request" });
     }
@@ -4725,7 +4806,13 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     const claims = request.user as TokenClaims;
     const { id } = request.params as { id: string };
     const r = await deps.verificationRequests.get(id);
-    if (!r || !verifierScoped(claims, r)) return notFound(reply, "verification request not found");
+    // The mode check sits WITH the authorization check, not after the status
+    // check: `/verify` is a one-way transition that stamps `verifierResult` and
+    // `verifiedAt` on the row and appends to the audit log, so a sandbox key
+    // must be refused before it can reach any of that on a live request.
+    if (!r || !verifierScoped(claims, r) || !(await vreqModeAllows(request, r))) {
+      return notFound(reply, "verification request not found");
+    }
     if (r.status !== "consented" || !r.presentationVpJwt) {
       return reply.code(409).send({ error: "NOT_CONSENTED", message: `request is ${r.status}; nothing to verify` });
     }
@@ -5058,15 +5145,35 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
    *     Resolving that key would find nothing and default to live, refusing a
    *     test key its own legitimate sandbox provisioning.
    *
-   * `null` means the proposal names no use case at all (an org DID credential,
-   * an org capability change) — nothing to compare a mode against, so nothing
-   * to refuse. An unresolvable name reads as LIVE, the same fail-closed default
-   * `modeGateByKey` uses.
+   *   * `revoke-credential`, whose payload names a CREDENTIAL and not a use
+   *     case. Resolved through the credential row, because a sandbox
+   *     credential must stay revocable by the test key that issued it — and
+   *     because a LIVE one must not be.
+   *
+   * `null` means the proposal names no use case we can find — either genuinely
+   * (an org DID credential from the closed catalog, an org capability change,
+   * an unscoped onboarding) or because the name no longer resolves. Both read
+   * as **LIVE** at the gate, which is where the fourth crossing was reopened
+   * once already: the first version of this returned `null` and the gate
+   * treated it as ALLOW, so a `tl_test_` key could approve a live
+   * `issue-credential` or `revoke-credential` and write to the real registry —
+   * the exact thing the paragraph above says this exists to prevent, arriving
+   * through the kinds whose payload happens not to name their use case.
+   * Fail-closed is the only default that survives a new kind being added by
+   * someone who has not read this comment.
    */
   async function proposalTarget(p: ProposalRecord): Promise<{ key: string; sandbox: boolean } | null> {
-    const payload = p.payload as { key?: unknown; sandbox?: unknown; useCaseKey?: unknown; credentialUseCaseKey?: unknown };
+    const payload = p.payload as { key?: unknown; sandbox?: unknown; useCaseKey?: unknown; credentialUseCaseKey?: unknown; credentialId?: unknown };
     if (p.kind === "create-use-case") {
       return { key: typeof payload.key === "string" ? payload.key : p.id, sandbox: payload.sandbox === true };
+    }
+    if (p.kind === "revoke-credential" && typeof payload.credentialId === "string") {
+      const cred = await deps.credentials.get(payload.credentialId).catch(() => null);
+      // A closed-catalog credential has no use case, so it stays `null` → live,
+      // which is correct: it was anchored on the platform registry for real.
+      if (!cred?.credentialUseCaseKey) return null;
+      const uc = await deps.credentialUseCases.get(cred.credentialUseCaseKey).catch(() => null);
+      return { key: cred.credentialUseCaseKey, sandbox: !!uc?.sandbox };
     }
     const named = p.useCaseKey
       ?? (typeof payload.credentialUseCaseKey === "string" ? payload.credentialUseCaseKey : null)
@@ -5077,10 +5184,13 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     return { key: named, sandbox: !!resolved?.sandbox };
   }
 
-  /** `modeGate` for a captured operation. Sends the 403 itself, like every other gate here. */
+  /**
+   * `modeGate` for a captured operation. Sends the 403 itself, like every other
+   * gate here. A `null` target is handed STRAIGHT TO `modeGate`, which reads it
+   * as live — never short-circuited to "allowed". See `proposalTarget`.
+   */
   async function modeGateProposal(request: FastifyRequest, reply: FastifyReply, p: ProposalRecord): Promise<boolean> {
-    const target = await proposalTarget(p);
-    return target === null ? true : modeGate(request, reply, target);
+    return modeGate(request, reply, await proposalTarget(p));
   }
 
   /**
@@ -5092,10 +5202,12 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     const keyMode = actorMode(request);
     if (keyMode === null) return rows;
     const targets = await Promise.all(rows.map((p) => proposalTarget(p)));
-    return rows.filter((_, i) => {
-      const t = targets[i];
-      return !t || modeAllows(keyMode, t.sandbox ? "test" : "live");
-    });
+    // NO `!t ||` SHORT-CIRCUIT. The read side must answer the same question the
+    // gate does — an unresolvable target is LIVE — or the listing hands a test
+    // key the payload (subject KYC included) of a proposal it is refused at
+    // approve. A visibility rule that is laxer than its own decide rule is how
+    // an "isolated" environment leaks production data by reading.
+    return rows.filter((_, i) => modeAllows(keyMode, targets[i]?.sandbox ? "test" : "live"));
   }
 
   app.get("/proposals", { schema: S.listProposals, ...auth }, async (request) => {

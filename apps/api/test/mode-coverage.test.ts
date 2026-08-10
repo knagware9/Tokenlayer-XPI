@@ -46,6 +46,29 @@ const RESOLVES_USE_CASE = /\b(useCases|credentialUseCases)\.(get|has|list)\(/;
  */
 const CONSULTS_GATE = /\bmodeGate\w*\(/;
 
+/**
+ * The gate is a WRAPPER around core's `modeAllows`, and a per-resource
+ * predicate that calls `modeAllows` directly has made the same decision — it
+ * just answers about a webhook endpoint or a verification request rather than a
+ * use case, so there is no use-case record to hand `modeGate`. `vreqModeAllows`
+ * and `orgEndpoint` are both this shape. Recognising only the wrapper would
+ * report those as ungated, and the fix a reader would then reach for is to
+ * rename an honest predicate into the gate family, which is worse.
+ */
+const DECIDES_MODE = /\bmode(Gate\w*|Allows)\(/;
+
+/**
+ * …with ONE exclusion, and it is load-bearing. `modeFilter` and
+ * `modeVisibleUseCaseKeys` call `modeAllows` too, but they NARROW rather than
+ * refuse — that is the whole reason the list projections are exempt from the
+ * gate and pinned by "the filtered projections really do filter" instead.
+ * Letting them count as gates would silently mark those routes decided and
+ * strand their MODE_EXEMPT entries as stale, deleting a real check to satisfy a
+ * regex. Matched on the helper's NAME because that is what the exemption prose
+ * refers to.
+ */
+const NARROWER_NAME = /^mode(Filter|Visible\w*)$/;
+
 /** Does `body` call any of `names` (as functions)? */
 function calls(body: string, names: readonly string[]): boolean {
   return names.some((n) => new RegExp(`\\b${n}\\(`).test(body));
@@ -119,7 +142,7 @@ describe("mode-gate coverage (EN-D2)", () => {
   const routes = declaredRoutes();
   const helpers = declaredHelpers();
   const resolvers = helpers.filter((h) => RESOLVES_USE_CASE.test(h.body)).map((h) => h.name);
-  const gates = helpers.filter((h) => CONSULTS_GATE.test(h.body)).map((h) => h.name);
+  const gates = helpers.filter((h) => DECIDES_MODE.test(h.body) && !NARROWER_NAME.test(h.name)).map((h) => h.name);
 
   /** Routes that resolve a use case — themselves, or through a resolving helper. */
   const candidates = routes.filter((r) => r.body !== null && (RESOLVES_USE_CASE.test(r.body) || calls(r.body, resolvers)));
@@ -243,6 +266,79 @@ describe("mode-gate coverage (EN-D2)", () => {
     // …and the list of them narrows rather than refusing, as every other
     // machine-visible list here does.
     expect(NARROWS_BY_MODE.test(at("GET /proposals")?.body ?? "")).toBe(true);
+  });
+
+  it("the routes that name no use case at all are gated too (final-review findings)", () => {
+    // THE STRUCTURAL LIMIT OF THIS FILE, named. The scan above can only see a
+    // route that RESOLVES a use case, so a route whose subject is a webhook
+    // endpoint, a verification request or a closed-catalog credential is
+    // invisible to it — not exempt, invisible. The final EN-D2 review walked the
+    // surface by hand and found four such holes, each with its own control
+    // proving the intended refusal existed one route away:
+    //
+    //   · webhook registration was gated; PATCH, rotate, DELETE and the listing
+    //     were not, so a `tl_test_` key repointed a LIVE endpoint's URL, rotated
+    //     its signing secret and deleted it.
+    //   · `POST /verification-requests` was gated; the read, consent, reject and
+    //     verify routes were not, so a sandbox key read a live holder's DID and
+    //     requested types and could have stamped `verifierResult` on a live row.
+    //   · the closed catalog (`issue-credential` / `revoke-credential`) named no
+    //     use case, so BOTH its doors were open — and its own comment claimed
+    //     they were shut.
+    //   · `revoke-user-identity` for a deskless user, whose executor revokes
+    //     every credential the user holds.
+    //
+    // Naming them here is the compensating control the previous hand-written
+    // list (which stopped at `decide`) should have been. It is a list, with all
+    // a list's weakness — but a named list that a reviewer can extend beats a
+    // scan that structurally cannot look.
+    const at = (k: string) => routes.find((r) => key(r) === k)?.body ?? null;
+    const helperBody = (n: string) => helpers.find((h) => h.name === n)?.body ?? null;
+    const CHECKS_MODE = /\bmodeAllows\(/;
+
+    // --- webhooks. The chokepoint is `orgEndpoint`: every per-endpoint route
+    // goes through it, so the check lives there rather than six times over.
+    const orgEndpoint = helperBody("orgEndpoint");
+    expect(orgEndpoint, "`orgEndpoint` has gone missing — the per-endpoint mode check lived in it").not.toBeNull();
+    expect(CHECKS_MODE.test(orgEndpoint!)).toBe(true);
+    for (const k of [
+      "PATCH /orgs/:id/webhooks/:whId",
+      "POST /orgs/:id/webhooks/:whId/rotate",
+      "DELETE /orgs/:id/webhooks/:whId",
+      "POST /orgs/:id/webhooks/:whId/test",
+      "GET /orgs/:id/webhooks/:whId/deliveries",
+      "POST /orgs/:id/webhooks/:whId/deliveries/:dId/replay",
+    ]) {
+      const body = at(k);
+      expect(body, `${k} has gone missing`).not.toBeNull();
+      expect(/\borgEndpoint\(/.test(body!), `${k} must reach its endpoint through orgEndpoint, which is where the mode check is`).toBe(true);
+    }
+    // The listing narrows rather than refusing — and it is not cosmetic: the
+    // unfiltered list is how a sandbox key learned a live endpoint's id.
+    expect(CHECKS_MODE.test(at("GET /orgs/:id/webhooks") ?? "")).toBe(true);
+
+    // --- verification requests, through their own shared predicate.
+    const vreq = helperBody("vreqModeAllows");
+    expect(vreq, "`vreqModeAllows` has gone missing").not.toBeNull();
+    expect(CHECKS_MODE.test(vreq!)).toBe(true);
+    for (const k of [
+      "GET /verification-requests/:id",
+      "POST /verification-requests/:id/consent",
+      "POST /verification-requests/:id/reject",
+      "GET /verification-requests/:id/verify",
+      "GET /me/verification-requests",
+    ]) {
+      const body = at(k);
+      expect(body, `${k} has gone missing`).not.toBeNull();
+      expect(/\bvreqModeAllows\(/.test(body!), `${k} acts on a verification request and must consult vreqModeAllows`).toBe(true);
+    }
+
+    // --- the closed catalog and the deskless user: both doors, both gates.
+    for (const k of ["POST /credentials/requests", "POST /credentials/:id/revoke", "POST /users/:id/revoke-identity"]) {
+      const body = at(k);
+      expect(body, `${k} has gone missing`).not.toBeNull();
+      expect(CONSULTS_GATE.test(body!), `${k} writes to the real registry for a live subject and must consult the mode gate`).toBe(true);
+    }
   });
 
   it("WRONG_MODE is sent from exactly one place", () => {

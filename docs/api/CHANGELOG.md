@@ -19,6 +19,51 @@ diff. That file is generated, not written by hand; see the header of
 
 ---
 
+## Unreleased — every sandbox boundary, not just the ones with a use case (EN-D2 review)
+
+The mode gate was written for routes that name a use case. The final review
+walked the rest of the surface by hand and found four places where a `tl_test_`
+key still reached live data — each one a door beside a door that *was* gated.
+All four are closed. **Nothing here changes what a human session or a
+`tl_live_` key can do**; the entire effect is on `tl_test_` keys, which were
+never meant to reach any of this.
+
+- **ACTION REQUIRED if a `tl_test_` key manages webhook endpoints.** Only
+  registration was mode-scoped, so a test key could list, repoint (`PATCH`),
+  rotate the signing secret of, and delete a **live** endpoint. Every
+  per-endpoint route (`PATCH`, rotate, `DELETE`, test-ping, deliveries, replay)
+  now answers **404** for an endpoint of the other mode, and `GET
+  /orgs/{id}/webhooks` returns only the caller's own environment. 404 rather
+  than 403 deliberately: an endpoint in the other environment should not be
+  distinguishable from one that does not exist.
+
+- **A `tl_test_` key can no longer decide a proposal that names no use case.**
+  Closed-catalog credential issuance and revocation (`issue-credential`,
+  `revoke-credential`), an org capability change and an unscoped onboarding all
+  carry `useCaseKey: null`, and the gate read that as "nothing to compare" —
+  so approving one **executed** it, including real writes to the platform's
+  on-chain registry. An unresolvable target now reads as **live**, matching what
+  the gate has always done everywhere else. `GET /proposals` narrows the same
+  way, so a test key no longer sees those rows or their `payload` at all.
+  A revocation of a genuinely *sandbox* credential is still approvable by a test
+  key: it now resolves through the credential's own use case.
+
+- **`POST /credentials/requests` refuses a `tl_test_` key with 403
+  `WRONG_MODE`.** The closed catalog has no sandbox variant, so this is a
+  refusal at the door rather than a proposal that could be drafted and never
+  approved.
+
+- **Verification requests are mode-scoped on every route, not only creation.**
+  Reading, consenting, rejecting and verifying now answer 404 for a request
+  belonging to the other environment. `/verify` in particular is a one-way
+  transition that stamps a result on the row, so a sandbox key reaching it would
+  have decided a live verification.
+
+- **`POST /users/{id}/revoke-identity`** is gated for the same reason: its
+  executor revokes every credential the subject holds.
+
+---
+
 ## Unreleased — a sandbox act never touches a chain (EN-D2)
 
 Sandbox mode lets you exercise the platform with a `tl_test_` key against
