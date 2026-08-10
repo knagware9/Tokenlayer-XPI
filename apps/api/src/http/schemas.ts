@@ -1322,6 +1322,22 @@ export const S: Record<string, FastifySchema> = {
       ...errs(400, 401, 403, 404, 413, 415),
     },
   },
+  getCertificateArtwork: {
+    tags: ["Credential Use Cases"], summary: "Fetch the certificate artwork a credential type currently uses", security: eitherCredential,
+    description:
+      "Requires the `usecases:provision` scope **and** a PlatformAdmin or an OrgAdmin whose organization OWNS this " +
+      "credential use case. Returns the image bytes that credential type's `certificate.background` names. It takes " +
+      "no document id: the use case you own is the capability, so a stored document that no design references is " +
+      "not reachable here. **404** when the type carries no artwork.",
+    params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
+    querystring: {
+      type: "object", required: ["credentialType"],
+      properties: { credentialType: { type: "string", description: "Name of the credential type within this use case." } },
+    },
+    // The 200 is opaque image bytes, so there is no field to name — the same
+    // deferral `credentialCertificate` and `previewCertificate` already record.
+    response: { ...errs(401, 403, 404) },
+  },
   provisionUseCase: {
     tags: ["Credential Use Cases"], summary: "One-step enterprise provisioning from a template: ensure the issuer org, instantiate the bound credential use case, and optionally create scoped desk users (PlatformAdmin; OrgAdmin scoped to their own org)", security: eitherCredential,
     description:

@@ -1575,6 +1575,41 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     return reply.code(201).send({ documentId: doc.id, sha256: doc.sha256, size: doc.size });
   });
 
+  /**
+   * The artwork back, for the designer canvas when a saved design is reopened.
+   *
+   * IT ACCEPTS NO DOCUMENT ID. The caller names a credential type, and what is
+   * served is whatever that type's `background` currently points at — so the
+   * use case you own is the whole capability, and a stored document that no
+   * design references is unreachable through this route. Handing it an id
+   * instead would rebuild, behind an ownership check, the same
+   * "any id, no ownership" read that made `background.documentId` worth pinning.
+   *
+   * A just-uploaded file needs no round trip: the browser still holds the
+   * `File` and can render it from a local object URL.
+   */
+  app.get("/credential-use-cases/:key/certificate/artwork", { schema: S.getCertificateArtwork, ...authScoped("usecases:provision") }, async (request, reply) => {
+    const key = (request.params as { key: string }).key;
+    const existing = await ownedCredentialUseCase(request, reply, key);
+    if (!existing) return reply;
+    const typeName = (request.query as { credentialType?: string }).credentialType ?? "";
+    const type = existing.credentialTypes.find((t) => t.name === typeName);
+    if (!type) return notFound(reply, `unknown credential type '${typeName}' in use case '${key}'`);
+    const documentId = type.certificate?.background?.documentId;
+    if (!documentId) return notFound(reply, `credential type '${typeName}' has no certificate artwork`);
+    const doc = await deps.documents.get(documentId).catch(() => null);
+    if (!doc) return notFound(reply, "certificate artwork document not found");
+    // Same headers `GET /documents/:id` sends: pin the stored (allowlisted)
+    // type and forbid sniffing, so stored bytes can never execute as the API
+    // origin. Served INLINE rather than as an attachment — this one is meant to
+    // be rendered into an <img>.
+    return reply
+      .header("content-type", doc.contentType)
+      .header("x-content-type-options", "nosniff")
+      .header("content-disposition", `inline; filename="artwork-${documentId}"`)
+      .send(doc.bytes);
+  });
+
   // Validate + create a credential use case from a fully-bound definition, reusing
   // the SAME checks as POST /credential-use-cases (referenced-org existence,
   // cross-type KEY_TAKEN guard). Throws coded errors the provisioner maps to HTTP.

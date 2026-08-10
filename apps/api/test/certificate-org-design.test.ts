@@ -493,3 +493,58 @@ describe("POST /credential-use-cases/:key/certificate/artwork", () => {
     expect(unknown.statusCode).toBe(404);
   });
 });
+
+describe("GET /credential-use-cases/:key/certificate/artwork", () => {
+  const fetchArt = (w: World, token: string, type: string) =>
+    w.h.app.inject({
+      method: "GET",
+      url: `${V1}/credential-use-cases/${w.key}/certificate/artwork?credentialType=${encodeURIComponent(type)}`,
+      headers: auth(token),
+    });
+
+  it("serves the artwork the type currently names, pinned and un-sniffable", async () => {
+    const w = await world();
+    const up = await w.h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/${w.key}/certificate/artwork`,
+      headers: auth(w.orgAdmin), payload: { contentType: "image/png", dataBase64: PNG_2x1_B64 },
+    });
+    const { documentId, sha256 } = up.json() as { documentId: string; sha256: string };
+    await design(w, w.orgAdmin, { credentialType: "CourseCompletion", background: { documentId, sha256 } });
+
+    const res = await fetchArt(w, w.orgAdmin, "CourseCompletion");
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toContain("image/png");
+    expect(res.headers["x-content-type-options"]).toBe("nosniff");
+    expect(res.rawPayload.equals(Buffer.from(PNG_2x1_B64, "base64"))).toBe(true);
+  });
+
+  it("404s when the type carries no artwork, and when the type is unknown", async () => {
+    const w = await world();
+    expect((await fetchArt(w, w.orgAdmin, "CourseCompletion")).statusCode).toBe(404);
+    expect((await fetchArt(w, w.orgAdmin, "NotAType")).statusCode).toBe(404);
+  });
+
+  it("refuses a foreign org — the use case you own IS the capability", async () => {
+    const w = await world();
+    const up = await w.h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/${w.key}/certificate/artwork`,
+      headers: auth(w.orgAdmin), payload: { contentType: "image/png", dataBase64: PNG_2x1_B64 },
+    });
+    const { documentId, sha256 } = up.json() as { documentId: string; sha256: string };
+    await design(w, w.orgAdmin, { credentialType: "CourseCompletion", background: { documentId, sha256 } });
+
+    const tag = Math.random().toString(36).slice(2, 10);
+    const foreignOrg = await w.h.organizations.create({
+      name: `Foreign G ${tag}`, orgType: "issuer", registrationId: null, jurisdiction: null,
+      did: `did:key:zFG${tag}`, didSeedEncrypted: "enc", status: "active", verified: true,
+      verifiedAt: new Date().toISOString(), companyProfile: null, capabilities: null,
+    });
+    await w.h.users.create({
+      email: `foreign-g-${tag}@tokenlayer.dev`, passwordHash: bcrypt.hashSync(`foreign-g-${tag}`, TEST_ROUNDS),
+      role: "OrgAdmin", useCaseKey: null, accountId: null, active: true, kycStatus: "approved",
+      kyc: null, orgId: foreignOrg.id, kind: "human",
+    });
+    const foreign = await loginAs(w.h.app, `foreign-g-${tag}@tokenlayer.dev`, `foreign-g-${tag}`);
+    expect((await fetchArt(w, foreign, "CourseCompletion")).statusCode).toBe(403);
+  });
+});
