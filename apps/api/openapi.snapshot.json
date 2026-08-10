@@ -186,6 +186,8 @@
       "type"
     ],
     "Organization": [
+      "brandAccent",
+      "brandLogoDocumentId",
       "capabilities",
       "companyProfile",
       "createdAt",
@@ -1722,7 +1724,7 @@
         "parameters": [],
         "requestBody": false,
         "responses": {
-          "200": "{id,orgCapabilities,role,useCaseDomain,useCaseKey}",
+          "200": "{brandAccent,brandLogoDocumentId,id,orgCapabilities,role,useCaseDomain,useCaseKey}",
           "401": "#Error"
         }
       }
@@ -2190,6 +2192,30 @@
           "404": "#Error",
           "409": "#Error",
           "502": "#Error"
+        }
+      }
+    },
+    "/api/v1/orgs/{id}/branding": {
+      "patch": {
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "#Organization",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
         }
       }
     },

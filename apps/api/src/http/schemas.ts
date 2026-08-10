@@ -593,6 +593,8 @@ export const components: Record<string, unknown>[] = [
       status: { type: "string", enum: ["pending", "active", "rejected"] },
       companyProfile: { type: "object", additionalProperties: true, nullable: true, description: "KYB profile captured at self-registration; null for a platform-created org." },
       capabilities: { type: "object", additionalProperties: true, nullable: true, description: "The EN-A capability envelope. null = legacy, unrestricted." },
+      brandLogoDocumentId: { type: "string", nullable: true, description: "EN-E: an image Document id used as this organization's mark. null = unbranded." },
+      brandAccent: { type: "string", nullable: true, description: "EN-E: lowercase `#rrggbb` accent colour. null = the platform palette." },
       createdAt: { type: "string" },
       // Present on the two READ routes only (list/get); the capability PATCH
       // returns the bare org. Not required, so it is simply absent there.
@@ -865,6 +867,8 @@ export const S: Record<string, FastifySchema> = {
           useCaseKey: { type: "string", nullable: true, description: "The desk this principal is scoped to, or null for an unscoped one." },
           useCaseDomain: { type: "string", enum: ["tokenization", "identity"], nullable: true, description: "Which domain `useCaseKey` belongs to. null when there is no use case, or when the key resolves to neither." },
           orgCapabilities: { type: "object", additionalProperties: true, nullable: true, description: "The org's EN-A envelope. null both for an org-less principal AND for a legacy, unrestricted org — the two are indistinguishable here." },
+          brandLogoDocumentId: { type: "string", nullable: true, description: "EN-E: the caller's org's logo Document id. null for an org-less principal or an unbranded org." },
+          brandAccent: { type: "string", nullable: true, description: "EN-E: the caller's org's lowercase `#rrggbb` accent. null for an org-less principal or an unbranded org." },
         },
         required: ["id", "role"],
       },
@@ -1956,6 +1960,24 @@ export const S: Record<string, FastifySchema> = {
     },
     // The updated org. `credentials` is absent here — this route returns the bare
     // record, not the read routes' held-credentials view.
+    response: { 200: { $ref: "Organization#" }, ...errs(400, 401, 403, 404) },
+  },
+  updateOrgBranding: {
+    tags: ["Organizations"], summary: "Set an organization's logo and accent colour", security: humanOnly,
+    description:
+      "Session-only, and restricted to an OrgAdmin of THIS organization or a Platform Admin. An API key is refused " +
+      "with **403 `MACHINE_PRINCIPAL`**. Deliberately carries no API-key scope: branding is a console act by a " +
+      "person, and a scope for it would let an unattended key rewrite an organization's identity.\n\n" +
+      "An omitted field is left unchanged; an explicit `null` clears it. So `{}` is a no-op, and " +
+      "`{\"brandAccent\": null}` keeps the logo while dropping the colour.",
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    body: {
+      type: "object", additionalProperties: false,
+      properties: {
+        brandLogoDocumentId: { type: "string", nullable: true, description: "An image Document id. null clears it." },
+        brandAccent: { type: "string", nullable: true, description: "#rrggbb, normalized to lowercase. null clears it." },
+      },
+    },
     response: { 200: { $ref: "Organization#" }, ...errs(400, 401, 403, 404) },
   },
   requestOrgCapabilities: {

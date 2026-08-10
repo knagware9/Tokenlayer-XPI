@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { ApiKeyRecord, AssetRecord, CashflowRecord, CompanyProfile, CredentialRecord, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord, WebhookEndpointRecord } from "../persistence/types.js";
+import type { ApiKeyRecord, AssetRecord, BrandingPatch, CashflowRecord, CompanyProfile, CredentialRecord, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord, WebhookEndpointRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, certificatePageSize, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, issueCredential, issuerBindingAllows, modeAllows, normalizeUseCaseDefinition, ORG_OPERATING_ROLES, orgDomainEnabled, orgRoleEnabled, PolicyError, presentCredential, presentCredentials, SANDBOX_CHAIN_ID, sandboxChainsValid, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateCertificatePlacements, validateCredentialUseCase, validateEventTypes, validateMetadata, scopeAllows, validateOrgCapabilities, validateScopes, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ApiScope, type ChainEntry, type CredentialTypeSpec, type CredentialUseCaseDefinition, type LifecycleAction, type OrgDomain, type OrgOperatingRole, type OrgType, type ResourceMode, type Role, type UseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
+import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, certificatePageSize, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, issueCredential, issuerBindingAllows, modeAllows, normalizeUseCaseDefinition, ORG_OPERATING_ROLES, orgDomainEnabled, orgRoleEnabled, PolicyError, presentCredential, presentCredentials, SANDBOX_CHAIN_ID, sandboxChainsValid, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateBrandAccent, validateCertificatePlacements, validateCredentialUseCase, validateEventTypes, validateMetadata, scopeAllows, validateOrgCapabilities, validateScopes, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ApiScope, type ChainEntry, type CredentialTypeSpec, type CredentialUseCaseDefinition, type LifecycleAction, type OrgDomain, type OrgOperatingRole, type OrgType, type ResourceMode, type Role, type UseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
 import qrcode from "qrcode";
 import type { AppDeps } from "../context.js";
 import { certificateStatusBanner, humanizeKey, renderCredentialCertificate } from "../certificate.js";
@@ -127,7 +127,7 @@ function devKeyFromSeed(seed: string) {
 
 // Public projection of an org — NEVER includes didSeedEncrypted.
 function orgView(o: OrganizationRecord) {
-  return { id: o.id, name: o.name, orgType: o.orgType, registrationId: o.registrationId, jurisdiction: o.jurisdiction, did: o.did, verified: o.verified, status: o.status, companyProfile: o.companyProfile, capabilities: o.capabilities, createdAt: o.createdAt };
+  return { id: o.id, name: o.name, orgType: o.orgType, registrationId: o.registrationId, jurisdiction: o.jurisdiction, did: o.did, verified: o.verified, status: o.status, companyProfile: o.companyProfile, capabilities: o.capabilities, brandLogoDocumentId: o.brandLogoDocumentId, brandAccent: o.brandAccent, createdAt: o.createdAt };
 }
 
 // EN-A: uniform 403 for an act outside an org's capability envelope. `missing`
@@ -527,7 +527,14 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     const org = claims.orgId ? await deps.organizations.get(claims.orgId) : null;
     // useCaseKey mirrors the login response so a scoped desk operator's session
     // principal is self-describing (role + scope + domain) from /me alone.
-    return { ...base, useCaseKey: claims.useCaseKey ?? null, useCaseDomain, orgCapabilities: org?.capabilities ?? null };
+    // EN-E rides the SAME org record already loaded above: the shell needs the
+    // brand on first paint, and a second fetch would be a second round-trip
+    // before it could avoid a flash of the platform palette.
+    return {
+      ...base, useCaseKey: claims.useCaseKey ?? null, useCaseDomain, orgCapabilities: org?.capabilities ?? null,
+      brandLogoDocumentId: org?.brandLogoDocumentId ?? null,
+      brandAccent: org?.brandAccent ?? null,
+    };
   });
 
   app.get("/config", { schema: S.config, ...auth }, async () => ({ domains: deps.enabledDomains }));
@@ -3422,6 +3429,59 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     const caps = b.capabilities === null ? null : validateOrgCapabilities(b.capabilities);
     const updated = await deps.organizations.setCapabilities(org.id, caps);
     await deps.audit.append({ actorId: claims.id, action: "org-capabilities-set" as LifecycleAction, payload: { orgId: org.id, capabilities: caps } });
+    return orgView(updated);
+  });
+
+  // EN-E: an org's own logo and accent colour.
+  app.patch("/orgs/:id/branding", { schema: S.updateOrgBranding, ...auth }, async (request, reply) => {
+    // MEASURED, not assumed: without this line a key bound to any OrgAdmin or
+    // PlatformAdmin service user rewrote the brand with an EMPTY scope list —
+    // the role predicate below reads the bound user's role and cannot tell the
+    // two credentials apart. Omitting `authScoped` withholds a scope; it does
+    // not withhold the route. So the refusal has to be stated here, or both the
+    // OpenAPI description and the DELIBERATELY_UNSCOPED entry are false.
+    if (machinePrincipal(request)) {
+      return reply.code(403).send({ error: "MACHINE_PRINCIPAL", message: "an API key may not set an organization's branding" });
+    }
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    // AN EXPLICIT ROLE PREDICATE, and an org-ownership check beside it.
+    // `authScoped` would be no gate at all here: `requireScope` returns early
+    // for a human session, so a scope narrows API keys and nothing else. And
+    // without the ownership half, one organization could rebrand another —
+    // the cross-tenant shape this program's reviews keep finding.
+    const isOwnOrgAdmin = claims.role === "OrgAdmin" && !!claims.orgId && claims.orgId === id;
+    if (claims.role !== "PlatformAdmin" && !isOwnOrgAdmin) {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "only this organization's admin or a platform admin may set its branding" });
+    }
+    const org = await deps.organizations.get(id);
+    if (!org) return notFound(reply, "organization not found");
+
+    const b = request.body as { brandLogoDocumentId?: string | null; brandAccent?: string | null };
+    const patch: BrandingPatch = {};
+    if ("brandAccent" in b) {
+      // Throws INVALID_BRAND_ACCENT -> 400. Normalizes to lowercase.
+      patch.brandAccent = b.brandAccent === null ? null : validateBrandAccent(b.brandAccent);
+    }
+    if ("brandLogoDocumentId" in b) {
+      // `in` is the test, not truthiness — an omitted key leaves the column
+      // alone. `?? null` only narrows the type: JSON cannot deliver `undefined`
+      // for a key that is present, so the optional-ness is a TypeScript artefact.
+      const logoId: string | null = b.brandLogoDocumentId ?? null;
+      if (logoId === null) patch.brandLogoDocumentId = null;
+      else {
+        const doc = await deps.documents.get(logoId);
+        if (!doc) return reply.code(400).send({ error: "BRAND_LOGO_NOT_FOUND", message: "no such document" });
+        // The renderer only cares about bytes, so the upload allowlist is not
+        // what gates it — check the stored type at the door an OrgAdmin reaches.
+        if (!doc.contentType.startsWith("image/")) {
+          return reply.code(400).send({ error: "BRAND_LOGO_NOT_AN_IMAGE", message: `document is ${doc.contentType}, not an image` });
+        }
+        patch.brandLogoDocumentId = logoId;
+      }
+    }
+    const updated = await deps.organizations.setBranding(id, patch);
+    await deps.audit.append({ actorId: claims.id, action: "org-branding-set" as LifecycleAction, payload: { orgId: id, ...patch } });
     return orgView(updated);
   });
 
