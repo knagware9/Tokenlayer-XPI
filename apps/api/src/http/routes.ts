@@ -8,7 +8,7 @@ import qrcode from "qrcode";
 import type { AppDeps } from "../context.js";
 import { certificateStatusBanner, humanizeKey, renderCredentialCertificate } from "../certificate.js";
 import { artworkDimensions, certificateDrawList, drawCertificate } from "../certificate-artwork.js";
-import { resolveCertificateFields } from "../certificate-fields.js";
+import { certificateLogoDocumentId, resolveCertificateFields } from "../certificate-fields.js";
 import { isSupportedCurrency } from "../currencies.js";
 import { renderContractCode } from "../contract-code.js";
 import { deployAndCreateUseCase } from "../use-cases.js";
@@ -4772,7 +4772,11 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     if (!def || !spec) return notFound(reply, "no certificate for this credential");
     if (cred.acceptance !== "accepted") return notFound(reply, "no certificate for this credential");
 
-    const issuerName = (await deps.organizations.findByDid(cred.issuerDid))?.name ?? null;
+    // Loaded once and reused for both the printed issuer name AND the EN-E
+    // brand-logo fallback below — a second fetch here would be the same
+    // organization asked twice for one request.
+    const issuerOrg = await deps.organizations.findByDid(cred.issuerDid);
+    const issuerName = issuerOrg?.name ?? null;
     const statusUrl = `${deps.publicApiUrl}/credentials/${cred.id}/status`;
     let status = { revoked: cred.revoked, revokedAt: cred.revokedAt, revokedReason: cred.revokedReason };
     // EN-D2: a sandbox credential has no on-chain record, so asking a real chain
@@ -4823,7 +4827,13 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
 
     if (!pdf) {
       let logoBytes: Buffer | null = null;
-      if (spec.certificate?.logoDocumentId) { try { logoBytes = (await deps.documents.get(spec.certificate.logoDocumentId))?.bytes ?? null; } catch { logoBytes = null; } }
+      // EN-E: the type's own logo still wins (MOST-SPECIFIC-WINS); only a type
+      // with none of its own falls back to the issuing org's brand. The
+      // deleted-document catch below covers BOTH sources — it wraps the fetch,
+      // not either lookup individually, so an org's brand document going
+      // missing degrades the same way a type's own always has: no logo, not a 500.
+      const logoDocId = certificateLogoDocumentId(spec, issuerOrg);
+      if (logoDocId) { try { logoBytes = (await deps.documents.get(logoDocId))?.bytes ?? null; } catch { logoBytes = null; } }
       pdf = await renderCredentialCertificate({ credential: cred, spec, issuerName, statusUrl, status, logoBytes, nowMs });
     }
     const fname = `${(spec.name || "credential").replace(/[^a-zA-Z0-9._-]/g, "_")}-${cred.id}.pdf`;

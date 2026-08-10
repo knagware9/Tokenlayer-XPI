@@ -75,3 +75,23 @@ export function resolveCertificateFields(input: ResolveCertificateFieldsInput): 
 
   return out;
 }
+
+/**
+ * EN-E: which logo a certificate should print: the type's own, else the
+ * issuing org's brand, else none. MOST-SPECIFIC-WINS — a credential type that
+ * already names its own `logoDocumentId` is untouched by an org branding
+ * itself later, which is the whole point of "the org brand is a default, not
+ * an override".
+ *
+ * Artwork mode never reaches this function at all — see the route, which
+ * skips the built-in logo lookup entirely once `certificate.background` is
+ * set. `certificateDrawList`'s input has no field a logo could travel
+ * through, so that is enforced by the type checker, not by a runtime branch
+ * here.
+ */
+export function certificateLogoDocumentId(
+  spec: { certificate?: { logoDocumentId?: string } },
+  issuerOrg: { brandLogoDocumentId: string | null } | null,
+): string | null {
+  return spec.certificate?.logoDocumentId ?? issuerOrg?.brandLogoDocumentId ?? null;
+}
