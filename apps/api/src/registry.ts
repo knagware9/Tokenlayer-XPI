@@ -5,6 +5,18 @@
  * ⇒ no registry ⇒ the platform issues UNANCHORED credentials and says so at the
  * status endpoint. This mirrors the platform's "real or absent, never mocked"
  * rule: we never fake an anchor.
+ *
+ * THIS OBJECT KNOWS NOTHING ABOUT USE CASES, AND THAT IS THE HAZARD (EN-D2).
+ * It is resolved once at boot on ONE chain, so neither `sandboxChainsValid`
+ * (which governs a use case's chains) nor `modeGate` (which governs its
+ * principals) stands between a caller and a real transaction — a live
+ * walkthrough proved a sandbox credential issuance spending real gas on real
+ * Besu through exactly this seam. Every WRITE must therefore either go through
+ * `sandbox.ts#writableRegistry` (credential issuance and revocation), take the
+ * sandbox flag itself (`ensureOrg`), or be a deliberate live-only act of
+ * platform governance no machine principal can reach (the boot-time
+ * platform-org bootstrap, `POST /orgs`, `POST /orgs/:id/approve`). Each says so
+ * at its call site; a new writer that fits none of those three is a bug.
  */
 import { supportsCredentialAnchor, type CredentialAnchor } from "@tokenlayer/adapters";
 import type { ChainRegistry } from "./chains.js";

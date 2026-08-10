@@ -210,6 +210,20 @@ accounts and returns their server-generated passwords. Note it lives *inside*
 from a human session" — precisely because those passwords would be disclosed to
 whoever holds the key.
 
+**To rehearse all of this against a sandbox, add `"sandbox": true` at the top
+level** — beside `templateKey`, *not* inside `provisioning`, which is the
+opposite of `createDeskUsers` above and therefore the mistake to expect. The
+nested spelling answers `400 SANDBOX_MISPLACED` rather than being ignored: a
+dropped flag would have returned `201` for a **live** programme you believed was
+a sandbox, and you would only find out by issuing real credentials. A sandbox
+programme is reachable only by a `tl_test_` key (mint one with `"mode": "test"`
+in step 3), keeps its events on the `test` webhook stream, and stays out of the
+dashboard's totals. The environment is fixed at creation — re-provisioning with
+the other value answers `409 SANDBOX_IMMUTABLE`; `POST
+/credential-use-cases/{key}/clone-to-live` copies the configuration into a real
+programme when you are ready. The same template serves both, so never write
+`sandbox` into a template (`400 SANDBOX_NOT_ON_TEMPLATE`).
+
 ## 3. Mint the maker key
 
 `POST /orgs/{orgId}/api-keys`. The key authenticates as a *service member* of

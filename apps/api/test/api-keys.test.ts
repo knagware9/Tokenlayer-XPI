@@ -331,7 +331,12 @@ describe("API key auth seam (EN-B task B3)", () => {
 
     const keyReq = reqFor(minted.secret);
     await preHandler(keyReq, replyStub);
-    expect((keyReq as { apiKey?: unknown }).apiKey).toEqual({ id: key.id, scopes: ["credentials:issue", "credentials:read"] });
+    // EN-D2 added `mode` to the principal. Kept as an EXACT-shape assertion
+    // rather than relaxed to toMatchObject: the point of this line is that the
+    // principal carries nothing beyond what a route is meant to read, and a
+    // field appearing here without anyone noticing is precisely what it
+    // catches. `"live"` is the value for every key minted before EN-D2.
+    expect((keyReq as { apiKey?: unknown }).apiKey).toEqual({ id: key.id, scopes: ["credentials:issue", "credentials:read"], mode: "live" });
     expect((keyReq as { user?: unknown }).user).toMatchObject({ id: svc.id, role: "PlatformAdmin" });
 
     const jwtReq = reqFor("a.jwt.token", function (this: void) { (jwtReq as { user?: unknown }).user = { id: human.id }; });

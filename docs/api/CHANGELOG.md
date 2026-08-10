@@ -19,6 +19,97 @@ diff. That file is generated, not written by hand; see the header of
 
 ---
 
+## Unreleased — every sandbox boundary, not just the ones with a use case (EN-D2 review)
+
+The mode gate was written for routes that name a use case. The final review
+walked the rest of the surface by hand and found four places where a `tl_test_`
+key still reached live data — each one a door beside a door that *was* gated.
+All four are closed. **Nothing here changes what a human session or a
+`tl_live_` key can do**; the entire effect is on `tl_test_` keys, which were
+never meant to reach any of this.
+
+- **ACTION REQUIRED if a `tl_test_` key manages webhook endpoints.** Only
+  registration was mode-scoped, so a test key could list, repoint (`PATCH`),
+  rotate the signing secret of, and delete a **live** endpoint. Every
+  per-endpoint route (`PATCH`, rotate, `DELETE`, test-ping, deliveries, replay)
+  now answers **404** for an endpoint of the other mode, and `GET
+  /orgs/{id}/webhooks` returns only the caller's own environment. 404 rather
+  than 403 deliberately: an endpoint in the other environment should not be
+  distinguishable from one that does not exist.
+
+- **A `tl_test_` key can no longer decide a proposal that names no use case.**
+  Closed-catalog credential issuance and revocation (`issue-credential`,
+  `revoke-credential`), an org capability change and an unscoped onboarding all
+  carry `useCaseKey: null`, and the gate read that as "nothing to compare" —
+  so approving one **executed** it, including real writes to the platform's
+  on-chain registry. An unresolvable target now reads as **live**, matching what
+  the gate has always done everywhere else. `GET /proposals` narrows the same
+  way, so a test key no longer sees those rows or their `payload` at all.
+  A revocation of a genuinely *sandbox* credential is still approvable by a test
+  key: it now resolves through the credential's own use case.
+
+- **`POST /credentials/requests` refuses a `tl_test_` key with 403
+  `WRONG_MODE`.** The closed catalog has no sandbox variant, so this is a
+  refusal at the door rather than a proposal that could be drafted and never
+  approved.
+
+- **Verification requests are mode-scoped on every route, not only creation.**
+  Reading, consenting, rejecting and verifying now answer 404 for a request
+  belonging to the other environment. `/verify` in particular is a one-way
+  transition that stamps a result on the row, so a sandbox key reaching it would
+  have decided a live verification.
+
+- **`POST /users/{id}/revoke-identity`** is gated for the same reason: its
+  executor revokes every credential the subject holds.
+
+---
+
+## Unreleased — a sandbox act never touches a chain (EN-D2)
+
+Sandbox mode lets you exercise the platform with a `tl_test_` key against
+`sandbox: true` use cases. Its whole promise is that nothing you do there is
+real. A walkthrough against a real network showed that promise was not being
+kept for credentials: a sandbox issuance was anchoring in the platform's
+on-chain VC registry — a real transaction, real gas — because anchoring goes to
+the platform registry rather than to the use case's own chain, and nothing on
+that path consulted the sandbox flag. It does now.
+
+- **A sandbox credential is not anchored, and never will be.** Issuing and
+  revoking in a sandbox use case writes nothing to any chain. `anchorTxHash`,
+  `anchorChainId` and `revokeTxHash` on the credential reflect that:
+  `anchorChainId` reads `"sandbox"` and the two tx hashes stay `null`.
+  Live issuance and revocation are unchanged — they still anchor.
+
+- **`GET /credentials/:id/status` has a third `source`: `"sandbox"`,** alongside
+  a new `sandbox: true` boolean. Additive; no existing field changed. Read it as
+  "unanchored **by design**" — deliberately distinct from `"database"`, which
+  also covers an anchor that was meant to land and did not. If your verifier
+  requires on-chain proof it already requires `source === "chain"` and is
+  unaffected. A verifier that treated everything-not-`"chain"` as one bucket
+  still behaves correctly.
+
+- **An organization created by `POST /credential-use-cases/provision` with
+  `sandbox: true` has an unregistered DID.** Provisioning still creates it and
+  still returns 201 — nothing about the call changed — but registering a DID on
+  the platform's on-chain registry is a real transaction, so a sandbox
+  provision does not make one. The organization is otherwise entirely real: it
+  signs credentials, it owns programmes, it appears in every list. What it lacks
+  is the public on-chain claim to its DID, so `GET /dids/{did}/resolve` reports
+  `registered: false`, and a third-party verifier that requires on-chain issuer
+  trust will not trust it **yet**. The first LIVE provision naming that same
+  organization registers the DID. Organizations created any other way
+  (`POST /orgs`, KYB approval, self-registration) are unaffected.
+
+- **`proposal.executed` for a sandbox proposal is now `mode: "test"`.** It was
+  `"live"`, because a credential-use-case proposal is org-scoped and names its
+  programme only inside its payload. Consequences of the old behaviour: the
+  event was delivered to your **production** webhook endpoints, and the
+  `tl_test_` key that drafted the proposal could not read its own approval back
+  from `GET /events`. If you have a live endpoint that was receiving these, it
+  will stop; subscribe a `test` endpoint instead. Live proposals are unchanged.
+
+---
+
 ## Unreleased — proposal reads: a null key stops being `""`, and the listing narrows
 
 Two fixes to `Proposal`, both visible to anyone reading proposals.

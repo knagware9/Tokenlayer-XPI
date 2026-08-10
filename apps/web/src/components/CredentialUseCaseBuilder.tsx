@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "../api.js";
 import { useAuth } from "../auth.js";
+import { SANDBOX_IMMUTABLE_NOTE, modeBlurb, modeLabel, modeTone } from "../lib/modes.js";
 import type { CredentialTypeSpec, CredentialUseCase, HolderPolicy, IssuerBinding, Organization, OrgType, UseCaseTemplate, VerifierBinding } from "../types.js";
 import { SchemaFieldEditor, fieldsToSchema, type FieldKind, type FieldRow } from "./SchemaFieldEditor.js";
-import { Icon } from "./ui.js";
+import { Icon, Pill } from "./ui.js";
 
 interface Props {
   onCreated: () => void;
@@ -71,6 +72,14 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
   const [key, setKey] = useState("");
   const [keyTouched, setKeyTouched] = useState(false);
   const [description, setDescription] = useState("");
+  /**
+   * EN-D2, the Identity-domain twin of `UseCase.sandbox`. A CREATE-TIME choice
+   * and nothing else: the server refuses to change it afterwards (409
+   * SANDBOX_IMMUTABLE), so there is no edit control for it anywhere. There is no
+   * chain rule to mirror here — a credential use case names no chains — so the
+   * flag alone is the whole of what this collects.
+   */
+  const [sandbox, setSandbox] = useState(false);
 
   // Step 2 — Credential types
   const [credTypes, setCredTypes] = useState<CredTypeDraft[]>([emptyCredType()]);
@@ -181,6 +190,7 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
       holderPolicy,
       verifier,
       ...(holderAcceptance ? { holderAcceptance: true } : {}),
+      sandbox,
     };
   }
 
@@ -316,6 +326,45 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
                   placeholder="What these credentials represent and who they are for"
                 />
               </L>
+
+              {/* THE ENVIRONMENT, offered here and nowhere else — the server
+                  fixes it at creation, so an edit control would be an
+                  affordance it refuses. */}
+              <div>
+                <span className="block text-xs font-medium text-slate-600 mb-2">Environment</span>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {([false, true] as const).map((isSandbox) => {
+                    const mode = isSandbox ? "test" : "live";
+                    const selected = sandbox === isSandbox;
+                    return (
+                      <button
+                        key={mode}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => setSandbox(isSandbox)}
+                        className={`text-left rounded-xl border p-4 transition ${
+                          selected
+                            ? isSandbox
+                              ? "border-amber-500 bg-amber-50/60 shadow-sm"
+                              : "border-brand-500 bg-brand-50/40 shadow-sm"
+                            : "border-slate-200 hover:border-brand-300"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-sm font-semibold text-slate-800">{modeLabel(mode)}</span>
+                          <Pill tone={modeTone(mode)}>{modeLabel(mode)}</Pill>
+                        </div>
+                        <p className="text-xs text-slate-500 mt-1">
+                          {isSandbox
+                            ? "Credentials issued under it are for integration testing. They are excluded from the identity dashboard and reachable only by a tl_test_ key or a signed-in person."
+                            : modeBlurb("live")}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1.5">{SANDBOX_IMMUTABLE_NOTE}</p>
+              </div>
             </div>
           )}
 
@@ -502,6 +551,14 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
                   <div className="text-sm font-semibold text-slate-800">{name || "—"}</div>
                   <div className="text-xs text-slate-500">{key}</div>
                   {description && <div className="text-xs text-slate-500 mt-1">{description}</div>}
+                </SummaryTile>
+                <SummaryTile label="Environment">
+                  <Pill tone={modeTone(sandbox ? "test" : "live")}>{modeLabel(sandbox ? "test" : "live")}</Pill>
+                  <div className="text-xs text-slate-500 mt-1">
+                    {sandbox
+                      ? "Fixed at creation. Credentials issued under it are not real attestations, and it is excluded from the identity dashboard by default."
+                      : "Fixed at creation. Credentials issued under it are real attestations about real subjects."}
+                  </div>
                 </SummaryTile>
                 <SummaryTile label="Credential types">
                   <div className="text-sm font-semibold text-slate-800">{namedCredTypes.length}</div>

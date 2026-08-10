@@ -174,6 +174,21 @@ export const components: Record<string, unknown>[] = [
         },
       },
       roles: { type: "array", items: { type: "string" } },
+      // EN-D2. DECLARED, not merely tolerated: the component is
+      // `additionalProperties: true`, so the flag always travelled — but an
+      // integrator reading the reference could not see that it exists, and a
+      // field nobody can find is a feature nobody can use. Optional on input
+      // and always present on output (false when it was never set).
+      sandbox: {
+        type: "boolean",
+        description:
+          "Test mode. `true` makes this a SANDBOX use case: it may allow ONLY the `sandbox` chain (an always-simulated " +
+          "ledger — no environment variable promotes it to a real backend), only a `tl_test_` key may act on it, its " +
+          "events go only to `test` webhook endpoints, and it is excluded from analytics unless asked for by name. " +
+          "SET AT CREATION AND NEVER AFTER (**409 `SANDBOX_IMMUTABLE`**) — use `POST /use-cases/{key}/clone-to-live` " +
+          "to promote the configuration into a real use case. Defaults to `false`: every call that omits it creates a " +
+          "live use case, exactly as before.",
+      },
     },
     required: ["key", "name", "tokenStandard", "symbol", "allowedChainIds", "defaultChainId", "metadataSchema", "lifecycle", "compliance", "roles"],
   },
@@ -192,6 +207,18 @@ export const components: Record<string, unknown>[] = [
       verifier: { type: "object", additionalProperties: true },
       ownerOrgId: { type: "string", nullable: true },
       status: { type: "string" },
+      // The identity-domain twin of `UseCase.sandbox`, and declared for the
+      // same reason. There are no chains here, so the whole of the difference
+      // is who may act on it and where its events go.
+      sandbox: {
+        type: "boolean",
+        description:
+          "Test mode. `true` makes this a SANDBOX credential programme: only a `tl_test_` key may act on it, nothing " +
+          "issued under it is a real credential, its events reach only `test` webhook endpoints, and it stays out of " +
+          "the identity dashboard's totals unless asked for by name. SET AT CREATION AND NEVER AFTER " +
+          "(**409 `SANDBOX_IMMUTABLE`**) — use `POST /credential-use-cases/{key}/clone-to-live` to promote the " +
+          "configuration. Defaults to `false`.",
+      },
     },
     required: ["key", "name", "credentialTypes", "issuer", "holderPolicy", "verifier"],
   },
@@ -629,8 +656,19 @@ export const components: Record<string, unknown>[] = [
       revokedBy: { type: "string", nullable: true },
       createdBy: { type: "string" },
       createdAt: { type: "string" },
+      // EN-D2 (D2-8). DECLARED, not merely projected: fast-json-stringify
+      // serialises against this schema and silently strips anything it does
+      // not name, so a `mode` added to `apiKeyView` and not to this list would
+      // vanish between the handler and the wire — with nothing failing.
+      mode: {
+        type: "string", enum: ["live", "test"],
+        description:
+          "Which environment this key acts in. A `test` key reads `tl_test_…`, acts ONLY on sandbox use cases and is " +
+          "refused **403 `WRONG_MODE`** on real ones; a `live` key is the mirror. Fixed at creation — rotation " +
+          "preserves it, and there is no route that moves a key between environments.",
+      },
     },
-    required: ["id", "orgId", "userId", "name", "prefix", "scopes", "status", "createdBy", "createdAt"],
+    required: ["id", "orgId", "userId", "name", "prefix", "scopes", "status", "createdBy", "createdAt", "mode"],
   },
   {
     $id: "WebhookEndpoint",
@@ -656,8 +694,15 @@ export const components: Record<string, unknown>[] = [
       createdBy: { type: "string" },
       createdAt: { type: "string" },
       lastDeliveryAt: { type: "string", nullable: true },
+      mode: {
+        type: "string", enum: ["live", "test"],
+        description:
+          "Which stream this endpoint receives. A `test` endpoint hears ONLY sandbox events and a `live` one ONLY " +
+          "real ones — the two never cross, so a sandbox event can never reach a production handler. Fixed at " +
+          "registration: an endpoint cannot be moved between streams.",
+      },
     },
-    required: ["id", "url", "eventTypes", "status", "consecutiveFailures", "consecutiveGuardFailures", "createdBy", "createdAt"],
+    required: ["id", "url", "eventTypes", "status", "consecutiveFailures", "consecutiveGuardFailures", "createdBy", "createdAt", "mode"],
   },
   {
     $id: "WebhookDelivery",
@@ -700,8 +745,15 @@ export const components: Record<string, unknown>[] = [
       subjectId: { type: "string", nullable: true, description: "The id of the thing the event is about (asset, credential, verification request…)." },
       data: { type: "object", additionalProperties: true, description: "Per-type payload. Its shape follows `type`; treat unknown keys as forward-compatible additions." },
       occurredAt: { type: "string" },
+      mode: {
+        type: "string", enum: ["live", "test"],
+        description:
+          "`test` if the use case that produced this fact is a sandbox one, else `live`. DERIVED from that use case " +
+          "— never set by the caller — and an event with no use case is `live`. You do not need to check it to stay " +
+          "safe: a `test` event is only ever delivered to a `test` endpoint. It is here so a fact is self-describing.",
+      },
     },
-    required: ["seq", "id", "type", "data", "occurredAt"],
+    required: ["seq", "id", "type", "data", "occurredAt", "mode"],
   },
   {
     $id: "VerificationRequest",
@@ -975,7 +1027,8 @@ export const S: Record<string, FastifySchema> = {
     description:
       "Requires the `usecases:provision` scope. Creates a tokenization use case — the contract template, the chains " +
       "it may deploy on, and the compliance and fee configuration every asset issued under it inherits. Deploying " +
-      "it is a separate call.",
+      "it is a separate call. Pass `sandbox: true` (with `allowedChainIds: [\"sandbox\"]`) to create a TEST-MODE use " +
+      "case; the flag is fixed at creation.",
     body: { $ref: "UseCase#" },
     response: { 201: { $ref: "UseCase#" }, ...errs(400, 401, 403) },
   },
@@ -997,6 +1050,54 @@ export const S: Record<string, FastifySchema> = {
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     body: { type: "object", additionalProperties: false, required: ["chainId"], properties: { chainId: { type: "string" } } },
     response: { 200: { $ref: "UseCase#" }, ...errs(400, 401, 403, 404, 502) },
+  },
+  cloneUseCaseToLive: {
+    tags: ["Use Cases"], summary: "Clone a sandbox use case into a live one (configuration only)", security: eitherCredential,
+    description:
+      "Requires the `usecases:provision` scope. THE SUPPORTED WAY OUT OF THE SANDBOX: `sandbox` cannot be changed " +
+      "on an existing use case, so this copies a sandbox one's CONFIGURATION — metadata schema, lifecycle, " +
+      "compliance rules, fees, sale terms, valuation, workflow, roles — into a brand-new LIVE use case and deploys " +
+      "fresh contracts on the real chains you name in `allowedChainIds`. IT COPIES NO DATA: no assets, holders, " +
+      "staged invoices, proposals or events come with it, and no contract address is inherited. The new key " +
+      "defaults to `<source key>-live`, may be overridden with `key`, and is echoed back as `key` on both answers. " +
+      "An Org Admin gets **202** and a **proposal** for a Platform Admin to approve — the same maker-checker " +
+      "`POST /use-cases` applies, because this creates a live use case and renaming the act must not change how it " +
+      "is governed. Cloning spans both environments, so an API key of EITHER mode is refused with " +
+      "**403 `WRONG_MODE`** (a `tl_test_` key on the live use case it would create, a `tl_live_` key on the sandbox " +
+      "one it must read): take this one from a human session. A source that is not sandbox answers " +
+      "**400 `NOT_SANDBOX`**.",
+    params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
+    body: {
+      type: "object", additionalProperties: false, required: ["allowedChainIds"],
+      properties: {
+        key: { type: "string", description: "Key for the new live use case. Defaults to `<source key>-live`. Must be free in BOTH domains." },
+        allowedChainIds: {
+          type: "array", items: { type: "string" }, minItems: 1,
+          description: "Real chains the live clone may deploy on. The `sandbox` chain is refused here (**400 `INVALID_SANDBOX_CHAINS`**).",
+        },
+        defaultChainId: { type: "string", description: "Defaults to the first of `allowedChainIds`." },
+        sandbox: {
+          type: "boolean",
+          description:
+            "Only `false` is meaningful: this route creates a LIVE use case by definition. `true` answers " +
+            "**400 `SANDBOX_NOT_CLONEABLE`** — it is declared here so it can be refused rather than dropped. To " +
+            "create a sandbox use case, `POST /use-cases` with `sandbox: true`.",
+        },
+      },
+    },
+    response: {
+      201: { $ref: "UseCase#" },
+      202: {
+        type: "object", additionalProperties: true,
+        properties: {
+          proposal: { type: "object", additionalProperties: true, description: "The pending `create-use-case` proposal — see `ProposalEnvelope`. The live use case DOES NOT EXIST YET." },
+          key: { type: "string", description: "The key the clone will have once the proposal is approved." },
+          clonedFrom: { type: "string", description: "The sandbox use case this was cloned from." },
+        },
+        required: ["proposal", "key"],
+      },
+      ...errs(400, 401, 403, 404, 409),
+    },
   },
   useCaseCode: {
     tags: ["Use Cases"], summary: "Contract code backing a use case on one allowed chain", security: humanOnly,
@@ -1040,7 +1141,9 @@ export const S: Record<string, FastifySchema> = {
     tags: ["Credential Use Cases"], summary: "Create a credential use case (PlatformAdmin)", security: eitherCredential,
     description:
       "Requires the `usecases:provision` scope — the same scope as its tokenization counterpart, because " +
-      "configuring who may issue a credential is the same kind of authority as configuring who may mint a token.",
+      "configuring who may issue a credential is the same kind of authority as configuring who may mint a token. " +
+      "Pass `sandbox: true` for a TEST-MODE programme; the flag is fixed at creation. An Org Admin cannot use this " +
+      "route at all — `POST /credential-use-cases/provision` is theirs, and it takes the same flag.",
     body: { type: "object", additionalProperties: true, required: ["key", "name", "credentialTypes", "issuer", "holderPolicy", "verifier"] },
     response: { 201: { $ref: "CredentialUseCase#" }, ...errs(400, 401, 403, 409) },
   },
@@ -1052,6 +1155,32 @@ export const S: Record<string, FastifySchema> = {
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     body: { type: "object", additionalProperties: true },
     response: { 200: { $ref: "CredentialUseCase#" }, ...errs(400, 401, 403, 404) },
+  },
+  cloneCredentialUseCaseToLive: {
+    tags: ["Credential Use Cases"], summary: "Clone a sandbox credential use case into a live one (configuration only)", security: eitherCredential,
+    description:
+      "Requires the `usecases:provision` scope. The identity-domain twin of `POST /use-cases/{key}/clone-to-live`, " +
+      "and Platform-Admin-only with a **201** because that is what `POST /credential-use-cases` is — cloning is " +
+      "governed as the act it performs. Copies credential types, issuer binding, holder policy, verifier policy and " +
+      "certificate design into a new LIVE credential use case; copies NO credentials, holders or verification " +
+      "requests. There are no chains to choose here. The new key defaults to `<source key>-live`. An API key of " +
+      "either mode is refused with **403 `WRONG_MODE`** (the act spans both environments); a source that is not " +
+      "sandbox answers **400 `NOT_SANDBOX`**.",
+    params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
+    body: {
+      type: "object", additionalProperties: false,
+      properties: {
+        key: { type: "string", description: "Key for the new live credential use case. Defaults to `<source key>-live`. Must be free in BOTH domains." },
+        sandbox: {
+          type: "boolean",
+          description:
+            "Only `false` is meaningful: this route creates a LIVE credential use case by definition. `true` answers " +
+            "**400 `SANDBOX_NOT_CLONEABLE`** — declared here so it is refused rather than dropped. To create a " +
+            "sandbox one, `POST /credential-use-cases` with `sandbox: true`, or provision it with `sandbox: true`.",
+        },
+      },
+    },
+    response: { 201: { $ref: "CredentialUseCase#" }, ...errs(400, 401, 403, 404, 409) },
   },
 
   listUseCaseTemplates: {
@@ -1076,7 +1205,9 @@ export const S: Record<string, FastifySchema> = {
     tags: ["Credential Use Cases"], summary: "Save a custom credential-use-case template (PlatformAdmin/OrgAdmin)", security: eitherCredential,
     description:
       "Requires the `usecases:provision` scope. Saves a reusable credential-use-case template. A template is " +
-      "authoring input and confers nothing until it is instantiated.",
+      "authoring input and confers nothing until it is instantiated. It may NOT carry `sandbox` " +
+      "(**400 `SANDBOX_NOT_ON_TEMPLATE`**): the environment is chosen when the template is provisioned, so one " +
+      "template serves both.",
     body: { type: "object", additionalProperties: true, required: ["key", "name", "category", "parameters", "body"] },
     // The stored template. `builtIn` comes back FALSE whatever you sent — the
     // route forces it, so a saved template can never impersonate a catalog one.
@@ -1115,12 +1246,24 @@ export const S: Record<string, FastifySchema> = {
     description:
       "Requires the `usecases:provision` scope. One call ensures the issuer organization, instantiates the " +
       "template's credential use case, and optionally creates scoped desk users — whose one-time passwords appear " +
-      "in **this response only** and are never retrievable again.",
+      "in **this response only** and are never retrievable again. Pass `sandbox: true` (at the TOP LEVEL, beside " +
+      "`templateKey`) to stand the programme up in TEST MODE — this is the way to create a sandbox credential " +
+      "programme, and the only one available to an Org Admin. The same template serves both environments, so " +
+      "`sandbox` is never written into the template itself.",
     body: {
       type: "object", additionalProperties: true, required: ["templateKey", "params"],
       properties: {
         templateKey: { type: "string" },
         params: { type: "object", additionalProperties: true },
+        sandbox: {
+          type: "boolean",
+          description:
+            "Create the programme in TEST MODE — see `CredentialUseCase.sandbox`. Defaults to `false`, so every " +
+            "existing caller is unaffected. Put it HERE, not inside `provisioning`: the nested spelling answers " +
+            "**400 `SANDBOX_MISPLACED`** rather than being ignored, because a dropped flag would return **201** for " +
+            "a LIVE programme you believed was a sandbox. Re-provisioning with the other value answers " +
+            "**409 `SANDBOX_IMMUTABLE`**; omitting it on a re-provision leaves the stored environment untouched.",
+        },
         provisioning: { type: "object", additionalProperties: true },
       },
     },
@@ -1333,12 +1476,19 @@ export const S: Record<string, FastifySchema> = {
     tags: ["Analytics"], summary: "Scope-aware dashboard summary (assets + audit + chains)", security: eitherCredential,
     description:
       "Requires the `assets:read` scope. Aggregates over exactly the assets the caller may already read, so it " +
-      "discloses nothing a direct read would refuse.",
+      "discloses nothing a direct read would refuse. SANDBOX USE CASES ARE EXCLUDED BY DEFAULT — a test asset " +
+      "inside a headline supply or tokenized-value total is a reporting defect — so pass `includeSandbox=true` to " +
+      "see them. An API key never mixes the two: it aggregates its own environment and only its own, whatever " +
+      "`includeSandbox` says.",
     querystring: {
       type: "object",
       properties: {
         useCaseKey: { type: "string" },
         days: { type: "integer", minimum: 1, maximum: 90, default: 30 },
+        includeSandbox: {
+          type: "boolean", default: false,
+          description: "Include sandbox use cases in the aggregate. Ignored for an API key, whose environment is fixed by its own mode.",
+        },
       },
     },
     response: { 200: { $ref: "Analytics#" }, ...errs(401) },
@@ -1878,12 +2028,28 @@ export const S: Record<string, FastifySchema> = {
     tags: ["API Keys"], summary: "Mint an org API key (secret returned once, never again)", security: humanOnly,
     description:
       "Session-only. An API key is refused with **403 `MACHINE_PRINCIPAL`** — minting a key is the one path by " +
-      "which a machine principal could widen itself, so only a human session may take it.",
+      "which a machine principal could widen itself, so only a human session may take it.\n\n" +
+      "`mode` picks the ENVIRONMENT the key acts in and defaults to `live`, so a caller that has never heard of the " +
+      "field mints exactly what it always did. A `test` key is returned as a `tl_test_…` secret and may act only on " +
+      "sandbox use cases. If `useCaseKey` is given, the two must agree: binding a `test` key to a live use case (or " +
+      "the reverse) is refused with **403 `WRONG_MODE`**, because such a key would be refused at every call it " +
+      "could ever make.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: {
       type: "object", additionalProperties: false, required: ["name", "role", "scopes"],
       properties: {
         name: { type: "string", minLength: 1 },
+        // ENUMERATED rather than a free string. The body is
+        // `additionalProperties: false`, which STRIPS an unknown field instead
+        // of refusing it — so before this existed a `mode` sent by an
+        // integrator was dropped and answered with a `tl_live_` secret. The
+        // enum is what makes `"sandbox"` (the word the console and the errors
+        // use for the environment) a 400 rather than a silent production
+        // credential.
+        mode: {
+          type: "string", enum: ["live", "test"],
+          description: "Environment for this key. Omitted = `live`. A `test` key mints a `tl_test_…` secret that acts only on sandbox use cases.",
+        },
         // Same enum as createMember: an out-of-rank role is a 403 from
         // canCreateOrgMember (authorization), not a 400 (validation).
         role: { type: "string", enum: ["PlatformAdmin", "OrgAdmin", "UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor", "Holder", "Verifier"] },
@@ -1901,7 +2067,7 @@ export const S: Record<string, FastifySchema> = {
         type: "object", additionalProperties: true,
         properties: {
           key: { $ref: "ApiKeyView#" },
-          secret: { type: "string", description: "The full `tl_live_…` credential, returned HERE AND NOWHERE ELSE. Store it before acknowledging this call." },
+          secret: { type: "string", description: "The full credential — `tl_live_…`, or `tl_test_…` when `mode` is `test` — returned HERE AND NOWHERE ELSE. Store it before acknowledging this call." },
         },
         required: ["key", "secret"],
       },
@@ -1918,7 +2084,10 @@ export const S: Record<string, FastifySchema> = {
   },
   rotateApiKey: {
     tags: ["API Keys"], summary: "Rotate an API key's secret (the old one dies immediately)", security: humanOnly,
-    description: "Session-only. An API key is refused with **403 `MACHINE_PRINCIPAL`** — key lifecycle is a human act.",
+    description:
+      "Session-only. An API key is refused with **403 `MACHINE_PRINCIPAL`** — key lifecycle is a human act. " +
+      "Rotation PRESERVES the key's environment: a `test` key rotates to another `tl_test_…` secret, and there is " +
+      "no way to move a key between environments.",
     params: { type: "object", required: ["id", "keyId"], properties: { id: { type: "string" }, keyId: { type: "string" } } },
     body: { type: "object", additionalProperties: false, properties: {} },
     response: {
@@ -1926,7 +2095,7 @@ export const S: Record<string, FastifySchema> = {
         type: "object", additionalProperties: true,
         properties: {
           key: { $ref: "ApiKeyView#" },
-          secret: { type: "string", description: "The NEW credential. The previous one stops authenticating the moment this returns — there is no overlap window." },
+          secret: { type: "string", description: "The NEW credential, carrying the SAME marker the key already had. The previous one stops authenticating the moment this returns — there is no overlap window." },
         },
         required: ["key", "secret"],
       },
@@ -1960,7 +2129,9 @@ export const S: Record<string, FastifySchema> = {
     tags: ["Webhooks"], summary: "Register a webhook endpoint (signing secret returned once, never again)", security: eitherCredential,
     description:
       "Requires the `webhooks:write` scope. The signing secret is returned in **this response only** and is never " +
-      "retrievable afterwards — store it before you acknowledge the call, or rotate to get a new one.",
+      "retrievable afterwards — store it before you acknowledge the call, or rotate to get a new one. `mode` picks " +
+      "which stream the endpoint joins and defaults to `live`; a `tl_test_` key may register only `test` endpoints " +
+      "and a `tl_live_` key only `live` ones (**403 `WRONG_MODE`**), while a human session may register either.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: {
       type: "object", additionalProperties: false, required: ["url", "eventTypes"],
@@ -1971,6 +2142,13 @@ export const S: Record<string, FastifySchema> = {
         // (400 UNKNOWN_EVENT_TYPE), so the catalog lives in exactly one place.
         eventTypes: { type: "array", items: { type: "string" } },
         useCaseKey: { type: "string" },
+        // Enumerated HERE, unlike eventTypes: there is no route-level validator
+        // for a mode and never will be — two values, closed, and a third one is
+        // a typo that must not be taken for "live".
+        mode: {
+          type: "string", enum: ["live", "test"],
+          description: "`live` (default) or `test`. FIXED at registration — an endpoint cannot be moved between streams afterwards.",
+        },
       },
     },
     response: {
@@ -2164,7 +2342,17 @@ export const S: Record<string, FastifySchema> = {
     tags: ["Identity"], summary: "Scoped identity operations dashboard (credential lifecycle + verification aggregates)", security: eitherCredential,
     description:
       "Requires the `credentials:read` scope. Aggregates the credential lifecycle and verification activity already " +
-      "inside the caller's scope.",
+      "inside the caller's scope. Sandbox programmes are excluded by default, exactly as in `GET /analytics`; pass " +
+      "`includeSandbox=true` for them.",
+    querystring: {
+      type: "object",
+      properties: {
+        includeSandbox: {
+          type: "boolean", default: false,
+          description: "Include sandbox credential use cases. Ignored for an API key, whose environment is fixed by its own mode.",
+        },
+      },
+    },
     // Loose 200: the nested fold output would be silently stripped by
     // fast-json-stringify under a typed schema (the standing lesson).
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403) },
@@ -2387,7 +2575,10 @@ export const S: Record<string, FastifySchema> = {
       "**Read `source` before you trust `revoked`.** `chain` means the answer came from the on-chain VC registry; " +
       "`database` means it did not — either nothing is anchored, or the chain read FAILED and this fell back to our " +
       "own record. The two are indistinguishable in `source` alone, so a verifier with a hard requirement on " +
-      "on-chain proof must require `source === \"chain\"` rather than merely reading `revoked`.",
+      "on-chain proof must require `source === \"chain\"` rather than merely reading `revoked`.\n\n" +
+      "`sandbox` is the third value (EN-D2): the credential was issued in a SANDBOX use case, so it was never " +
+      "anchored and never will be — nothing about it exists on any chain. That is a design property, not a failure, " +
+      "and it is reported separately from `database` precisely so it cannot be mistaken for one.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: {
       200: {
@@ -2402,7 +2593,10 @@ export const S: Record<string, FastifySchema> = {
           // lifecycle simply omits it.
           acceptance: { type: "string", enum: ["pending", "accepted", "rejected", "changes_requested"], description: "The holder's acceptance state. ABSENT for a credential that predates the acceptance lifecycle." },
           anchored: { type: "boolean", description: "Whether this credential was found in the on-chain registry." },
-          source: { type: "string", enum: ["chain", "database"], description: "Where `revoked` came from. `database` also covers an on-chain read that failed." },
+          source: { type: "string", enum: ["chain", "database", "sandbox"], description: "Where `revoked` came from. `database` also covers an on-chain read that failed. `sandbox` means the credential belongs to a sandbox use case and is unanchored by design." },
+          // Declared, or fast-json-stringify strips it and the honest answer
+          // above silently becomes the ambiguous one.
+          sandbox: { type: "boolean", description: "Present and true only for a credential issued in a SANDBOX use case: never anchored, by design (EN-D2)." },
           chainId: { type: "string", description: "Chain-source only." },
           registry: { type: "string", description: "The VC registry contract address. Chain-source only." },
           vcHash: { type: "string", description: "The anchored hash of the credential. Chain-source only." },
@@ -2848,9 +3042,22 @@ export const S: Record<string, FastifySchema> = {
   },
   listInvoices: {
     tags: ["Invoice Register"], summary: "List staged/tokenized invoices for a use case", security: eitherCredential,
-    description: "Requires the `assets:read` scope. Staged and already-tokenized rows in a use case's invoice register.",
+    description:
+      "Requires the `assets:read` scope. Staged and already-tokenized rows in a use case's invoice register. The " +
+      "register is the record of REAL invoices, so a SANDBOX use case's rows are withheld unless you pass " +
+      "`includeSandbox=true` — the answer is an empty list, not an error. An API key reads its own environment's " +
+      "register regardless of the flag.",
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
-    querystring: { type: "object", additionalProperties: false, properties: { status: { type: "string", enum: ["staged", "tokenized"] } } },
+    querystring: {
+      type: "object", additionalProperties: false,
+      properties: {
+        status: { type: "string", enum: ["staged", "tokenized"] },
+        includeSandbox: {
+          type: "boolean", default: false,
+          description: "Return a sandbox use case's staged rows. Ignored for an API key, whose environment is fixed by its own mode.",
+        },
+      },
+    },
     response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(400, 401, 403, 404) },
   },
   deleteInvoice: {

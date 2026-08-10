@@ -509,6 +509,7 @@ function CredStatusPill({ id }: { id: string }): JSX.Element | null {
   const [status, setStatus] = useState<CredentialStatusInfo | null>(null);
   useEffect(() => { void api.credentialStatus(id).then(setStatus).catch(() => setStatus(null)); }, [id]);
   if (!status) return null;
+  if (!status.revoked && status.source === "sandbox") return <Pill tone="warn">sandbox · not anchored</Pill>;
   return <Pill tone={status.revoked ? "danger" : "ok"}>{status.revoked ? "revoked" : status.source === "chain" ? "anchored on-chain" : "issued"}</Pill>;
 }
 

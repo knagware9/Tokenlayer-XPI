@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { API_BASE, ApiError, api } from "../api.js";
 import { useAuth } from "../auth.js";
 import { isOrgOperatingRole, orgRoleEnabled } from "../lib/capabilities.js";
+import { KEY_MARKERS, keyMarker, modeLabel, modeTone, type ResourceMode } from "../lib/modes.js";
 import { confirmNavigation, setNavGuard } from "../lib/nav-guard.js";
 import { API_SCOPES, type ApiKeyView, type ApiScope, type OrgCapabilities, type Organization, type Role } from "../types.js";
 import { ApiReference } from "./ApiReference.js";
@@ -9,8 +10,24 @@ import { Guides } from "./Guides.js";
 import { Webhooks } from "./Webhooks.js";
 import { Card, EmptyState, Pill, SectionHeader } from "./ui.js";
 
-/** The public marker every secret carries — mirrors the API's KEY_PREFIX_MARKER. */
-const KEY_MARKER = "tl_live_";
+/**
+ * The marker map moved to `src/lib/modes.ts` (EN-D2, D2-7) so the console has
+ * ONE place that knows how an environment is named, marked and coloured. This
+ * alias keeps the few reading sites below about the ORDINARY key, which is what
+ * they mean — the redaction placeholder and the "what a secret looks like"
+ * prose, neither of which is about a particular key.
+ *
+ * ANYTHING SHOWING A PARTICULAR KEY READS ITS OWN MODE (`keyModeOf`), because
+ * since D2-8 both environments are mintable here: `POST /orgs/:id/api-keys`
+ * takes `mode` and `apiKeyView` projects the column back.
+ */
+const KEY_MARKER = KEY_MARKERS.live;
+
+/** The environment a key row is showing. Absent means live — the column's own
+ *  default, and the only reading that is safe against an older API. */
+function keyModeOf(k: Pick<ApiKeyView, "mode">): ResourceMode {
+  return k.mode ?? "live";
+}
 
 /**
  * Roles a key's bound service user may take. Mirrors the server's
@@ -222,6 +239,16 @@ function Overview(): JSX.Element {
             from a 202 and follow it to a terminal state — treating a 202 as a completed create is the most common integration
             mistake made here.
           </p>
+          <p>
+            <strong className="font-semibold text-slate-800">Two environments, told apart by the secret itself.</strong> A{" "}
+            <span className="font-mono text-xs">{KEY_MARKERS.live}…</span> key acts only on real use cases; a{" "}
+            <span className="font-mono text-xs">{KEY_MARKERS.test}…</span> key acts only on <em>sandbox</em> ones, whose assets
+            mint on a simulated in-memory ledger. Crossing between them is a{" "}
+            <span className="font-mono text-xs">403 WRONG_MODE</span> in both directions — a test key cannot touch real data,
+            and a live key cannot quietly read the sandbox either. Webhook endpoints carry the same split, so a sandbox event
+            can never arrive at a production handler. A human session has no mode and may act on both, which is why cloning a
+            sandbox use case to live is a person&rsquo;s act and not a key&rsquo;s.
+          </p>
         </div>
       </Card>
       <UsingYourKey />
@@ -404,6 +431,7 @@ function ApiKeys({ orgId, org }: { orgId: string | null; org: Organization | nul
             <thead className="text-xs text-slate-500 bg-slate-50 uppercase tracking-wide">
               <tr>
                 <th className="text-left font-medium px-4 py-2.5">Name</th>
+                <th className="text-left font-medium px-4 py-2.5">Environment</th>
                 <th className="text-left font-medium px-4 py-2.5">Key</th>
                 <th className="text-left font-medium px-4 py-2.5">Scopes</th>
                 <th className="text-left font-medium px-4 py-2.5">Role</th>
@@ -417,7 +445,13 @@ function ApiKeys({ orgId, org }: { orgId: string | null; org: Organization | nul
               {keys.map((k) => (
                 <tr key={k.id} className="border-t border-slate-100 align-top">
                   <td className="px-4 py-2 font-medium text-slate-800">{k.name}</td>
-                  <td className="px-4 py-2 font-mono text-xs text-slate-500 whitespace-nowrap">{KEY_MARKER}{k.prefix}…</td>
+                  {/* The environment, on every row and never inferred from the
+                      name a person typed. A test key acts only on sandbox use
+                      cases; a live one only on real ones (403 WRONG_MODE). */}
+                  <td className="px-4 py-2"><Pill tone={modeTone(keyModeOf(k))}>{modeLabel(keyModeOf(k))}</Pill></td>
+                  {/* …and the marker follows the same reading, so the secret's
+                      shape and the row's label can never disagree. */}
+                  <td className="px-4 py-2 font-mono text-xs text-slate-500 whitespace-nowrap">{keyMarker(keyModeOf(k))}{k.prefix}…</td>
                   <td className="px-4 py-2">
                     <div className="flex flex-wrap gap-1">
                       {k.scopes.length === 0
@@ -443,6 +477,17 @@ function ApiKeys({ orgId, org }: { orgId: string | null; org: Organization | nul
                         very first call. An expired key is replaced by creating a
                         new one, not by rotating the dead one. Revoke stays
                         available for anything not already revoked.
+                      */}
+                      {/*
+                        …and it is offered for a TEST key on the same terms as a
+                        live one. D2-7 withheld it because the rotate route
+                        minted with the default mode — stamping a `tl_live_`
+                        marker on a row stored as `test`, which the auth path
+                        refuses, so the ceremony handed over a credential that
+                        401'd on its first call. D2-8 fixed the route to mint
+                        with `key.mode`, so rotation now preserves the
+                        environment and the withholding would only be a control
+                        that does nothing.
                       */}
                       {canRotate(k.status) && (
                         <button
@@ -623,6 +668,23 @@ function CreateKey({ orgId, capabilities, onCreated }: {
   // No default role — see EMPTY_KEY_DRAFT above for why.
   const [role, setRole] = useState<Role | "">(EMPTY_KEY_DRAFT.role);
   const [useCaseKey, setUseCaseKey] = useState("");
+  /**
+   * The environment, and it is deliberately NOT part of `KeyDraft`.
+   *
+   * `checkKeyDraft` exists to stop a draft that CANNOT be sent — an empty name,
+   * an unchosen role, no scopes. There is no such state here: the control is
+   * two buttons, one of them is always pressed, and both values are always
+   * valid. Putting it on the check's ok arm would imply a narrowing that does
+   * not happen (the pattern `checkWebhookDraft` already declines for the same
+   * field, for the same reason).
+   *
+   * Defaulting to LIVE, unlike the role above, and the difference is real: a
+   * privileged default is one that grants authority nobody chose, and `test`
+   * grants strictly LESS than `live`. Live is also the server's own default and
+   * the mode of every key that already exists. What matters is that the choice
+   * is visible before the secret is minted, which is what the picker buys.
+   */
+  const [mode, setMode] = useState<ResourceMode>("live");
   const [scopes, setScopes] = useState<ApiScope[]>([...EMPTY_KEY_DRAFT.scopes]);
   const [expiry, setExpiry] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -650,6 +712,7 @@ function CreateKey({ orgId, capabilities, onCreated }: {
         useCaseKey: useCaseKey.trim() || undefined,
         scopes,
         expiresAt,
+        mode,
       });
       // Hand the secret straight to the panel and keep NO copy here: this form
       // is about to be unmounted, and the secret must not outlive the handoff.
@@ -664,6 +727,49 @@ function CreateKey({ orgId, capabilities, onCreated }: {
   return (
     <form onSubmit={submit} className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 space-y-4">
       <h2 className="font-semibold text-slate-900">Create an API key</h2>
+      {/*
+        THE ENVIRONMENT, and it is the first control on the form rather than the
+        last. Everything below it — the role, the use case, the scopes — is
+        about what the key may do; this decides WHICH WORLD it does it in, and
+        it is the one choice that cannot be corrected afterwards (there is no
+        route that moves a key between environments, by design: doing so would
+        silently reclassify a credential already sitting in somebody's config).
+      */}
+      <fieldset>
+        <legend className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1.5">Environment</legend>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {(["live", "test"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              aria-pressed={mode === m}
+              onClick={() => setMode(m)}
+              className={`text-left rounded-xl border p-3 transition ${
+                mode === m
+                  ? m === "test"
+                    ? "border-amber-500 bg-amber-50/60 shadow-sm"
+                    : "border-brand-500 bg-brand-50/40 shadow-sm"
+                  : "border-slate-200 hover:border-brand-300"
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-semibold text-slate-800">{modeLabel(m)}</span>
+                <Pill tone={modeTone(m)}>{modeLabel(m)}</Pill>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                A <span className="font-mono">{KEY_MARKERS[m]}…</span> secret,{" "}
+                {m === "test" ? "acting only on sandbox use cases." : "acting only on real use cases."}
+              </p>
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-slate-500 mt-2">
+          The two never cross: a key is refused <span className="font-mono">403 WRONG_MODE</span> on anything in the other
+          environment. <strong className="font-semibold text-slate-700">Fixed at creation</strong> — rotation keeps it, and
+          nothing moves a key between environments. If you name a use case below it must live in this environment, or the
+          create call is refused rather than handing you a key that works nowhere.
+        </p>
+      </fieldset>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label className="block text-xs font-medium text-slate-500 mb-1">Name</label>

@@ -56,6 +56,12 @@ export interface CredentialUseCaseDefinition {
   /** When true, issued credentials require explicit holder acceptance before
    *  they can be presented, satisfy identity gates, or expose a certificate. */
   holderAcceptance?: boolean;
+  /**
+   * EN-D2 test mode — the Identity-domain twin of `UseCaseDefinition.sandbox`.
+   * Optional on input; the persistence layer normalises an absent value to
+   * `false`, mirroring the DB default.
+   */
+  sandbox?: boolean;
 }
 
 /** Editable starter templates surfaced by the builder. */

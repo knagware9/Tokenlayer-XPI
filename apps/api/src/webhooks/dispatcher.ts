@@ -273,6 +273,12 @@ export async function dispatchDue(deps: DispatchDeps): Promise<number> {
         orgId: event.orgId,
         useCaseKey: event.useCaseKey,
         subjectId: event.subjectId,
+        // EN-D2. A delivered fact says which environment it came from. The
+        // consumer does NOT have to read it to be safe — a test event is only
+        // ever handed to a test endpoint — but a body that cannot say so is a
+        // body nobody can assert on, and an integrator who wants the belt as
+        // well as the braces should not have to call back to get it.
+        mode: event.mode,
         data: event.data,
       });
       // Signed at SEND time, not at enqueue time: the timestamp inside the MAC is
