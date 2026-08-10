@@ -112,6 +112,24 @@ export const api = {
     }
     return res.blob();
   },
+  /** Render a DRAFT certificate design. Returns a PDF Blob, always stamped SAMPLE. */
+  previewCertificate: async (
+    token: string,
+    body: { credentialType: unknown; sampleClaims?: Record<string, unknown> },
+  ): Promise<Blob> => {
+    const res = await fetch(`${BASE}/credential-use-cases/preview-certificate`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      let parsed: { message?: string; error?: string } | null = null;
+      try { parsed = text ? (JSON.parse(text) as { message?: string; error?: string }) : null; } catch { /* non-JSON error body */ }
+      throw new ApiError(parsed?.message ?? parsed?.error ?? res.statusText, res.status, parsed?.error);
+    }
+    return res.blob();
+  },
   chains: (token: string) => request<ChainInfo[]>("/chains", token),
   chainStatus: (token: string, id: string) =>
     request<ChainStatus>(`/chains/${encodeURIComponent(id)}/status`, token),

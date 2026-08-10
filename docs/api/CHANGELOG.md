@@ -19,6 +19,58 @@ diff. That file is generated, not written by hand; see the header of
 
 ---
 
+## Unreleased — certificate artwork: place your own fields on your own design (EN-F)
+
+A credential type's certificate can now be YOUR artwork with the fields placed
+where you want them, instead of our layout with your logo in a slot. Everything
+here is additive: **a credential type with no `background` renders exactly as it
+did**, through code this release does not touch.
+
+- **`CertificateConfig` gains two optional fields.** `background:
+  {documentId}` names a stored image document, and its PRESENCE selects the
+  mode: with it, none of the generated furniture prints (no heading, no "This
+  certifies that", no claim list, no issuer block) and only your `placements`
+  are drawn onto the artwork. `placements[]` positions each field in **0–1
+  fractions of the page**, so re-uploading the same design at a higher
+  resolution does not move anything.
+- **The page becomes your artwork's shape** — its aspect ratio with A4's long
+  edge (841.89 pt). No letterboxing, and one coordinate space. Artwork that is
+  not A4-shaped therefore produces a non-standard page size; printing onto A4
+  paper scales and centres.
+- **`x` is an ANCHOR, not a left edge.** `align` decides which part of the text
+  sits on it: `left` starts there, `center` straddles it, `right` ends on it.
+- **Two things configuration cannot switch off.** A verification QR is always
+  drawn — you choose where (and it must fit on the page, at least 0.06 of page
+  width), never whether; and the REVOKED/EXPIRED watermark is drawn over
+  everything regardless of any placement. A certificate that could be designed
+  to hide its own revocation would be a forgery kit, and this render route is
+  public and unauthenticated.
+- **Unusable artwork falls back to the built-in layout**, never a blank page and
+  never a 500. Deleting a document does not break every certificate for a type.
+
+**New: `POST /credential-use-cases/preview-certificate`** — `usecases:provision`
+plus a PlatformAdmin or OrgAdmin session. Renders a DRAFT credential type (you
+are designing before the use case is saved) and returns the PDF. **Always
+stamped `SAMPLE — NOT A CREDENTIAL`** when artwork is used: it renders
+caller-supplied claims through the same code that renders real certificates.
+
+**Limits worth knowing.** Artwork is capped at 35 megapixels and its
+decompressed size is bounded; interlaced PNGs are refused (the render falls
+back). At most 40 placements per credential type, and at most one QR.
+
+**Templates carry the layout, never the artwork.** A design saved as a
+credential-use-case template keeps its `placements` and has `background`
+stripped when it is stored — templates are readable by any authenticated user,
+and one tenant's letterhead must not become another's. The instantiating
+organization uploads their own.
+
+**Today this is configured BY THE PLATFORM OPERATOR.** `background` is writable
+only through `POST`/`PATCH /credential-use-cases`, which are PlatformAdmin-only;
+the org self-service path (`provision`) goes through template instantiation and
+therefore carries no artwork. Organization-owned artwork upload is a follow-up.
+
+---
+
 ## Unreleased — consenting to a verification needs its own scope
 
 **ACTION REQUIRED if a machine key consents to verification requests on a

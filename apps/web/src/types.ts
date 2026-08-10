@@ -431,6 +431,64 @@ export const API_SCOPES = [
 ] as const;
 export type ApiScope = (typeof API_SCOPES)[number];
 
+// ---- EN-F: certificate designer ------------------------------------------
+/**
+ * A DELIBERATE MIRROR of `@tokenlayer/core`'s `CERTIFICATE_FIXED_FIELDS`
+ * (packages/core/src/certificate-fields.ts), on the same terms as `API_SCOPES`
+ * above: the web app has no dependency on core.
+ *
+ * Unlike those, this one is PINNED — `apps/api/test/certificate-mirror.test.ts`
+ * reads this file and fails the API suite if the list or a label drifts. That
+ * check exists because this mirror pattern has silently drifted twice.
+ */
+export const CERTIFICATE_FIXED_FIELDS = [
+  "subject.name",
+  "subject.did",
+  "credential.id",
+  "credential.type",
+  "credential.issuedAt",
+  "credential.expiresAt",
+  "issuer.name",
+  "issuer.did",
+  "config.heading",
+  "config.subheading",
+  "qr",
+] as const;
+
+export type CertificateFixedField = (typeof CERTIFICATE_FIXED_FIELDS)[number];
+export type CertificateFieldRef = CertificateFixedField | `claim:${string}`;
+export type CertificateFont = "sans" | "serif" | "mono";
+export type CertificateAlign = "left" | "center" | "right";
+
+export const CERTIFICATE_FIELD_LABELS: Record<CertificateFixedField, string> = {
+  "subject.name": "Holder name",
+  "subject.did": "Holder DID",
+  "credential.id": "Credential ID",
+  "credential.type": "Credential type",
+  "credential.issuedAt": "Issue date",
+  "credential.expiresAt": "Expiry date",
+  "issuer.name": "Issuer name",
+  "issuer.did": "Issuer DID",
+  "config.heading": "Heading (from config)",
+  "config.subheading": "Subheading (from config)",
+  "qr": "Verification QR",
+};
+
+export interface CertificateFieldPlacement {
+  field: CertificateFieldRef;
+  x: number;
+  y: number;
+  width?: number;
+  fontSize?: number;
+  font?: CertificateFont;
+  bold?: boolean;
+  color?: string;
+  align?: CertificateAlign;
+}
+
+export const MAX_CERTIFICATE_PLACEMENTS = 40;
+export const DEFAULT_QR_WIDTH = 0.14;
+
 /** Derived server-side from `revokedAt` + `expiresAt` — never stored. */
 export type ApiKeyStatus = "active" | "revoked" | "expired";
 
@@ -727,7 +785,20 @@ export interface StagedInvoice {
 export interface InvoiceRowResult { index: number; status: "staged" | "duplicate" | "invalid"; id?: string; error?: string }
 export interface TokenizeResult { id: string; status: "tokenized" | "skipped" | "failed"; assetId?: string; error?: string }
 
-export interface CertificateConfig { enabled: boolean; heading?: string; subheading?: string; claimOrder?: string[]; logoDocumentId?: string; }
+export interface CertificateConfig {
+  enabled: boolean;
+  heading?: string;
+  subheading?: string;
+  claimOrder?: string[];
+  logoDocumentId?: string;
+  /** EN-F. Full-page artwork, referencing a stored image Document. Its PRESENCE
+   *  selects the renderer: with it, the built-in layout is replaced entirely and
+   *  only `placements` are drawn. Mirrors core's `CertificateConfig`. */
+  background?: { documentId: string };
+  /** EN-F. Where each field prints on the artwork. Inert without `background`,
+   *  which is exactly the state a template instantiation lands in. */
+  placements?: CertificateFieldPlacement[];
+}
 export interface CredentialTypeSpec { name: string; title: string; claimSchema: { type: "object"; required?: string[]; properties: Record<string, { type: string; pattern?: string; enum?: string[] }> }; validityDays: number; requiredApprovals: number; certificate?: CertificateConfig; }
 export interface EligibleHolder { kind: "user" | "org"; id: string; label: string; did: string; subLabel: string | null; }
 export type IssuerBinding = { kind: "platform" } | { kind: "org"; orgId: string };

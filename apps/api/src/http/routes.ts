@@ -3,10 +3,12 @@ import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ApiKeyRecord, AssetRecord, CashflowRecord, CompanyProfile, CredentialRecord, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord, WebhookEndpointRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, issueCredential, issuerBindingAllows, modeAllows, normalizeUseCaseDefinition, ORG_OPERATING_ROLES, orgDomainEnabled, orgRoleEnabled, PolicyError, presentCredential, presentCredentials, SANDBOX_CHAIN_ID, sandboxChainsValid, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateCredentialUseCase, validateEventTypes, validateMetadata, scopeAllows, validateOrgCapabilities, validateScopes, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ApiScope, type ChainEntry, type CredentialUseCaseDefinition, type LifecycleAction, type OrgDomain, type OrgOperatingRole, type OrgType, type ResourceMode, type Role, type UseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
+import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, certificatePageSize, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, issueCredential, issuerBindingAllows, modeAllows, normalizeUseCaseDefinition, ORG_OPERATING_ROLES, orgDomainEnabled, orgRoleEnabled, PolicyError, presentCredential, presentCredentials, SANDBOX_CHAIN_ID, sandboxChainsValid, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateCertificatePlacements, validateCredentialUseCase, validateEventTypes, validateMetadata, scopeAllows, validateOrgCapabilities, validateScopes, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ApiScope, type ChainEntry, type CredentialTypeSpec, type CredentialUseCaseDefinition, type LifecycleAction, type OrgDomain, type OrgOperatingRole, type OrgType, type ResourceMode, type Role, type UseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
 import qrcode from "qrcode";
 import type { AppDeps } from "../context.js";
-import { renderCredentialCertificate } from "../certificate.js";
+import { certificateStatusBanner, humanizeKey, renderCredentialCertificate } from "../certificate.js";
+import { artworkDimensions, certificateDrawList, drawCertificate } from "../certificate-artwork.js";
+import { resolveCertificateFields } from "../certificate-fields.js";
 import { isSupportedCurrency } from "../currencies.js";
 import { renderContractCode } from "../contract-code.js";
 import { deployAndCreateUseCase } from "../use-cases.js";
@@ -1160,6 +1162,30 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       return reply.code(409).send({ error: "TEMPLATE_KEY_TAKEN", message: `template key '${t.key}' already exists` });
     }
     t.builtIn = false;
+    // EN-F: STRIP THE ARTWORK BEFORE IT IS STORED, not when it is instantiated.
+    //
+    // `instantiateTemplate` already drops `certificate.background`, and that was
+    // believed to be enough. It is not: the STORED RECORD still carries the
+    // document id, `GET /credential-use-case-templates/:key` is `...auth` — any
+    // authenticated user — and the web builder's "save as template" copies the
+    // certificate block verbatim. The final review proved the chain end to end:
+    // Org A saves its design, an unrelated tokenization Buyer reads the template
+    // and lifts `background.documentId`, and renders Org A's letterhead. The
+    // whole reason the design refuses to let artwork travel with a template was
+    // to prevent exactly that, and the defence was one layer too late.
+    //
+    // Stripped rather than refused (unlike `sandbox` above) because a design
+    // saved from a working use case legitimately HAS artwork; the author is not
+    // making a mistake, and failing their save would be the wrong lesson. What
+    // travels is the layout, which is the reusable part.
+    //
+    // `logoDocumentId` is deliberately NOT stripped here: it has travelled with
+    // templates since ID-I, `instantiate()` still copies it onto the definition,
+    // and changing that is a behaviour change to a shipped feature rather than
+    // part of EN-F. Recorded as a known inconsistency, not fixed by stealth.
+    for (const ct of t.body?.credentialTypes ?? []) {
+      if (ct.certificate?.background !== undefined) delete ct.certificate.background;
+    }
     const created = await deps.credentialTemplates.create(t);
     return reply.code(201).send(created);
   });
@@ -1178,6 +1204,124 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       }
       throw e;
     }
+  });
+
+  /**
+   * EN-F: render a DRAFT certificate design, before the use case exists.
+   *
+   * The designer posts a credential type it has not saved, so nothing here is
+   * read from storage except the one artwork document the draft names — there
+   * is no key, no definition and no credential to look up.
+   *
+   * THE RULE THIS ROUTE EXISTS TO KEEP: every artwork preview is stamped
+   * SAMPLE — NOT A CREDENTIAL. It renders arbitrary caller-supplied claims
+   * through the same code that renders real certificates, over the customer's
+   * own artwork; without the stamp it is a certificate generator for made-up
+   * facts. `sample: true` below is unconditional for exactly that reason.
+   */
+  app.post("/credential-use-cases/preview-certificate", {
+    schema: S.previewCertificate,
+    bodyLimit: 256 * 1024, // JSON config, not artwork — the artwork is already stored and referenced by id
+    ...authScoped("usecases:provision"),
+  }, async (request, reply) => {
+    const actor = request.user as TokenClaims;
+    // THE ROLE GATE, WITHOUT WHICH `authScoped` GATES NOTHING HERE.
+    //
+    // `requireScope` short-circuits on `if (!key) return` — scopes are a
+    // property of API KEYS, so for a human JWT session it passes
+    // unconditionally. Every sibling authoring route therefore pairs the scope
+    // with an explicit role predicate; this one did not, and the final review
+    // proved the consequence with a seeded tokenization Buyer: 403 from
+    // `GET /documents/:id`, then 200 from this route naming the SAME document
+    // id, with those bytes embedded full-bleed in the returned PDF. A
+    // document-read escalation past both `assets:read` and `canReadDoc`, plus
+    // an unstamped built-in-layout certificate for caller-chosen facts.
+    //
+    // The mutating-route coverage oracle asks "is it authScoped?" and the
+    // answer was confidently yes. The question was wrong — the same shape as
+    // EN-B's decide-time scope hole and EN-D2's null-as-allow.
+    if (actor.role !== "PlatformAdmin" && actor.role !== "OrgAdmin") {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "only a platform admin or org admin may preview a certificate design" });
+    }
+    const b = request.body as { credentialType: CredentialTypeSpec; sampleClaims?: Record<string, unknown> };
+    const spec = b.credentialType;
+    if (!spec?.claimSchema?.properties) return reply.code(400).send({ error: "BAD_REQUEST", message: "credentialType.claimSchema is required" });
+    // Validate the DRAFT exactly as saving would, so a design that previews
+    // cannot fail to save. Throws INVALID_CERTIFICATE_PLACEMENT → 400.
+    validateCertificatePlacements(spec.certificate?.placements, Object.keys(spec.claimSchema.properties), spec.name || "credential type");
+
+    // A fabricated credential: every value is visibly sample data, and the id is
+    // not a real one, so the QR resolves to a status route that answers 404.
+    const claims: Record<string, unknown> = {};
+    for (const key of Object.keys(spec.claimSchema.properties)) {
+      // A missing sample value falls back to the humanized key rather than to
+      // nothing: an absent field is SKIPPED by the draw list, and a designer
+      // who cannot see the chip they just dropped cannot place it.
+      claims[key] = b.sampleClaims?.[key] ?? humanizeKey(key);
+    }
+    const now = new Date();
+    const sample: CredentialRecord = {
+      id: "cred_sample", holderDid: "did:key:zSample", issuerDid: "did:key:zSampleIssuer",
+      type: spec.name, vcJwt: "", subjectClaims: claims,
+      issuedAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + (Number(spec.validityDays) || 0) * 86_400_000).toISOString(),
+      revoked: false, revokedAt: null, revokedReason: null, revokedBy: null,
+      proposalId: null, credentialUseCaseKey: null,
+      acceptance: "accepted", acceptanceAt: null, acceptanceNote: null,
+      anchorTxHash: null, anchorChainId: null, revokeTxHash: null,
+    };
+    const statusUrl = `${deps.publicApiUrl}/credentials/${sample.id}/status`;
+
+    let pdf: Buffer | null = null;
+    const bgId = spec.certificate?.background?.documentId;
+    if (bgId) {
+      try {
+        const bytes = (await deps.documents.get(bgId))?.bytes;
+        if (!bytes) throw new Error(`background document '${bgId}' not found`);
+        // The page comes from a REAL measurement, never a hand-built object:
+        // the draw list trusts the page it is handed, so a degenerate one would
+        // yield a QR of size 0 — rule 1 satisfied structurally and vacuous in
+        // fact. `artworkDimensions` throws rather than returning one.
+        const measured = artworkDimensions(bytes);
+        const page = certificatePageSize(measured.width, measured.height);
+        const ops = certificateDrawList({
+          placements: spec.certificate?.placements ?? [],
+          values: resolveCertificateFields({ credential: sample, spec, issuerName: "Sample Issuer" }),
+          page, statusUrl,
+          // A draft has no status: it is not a credential and cannot be revoked.
+          banner: null,
+          sample: true, // RULE 3 — always, on this route
+        });
+        pdf = await drawCertificate(ops, bytes, page);
+      } catch (err) {
+        // Artwork the designer just uploaded may be anything at all, and a
+        // truncated or unreadable file must not 500 the editor mid-keystroke.
+        request.log.error({ err, backgroundDocumentId: bgId }, "preview artwork unusable; previewing the built-in layout");
+        pdf = null;
+      }
+    }
+    if (!pdf) {
+      // No artwork (or unusable): preview the built-in layout, which is exactly
+      // what this config would produce.
+      //
+      // KNOWN GAP, DELIBERATE: this path is NOT stamped SAMPLE, because
+      // `renderCredentialCertificate` takes no such parameter and EN-F does not
+      // change that renderer. It prints a certificate for the fabricated id
+      // `cred_sample`, whose QR resolves to a status route answering 404 —
+      // visibly not a real credential — so the risk is materially lower than in
+      // artwork mode, where the design is the customer's own and would look
+      // genuine. Recorded rather than silently accepted.
+      pdf = await renderCredentialCertificate({
+        credential: sample, spec, issuerName: "Sample Issuer", statusUrl,
+        status: { revoked: false, revokedAt: null, revokedReason: null },
+        logoBytes: null, nowMs: Date.now(),
+      });
+    }
+    return reply
+      .header("content-type", "application/pdf")
+      .header("x-content-type-options", "nosniff")
+      .header("content-disposition", 'inline; filename="certificate-preview.pdf"')
+      .send(pdf);
   });
 
   // Validate + create a credential use case from a fully-bound definition, reusing
@@ -4541,10 +4685,48 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
         if (onChain.exists) status = { revoked: onChain.revoked, revokedAt: onChain.revokedAt ? new Date(onChain.revokedAt * 1000).toISOString() : null, revokedReason: cred.revokedReason };
       } catch (err) { request.log.error({ err }, "cert on-chain status read failed"); }
     }
-    let logoBytes: Buffer | null = null;
-    if (spec.certificate?.logoDocumentId) { try { logoBytes = (await deps.documents.get(spec.certificate.logoDocumentId))?.bytes ?? null; } catch { logoBytes = null; } }
+    const nowMs = Date.now();
 
-    const pdf = await renderCredentialCertificate({ credential: cred, spec, issuerName, statusUrl, status, logoBytes, nowMs: Date.now() });
+    // EN-F: the PRESENCE of artwork selects the renderer. With it the built-in
+    // layout is replaced entirely and only `placements` print; without it,
+    // nothing below this block changes.
+    let pdf: Buffer | null = null;
+    const background = spec.certificate?.background;
+    if (background) {
+      try {
+        const bytes = (await deps.documents.get(background.documentId))?.bytes;
+        if (!bytes) throw new Error(`certificate background document '${background.documentId}' not found`);
+        // The page comes from a REAL measurement, never a hand-built object:
+        // `certificateDrawList` resolves every coordinate against the page it is
+        // handed and trusts it, so a zero or non-finite edge would silently
+        // produce a QR of size 0 — a certificate that satisfies "a QR is always
+        // drawn" and is still unverifiable. `certificatePageSize` is where the
+        // degenerate cases are guarded, and `artworkDimensions` throws rather
+        // than returning one.
+        const measured = artworkDimensions(bytes);
+        const page = certificatePageSize(measured.width, measured.height);
+        const ops = certificateDrawList({
+          placements: spec.certificate?.placements ?? [],
+          values: resolveCertificateFields({ credential: cred, spec, issuerName }),
+          page,
+          statusUrl,
+          banner: certificateStatusBanner({ status, expiresAt: cred.expiresAt, nowMs }),
+        });
+        pdf = await drawCertificate(ops, bytes, page);
+      } catch (err) {
+        // Deleting a document must not turn every certificate of that type into
+        // an error, so this degrades to the built-in layout. At `error` and with
+        // both ids, because it means a live config now names a document that is
+        // gone or unreadable — a thing to fix, not a routine miss.
+        request.log.error({ err, credentialId: cred.id, documentId: background.documentId }, "certificate artwork unusable; falling back to the built-in layout");
+      }
+    }
+
+    if (!pdf) {
+      let logoBytes: Buffer | null = null;
+      if (spec.certificate?.logoDocumentId) { try { logoBytes = (await deps.documents.get(spec.certificate.logoDocumentId))?.bytes ?? null; } catch { logoBytes = null; } }
+      pdf = await renderCredentialCertificate({ credential: cred, spec, issuerName, statusUrl, status, logoBytes, nowMs });
+    }
     const fname = `${(spec.name || "credential").replace(/[^a-zA-Z0-9._-]/g, "_")}-${cred.id}.pdf`;
     return reply
       .header("content-type", "application/pdf")

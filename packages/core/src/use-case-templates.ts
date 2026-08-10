@@ -9,6 +9,7 @@
  * shape hand-authored use cases use, so the output flows through the existing
  * `validateCredentialUseCase` validator and runtime unchanged.
  */
+import { validateCertificatePlacements } from "./certificate-fields.js";
 import { PolicyError } from "./errors.js";
 import type {
   CredentialUseCaseDefinition,
@@ -129,6 +130,23 @@ export function validateTemplate(t: UseCaseTemplate): void {
       for (const k of cert.claimOrder)
         if (!(k in ct.properties)) fail(`credential type '${ct.name}' certificate.claimOrder references unknown claim '${k}'`);
     }
+    // EN-F, AND THE SECOND DOOR. `validateCredentialUseCase` runs this on the
+    // use-case door; without it here a template POSTed straight to the API
+    // carried arbitrary placements — off-page coordinates, forty-first entries,
+    // two QRs, claim refs naming nothing — which `instantiate()` faithfully
+    // copied onto a definition that then 400'd at creation. The template author
+    // got a 201 and the person who used their template got the error.
+    //
+    // The same shape as EN-B's scope map (gating the routes that DRAFT gates
+    // nothing when the work happens on approval) and EN-D2's mode gate. When a
+    // rule has two doors, both get the check.
+    //
+    // `background` is deliberately NOT validated here beyond its type, because
+    // `instantiate()` drops it: a template may carry one, and it never reaches a
+    // definition. See the comment there for why.
+    validateCertificatePlacements(cert.placements, Object.keys(ct.properties), ct.name);
+    if (cert.background !== undefined && (typeof cert.background !== "object" || cert.background === null || typeof cert.background.documentId !== "string"))
+      fail(`credential type '${ct.name}' certificate.background.documentId must be a string`);
   }
   if (t.body.holderAcceptance !== undefined && typeof t.body.holderAcceptance !== "boolean")
     fail("body.holderAcceptance must be a boolean");
@@ -228,12 +246,22 @@ export function instantiateTemplate(
           return out || undefined;
         };
         const claimOrder = src.claimOrder?.filter((k) => k in properties);
+        // EN-F: `placements` travel, `background` NEVER does. Templates are
+        // listable by any authenticated user and documents are readable by
+        // role rather than by org, so shipping one tenant's artwork id inside a
+        // template hands another tenant a pixel-exact impersonation of their
+        // certificates — on a public, unauthenticated render route. The layout
+        // is the reusable part; the letterhead is not.
+        const placements = src.placements?.filter(
+          (p) => !p.field.startsWith("claim:") || p.field.slice("claim:".length) in properties,
+        );
         certificate = {
           enabled: src.enabled,
           heading: interpOrUndef(src.heading),
           subheading: interpOrUndef(src.subheading),
           claimOrder: claimOrder?.length ? claimOrder : undefined,
           logoDocumentId: src.logoDocumentId,
+          ...(placements?.length ? { placements } : {}),
         };
       }
       return {
