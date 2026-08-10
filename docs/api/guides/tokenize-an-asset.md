@@ -609,10 +609,13 @@ totalSupply()          1000      # GET /assets/{id} said "1000"
 
 If those numbers disagree, do not ship — say so.
 
-**One thing that looks like a disagreement and is not.** The token contract
-reports `decimals() == 18`, the ERC-20 default, but the platform mints and
-accounts in **whole base units**: an `initialSupply` of `"1000"` is 1000 wei-like
-units on chain, not 1000 × 10¹⁸. So a raw `balanceOf` matches the API exactly,
-while any wallet or library that applies `formatUnits(balance, 18)` will show
-`0.00000000000000075`. Compare raw values, and if you surface these balances in
-a UI that assumes ERC-20 decimals, scale them yourself.
+**Units.** These tokens are indivisible: the contract reports `decimals() == 0`,
+because the platform mints and accounts in whole units — an `initialSupply` of
+`"1000"` is 1000 tokens. Raw `balanceOf` and the displayed value are therefore
+the same number, and the same number the API reports, so a wallet or explorer
+shows `750`, not `0.00000000000000075`.
+
+Read `decimals()` from the contract rather than assuming it. Tokens deployed
+before this convention landed still report `18` while holding whole-unit
+balances; for those, and only those, a `formatUnits(balance, 18)` reading is
+wrong by 10¹⁸ and you should compare raw values instead.

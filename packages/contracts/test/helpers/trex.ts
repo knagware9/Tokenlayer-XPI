@@ -81,7 +81,8 @@ export async function deployFullTrexSuite(): Promise<TrexSuite> {
   const token = await at(
     "Token",
     await (
-      await deploy("TokenProxy", iaAddr, await ir.getAddress(), await mc.getAddress(), "Acme Equity", "ACME", 18, ethers.ZeroAddress)
+      // 0 decimals — the platform accounts in whole units (see ComplianceToken).
+      await deploy("TokenProxy", iaAddr, await ir.getAddress(), await mc.getAddress(), "Acme Equity", "ACME", 0, ethers.ZeroAddress)
     ).getAddress(),
   );
 

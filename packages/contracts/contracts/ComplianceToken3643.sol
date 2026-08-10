@@ -16,7 +16,8 @@ pragma solidity ^0.8.24;
 contract ComplianceToken3643 {
     string public name;
     string public symbol;
-    uint8 public constant decimals = 18;
+    /// @notice Indivisible — see ComplianceToken; the platform accounts in whole units.
+    uint8 public constant decimals = 0;
 
     address public immutable operator;
     bool public constant allowlistEnabled = true; // identity registry is mandatory
