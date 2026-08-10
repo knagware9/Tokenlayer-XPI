@@ -123,6 +123,40 @@ any other way (the definition PATCH is PlatformAdmin-only), and the whole point
 of this work is to remove that dead end. Uploading artwork for a credential type
 is unambiguous intent to have a certificate for it.
 
+## The artwork doors: an OrgAdmin cannot reach the document store at all
+
+`RbacPolicy` grants `OrgAdmin` exactly one action — `read`. `POST /documents`
+gates on `rbac.can(role, "issue")` and `GET /documents/:id` on `canReadDoc`
+(issue-capable, or Auditor). So an OrgAdmin can neither upload artwork nor fetch
+it back for the designer canvas, and the scoped PATCH above would be a route its
+target user can never populate. Organizations reach the document store today
+only through `POST /orgs/register/documents`, which is public because it runs
+before the org exists.
+
+Widening `canReadDoc` is not the answer — it is what keeps stored invoice
+evidence away from tenants. Instead, two doors scoped by the same ownership rule
+as the PATCH:
+
+```
+POST /credential-use-cases/:key/certificate/artwork     → { documentId, sha256, size }
+GET  /credential-use-cases/:key/certificate/artwork?credentialType=<name>  → the image bytes
+```
+
+Both are `authScoped("usecases:provision")` plus the same six gates as the
+PATCH (role, existence, mode, ownership). The POST takes the existing
+`{ contentType, dataBase64 }` body under `DOC_UPLOAD_BODY_LIMIT` and reuses
+`storeUploadedDocument`, refusing any `contentType` that is not `image/*` — a
+narrower allowlist than the store's, because this door exists for artwork only.
+The GET serves the bytes of the document **currently named by that credential
+type's `background`**, and nothing else: the use case the caller owns is the
+capability, so no document id is accepted from the caller and no unreferenced
+document is reachable. Same `nosniff` + pinned-content-type headers
+`GET /documents/:id` already sends.
+
+This is also why the read door does not need to cover a just-uploaded file: the
+browser already holds the `File` it uploaded and can `URL.createObjectURL(file)`
+locally. The GET exists for **reopening** a saved design.
+
 ## Binding `background.documentId`
 
 Today `background.documentId` is bound to nothing: core checks only that it is a
@@ -174,8 +208,10 @@ credential type, opening a panel that reuses `CertificateDesigner` unchanged.
   `apps/web/src/lib/` as a pure predicate so it is unit-tested — `apps/web` has
   no DOM test environment, which is why `lib/certificate-layout.ts` already
   holds every calculation the designer performs.
-- **Artwork upload:** `api.uploadDocument` already returns `{ id, sha256 }`, so
-  the panel carries both into `background` with no new plumbing.
+- **Artwork upload:** `api.uploadCertificateArtwork(token, key, contentType, dataBase64)`
+  onto the scoped POST above, which returns `{ documentId, sha256 }`. The canvas
+  shows the uploaded `File` through a local object URL; reopening a saved design
+  fetches `api.certificateArtwork(token, key, credentialType)`.
 - **Save:** a new `api.updateCertificateDesign(token, key, body)` onto the new
   route.
 - **Preview:** unchanged — `preview-certificate` already admits OrgAdmin, and
@@ -190,8 +226,8 @@ credential type, opening a panel that reuses `CertificateDesigner` unchanged.
 |---|---|
 | `packages/core/src/credential-use-cases.ts` | `background` gains `sha256?`; validate its format. |
 | `packages/core/src/use-case-templates.ts` | Same format check in `validateTemplate`. |
-| `apps/api/src/http/routes.ts` | The new route; a shared `resolveBackgroundDocument` helper applied at all four doors. |
-| `apps/api/src/http/schemas.ts` | The route's schema, its documented scope and its error codes. |
+| `apps/api/src/http/routes.ts` | The three new routes; a shared ownership gate; a shared `resolveBackgroundDocument` helper applied at all four writing doors. |
+| `apps/api/src/http/schemas.ts` | The three routes' schemas, their documented scope and their error codes. |
 | `apps/api/openapi.snapshot.json` | Regenerated. |
 | `apps/web/src/lib/certificate-access.ts` | **NEW.** The pure visibility predicate. |
 | `apps/web/src/components/IdentityHome.tsx` | The per-type "Design certificate" action + panel. |
@@ -219,6 +255,18 @@ refused at both the definition and the template validator.
 - omitted `placements` leaves stored placements untouched; `[]` clears them;
 - a malformed placement 400 `INVALID_CERTIFICATE_PLACEMENT` naming the index;
 - `enabled` preserved when a block exists, created `true` when none does.
+
+And for the two artwork doors:
+
+- an owner OrgAdmin uploads a PNG and gets `{ documentId, sha256 }` — the same
+  call an OrgAdmin makes against `POST /documents` is still 403, so the narrow
+  door is what admitted them;
+- a `text/plain` upload 415; a foreign org 403; an unknown key 404;
+- the GET serves the bytes of the type's current `background` with
+  `x-content-type-options: nosniff` and the stored content type; a foreign org
+  403; a type with no `background` 404;
+- **the GET accepts no document id from the caller** — a document that exists
+  but is not referenced by that credential type is unreachable through it.
 
 `scope-coverage.test.ts`, `mode-coverage.test.ts` and the openapi snapshot all
 take the new route as-is — no allowlist entry, because it is scoped and it mode-
@@ -267,6 +315,10 @@ rather than confirming this document.
 - **Unhide `CredentialUseCaseBuilder` for OrgAdmins** — one line of web, and its
   save calls the PlatformAdmin-gated definition PATCH, so everything except the
   artwork would 403. A visible dead end is worse than the current invisible one.
+- **Widening `canReadDoc` / the upload gate to include OrgAdmin** — one line,
+  and it hands every tenant admin the whole document store, which holds
+  off-ledger invoice evidence. The ownership-scoped artwork doors give the same
+  capability bounded by the use case it is for.
 - **Require `sha256` at every door** — strongest binding, and it changes a
   shipped PlatformAdmin contract and edits an EN-F test that stores a
   non-existent document id on purpose to prove the render falls back.
