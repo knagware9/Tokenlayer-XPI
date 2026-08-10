@@ -25,6 +25,8 @@
 - **THE ADDITIVITY RULE:** `fast-json-stringify` silently strips undeclared response fields. You may ADD `properties`; never remove `additionalProperties: true`; never narrow a schema. A field you forget to declare simply will not appear on the wire.
 - **`authScoped(...)` is NOT an authorization gate for humans.** `requireScope` short-circuits on `if (!key) return`. Any route that must be restricted needs an explicit role predicate as well.
 - Comments explain WHY. Calibrate against `packages/core/src/modes.ts` and `apps/api/src/certificate-artwork.ts`. Do not restate the code.
+- **NO test directory in this monorepo is typechecked.** `apps/api/tsconfig.json` and `packages/core/tsconfig.json` both `"include": ["src"]`, and vitest runs no typecheck. So a test literal can carry an invalid enum value and stay green forever — Task 2's implementer found exactly that in this plan's own test (`orgType: "issuer"`, which is not an `OrgType`; the valid set is `bank | corporate | msme | government | verifier`). **When a type gains a required field, find the affected test literals by GREP, not by `tsc`** — the compiler will not tell you.
+- **Run `npx prisma generate` from `apps/api`, never from the repo root.** Root `npx` resolves a different prisma major and misses `apps/api/.env`, so `DATABASE_URL` does not resolve.
 
 **Baselines on `main`:** core 283 · api 760 · web 138.
 
