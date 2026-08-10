@@ -74,4 +74,25 @@ describe("ComplianceToken", () => {
     const token = await deploy(false);
     await expect(token.connect(alice).mint(alice.address, 100)).to.be.revertedWithCustomError(token, "NotOperator");
   });
+
+  // The platform mints whole units — an initialSupply of "1000" is 1000 units,
+  // not 1000 × 10^18 — so the token must declare itself indivisible. With
+  // decimals() == 0 a wallet, explorer or formatUnits() renders exactly the
+  // quantity the platform accounts for.
+  it("declares itself indivisible (decimals 0)", async () => {
+    const token = await deploy(false);
+    expect(await token.decimals()).to.equal(0n);
+  });
+
+  it("displays balances as the whole quantity the platform issued", async () => {
+    const [, alice, bob] = await ethers.getSigners();
+    const token = await deploy(false);
+    await token.mint(alice.address, 1000);
+    await token.transfer(alice.address, bob.address, 250);
+
+    const decimals = await token.decimals();
+    expect(ethers.formatUnits(await token.balanceOf(alice.address), decimals)).to.equal("750");
+    expect(ethers.formatUnits(await token.balanceOf(bob.address), decimals)).to.equal("250");
+    expect(ethers.formatUnits(await token.totalSupply(), decimals)).to.equal("1000");
+  });
 });
