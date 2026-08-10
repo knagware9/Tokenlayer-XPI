@@ -34,36 +34,34 @@ describe("CertificateConfig carries artwork", () => {
       .toThrow(/background.documentId/);
   });
 
-  it("accepts a background with a 64-char lowercase hex sha256 pin", () => {
+  it("accepts a background with a 0x-prefixed 64-char lowercase hex sha256 pin", () => {
     expect(() => validateCredentialUseCase(def({
       enabled: true,
-      background: { documentId: "doc_1", sha256: "a".repeat(64) },
+      background: { documentId: "doc_1", sha256: "0x" + "a".repeat(64) },
     }), ctx)).not.toThrow();
   });
 
-  it("rejects a malformed sha256 — too short, uppercase, or not hex", () => {
-    for (const bad of ["abc", "A".repeat(64), "z".repeat(64), 7]) {
+  it("rejects a malformed sha256", () => {
+    // Every shape that isn't EXACTLY what DocumentRepository.create writes:
+    // `0x` + 64 lowercase hex. Bare hex with no `0x` is the important one —
+    // it's the shape a naive `createHash(...).digest("hex")` regex (what an
+    // earlier draft of this validator used) would have wrongly accepted, and
+    // it would never equal a stored digest.
+    const badPins: unknown[] = [
+      "abc", // too short
+      "A".repeat(64), // uppercase — the store only ever emits lowercase
+      "z".repeat(64), // not hex
+      7, // not a string at all
+      "a".repeat(64), // bare hex, no `0x` prefix
+      "0x" + "a".repeat(65), // one hex char too many
+      " 0x" + "a".repeat(64), // leading whitespace
+      null,
+    ];
+    for (const bad of badPins) {
       expect(() => validateCredentialUseCase(def({
         enabled: true, background: { documentId: "doc_1", sha256: bad },
-      }), ctx)).toThrow(/background\.sha256/);
+      }), ctx), `pin ${String(bad)}`).toThrow(/background\.sha256/);
     }
-  });
-
-  it("a template's background sha256 is held to the same format", () => {
-    const t = {
-      key: "sha-t", name: "T", category: "education",
-      parameters: [],
-      body: {
-        keyTemplate: "t-key", nameTemplate: "T",
-        credentialTypes: [{
-          name: "C", title: "C", validityDays: 365, requiredApprovals: 1,
-          required: ["fullName"], properties: { fullName: { type: "string" } },
-          certificate: { enabled: true, background: { documentId: "doc_1", sha256: "nope" } },
-        }],
-        holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
-      },
-    } as unknown as UseCaseTemplate;
-    expect(() => validateTemplate(t)).toThrow(/background\.sha256/);
   });
 
   it("propagates a placement error, with its own code", () => {
@@ -178,5 +176,17 @@ describe("validateTemplate is the SECOND door, and enforces the same placement r
 
   it("…but rejects a malformed one", () => {
     expect(() => validateTemplate(tpl({ enabled: true, background: { documentId: 7 } }))).toThrow(/background.documentId/);
+  });
+
+  it("accepts a well-formed sha256 pin on the background — same format, same door", () => {
+    expect(() => validateTemplate(tpl({
+      enabled: true, background: { documentId: "doc_1", sha256: "0x" + "a".repeat(64) },
+    }))).not.toThrow();
+  });
+
+  it("rejects a malformed sha256 pin — held to the same format as the use-case door", () => {
+    expect(() => validateTemplate(tpl({
+      enabled: true, background: { documentId: "doc_1", sha256: "nope" },
+    }))).toThrow(/background\.sha256/);
   });
 });
