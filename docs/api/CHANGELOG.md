@@ -65,6 +65,45 @@ that path consulted the sandbox flag. It does now.
 
 ---
 
+## Unreleased — proposal reads: a null key stops being `""`, and the listing narrows
+
+Two fixes to `Proposal`, both visible to anyone reading proposals.
+
+- **ACTION REQUIRED if you match on `useCaseKey === ""`.** A proposal that belongs
+  to an organization rather than a use case — the credential and governance
+  kinds, and a mixed-desk onboarding batch — has no use-case key, and the 202
+  body that creates one has always said `null`. `GET /proposals` and the
+  approve/reject response said **`""`** for the same proposal: the component
+  declared the field as a non-nullable string, and the serializer coerces null to
+  the empty string for one of those. All three surfaces now say `null`.
+
+  If you branch on `if (p.useCaseKey)` nothing changes — both values are falsy.
+  If you compare against `""`, that comparison stops matching. Note that this is
+  a change to a *value*, not to the surface projection, so it does **not** appear
+  in `openapi.snapshot.json`, which records field names and shapes and not
+  nullability.
+
+  `orgId` is now declared on the component as well. It was already on the wire
+  and its value is unchanged; only the documentation was missing.
+
+- **`GET /proposals` returns fewer rows to callers who were never approvers.** The
+  listing narrowed by index — every proposal at your desk, every proposal of your
+  org — while each proposal kind admits a much narrower audience: `onboard-user`
+  only a UseCaseAdmin of that desk, the credential and governance kinds only an
+  OrgAdmin of that organization. So an Issuer, Trader, Auditor or Holder could
+  list proposals whose approval answered 404, and whose `payload` carries the
+  subject's KYC details. The listing now applies the same visibility rule the
+  fetch and decide paths already applied.
+
+  Nothing you could act on has been removed: every row that disappears is one
+  whose `POST /proposals/{id}/approve` already answered `404`. Token-operation
+  proposals (mint, transfer, burn, freeze, cashflow) are unaffected — they remain
+  visible to everyone scoped to the use case. A PlatformAdmin still sees every
+  kind. For a key principal the scope filter is unchanged and this check is
+  additional.
+
+---
+
 ## Unreleased — documentation corrections (EN-D1)
 
 No behaviour changed. The **document** changed, and in one place it had been

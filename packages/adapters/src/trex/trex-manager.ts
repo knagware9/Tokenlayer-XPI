@@ -97,7 +97,9 @@ export class TrexManager {
     );
     const token = this.at(
       "Token",
-      await (await this.deploy("TokenProxy", iaAddr, await ir.getAddress(), await mc.getAddress(), name, symbol, 18, ZeroAddress)).getAddress(),
+      // 0 decimals: the platform mints and accounts in whole units, so a wallet
+      // or explorer renders exactly the quantity the platform issued.
+      await (await this.deploy("TokenProxy", iaAddr, await ir.getAddress(), await mc.getAddress(), name, symbol, 0, ZeroAddress)).getAddress(),
     );
 
     const irAddr = await ir.getAddress();

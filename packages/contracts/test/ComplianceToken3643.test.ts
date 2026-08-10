@@ -41,4 +41,24 @@ describe("ComplianceToken3643", () => {
     await token.forcedTransfer(alice.address, bob.address, 40);
     expect(await token.balanceOf(bob.address)).to.equal(40n);
   });
+
+  // Same whole-unit convention as ComplianceToken — see the note there.
+  it("declares itself indivisible (decimals 0)", async () => {
+    const token = await deploy();
+    expect(await token.decimals()).to.equal(0n);
+  });
+
+  it("displays balances as the whole quantity the platform issued", async () => {
+    const [, alice, bob] = await ethers.getSigners();
+    const token = await deploy();
+    await token.setAllowed(alice.address, true);
+    await token.setAllowed(bob.address, true);
+    await token.mint(alice.address, 1000);
+    await token.transfer(alice.address, bob.address, 250);
+
+    const decimals = await token.decimals();
+    expect(ethers.formatUnits(await token.balanceOf(alice.address), decimals)).to.equal("750");
+    expect(ethers.formatUnits(await token.balanceOf(bob.address), decimals)).to.equal("250");
+    expect(ethers.formatUnits(await token.totalSupply(), decimals)).to.equal("1000");
+  });
 });

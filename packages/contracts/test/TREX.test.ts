@@ -62,4 +62,16 @@ describe("T-REX ERC-3643 (official Tokeny suite)", () => {
     await suite.token.connect(alice).transfer(bob.address, 100);
     expect(await suite.token.balanceOf(bob.address)).to.equal(100n);
   });
+
+  // The suite is deployed with 0 decimals to match the platform's whole-unit
+  // accounting, so a wallet shows the same quantity the platform issued.
+  it("displays balances as the whole quantity issued (decimals 0)", async () => {
+    const suite = await deployFullTrexSuite();
+    const [, , , , alice] = await ethers.getSigners();
+    await suite.registerInvestor(alice, 42);
+    await suite.token.connect(suite.agent).mint(alice.address, 1000);
+
+    expect(await suite.token.decimals()).to.equal(0n);
+    expect(ethers.formatUnits(await suite.token.balanceOf(alice.address), await suite.token.decimals())).to.equal("1000");
+  });
 });

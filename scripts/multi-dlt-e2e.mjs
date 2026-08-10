@@ -8,7 +8,11 @@ import { ethers } from "/Users/kamleshnagware/Tokenlayer XPI/packages/adapters/n
 const API = "http://localhost:4000/api/v1";
 const RPC = { besu: "http://localhost:8545", mst: "https://testnetrpc.mstblockchain.com" };
 const EXPLORER = { mst: "https://testnet.mstscan.com" };
-const ERC20 = ["function totalSupply() view returns (uint256)", "function balanceOf(address) view returns (uint256)"];
+const ERC20 = [
+  "function totalSupply() view returns (uint256)",
+  "function balanceOf(address) view returns (uint256)",
+  "function decimals() view returns (uint8)",
+];
 const ALICE = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
 const BOB = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC";
 
@@ -59,6 +63,18 @@ for (const chain of ["besu", "mst"]) {
   ok(xfer.status === 200, `transfer 250 treasury→Bob → tx ${String(xfer.j?.receipt?.txHash).slice(0, 18)}…`, xfer.j?.error ?? xfer.j);
   ok((await retry(() => token.balanceOf(ALICE))) === 750n, "on-chain balanceOf(treasury) = 750 after transfer");
   ok((await retry(() => token.balanceOf(BOB))) === 250n, "on-chain balanceOf(Bob) = 250 after transfer");
+
+  // What a wallet or explorer actually shows. The platform accounts in whole
+  // units, so the token declares decimals() == 0 and the DISPLAYED value must
+  // equal the API's own quantity — not just the raw base units.
+  const decimals = await retry(() => token.decimals());
+  const display = async (who) => ethers.formatUnits(await retry(() => token.balanceOf(who)), decimals);
+  const accounts = (await call("GET", `/assets/${assetId}/accounts`, null, admin)).j;
+  const apiBalance = Array.isArray(accounts) ? accounts.find((a) => a.address === ALICE)?.balance : undefined;
+  ok(decimals === 0n, `on-chain decimals() = ${decimals} (expected 0 — whole units)`);
+  ok((await display(ALICE)) === "750", `wallet-displayed balance(treasury) = ${await display(ALICE)} (expected 750, not 0.00000000000000075)`);
+  ok((await display(BOB)) === "250", `wallet-displayed balance(Bob) = ${await display(BOB)} (expected 250)`);
+  if (apiBalance !== undefined) ok((await display(ALICE)) === String(apiBalance), `displayed balance matches the API's own number (${apiBalance})`);
 
   const rcpt = await retry(() => provider.getTransactionReceipt(xfer.j?.receipt?.txHash));
   ok(rcpt?.status === 1, `transfer tx mined with status 1 (block ${rcpt?.blockNumber})`);

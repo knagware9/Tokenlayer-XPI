@@ -17,7 +17,10 @@ pragma solidity ^0.8.24;
 contract ComplianceToken {
     string public name;
     string public symbol;
-    uint8 public constant decimals = 18;
+    /// @notice Indivisible: the platform mints and accounts in whole units, so a
+    ///         supply of 1000 is 1000 tokens and any ERC-20 consumer that applies
+    ///         `formatUnits(balance, decimals())` shows that same 1000.
+    uint8 public constant decimals = 0;
 
     address public immutable operator;
     bool public immutable allowlistEnabled;
