@@ -34,6 +34,38 @@ describe("CertificateConfig carries artwork", () => {
       .toThrow(/background.documentId/);
   });
 
+  it("accepts a background with a 64-char lowercase hex sha256 pin", () => {
+    expect(() => validateCredentialUseCase(def({
+      enabled: true,
+      background: { documentId: "doc_1", sha256: "a".repeat(64) },
+    }), ctx)).not.toThrow();
+  });
+
+  it("rejects a malformed sha256 — too short, uppercase, or not hex", () => {
+    for (const bad of ["abc", "A".repeat(64), "z".repeat(64), 7]) {
+      expect(() => validateCredentialUseCase(def({
+        enabled: true, background: { documentId: "doc_1", sha256: bad },
+      }), ctx)).toThrow(/background\.sha256/);
+    }
+  });
+
+  it("a template's background sha256 is held to the same format", () => {
+    const t = {
+      key: "sha-t", name: "T", category: "education",
+      parameters: [],
+      body: {
+        keyTemplate: "t-key", nameTemplate: "T",
+        credentialTypes: [{
+          name: "C", title: "C", validityDays: 365, requiredApprovals: 1,
+          required: ["fullName"], properties: { fullName: { type: "string" } },
+          certificate: { enabled: true, background: { documentId: "doc_1", sha256: "nope" } },
+        }],
+        holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
+      },
+    } as unknown as UseCaseTemplate;
+    expect(() => validateTemplate(t)).toThrow(/background\.sha256/);
+  });
+
   it("propagates a placement error, with its own code", () => {
     try {
       validateCredentialUseCase(def({ enabled: true, placements: [{ field: "claim:nope", x: 0, y: 0 }] }), ctx);

@@ -41,7 +41,14 @@ export interface CertificateConfig {
    * only `placements` are drawn; without it, nothing about the existing
    * certificate changes.
    */
-  background?: { documentId: string };
+  /**
+   * EN-F follow-up: the digest of the artwork bytes, as `POST /documents`
+   * reports it. OPTIONAL so every record written by EN-F stays valid, and the
+   * org-scoped design route REQUIRES it: `documentId` alone is bound to
+   * nothing, so a pin is what stops a caller naming a document id it merely
+   * guessed. Verified wherever it is supplied.
+   */
+  background?: { documentId: string; sha256?: string };
   /** EN-F. Where each field prints on the artwork. Inert without `background`,
    *  which is exactly the state a template instantiation lands in. */
   placements?: CertificateFieldPlacement[];
@@ -138,6 +145,12 @@ export function validateCredentialUseCase(
       if (cert.background !== undefined) {
         if (!cert.background || typeof cert.background !== "object" || typeof cert.background.documentId !== "string" || !cert.background.documentId.trim())
           fail(`credential type '${ct.name}' certificate.background.documentId must be a non-empty string`);
+        // Lowercase hex, 64 chars — exactly what `createHash("sha256").digest("hex")`
+        // produces in the document store. A pin in any other shape can never
+        // match a stored digest, so accepting it would store a check that
+        // always fails at the door which enforces it.
+        if (cert.background.sha256 !== undefined && (typeof cert.background.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(cert.background.sha256)))
+          fail(`credential type '${ct.name}' certificate.background.sha256 must be a 64-character lowercase hex digest`);
       }
       // Throws INVALID_CERTIFICATE_PLACEMENT — a distinct code from this
       // function's INVALID_USECASE, so a 400 tells the designer which chip.

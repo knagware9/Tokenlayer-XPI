@@ -147,6 +147,9 @@ export function validateTemplate(t: UseCaseTemplate): void {
     validateCertificatePlacements(cert.placements, Object.keys(ct.properties), ct.name);
     if (cert.background !== undefined && (typeof cert.background !== "object" || cert.background === null || typeof cert.background.documentId !== "string"))
       fail(`credential type '${ct.name}' certificate.background.documentId must be a string`);
+    // Both doors, same rule — the reason this file validates placements at all.
+    if (cert.background?.sha256 !== undefined && (typeof cert.background.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(cert.background.sha256)))
+      fail(`credential type '${ct.name}' certificate.background.sha256 must be a 64-character lowercase hex digest`);
   }
   if (t.body.holderAcceptance !== undefined && typeof t.body.holderAcceptance !== "boolean")
     fail("body.holderAcceptance must be a boolean");
