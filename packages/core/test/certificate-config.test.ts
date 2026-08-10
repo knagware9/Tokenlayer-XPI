@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { validateCredentialUseCase, type CredentialUseCaseDefinition } from "../src/credential-use-cases.js";
-import { instantiateTemplate, type UseCaseTemplate } from "../src/use-case-templates.js";
+import { instantiateTemplate, validateTemplate, type UseCaseTemplate } from "../src/use-case-templates.js";
 
 const ctx = { orgExists: () => true };
 
@@ -98,5 +98,51 @@ describe("templates carry placements, never artwork", () => {
     // A placement pointing at a claim that no longer exists would fail
     // validation on the way in — so instantiation must not emit one.
     expect(out.credentialTypes[0]!.certificate!.placements ?? []).toHaveLength(0);
+  });
+});
+
+describe("validateTemplate is the SECOND door, and enforces the same placement rules", () => {
+  // Without this the template author gets a 201 and the person who uses their
+  // template gets the 400 — the split that EN-B's scope map and EN-D2's mode
+  // gate were both bitten by. A rule with two doors gets checked at both.
+  const tpl = (certificate: Record<string, unknown>): UseCaseTemplate => ({
+    key: "t", name: "T", category: "education",
+    parameters: [{ name: "orgName", label: "Org", type: "string", required: true }],
+    body: {
+      keyTemplate: "${orgName}-t", nameTemplate: "${orgName} T",
+      credentialTypes: [{
+        name: "C", title: "C", validityDays: 365, requiredApprovals: 1,
+        required: ["fullName"], properties: { fullName: { type: "string" } },
+        certificate: certificate as never,
+      }],
+      holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
+    },
+  } as UseCaseTemplate);
+
+  it("accepts well-formed placements", () => {
+    expect(() => validateTemplate(tpl({ enabled: true, placements: [{ field: "claim:fullName", x: 0.5, y: 0.4 }] }))).not.toThrow();
+  });
+
+  it("rejects an off-page coordinate", () => {
+    expect(() => validateTemplate(tpl({ enabled: true, placements: [{ field: "subject.name", x: 9, y: 0.4 }] })))
+      .toThrow(/x must be a number between 0 and 1/);
+  });
+
+  it("rejects a claim ref naming nothing in the template's own properties", () => {
+    expect(() => validateTemplate(tpl({ enabled: true, placements: [{ field: "claim:nope", x: 0.5, y: 0.4 }] })))
+      .toThrow(/nope/);
+  });
+
+  it("rejects two QRs", () => {
+    expect(() => validateTemplate(tpl({ enabled: true, placements: [{ field: "qr", x: 0.1, y: 0.1 }, { field: "qr", x: 0.9, y: 0.9 }] })))
+      .toThrow(/at most one/);
+  });
+
+  it("still ACCEPTS a background — instantiate drops it, so carrying one is legal", () => {
+    expect(() => validateTemplate(tpl({ enabled: true, background: { documentId: "doc_1" } }))).not.toThrow();
+  });
+
+  it("…but rejects a malformed one", () => {
+    expect(() => validateTemplate(tpl({ enabled: true, background: { documentId: 7 } }))).toThrow(/background.documentId/);
   });
 });
