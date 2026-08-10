@@ -1980,6 +1980,31 @@ export const S: Record<string, FastifySchema> = {
     },
     response: { 200: { $ref: "Organization#" }, ...errs(400, 401, 403, 404) },
   },
+  uploadOrgBrandLogo: {
+    tags: ["Organizations"], summary: "Upload an organization's brand logo (image)", security: humanOnly,
+    description:
+      "Session-only, gated identically to `PATCH /orgs/:id/branding`: restricted to an OrgAdmin of THIS " +
+      "organization or a Platform Admin, and an API key is refused with **403 `MACHINE_PRINCIPAL`** whatever its " +
+      "scopes. A dedicated door rather than `POST /documents`, because that route gates on the `issue` capability " +
+      "and an OrgAdmin does not hold it — widening it would change the authorization of a route that also serves " +
+      "KYB documents, certificate artwork and asset attachments, for the sake of a logo. Images only, even though " +
+      "`POST /documents` accepts a wider allowlist: this door exists so an OrgAdmin can upload a MARK. Returns the " +
+      "document id, ready to hand straight to `PATCH /orgs/:id/branding` as `brandLogoDocumentId`.",
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    body: {
+      type: "object",
+      required: ["contentType", "dataBase64"],
+      properties: { contentType: { type: "string" }, dataBase64: { type: "string" } },
+    },
+    response: {
+      201: {
+        type: "object", additionalProperties: true,
+        properties: { id: { type: "string" }, sha256: { type: "string" }, size: { type: "integer" } },
+        required: ["id", "sha256", "size"],
+      },
+      ...errs(400, 401, 403, 404, 413, 415),
+    },
+  },
   requestOrgCapabilities: {
     tags: ["Organizations"], summary: "Request a capability-envelope change (OrgAdmin; PlatformAdmin approval applies it)", security: humanOnly,
     description:

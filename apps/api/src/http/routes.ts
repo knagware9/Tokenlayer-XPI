@@ -3485,6 +3485,43 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     return orgView(updated);
   });
 
+  // EN-E, Task 3b: a dedicated upload door for an org's own logo. `POST
+  // /documents` gates on `rbac.can(role, "issue")` and MATRIX.OrgAdmin is
+  // ["read"] alone — an OrgAdmin gets 403 there, so without this route the
+  // brand editor would have no working upload path for the exact role it is
+  // built for. Widening the general store was rejected: it also serves KYB
+  // documents, certificate artwork and asset attachments, a much larger blast
+  // radius than a logo needs. Gated IDENTICALLY to PATCH /orgs/:id/branding —
+  // same machine-principal refusal, same PlatformAdmin-or-own-OrgAdmin check —
+  // because uploading the mark is the same console act as setting the colour.
+  app.post("/orgs/:id/branding/logo", { schema: S.uploadOrgBrandLogo, bodyLimit: DOC_UPLOAD_BODY_LIMIT, ...auth }, async (request, reply) => {
+    // See the identical comment on PATCH /orgs/:id/branding: omitting this
+    // withholds a scope, not the route, and a zero-scope key is the widest
+    // hole of all because scopes are never consulted for a route with no
+    // `authScoped(...)`.
+    if (machinePrincipal(request)) {
+      return reply.code(403).send({ error: "MACHINE_PRINCIPAL", message: "an API key may not upload an organization's brand logo" });
+    }
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    const isOwnOrgAdmin = claims.role === "OrgAdmin" && !!claims.orgId && claims.orgId === id;
+    if (claims.role !== "PlatformAdmin" && !isOwnOrgAdmin) {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "only this organization's admin or a platform admin may upload its brand logo" });
+    }
+    const org = await deps.organizations.get(id);
+    if (!org) return notFound(reply, "organization not found");
+
+    const b = request.body as { contentType: string; dataBase64: string };
+    // Narrower than the shared allowlist ON PURPOSE. This route exists so an
+    // OrgAdmin can upload a MARK; a PDF or a text file stored through it would
+    // only ever fail later, at the point something tries to draw it.
+    if (!b.contentType.startsWith("image/")) {
+      return reply.code(415).send({ error: "UNSUPPORTED_DOCUMENT_TYPE", message: "a brand logo must be an image" });
+    }
+    const doc = await storeUploadedDocument(deps.documents, b);
+    return reply.code(201).send(doc);
+  });
+
   // Org-requested capability change (EN-A): the org's own OrgAdmin proposes a
   // new envelope; only a PlatformAdmin approval applies it (see org-kinds.ts).
   app.post("/orgs/:id/capabilities/request", { schema: S.requestOrgCapabilities, ...auth }, async (request, reply) => {

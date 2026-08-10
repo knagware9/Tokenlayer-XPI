@@ -62,6 +62,7 @@ const DELIBERATELY_UNSCOPED: Record<string, string> = {
   "POST /orgs/:id/reject": "403 MACHINE_PRINCIPAL: platform governance (admitting a tenant)",
   "PATCH /orgs/:id/capabilities": "403 MACHINE_PRINCIPAL: a key may never raise the envelope that bounds it",
   "PATCH /orgs/:id/branding": "403 MACHINE_PRINCIPAL: session-only by design — branding is a console act by an OrgAdmin or PlatformAdmin, and an unattended key must not be able to rewrite an organization's identity. Role AND org-ownership are both checked in the handler; withholding a scope alone would NOT have withheld the route, so the refusal is explicit.",
+  "POST /orgs/:id/branding/logo": "403 MACHINE_PRINCIPAL: gated identically to PATCH /orgs/:id/branding — uploading the org's mark is the same console act as setting its colour, checked the same way (role AND org-ownership in the handler, machine principals refused outright).",
 
   // --- gated dynamically, by something a static scope cannot express --------
   "POST /proposals/:id/approve": "scope derived from the proposal's KIND inside decide() — see ProposalKindHandler.apiScope",
