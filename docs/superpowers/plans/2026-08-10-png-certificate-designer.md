@@ -52,6 +52,7 @@
 **Files:**
 - Create: `packages/core/src/certificate-fields.ts`
 - Modify: `packages/core/src/index.ts`
+- Modify: `packages/core/src/errors.ts` — `PolicyErrorCode` is a CLOSED union and `packages/core/src` IS typechecked, so `INVALID_CERTIFICATE_PLACEMENT` must be added to it or the new module will not compile.
 - Test: `packages/core/test/certificate-fields.test.ts`
 
 - [ ] **Step 1: Write the failing test**
@@ -394,10 +395,10 @@ export * from "./certificate-fields.js";
 - [ ] **Step 5: Run the test and the whole core suite**
 
 Run: `cd packages/core && ./node_modules/.bin/vitest run test/certificate-fields.test.ts`
-Expected: PASS, 9 tests.
+Expected: PASS, 12 tests.
 
 Run: `cd packages/core && ./node_modules/.bin/vitest run`
-Expected: PASS — 253 pre-existing + 9 new.
+Expected: PASS — 253 pre-existing + 12 new.
 
 - [ ] **Step 6: Commit**
 
