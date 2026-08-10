@@ -1,3 +1,4 @@
+import { inflateSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { certificatePageSize } from "@tokenlayer/core";
 import { artworkDimensions, certificateDrawList, drawCertificate } from "../src/certificate-artwork.js";
@@ -283,5 +284,74 @@ describe("undecodable artwork is refused synchronously, never left to crash the 
   it("THE CONTROL: the same generator's clean PNG renders", async () => {
     const pdf = await drawCertificate(ops(), PNG_4x2_GOOD, page);
     expect(pdf.subarray(0, 4).toString("latin1")).toBe("%PDF");
+  });
+});
+
+/**
+ * `x` IS THE ANCHOR — measured out of the emitted PDF, not asserted about.
+ *
+ * The live walkthrough caught this and no unit test could have: the draw list
+ * was correct (it emits `x` in points and the right `align`), and the mistake
+ * was in the adapter's box. Starting the box at `x` and letting pdfkit align
+ * inside it puts a centred field at (x + pageWidth) / 2 and pins a right-aligned
+ * one to the page edge with `x` ignored entirely. A name placed dead centre
+ * printed three-quarters of the way across the certificate.
+ */
+describe("x is the anchor, and align picks which edge sits on it", () => {
+  const page = certificatePageSize(1400, 990);
+  const ANCHOR = page.width * 0.5;
+
+  /** Every `1 0 0 1 x y Tm` in the inflated content streams. The SAMPLE and
+   *  watermark stamps are rotated, so their matrices do not match this. */
+  function textStartsAt(pdf: Buffer): number[] {
+    const raw = pdf.toString("latin1");
+    let content = "";
+    const re = /stream\r?\n/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(raw))) {
+      const start = m.index + m[0].length;
+      const end = raw.indexOf("endstream", start);
+      if (end < 0) continue;
+      try { content += inflateSync(pdf.subarray(start, end)).toString("latin1"); } catch { /* not a flate stream */ }
+    }
+    return [...content.matchAll(/1 0 0 1 ([\d.]+) [\d.]+ Tm/g)].map((x) => Number(x[1]));
+  }
+
+  const render = async (align: "left" | "center" | "right"): Promise<number> => {
+    const ops = certificateDrawList({
+      placements: [{ field: "subject.name", x: 0.5, y: 0.5, align, fontSize: 40, bold: true }],
+      values: new Map([["subject.name", "MID"]]),
+      page, statusUrl: "https://api.example/status", banner: null,
+    });
+    const pdf = await drawCertificate(ops, PNG_2x1, page);
+    // The placement is drawn before the auto-QR's caption, so it is the first run.
+    return textStartsAt(pdf)[0]!;
+  };
+
+  it("left starts ON the anchor", async () => {
+    expect(await render("left")).toBeCloseTo(ANCHOR, 1);
+  });
+
+  it("center straddles the anchor — starting LEFT of it by half the text", async () => {
+    const start = await render("center");
+    expect(start).toBeLessThan(ANCHOR);
+    // Half a 40pt "MID" is ~35pt; the point is that it is centred ON the anchor,
+    // not centred in the space to its right (which was ~594, i.e. +174).
+    expect(ANCHOR - start).toBeGreaterThan(20);
+    expect(ANCHOR - start).toBeLessThan(60);
+  });
+
+  it("right ENDS on the anchor, so x is honoured rather than ignored", async () => {
+    const start = await render("right");
+    // The bug pinned this to the page's right edge (~768 for this page), which
+    // is well to the RIGHT of the anchor. Correct is well to the left of it.
+    expect(start).toBeLessThan(ANCHOR);
+    expect(ANCHOR - start).toBeGreaterThan(50);
+  });
+
+  it("the three alignments are ordered left > center > right, all around one anchor", async () => {
+    const [l, c, r] = [await render("left"), await render("center"), await render("right")];
+    expect(l).toBeGreaterThan(c);
+    expect(c).toBeGreaterThan(r);
   });
 });

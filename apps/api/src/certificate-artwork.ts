@@ -256,13 +256,37 @@ export async function drawCertificate(
       case "text": {
         const family = PDF_FONTS[op.font];
         doc.font(op.bold ? family.bold : family.normal).fontSize(op.fontSize).fillColor(op.color);
-        // With a width, pdfkit wraps and honours `align` inside the box. Without
-        // one, `align` has nothing to align against, so the box is the rest of
-        // the page from x — which makes centre/right behave as the designer
-        // expects rather than silently doing nothing. The floor keeps a
-        // placement pinned at the right edge from asking for a <=0 box.
-        const width = op.width ?? Math.max(1, page.width - op.x);
-        doc.text(op.text, op.x, op.y, { width, align: op.align, lineBreak: op.width !== null });
+        // `x` IS THE ANCHOR, and `align` says which part of the text sits on
+        // it. So the box is positioned RELATIVE to x rather than started at it.
+        //
+        // Starting the box at x and letting pdfkit align inside it — the
+        // obvious implementation — puts a centred field at (x + pageWidth) / 2
+        // and a right-aligned one hard against the page edge with x ignored
+        // entirely. The live walkthrough caught it: a name placed at x = 0.5,
+        // centred, printed three-quarters of the way across the certificate.
+        // Every unit test passed, because the draw list was right and the
+        // mistake was in the millimetre.
+        const maxLine = op.width;
+        let boxX: number;
+        let boxW: number;
+        if (op.align === "center") {
+          // Symmetric about x, so the text's midpoint lands on it. Without an
+          // explicit width the half-box is the nearer edge, which keeps the box
+          // on the page and still centres correctly.
+          const half = maxLine !== null ? maxLine / 2 : Math.min(op.x, page.width - op.x);
+          boxX = Math.max(0, op.x - half);
+          boxW = Math.max(1, Math.min(half * 2, page.width - boxX));
+        } else if (op.align === "right") {
+          // The box ENDS at x, so the text's right edge lands on it.
+          boxW = Math.max(1, Math.min(maxLine ?? op.x, op.x));
+          boxX = Math.max(0, op.x - boxW);
+        } else {
+          boxX = op.x;
+          boxW = Math.max(1, maxLine ?? page.width - op.x);
+        }
+        // `lineBreak` only when a width was asked for: an unwrapped field is one
+        // line by definition, and pdfkit still aligns it inside the box.
+        doc.text(op.text, boxX, op.y, { width: boxW, align: op.align, lineBreak: maxLine !== null });
         break;
       }
       case "qr": {
