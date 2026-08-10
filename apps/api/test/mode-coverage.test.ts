@@ -56,6 +56,28 @@ function calls(body: string, names: readonly string[]): boolean {
  * entry states WHY, in prose, and the staleness check below deletes the
  * standing exemption the moment it stops being true.
  */
+/**
+ * The exemptions above that are exempt BECAUSE THEY FILTER. Every one of them
+ * must be able to show the filter in its own body — otherwise the reason is
+ * merely a sentence, and a sentence is what an allowlist rots into.
+ *
+ * `modeFilter` narrows a projection row by row; `modeVisibleUseCaseKeys`
+ * narrows the repository query itself. Either is the decision; neither being
+ * present means the route says "filtered" and is not.
+ */
+const FILTERED = [
+  "GET /use-cases",
+  "GET /credential-use-cases",
+  "GET /analytics",
+  "GET /identity/dashboard",
+  "GET /assets",
+  "GET /audit/verify",
+  "POST /audit/anchor",
+] as const;
+
+/** `modeFilter(` / `modeVisible…(` — a mode NARROWING rather than a refusal. */
+const NARROWS_BY_MODE = /\bmode(Filter|Visible\w*)\(/;
+
 const MODE_EXEMPT: Record<string, string> = {
   // --- pre-auth, or the caller's own session: the use case is resolved only to
   // LABEL a session with its product domain (see resolveUseCaseDomain), never
@@ -64,15 +86,25 @@ const MODE_EXEMPT: Record<string, string> = {
   "GET /auth/qr/:id": "the same domain label on an unauthenticated QR poll; no principal, so no mode to compare against",
   "GET /me": "the caller's own claims, with the same domain label; a key reading back the identity it already proved crosses nothing",
 
-  // --- list projections. Gating a LIST per row would 403 the whole response
-  // because one row is in the other environment, which is the wrong answer:
-  // the right one is to filter, and filtering is D2-6's job (analytics, org
-  // dashboards and the register all get `?includeSandbox=` there). Recorded
-  // here as deferred, not as decided-safe.
-  "GET /use-cases": "a list, not an act on one use case; sandbox rows are filtered in the projection by D2-6, not 403'd per row",
-  "GET /credential-use-cases": "the identity-domain twin of the above; filtered by the D2-6 projection rather than gated per row",
-  "GET /analytics": "an aggregate over every use case the caller can see; D2-6 excludes sandbox from the numbers by default, which is a filter and not a refusal",
-  "GET /identity/dashboard": "an aggregate over the caller's own credential use cases, excluded from sandbox by the same D2-6 filter",
+  // --- list projections and aggregates. Gating a LIST per row would 403 the
+  // whole response because one row is in the other environment, which is the
+  // wrong answer: the right one is to FILTER. D2-6 landed that filter, so
+  // these are no longer deferred — they are decided, and the decision is
+  // checked rather than asserted in prose by "the filtered projections really
+  // do filter" below.
+  "GET /use-cases": "a list, not an act on one use case; a machine principal's catalog is narrowed to its own environment by modeFilter, and a human sees both because a builder must be able to find the sandbox programme they are configuring",
+  "GET /credential-use-cases": "the identity-domain twin of the above, narrowed by the same modeFilter rather than 403'd per row",
+  "GET /analytics": "an aggregate over every use case the caller can see; modeFilter excludes sandbox from the numbers by default (?includeSandbox=true opts in, and never for a key), which is a filter and not a refusal",
+  "GET /identity/dashboard": "an aggregate over the caller's own credential use cases, narrowed by the same modeFilter on the same terms",
+  // The three routes that resolve NO use case of their own and select across
+  // ALL of them — the crossing D2-6 found. They are exempt from the GATE for
+  // the reason above (an aggregate must narrow, not refuse), but the narrowing
+  // is not optional here: it rides into the repository query as
+  // `AssetFilter.useCaseKeys`, so `pagination.total` and the page window
+  // describe only rows the caller may see.
+  "GET /assets": "selects across every use case for a PlatformAdmin principal, so there is no single use case to gate; modeVisibleUseCaseKeys pushes the admitted keys into the asset query instead, which narrows the page and its total together",
+  "GET /audit/verify": "a tamper summary over the same unnarrowed asset selection, narrowed by the same modeVisibleUseCaseKeys — a summary over the live register would be a disclosure of the live register",
+  "POST /audit/anchor": "the write side of that same selection (it would otherwise anchor live heads on a real chain with a test key); narrowed by modeVisibleUseCaseKeys rather than gated, because anchoring is a bulk act over everything the caller can see",
 
   // --- the holder's own wallet. A credential belongs to its HOLDER, who is a
   // human with no mode; the use case is resolved only to title the row.
@@ -147,6 +179,24 @@ describe("mode-gate coverage (EN-D2)", () => {
     expect(stale).toEqual([]);
   });
 
+  it("the filtered projections really do filter (D2-6)", () => {
+    // D2-4 exempted the list projections on the promise that D2-6 would filter
+    // them. This is the promise being collected: an exemption whose stated
+    // reason is "it filters" fails here the day the filter is deleted, which
+    // is the only difference between a decision and a note.
+    for (const k of FILTERED) {
+      expect(MODE_EXEMPT[k], `${k} must still be exempt from the gate`).toBeDefined();
+      const r = routes.find((x) => key(x) === k);
+      expect(r, `${k} has gone missing`).toBeDefined();
+      expect(NARROWS_BY_MODE.test(r!.body ?? ""), `${k} claims to filter by mode and does not`).toBe(true);
+    }
+    // …and the narrowing helpers exist and were read, so a rename cannot turn
+    // the assertion above into a check on a regex nothing matches.
+    const narrowers = helpers.filter((h) => NARROWS_BY_MODE.test(h.body)).map((h) => h.name);
+    expect(helpers.map((h) => h.name)).toEqual(expect.arrayContaining(["modeFilter", "modeVisibleUseCaseKeys"]));
+    expect(narrowers).toContain("modeVisibleUseCaseKeys");
+  });
+
   it("every exemption gives a real reason", () => {
     // A placeholder is worse than no entry: it looks like a decision and is
     // not one. Prose, of a length somebody had to think to write.
@@ -169,6 +219,30 @@ describe("mode-gate coverage (EN-D2)", () => {
       expect(r, `${k} has gone missing`).toBeDefined();
       expect(gated(r!), `${k} is a door onto issueAssetCore and must consult the mode gate`).toBe(true);
     }
+  });
+
+  it("deciding a proposal is gated, and the proposal list is narrowed (D2-6)", () => {
+    // THE BLIND SPOT THIS FILE HAD. A proposal is a CAPTURED OPERATION: the
+    // mint, the deploy and the signature all happen on final approval, in
+    // `decide` — which resolves a PROPOSAL and no use case, so the scan above
+    // could never have classified it as a candidate. It is named here instead,
+    // by hand, because the scan cannot find what it cannot see. (`GET /assets`
+    // was the same shape; it only became visible once its fix added a
+    // `useCases.list()` call.)
+    const at = (k: string) => routes.find((r) => key(r) === k);
+    for (const k of ["POST /proposals/:id/approve", "POST /proposals/:id/reject"]) {
+      const r = at(k);
+      expect(r, `${k} has gone missing`).toBeDefined();
+      expect(gated(r!), `${k} EXECUTES the captured operation and must consult the mode gate`).toBe(true);
+    }
+    // Reject is not a spectator: it runs compensation (fee refunds, asset state
+    // changes), so it decides the other environment's business just as much.
+    const decideHelper = helpers.find((h) => h.name === "decide");
+    expect(decideHelper, "both decision routes delegate to `decide` — it has gone missing").toBeDefined();
+    expect(CONSULTS_GATE.test(decideHelper!.body)).toBe(true);
+    // …and the list of them narrows rather than refusing, as every other
+    // machine-visible list here does.
+    expect(NARROWS_BY_MODE.test(at("GET /proposals")?.body ?? "")).toBe(true);
   });
 
   it("WRONG_MODE is sent from exactly one place", () => {

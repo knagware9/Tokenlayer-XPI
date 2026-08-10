@@ -298,6 +298,63 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     return true;
   }
 
+  /**
+   * THE READ-SIDE COMPANION TO `modeGate` (EN-D2, D2-6) — and it FILTERS rather
+   * than refuses.
+   *
+   * A gate is the wrong instrument for a projection. 403-ing a whole page
+   * because one of its rows belongs to the other environment answers a question
+   * nobody asked; the rows a caller IS entitled to are what they should get. So
+   * a list narrows, and this returns the predicate that narrows it.
+   *
+   * TWO RULES, AND ONLY ONE OF THEM CONSULTS THE QUERY:
+   *
+   *   * A MACHINE PRINCIPAL SEES ITS OWN ENVIRONMENT AND NOTHING ELSE — the
+   *     same `modeAllows` equality the gate uses, applied per row.
+   *     `includeSandbox` is IGNORED for a key, deliberately: a `tl_test_` key
+   *     asking for live rows is the crossing itself rather than a preference,
+   *     and a `tl_live_` key must not be able to opt INTO the sandbox either.
+   *     A query parameter that could widen a key's reach would undo D2-4 with
+   *     eight characters of URL.
+   *
+   *   * A HUMAN SESSION HAS NO MODE and may legitimately see both, so the CALL
+   *     SITE picks the default: `true` for a catalog — a builder must be able
+   *     to find the sandbox programme they are configuring, which is labelled
+   *     in the UI rather than hidden — and the `?includeSandbox=` flag for
+   *     anything that reports NUMBERS, where a sandbox asset inside a
+   *     customer's headline total is a reporting defect and the safe default is
+   *     to leave it out.
+   */
+  function modeFilter(request: FastifyRequest, includeSandbox: boolean): (row: { sandbox?: boolean }) => boolean {
+    const keyMode = actorMode(request);
+    if (keyMode !== null) return (row) => modeAllows(keyMode, row.sandbox ? "test" : "live");
+    return includeSandbox ? () => true : (row) => !row.sandbox;
+  }
+
+  /**
+   * The tokenization use-case keys a MACHINE principal's mode admits, or
+   * `undefined` for a human session — which is what `AssetFilter` reads as
+   * "every use case", leaving the pre-EN-D2 query byte-for-byte as it was.
+   *
+   * FOUND WHILE WIRING D2-6, and closed here. `GET /assets`, `GET
+   * /audit/verify` and `POST /audit/anchor` resolve no use case of their own,
+   * so `mode-coverage.test.ts` never even considered them — and for a
+   * PlatformAdmin principal all three select across EVERY use case at once. A
+   * `tl_test_` key bound to such a service user would have read the entire LIVE
+   * asset register with one GET (and, through the anchor route, spent real gas
+   * writing live audit heads to a real chain). It is the same crossing D2-5
+   * found on the `GET /events` cursor, one repository along.
+   *
+   * The keys are pushed INTO the query rather than filtered out of its result:
+   * a post-fetch filter would leave `pagination.total` announcing rows the
+   * caller cannot see, and would silently interact with the page window.
+   */
+  async function modeVisibleUseCaseKeys(request: FastifyRequest): Promise<string[] | undefined> {
+    if (actorMode(request) === null) return undefined;
+    const allowed = modeFilter(request, true);
+    return (await deps.useCases.list()).filter(allowed).map((u) => u.key);
+  }
+
   // Loads an asset and enforces use-case scope. Returns null after sending the
   // right error (404 for reads to hide existence; 403 for actions).
   //
@@ -547,7 +604,11 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
 
   app.get("/use-cases", { schema: S.listUseCases, ...auth }, async (request) => {
     const claims = request.user as TokenClaims;
-    const all = await deps.useCases.list();
+    // EN-D2 (D2-6): a machine principal's catalog holds only its own
+    // environment. `true` is what a HUMAN sees — both — because an OrgAdmin who
+    // could not find their own sandbox programme could not configure it; the
+    // web marks those rows rather than hiding them.
+    const all = (await deps.useCases.list()).filter(modeFilter(request, true));
     if (claims.role === "PlatformAdmin") return all;
     if (claims.role === "OrgAdmin") return all.filter((u) => u.ownerOrgId != null && u.ownerOrgId === claims.orgId);
     return all.filter((u) => u.key === claims.useCaseKey);
@@ -734,13 +795,119 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     return deps.useCases.update(key, incoming);
   });
 
+  /**
+   * THE WAY OUT OF THE SANDBOX (EN-D2, D2-6).
+   *
+   * `sandbox` is immutable, so a programme that was built and debugged against
+   * the simulated ledger needs a supported way to become real. This is it, and
+   * its whole value rests on what it does NOT do: it copies CONFIGURATION —
+   * fields, compliance rules, fees, lifecycle, certificate design, whatever
+   * else the definition carries — and no data at all. No assets, holders,
+   * staged invoices, proposals or events come with it. The four overrides below
+   * are the entirety of what makes the copy a different, live use case, and
+   * `contracts: {}` is the load-bearing one: a clone that inherited the source's
+   * contract map would name an IN-MEMORY LEDGER as the deployment of a real
+   * programme, and every asset issued under it would be a fiction with an
+   * address.
+   *
+   * THE GOVERNANCE IS `POST /use-cases`'s, VERBATIM: an OrgAdmin gets a 202 and
+   * a create-use-case proposal, a PlatformAdmin a 201 and a deploy. Cloning
+   * CREATES A LIVE USE CASE, and giving that act a second name must not become
+   * a way around the maker-checker the platform already applies to it.
+   */
+  app.post("/use-cases/:key/clone-to-live", { schema: S.cloneUseCaseToLive, ...authScoped("usecases:provision") }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const { key } = request.params as { key: string };
+    const b = request.body as { key?: string; allowedChainIds: string[]; defaultChainId?: string };
+    // The SAME role predicate as POST /use-cases, checked first and with the
+    // same 403, so the two answers cannot drift apart.
+    if (claims.role !== "PlatformAdmin" && !(claims.role === "OrgAdmin" && claims.orgId)) {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "only the Platform Admin or an Org Admin may create use cases" });
+    }
+    const source = await deps.useCases.get(key).catch(() => null);
+    // Ownership answers 404, not 403: an OrgAdmin must not be able to probe
+    // another org's key space by reading the difference between the two.
+    if (!source || !(claims.role === "PlatformAdmin" || source.ownerOrgId === claims.orgId)) {
+      return notFound(reply, `unknown use case '${key}'`);
+    }
+    if (!modeGate(request, reply, source)) return reply;
+    if (!source.sandbox) {
+      return reply.code(400).send({
+        error: "NOT_SANDBOX",
+        message: `'${key}' is already a live use case; clone-to-live exists to promote a SANDBOX one and has no meaning here`,
+        details: { key, sandbox: false },
+      });
+    }
+    let definition: UseCaseDefinition;
+    try {
+      definition = normalizeUseCaseDefinition({
+        ...source,
+        key: b.key ?? `${key}-live`,
+        sandbox: false,
+        allowedChainIds: b.allowedChainIds,
+        defaultChainId: b.defaultChainId ?? b.allowedChainIds[0] ?? "",
+        contracts: {},
+      });
+    } catch (err) {
+      if (err instanceof PolicyError) return reply.code(400).send({ error: err.code, message: err.message });
+      throw err;
+    }
+    // The clone is LIVE, so the chain rule applies to it in the live direction:
+    // a sandbox use case's only chain is the always-simulated one, which the
+    // thing we are creating may never name.
+    if (sandboxChainsRefused(reply, definition)) return reply;
+    // AND THE GATE, ON THE DEFINITION ITSELF — the same write-time check
+    // `POST /use-cases` applies to a body it was handed. With the source gate
+    // above it, this makes clone-to-live reachable ONLY by a principal that has
+    // no mode, i.e. a human session: a `tl_test_` key is refused on the live use
+    // case it would create, a `tl_live_` key on the sandbox one it must read to
+    // create it. That is the right answer rather than an accident of ordering —
+    // the act genuinely spans both environments, and nothing that belongs to
+    // one of them may perform it.
+    if (!modeGate(request, reply, definition)) return reply;
+    // A slug is unique across BOTH domains — the same collision rule the two
+    // create routes apply to each other.
+    if ((await deps.useCases.has(definition.key)) || (await deps.credentialUseCases.has(definition.key))) {
+      return reply.code(409).send({ error: "KEY_TAKEN", message: `use-case key '${definition.key}' already exists` });
+    }
+    if (claims.role === "OrgAdmin") {
+      const ownOrg = await deps.organizations.get(claims.orgId as string).catch(() => null);
+      if (ownOrg && !orgDomainEnabled(ownOrg.capabilities, "tokenization")) {
+        return orgCapabilityMissing(reply, ownOrg, "tokenization");
+      }
+      // ownerOrgId from the caller's own claims, never the source's — the same
+      // stamping POST /use-cases does, so a clone cannot be parked under an org
+      // the proposer does not belong to.
+      const owned = { ...definition, ownerOrgId: claims.orgId as string };
+      const proposal = await deps.proposals.create({
+        useCaseKey: null, orgId: claims.orgId as string, assetId: null, kind: "create-use-case",
+        payload: owned as unknown as Record<string, unknown>,
+        proposerId: claims.id, proposerLabel: claims.email, required: 1,
+      });
+      // `key` is echoed because the caller may not have chosen it, and a client
+      // that cannot name what it just asked for cannot poll for it either.
+      return reply.code(202).send({ proposal: proposalView(proposal), key: definition.key, clonedFrom: source.key });
+    }
+    const available = new Set(deps.chains.list().map((c) => c.id));
+    const created = await deployAndCreateUseCase(
+      deps.useCases,
+      definition,
+      available,
+      (def, chainId) => deps.engine.deployUseCaseContract(def, chainId),
+      (m) => request.log.warn(m),
+    );
+    return reply.code(201).send(created);
+  });
+
   // --- credential use cases (Identity domain) -----------------------------
   // The DID/VC parallel of token use cases: configurable custom credential types
   // + Issuer/Holder/Verifier bindings. Reads are open to authed users; authoring
   // is PlatformAdmin-only. A slug is either a token or a credential use case.
   app.get("/credential-templates", { schema: S.credentialTemplates, ...auth }, async () => CREDENTIAL_TEMPLATES);
 
-  app.get("/credential-use-cases", { schema: S.listCredentialUseCases, ...auth }, async () => deps.credentialUseCases.list());
+  // Same D2-6 narrowing as the tokenization catalog above, and for the same reason.
+  app.get("/credential-use-cases", { schema: S.listCredentialUseCases, ...auth }, async (request) =>
+    (await deps.credentialUseCases.list()).filter(modeFilter(request, true)));
 
   app.get("/credential-use-cases/:key", { schema: S.getCredentialUseCase, ...auth }, async (request, reply) => {
     const cuc = await deps.credentialUseCases.get((request.params as { key: string }).key);
@@ -847,6 +1014,47 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     return reply.code(200).send(updated);
   });
 
+  /**
+   * The identity-domain twin of `POST /use-cases/:key/clone-to-live`, and the
+   * policy is `POST /credential-use-cases`'s rather than its tokenization
+   * sibling's: authoring a credential use case is PlatformAdmin-only and
+   * answers 201, so cloning one does too. Matching the ACT it performs — not
+   * the other clone route's shape — is what keeps a second policy from being
+   * invented here.
+   *
+   * There is no chain rule to apply (a credential use case names no chains), so
+   * the whole of the difference is `sandbox: false` and a new key. It copies
+   * credential types, issuer binding, holder policy, verifier policy and
+   * certificate design; it copies no credentials, no holders and no
+   * verification requests.
+   */
+  app.post("/credential-use-cases/:key/clone-to-live", { schema: S.cloneCredentialUseCaseToLive, ...authScoped("usecases:provision") }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    if (claims.role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only a platform admin may author credential use cases" });
+    const key = (request.params as { key: string }).key;
+    const b = (request.body ?? {}) as { key?: string };
+    const source = await deps.credentialUseCases.get(key);
+    if (!source) return notFound(reply, "credential use case not found");
+    if (!modeGate(request, reply, source)) return reply;
+    if (!source.sandbox) {
+      return reply.code(400).send({
+        error: "NOT_SANDBOX",
+        message: `'${key}' is already a live credential use case; clone-to-live exists to promote a SANDBOX one and has no meaning here`,
+        details: { key, sandbox: false },
+      });
+    }
+    const def: CredentialUseCaseDefinition = { ...source, key: b.key ?? `${key}-live`, sandbox: false };
+    // The gate on the DEFINITION, exactly as the tokenization clone applies it:
+    // the thing being created is live, and a `tl_test_` key may not create a
+    // live anything.
+    if (!modeGate(request, reply, def)) return reply;
+    // Reuses the SAME validation, capability and collision checks as
+    // POST /credential-use-cases (it throws coded errors the error handler maps),
+    // so a clone can never be a cheaper door onto creation than the front one.
+    const created = await createCredentialUseCaseFromDef(def, source.ownerOrgId ?? null, claims.id);
+    return reply.code(201).send(created);
+  });
+
   // --- credential use-case TEMPLATE catalog (ID-G) ------------------------
   // Declarative, parameterized starting points for authoring a credential use
   // case (distinct from the raw per-credential-type CREDENTIAL_TEMPLATES above
@@ -906,7 +1114,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
   // Validate + create a credential use case from a fully-bound definition, reusing
   // the SAME checks as POST /credential-use-cases (referenced-org existence,
   // cross-type KEY_TAKEN guard). Throws coded errors the provisioner maps to HTTP.
-  async function createCredentialUseCaseFromDef(def: CredentialUseCaseDefinition, ownerOrgId: string, actorId: string) {
+  async function createCredentialUseCaseFromDef(def: CredentialUseCaseDefinition, ownerOrgId: string | null, actorId: string) {
     if (await deps.credentialUseCases.has(def.key) || await deps.useCases.has(def.key)) {
       throw coded(409, "KEY_TAKEN", `use-case key '${def.key}' already exists`);
     }
@@ -1562,7 +1770,15 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
 
   app.get("/use-cases/:key/invoices", { schema: S.listInvoices, ...authScoped("assets:read") }, async (request, reply) => {
     const gate = await invoiceGate(request, reply); if (!gate) return reply;
-    const { status } = request.query as { status?: "staged" | "tokenized" };
+    const { status, includeSandbox } = request.query as { status?: "staged" | "tokenized"; includeSandbox?: boolean };
+    // EN-D2 (D2-6): THE REGISTER IS THE CUSTOMER'S RECORD OF REAL INVOICES, so
+    // sandbox rows stay out of it unless asked for by name. The register is
+    // per-use-case, so the filter is all-or-nothing here rather than per row —
+    // an empty page, not a refusal, because "you asked for the sandbox
+    // register" is a legitimate question with a legitimate answer one query
+    // parameter away. `invoiceGate` has already applied the mode GATE, so a key
+    // never reaches this line holding the other environment's use case.
+    if (!modeFilter(request, includeSandbox === true)(gate.useCase)) return [];
     return deps.stagedInvoices.listByUseCase(gate.useCase.key, status);
   });
 
@@ -1605,7 +1821,12 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     const claims = request.user as TokenClaims;
     const q = request.query as { useCaseKey?: string; chainId?: string; status?: string; limit: number; offset: number };
     const useCaseKey = claims.role === "PlatformAdmin" ? q.useCaseKey : claims.useCaseKey ?? NO_USE_CASE;
-    const { items, total } = await deps.assets.list({ useCaseKey, chainId: q.chainId, status: q.status }, { limit: q.limit, offset: q.offset });
+    // EN-D2 (D2-6) — see `modeVisibleUseCaseKeys`. A PlatformAdmin principal
+    // reaches this line with `useCaseKey` UNSET, i.e. selecting across every
+    // use case at once; without this a `tl_test_` key would read the whole live
+    // register. `undefined` for a human session leaves the query untouched.
+    const useCaseKeys = await modeVisibleUseCaseKeys(request);
+    const { items, total } = await deps.assets.list({ useCaseKey, useCaseKeys, chainId: q.chainId, status: q.status }, { limit: q.limit, offset: q.offset });
     // Enrich each row with on-chain total supply and the treasury's remaining
     // sellable balance, so the marketplace can show supply + availability.
     const actor = actorOf(request);
@@ -1712,7 +1933,9 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
   app.get("/audit/verify", { schema: S.verifyAuditSummary, ...authScoped("assets:read") }, async (request) => {
     const claims = request.user as TokenClaims;
     const useCaseKey = claims.role === "PlatformAdmin" ? undefined : claims.useCaseKey ?? NO_USE_CASE;
-    const { items } = await deps.assets.list({ useCaseKey }, { limit: 1000 });
+    // EN-D2 (D2-6) — the same unset-useCaseKey crossing as GET /assets. A
+    // tamper summary over the live register is a disclosure of the register.
+    const { items } = await deps.assets.list({ useCaseKey, useCaseKeys: await modeVisibleUseCaseKeys(request) }, { limit: 1000 });
     const results = await Promise.all(items.map((a) => verifyAsset(a.id)));
     const tampered = results.filter((r) => !r.valid || !r.anchorConsistent).map((r) => ({ assetId: r.assetId, brokenAt: r.brokenAt, reason: r.anchorConsistent ? r.reason : "anchor-mismatch" }));
     return { assets: results.length, verified: results.filter((r) => r.valid && r.anchorConsistent).length, tampered, anchoredAssets: results.filter((r) => r.lastAnchor).length };
@@ -1731,7 +1954,10 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     }
     const claims = request.user as TokenClaims;
     const useCaseKey = claims.role === "PlatformAdmin" ? undefined : claims.useCaseKey ?? NO_USE_CASE;
-    const { items } = await deps.assets.list({ useCaseKey }, { limit: 1000 });
+    // EN-D2 (D2-6), and the WRITE side of the same crossing: anchoring sends a
+    // transaction on each asset's own chain, so an unnarrowed `tl_test_` key
+    // here would spend real gas writing live audit heads to a real ledger.
+    const { items } = await deps.assets.list({ useCaseKey, useCaseKeys: await modeVisibleUseCaseKeys(request) }, { limit: 1000 });
     const anchored: { assetId: string; seq: number; txHash: string }[] = [];
     for (const a of items) {
       const chain = await assetChain(a.id);
@@ -1751,7 +1977,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
   // --- analytics ----------------------------------------------------------
   app.get("/analytics", { schema: S.analytics, ...authScoped("assets:read") }, async (request) => {
     const claims = request.user as TokenClaims;
-    const q = request.query as { useCaseKey?: string; days?: number };
+    const q = request.query as { useCaseKey?: string; days?: number; includeSandbox?: boolean };
     // Determine scope like /assets: PlatformAdmin sees the platform unless a
     // useCaseKey is given (then that use case); a scoped user is clamped to their
     // own use case and can never point the query at another tenant.
@@ -1771,9 +1997,23 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     }
 
     const days = Math.min(90, Math.max(1, Math.trunc(q.days ?? 30)));
-    const { items: assets } = await deps.assets.list({ useCaseKey: useCaseKey ?? undefined }, { limit: 1000 });
+    // EN-D2 (D2-6): THE HEADLINE NUMBERS LEAVE THE SANDBOX OUT BY DEFAULT.
+    // A sandbox asset inside a customer's supply or tokenized-value total is a
+    // reporting defect that nobody catches, because the number still looks like
+    // a number. The catalog is loaded FIRST and the admitted keys pushed into
+    // the asset query — filtering the 1000-row page afterwards would silently
+    // shrink the window instead of the result.
+    const catalog = await deps.useCases.list();
+    const admitted = catalog.filter(modeFilter(request, q.includeSandbox === true));
+    const { items: assets } = await deps.assets.list(
+      { useCaseKey: useCaseKey ?? undefined, useCaseKeys: admitted.map((u) => u.key) },
+      { limit: 1000 },
+    );
     const { items: audit } = await deps.audit.listByAssetIds(assets.map((a) => a.id), { limit: 10000 });
-    const useCases = (await deps.useCases.list()).map((u) => ({ key: u.key, name: u.name, symbol: u.symbol, valuation: u.valuation }));
+    // The catalog stays WHOLE for the name/symbol/valuation lookup: it is a
+    // display join over assets that have already been filtered, and narrowing
+    // it too would only lose a label.
+    const useCases = catalog.map((u) => ({ key: u.key, name: u.name, symbol: u.symbol, valuation: u.valuation }));
     const chains = deps.chains.list().map((c) => ({ id: c.id, mode: c.mode }));
 
     return computeAnalytics({
@@ -1807,6 +2047,14 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     } else {
       return reply.code(403).send({ error: "FORBIDDEN", message: "no identity dashboard for this role" });
     }
+
+    // EN-D2 (D2-6): the sandbox is out of the aggregate by default, on the same
+    // terms as `GET /analytics`. Applied AFTER the role branch above, never
+    // before it: narrowing the catalog the role decision reads from would turn
+    // "your sandbox programme has no numbers yet" into a 403 saying the caller
+    // has no dashboard at all.
+    const q = request.query as { includeSandbox?: boolean };
+    scoped = scoped.filter(modeFilter(request, q.includeSandbox === true));
 
     const keys = new Set(scoped.map((u) => u.key));
     const credentials = (await deps.credentials.list())
@@ -4543,6 +4791,73 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     return p;
   }
 
+  /**
+   * THE USE CASE A PROPOSAL ACTS ON — the fourth cross-environment crossing
+   * (EN-D2, found while wiring D2-6), and the least visible of the four.
+   *
+   * A proposal is a CAPTURED OPERATION. Every scoped mutating route on this
+   * platform answers 202 and one of these; the mint, the deploy and the
+   * signature all happen later, in `decide`. And `decide` resolves no use case
+   * — it loads a proposal — so `mode-coverage.test.ts` could not see it, in
+   * exactly the way it could not see `GET /assets`. A `tl_test_` key holding
+   * `usecases:provision` could therefore approve a pending create-use-case
+   * proposal for a LIVE programme and deploy real contracts on a real chain
+   * with a sandbox credential. EN-B closed the SCOPE half of this same gap
+   * ("gating only the routes that DRAFT would gate nothing"); this is its mode
+   * twin.
+   *
+   * THREE SHAPES, because the target is not stored in one place:
+   *
+   *   * `useCaseKey` on the record — every token kind.
+   *   * `credentialUseCaseKey` / `useCaseKey` INSIDE the payload — the
+   *     credential-use-case kinds, whose record column is null because they are
+   *     org-scoped. A gate that read only the column would wave these through,
+   *     which is the quietest possible version of the bug.
+   *   * `create-use-case`, the one kind whose target DOES NOT EXIST YET: its
+   *     mode is the `sandbox` flag of the definition it is about to create.
+   *     Resolving that key would find nothing and default to live, refusing a
+   *     test key its own legitimate sandbox provisioning.
+   *
+   * `null` means the proposal names no use case at all (an org DID credential,
+   * an org capability change) — nothing to compare a mode against, so nothing
+   * to refuse. An unresolvable name reads as LIVE, the same fail-closed default
+   * `modeGateByKey` uses.
+   */
+  async function proposalTarget(p: ProposalRecord): Promise<{ key: string; sandbox: boolean } | null> {
+    const payload = p.payload as { key?: unknown; sandbox?: unknown; useCaseKey?: unknown; credentialUseCaseKey?: unknown };
+    if (p.kind === "create-use-case") {
+      return { key: typeof payload.key === "string" ? payload.key : p.id, sandbox: payload.sandbox === true };
+    }
+    const named = p.useCaseKey
+      ?? (typeof payload.credentialUseCaseKey === "string" ? payload.credentialUseCaseKey : null)
+      ?? (typeof payload.useCaseKey === "string" ? payload.useCaseKey : null);
+    if (!named) return null;
+    const resolved = (await deps.useCases.get(named).catch(() => null))
+      ?? (await deps.credentialUseCases.get(named).catch(() => null));
+    return { key: named, sandbox: !!resolved?.sandbox };
+  }
+
+  /** `modeGate` for a captured operation. Sends the 403 itself, like every other gate here. */
+  async function modeGateProposal(request: FastifyRequest, reply: FastifyReply, p: ProposalRecord): Promise<boolean> {
+    const target = await proposalTarget(p);
+    return target === null ? true : modeGate(request, reply, target);
+  }
+
+  /**
+   * The read-side companion, on the same terms as `modeFilter`: a LIST narrows
+   * rather than refusing, and a human session (no mode) sees both environments
+   * because a human may decide in both.
+   */
+  async function modeVisibleProposals(request: FastifyRequest, rows: ProposalRecord[]): Promise<ProposalRecord[]> {
+    const keyMode = actorMode(request);
+    if (keyMode === null) return rows;
+    const targets = await Promise.all(rows.map((p) => proposalTarget(p)));
+    return rows.filter((_, i) => {
+      const t = targets[i];
+      return !t || modeAllows(keyMode, t.sandbox ? "test" : "live");
+    });
+  }
+
   app.get("/proposals", { schema: S.listProposals, ...auth }, async (request) => {
     const claims = request.user as TokenClaims;
     const q = request.query as { status?: string; useCaseKey?: string };
@@ -4557,7 +4872,8 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
         const seen = new Set(byUseCase.map((p) => p.id));
         return [...byUseCase, ...byOrg.filter((p) => !seen.has(p.id))];
       })();
-    return rows.filter((p) => decidableByPrincipal(request, p.kind)).map(proposalView);
+    const decidable = rows.filter((p) => decidableByPrincipal(request, p.kind));
+    return (await modeVisibleProposals(request, decidable)).map(proposalView);
   });
 
   // Run the finalized proposal's operation as the PROPOSER's identity (RBAC +
@@ -4646,6 +4962,15 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
         details: { required, granted: machineKey.scopes },
       });
     }
+    // EN-D2 (D2-6): AND THE MODE, for the same reason the scope check above
+    // exists — approving IS the operation. After the scope check so the two
+    // refusals arrive in the same order they do on every drafting route
+    // (`authScoped` runs before the handler's gate), and before any approval is
+    // recorded, so a refused decision cannot even consume the threshold.
+    // Reject is gated too: rejecting runs compensation — fee refunds, asset
+    // state changes — which is just as much a decision on the other
+    // environment's business.
+    if (!(await modeGateProposal(request, reply, p))) return reply;
     if (p.status !== "pending") return reply.code(409).send({ error: "PROPOSAL_NOT_PENDING", message: `proposal is ${p.status}` });
     if (claims.id === p.proposerId) return reply.code(403).send({ error: "SELF_APPROVAL", message: "the proposer may not decide their own proposal" });
     if (!(await proposalKind(p.kind).canApprove(deps, claims, p))) {

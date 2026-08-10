@@ -182,6 +182,11 @@ export class PrismaAssetRepository implements AssetRepository {
       ...(filter.useCaseKey ? { useCaseKey: filter.useCaseKey } : {}),
       ...(filter.chainId ? { chainId: filter.chainId } : {}),
       ...(filter.status ? { status: filter.status } : {}),
+      // Under `AND`, deliberately. Spreading a second `useCaseKey` key at this
+      // level would OVERWRITE the single-key clamp above rather than intersect
+      // with it — silently widening a scoped caller's query the moment both
+      // filters are supplied, which is exactly what /analytics does.
+      ...(filter.useCaseKeys ? { AND: [{ useCaseKey: { in: filter.useCaseKeys } }] } : {}),
     };
     const [rows, total] = await Promise.all([
       prisma.asset.findMany({ where, orderBy: { createdAt: "desc" }, skip: page.offset ?? 0, take: page.limit }),

@@ -995,3 +995,555 @@ describe("EN-D2 · the event cursor is mode-scoped too", () => {
     expect(nothingNew.json()).toEqual({ events: [], nextAfter: asTest.nextAfter });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Task D2-6 — THE WAY OUT OF THE SANDBOX, AND KEEPING SANDBOX OUT OF THE
+// NUMBERS.
+//
+// Two halves of one idea. `sandbox` is immutable (D2-4), so a programme built
+// and debugged in the sandbox needs a supported way to become real: that is
+// clone-to-live, and its whole value rests on copying CONFIGURATION and
+// nothing else — a clone that dragged along the assets an integrator minted
+// while learning the API would put invented invoices into a real register.
+//
+// The other half is the reporting default. A sandbox asset counted in a
+// customer's headline supply figure is a defect that nobody notices, because
+// the number still looks like a number. So sandbox is out of the numbers
+// unless somebody asks for it by name.
+// ---------------------------------------------------------------------------
+
+/** A seeded demo wallet, used as the treasury an initial supply mints into. */
+const CLONE_TREASURY = "0x90F79bf6EB2c4f870365E785982E1f101E93b906";
+
+/**
+ * Every configuration field a clone must carry across, each set to a NON-DEFAULT
+ * value. A test built on the defaults would pass against a clone that copied
+ * nothing at all and simply re-derived them.
+ */
+const CLONE_CONFIG = {
+  description: "the source programme",
+  tokenStandard: "ERC-20" as const,
+  tokenType: "fungible" as const,
+  symbol: "CLN",
+  metadataSchema: {
+    type: "object" as const,
+    properties: { ref: { type: "string" }, amount: { type: "number" } },
+    required: ["ref"],
+  },
+  lifecycle: { mint: true, transfer: true, burn: true, freeze: true },
+  compliance: { allowlist: false, transferRestrictions: false, maxHolders: 25, lockupDays: 7 },
+  fees: { marketplaceBps: 125, issuanceFlat: "500" },
+  saleTermsDefault: { unitPrice: "1000", currency: "INR" },
+  valuation: { metadataField: "amount", currency: "INR" },
+  uniqueBy: "ref",
+  workflow: { approvals: { burn: 2 } },
+  roles: ["Issuer", "Trader"] as const,
+};
+
+/** POST /use-cases, with the sandbox/live pair chosen by `sandbox`. */
+async function createUseCaseOverHttp(h: TestAppHandle, token: string, key: string, sandbox: boolean, over: Record<string, unknown> = {}) {
+  const chain = sandbox ? SANDBOX_CHAIN_ID : "fabric";
+  const res = await h.app.inject({
+    method: "POST", url: `${V1}/use-cases`, headers: auth(token),
+    payload: {
+      ...useCaseDef, ...CLONE_CONFIG, key, name: key, sandbox,
+      allowedChainIds: [chain], defaultChainId: chain, ...over,
+    },
+  });
+  return res;
+}
+
+/** Mint one asset with a live initial supply into the seeded treasury. */
+const issueAsset = (h: TestAppHandle, token: string, useCaseKey: string, chainId: string, ref: string) => h.app.inject({
+  method: "POST", url: `${V1}/assets`, headers: auth(token),
+  payload: {
+    useCaseKey, name: `asset ${ref}`, chainId,
+    metadata: { ref, amount: 1000 },
+    treasuryAccount: CLONE_TREASURY, initialSupply: "100",
+  },
+});
+
+describe("EN-D2 · clone to live", () => {
+  it("clone-to-live copies CONFIGURATION and provably no data", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+
+    const src = await createUseCaseOverHttp(h, admin, "d2-clone-src", true);
+    expect(src.statusCode).toBe(201);
+    expect(src.json()).toMatchObject({ sandbox: true, contracts: { [SANDBOX_CHAIN_ID]: expect.anything() } });
+
+    // ISSUE FIRST, so "no data came with it" is a real assertion rather than a
+    // vacuous one. A clone of an EMPTY use case has no assets either way.
+    const asset = await issueAsset(h, admin, "d2-clone-src", SANDBOX_CHAIN_ID, "SRC-1");
+    expect(asset.statusCode).toBe(201);
+    // …and a staged invoice row too: the register is a second store keyed by
+    // use case, and a clone that copied one and not the other is still a clone
+    // that carried data across.
+    await h.deps.stagedInvoices.create({
+      useCaseKey: "d2-clone-src", status: "staged", metadata: { invoiceNumber: "SRC-1" },
+      invoiceHash: "0xsrc1", source: "manual", documentId: null, documentSha256: null,
+      assetId: null, tokenizedAt: null, createdBy: "test",
+    });
+
+    const cloned = await h.app.inject({
+      method: "POST", url: `${V1}/use-cases/d2-clone-src/clone-to-live`, headers: auth(admin),
+      payload: { allowedChainIds: ["fabric"], defaultChainId: "fabric" },
+    });
+    expect(cloned.statusCode).toBe(201);
+    const clone = cloned.json();
+
+    // --- the key, said out loud in the response ---------------------------
+    expect(clone.key).toBe("d2-clone-src-live");
+    expect(clone.sandbox).toBe(false);
+
+    // --- CONFIGURATION came across, field for field -----------------------
+    const stored = await h.deps.useCases.get("d2-clone-src-live");
+    for (const [field, value] of Object.entries(CLONE_CONFIG)) {
+      expect(clone[field], `${field} on the wire`).toEqual(value);
+      expect((stored as unknown as Record<string, unknown>)[field], `${field} in the store`).toEqual(value);
+    }
+
+    // --- the CHAINS did not: contracts are redeployed against the real one --
+    expect(clone.allowedChainIds).toEqual(["fabric"]);
+    expect(clone.defaultChainId).toBe("fabric");
+    expect(Object.keys(clone.contracts)).toEqual(["fabric"]);
+    expect(clone.contracts[SANDBOX_CHAIN_ID]).toBeUndefined();
+    // A DISTINCT deployment, not the sandbox contract relabelled. The field is
+    // `contractRef` (see UseCaseContract) — an earlier draft asserted on
+    // `.address`, which exists on neither side, so `undefined !== undefined`
+    // was the only thing being compared.
+    expect(clone.contracts.fabric.contractRef).toBeTruthy();
+    expect(src.json().contracts[SANDBOX_CHAIN_ID].contractRef).toBeTruthy();
+    expect(clone.contracts.fabric.contractRef).not.toBe(src.json().contracts[SANDBOX_CHAIN_ID].contractRef);
+
+    // --- and PROVABLY no data ---------------------------------------------
+    const assetsOf = async (key: string) =>
+      (await h.app.inject({ method: "GET", url: `${V1}/assets?useCaseKey=${key}`, headers: auth(admin) })).json().data;
+    expect(await assetsOf("d2-clone-src-live")).toHaveLength(0);
+    // The control: the SOURCE still holds everything, so the emptiness above is
+    // a clone that copied nothing rather than a query that found nothing.
+    expect(await assetsOf("d2-clone-src")).toHaveLength(1);
+    expect(await h.deps.stagedInvoices.listByUseCase("d2-clone-src-live")).toHaveLength(0);
+    expect(await h.deps.stagedInvoices.listByUseCase("d2-clone-src")).toHaveLength(1);
+    expect(await h.deps.proposals.list("d2-clone-src-live")).toHaveLength(0);
+    expect((await h.deps.credentials.list()).filter((c) => c.credentialUseCaseKey === "d2-clone-src-live")).toHaveLength(0);
+  });
+
+  it("returns 202 with a proposal for an OrgAdmin, like POST /use-cases", async () => {
+    // Cloning creates a LIVE use case. Giving that act a different name must
+    // not become a way around the maker-checker the platform already applies
+    // to creating one.
+    const h = await buildTestAppWithRepos();
+    const { orgId, token } = await seedOrgAdmin(h);
+    await h.deps.useCases.create({
+      ...useCaseDef, ...CLONE_CONFIG, key: "d2-org-src", name: "d2-org-src", sandbox: true,
+      ownerOrgId: orgId, allowedChainIds: [SANDBOX_CHAIN_ID], defaultChainId: SANDBOX_CHAIN_ID,
+    });
+
+    const res = await h.app.inject({
+      method: "POST", url: `${V1}/use-cases/d2-org-src/clone-to-live`, headers: auth(token),
+      payload: { allowedChainIds: ["fabric"], defaultChainId: "fabric" },
+    });
+    expect(res.statusCode).toBe(202);
+    expect(res.json().key).toBe("d2-org-src-live");
+    expect(res.json().proposal).toMatchObject({ kind: "create-use-case", status: "pending", orgId });
+    // The proposal's payload is the LIVE definition — the flag and the chains
+    // are decided at propose time, not left for the approver to get right.
+    expect(res.json().proposal.payload).toMatchObject({ key: "d2-org-src-live", sandbox: false, allowedChainIds: ["fabric"], ownerOrgId: orgId });
+
+    // NOTHING exists yet. A 202 that had already created the use case would be
+    // maker-checker in name only.
+    expect(await h.deps.useCases.has("d2-org-src-live")).toBe(false);
+
+    // …and a PlatformAdmin still gets the direct 201, exactly as POST /use-cases
+    // gives one. Two policies for one act is how the two drift apart.
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const direct = await h.app.inject({
+      method: "POST", url: `${V1}/use-cases/d2-org-src/clone-to-live`, headers: auth(admin),
+      payload: { key: "d2-org-src-direct", allowedChainIds: ["fabric"], defaultChainId: "fabric" },
+    });
+    expect(direct.statusCode).toBe(201);
+    expect(direct.json().key).toBe("d2-org-src-direct");
+    expect(await h.deps.useCases.has("d2-org-src-direct")).toBe(true);
+  });
+
+  it("refuses to clone a use case that is not sandbox", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    expect((await createUseCaseOverHttp(h, admin, "d2-already-live", false)).statusCode).toBe(201);
+
+    const res = await h.app.inject({
+      method: "POST", url: `${V1}/use-cases/d2-already-live/clone-to-live`, headers: auth(admin),
+      payload: { allowedChainIds: ["fabric"], defaultChainId: "fabric" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("NOT_SANDBOX");
+    expect(await h.deps.useCases.has("d2-already-live-live")).toBe(false);
+
+    // The credential domain answers the same way, for the same reason.
+    await h.deps.credentialUseCases.create({ ...credentialUseCaseDef, key: "d2-cred-already-live", sandbox: false });
+    const cred = await h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/d2-cred-already-live/clone-to-live`, headers: auth(admin), payload: {},
+    });
+    expect(cred.statusCode).toBe(400);
+    expect(cred.json().error).toBe("NOT_SANDBOX");
+  });
+
+  it("a live use case may not be cloned onto the sandbox chain, and the new key must be free", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    await createUseCaseOverHttp(h, admin, "d2-clone-rules", true);
+
+    // The clone is LIVE, so the chain rule applies to it in the live direction
+    // — naming the always-simulated chain is the forgery D2-4 refuses at every
+    // other write.
+    const onSandbox = await h.app.inject({
+      method: "POST", url: `${V1}/use-cases/d2-clone-rules/clone-to-live`, headers: auth(admin),
+      payload: { allowedChainIds: [SANDBOX_CHAIN_ID], defaultChainId: SANDBOX_CHAIN_ID },
+    });
+    expect(onSandbox.statusCode).toBe(400);
+    expect(onSandbox.json()).toMatchObject({ error: "INVALID_SANDBOX_CHAINS", details: { sandbox: false } });
+
+    // A key already taken — in EITHER domain, because a slug is unique across both.
+    await h.deps.credentialUseCases.create({ ...credentialUseCaseDef, key: "d2-taken-slug" });
+    const taken = await h.app.inject({
+      method: "POST", url: `${V1}/use-cases/d2-clone-rules/clone-to-live`, headers: auth(admin),
+      payload: { key: "d2-taken-slug", allowedChainIds: ["fabric"], defaultChainId: "fabric" },
+    });
+    expect(taken.statusCode).toBe(409);
+    expect(taken.json().error).toBe("KEY_TAKEN");
+  });
+
+  it("the clone is live: a tl_test_ key is refused on it, a tl_live_ key is not", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    await createUseCaseOverHttp(h, admin, "d2-clone-modes", true);
+    const testKey = (await seedKey(h, { mode: "test" })).secret;
+    const liveKey = (await seedKey(h, { mode: "live" })).secret;
+
+    const cloned = await h.app.inject({
+      method: "POST", url: `${V1}/use-cases/d2-clone-modes/clone-to-live`, headers: auth(admin),
+      payload: { allowedChainIds: ["fabric"], defaultChainId: "fabric" },
+    });
+    expect(cloned.statusCode).toBe(201);
+
+    const read = (cred: string, key: string) =>
+      h.app.inject({ method: "GET", url: `${V1}/use-cases/${key}`, headers: auth(cred) });
+
+    // The clone is a LIVE use case in every sense the gate cares about.
+    expect((await read(testKey, "d2-clone-modes-live")).statusCode).toBe(403);
+    expect((await read(testKey, "d2-clone-modes-live")).json().error).toBe("WRONG_MODE");
+    expect((await read(liveKey, "d2-clone-modes-live")).statusCode).toBe(200);
+    // …and the SOURCE is still the sandbox's, the other way round.
+    expect((await read(liveKey, "d2-clone-modes")).statusCode).toBe(403);
+    expect((await read(testKey, "d2-clone-modes")).statusCode).toBe(200);
+
+    // CLONING ITSELF SPANS BOTH ENVIRONMENTS, so no key can perform it: a test
+    // key is refused on the live thing it would create, a live key on the
+    // sandbox thing it would read. Only a principal with no mode — a human
+    // session — sits on both sides, which is the same asymmetry the gate has
+    // everywhere else.
+    for (const cred of [testKey, liveKey]) {
+      const res = await h.app.inject({
+        method: "POST", url: `${V1}/use-cases/d2-clone-modes/clone-to-live`, headers: auth(cred),
+        payload: { key: `d2-by-key-${cred.slice(-4)}`, allowedChainIds: ["fabric"], defaultChainId: "fabric" },
+      });
+      expect(res.statusCode).toBe(403);
+      expect(res.json().error).toBe("WRONG_MODE");
+    }
+    expect((await h.deps.useCases.list()).filter((u) => u.key.startsWith("d2-by-key-"))).toHaveLength(0);
+  });
+
+  it("the credential-use-case clone copies configuration and no credentials", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const { orgId } = await seedOrgAdmin(h);
+    await seedCredentialUseCase(h, "d2-cred-clone-src", true, orgId);
+    // A credential ON the sandbox programme, so "no credentials came with it"
+    // is a claim about a non-empty source.
+    const issued = await issueOn(h, "d2-cred-clone-src", admin);
+    expect(issued.statusCode).toBe(400); // SUBJECT_REQUIRED — see below
+    await h.deps.credentials.create({
+      subjectDid: "did:key:zHolder", type: "KycCredential", claims: {}, issuerDid: "did:key:zIssuer",
+      vcJwt: "jwt", status: "active", credentialUseCaseKey: "d2-cred-clone-src", issuedBy: "test",
+      expiresAt: null, revokedAt: null, revokedBy: null, anchorTxHash: null, anchorChainId: null,
+    } as never);
+
+    const cloned = await h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/d2-cred-clone-src/clone-to-live`, headers: auth(admin), payload: {},
+    });
+    expect(cloned.statusCode).toBe(201);
+    expect(cloned.json()).toMatchObject({ key: "d2-cred-clone-src-live", sandbox: false });
+    expect(cloned.json().credentialTypes).toEqual(credentialUseCaseDef.credentialTypes);
+    expect(cloned.json().issuer).toEqual({ kind: "org", orgId });
+
+    const all = await h.deps.credentials.list();
+    expect(all.filter((c) => c.credentialUseCaseKey === "d2-cred-clone-src-live")).toHaveLength(0);
+    expect(all.filter((c) => c.credentialUseCaseKey === "d2-cred-clone-src")).toHaveLength(1);
+  });
+});
+
+describe("EN-D2 · sandbox is out of the numbers", () => {
+  it("a sandbox asset is absent from analytics by default and present with includeSandbox=true", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    await createUseCaseOverHttp(h, admin, "d2-num-live", false);
+    await createUseCaseOverHttp(h, admin, "d2-num-sandbox", true);
+    expect((await issueAsset(h, admin, "d2-num-live", "fabric", "LIVE-1")).statusCode).toBe(201);
+    expect((await issueAsset(h, admin, "d2-num-sandbox", SANDBOX_CHAIN_ID, "SBX-1")).statusCode).toBe(201);
+
+    const analytics = async (query = "") =>
+      (await h.app.inject({ method: "GET", url: `${V1}/analytics${query}`, headers: auth(admin) })).json();
+
+    const dflt = await analytics();
+    expect(dflt.byUseCase.map((r: { useCaseKey: string }) => r.useCaseKey)).toEqual(["d2-num-live"]);
+    expect(dflt.byLedger.map((r: { chainId: string }) => r.chainId)).toEqual(["fabric"]);
+    expect(dflt.totals.assets).toBe(1);
+    expect(dflt.totals.supply).toBe("100");
+    // The headline VALUE figure is the one that matters most: an invented
+    // invoice inflating a customer's tokenized total is the reporting defect.
+    expect(dflt.totals.valueByCurrency).toEqual({ INR: "1000" });
+
+    const opted = await analytics("?includeSandbox=true");
+    expect(opted.byUseCase.map((r: { useCaseKey: string }) => r.useCaseKey)).toEqual(["d2-num-live", "d2-num-sandbox"]);
+    expect(opted.totals.assets).toBe(2);
+    expect(opted.totals.supply).toBe("200");
+    expect(opted.totals.valueByCurrency).toEqual({ INR: "2000" });
+    expect(opted.byLedger.map((r: { chainId: string }) => r.chainId)).toEqual(["fabric", SANDBOX_CHAIN_ID]);
+  });
+
+  it("the register excludes sandbox rows by default", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    // The seeded invoice programme, in both environments.
+    const invoiceDef = await h.deps.useCases.get("invoice-tokenization");
+    await h.deps.useCases.create({
+      ...invoiceDef, key: "d2-reg-sandbox", name: "d2-reg-sandbox", sandbox: true,
+      allowedChainIds: [SANDBOX_CHAIN_ID], defaultChainId: SANDBOX_CHAIN_ID, contracts: {},
+    });
+    const row = { invoiceNumber: "REG-D2", invoiceDate: "2026-07-05", buyerName: "JSW Steel", currency: "INR", amount: 1800000, dueDate: "2026-10-15" };
+    const stage = (key: string, invoiceNumber: string) => h.app.inject({
+      method: "POST", url: `${V1}/use-cases/${key}/invoices`, headers: auth(admin),
+      payload: { metadata: { ...row, invoiceNumber } },
+    });
+    expect((await stage("d2-reg-sandbox", "SBX-REG")).statusCode).toBe(201);
+    expect((await stage("invoice-tokenization", "LIVE-REG")).statusCode).toBe(201);
+
+    const list = async (key: string, query = "") =>
+      (await h.app.inject({ method: "GET", url: `${V1}/use-cases/${key}/invoices${query}`, headers: auth(admin) })).json();
+
+    expect(await list("d2-reg-sandbox")).toHaveLength(0);
+    expect(await list("d2-reg-sandbox", "?includeSandbox=true")).toHaveLength(1);
+    // THE CONTROL: the live register is untouched by the default. A filter that
+    // emptied every register would satisfy the assertion above.
+    expect(await list("invoice-tokenization")).toHaveLength(1);
+    expect(await list("invoice-tokenization", "?includeSandbox=true")).toHaveLength(1);
+  });
+
+  it("the identity dashboard leaves sandbox programmes out by default", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const { orgId } = await seedOrgAdmin(h);
+    await seedCredentialUseCase(h, "d2-dash-live", false, orgId);
+    await seedCredentialUseCase(h, "d2-dash-sandbox", true, orgId);
+
+    const dash = async (query = "") =>
+      (await h.app.inject({ method: "GET", url: `${V1}/identity/dashboard${query}`, headers: auth(admin) })).json();
+
+    const keysOf = (d: { byUseCase?: { key: string }[] }) => (d.byUseCase ?? []).map((u) => u.key);
+    expect(keysOf(await dash())).not.toContain("d2-dash-sandbox");
+    expect(keysOf(await dash())).toContain("d2-dash-live");
+    expect(keysOf(await dash("?includeSandbox=true"))).toContain("d2-dash-sandbox");
+  });
+
+  it("a machine principal's use-case catalog holds only its own environment", async () => {
+    // The list projections `mode-coverage.test.ts` left exempt. Gating a list
+    // per row would 403 the whole page because one row is in the other
+    // environment; the right answer is to filter, and this is the filter.
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const { orgId } = await seedOrgAdmin(h);
+    await createUseCaseOverHttp(h, admin, "d2-cat-live", false);
+    await createUseCaseOverHttp(h, admin, "d2-cat-sandbox", true);
+    await seedCredentialUseCase(h, "d2-catc-live", false, orgId);
+    await seedCredentialUseCase(h, "d2-catc-sandbox", true, orgId);
+    const testKey = (await seedKey(h, { mode: "test" })).secret;
+    const liveKey = (await seedKey(h, { mode: "live" })).secret;
+
+    const keys = async (path: string, cred: string) =>
+      ((await h.app.inject({ method: "GET", url: `${V1}/${path}`, headers: auth(cred) })).json() as { key: string }[]).map((u) => u.key);
+
+    expect(await keys("use-cases", testKey)).toEqual(["d2-cat-sandbox"]);
+    expect(await keys("use-cases", liveKey)).toContain("d2-cat-live");
+    expect(await keys("use-cases", liveKey)).not.toContain("d2-cat-sandbox");
+    expect(await keys("credential-use-cases", testKey)).toEqual(["d2-catc-sandbox"]);
+    expect(await keys("credential-use-cases", liveKey)).toEqual(["d2-catc-live"]);
+
+    // The human still sees both — they are labelled in the UI, not hidden, and
+    // an OrgAdmin who could not see their own sandbox could not configure it.
+    expect(await keys("use-cases", admin)).toEqual(expect.arrayContaining(["d2-cat-live", "d2-cat-sandbox"]));
+    expect(await keys("credential-use-cases", admin)).toEqual(expect.arrayContaining(["d2-catc-live", "d2-catc-sandbox"]));
+  });
+
+  it("a machine principal's ASSET list holds only its own environment", async () => {
+    // THE CROSSING FOUND WHILE WIRING D2-6. `GET /assets` resolves no use case
+    // at all, so `mode-coverage.test.ts` never considered it — and for a
+    // PlatformAdmin principal it selects across EVERY use case. A `tl_test_`
+    // key would have read the entire live register with one GET, which is
+    // precisely what D2-5 closed for `GET /events`.
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    await createUseCaseOverHttp(h, admin, "d2-al-live", false);
+    await createUseCaseOverHttp(h, admin, "d2-al-sandbox", true);
+    await issueAsset(h, admin, "d2-al-live", "fabric", "AL-LIVE");
+    await issueAsset(h, admin, "d2-al-sandbox", SANDBOX_CHAIN_ID, "AL-SBX");
+    const testKey = (await seedKey(h, { mode: "test" })).secret;
+    const liveKey = (await seedKey(h, { mode: "live" })).secret;
+
+    const listed = async (cred: string) => {
+      const res = await h.app.inject({ method: "GET", url: `${V1}/assets`, headers: auth(cred) });
+      return { keys: (res.json().data as { useCaseKey: string }[]).map((a) => a.useCaseKey), body: res.payload, total: res.json().pagination.total };
+    };
+
+    const asTest = await listed(testKey);
+    expect(asTest.keys).toEqual(["d2-al-sandbox"]);
+    // Not merely absent from the parsed list — absent from the raw text, and
+    // absent from the PAGINATION TOTAL, which a post-fetch filter would leave
+    // announcing rows the caller cannot see.
+    expect(asTest.body).not.toContain("AL-LIVE");
+    expect(asTest.total).toBe(1);
+
+    const asLive = await listed(liveKey);
+    expect(asLive.keys).toContain("d2-al-live");
+    expect(asLive.keys).not.toContain("d2-al-sandbox");
+    expect(asLive.body).not.toContain("AL-SBX");
+
+    // The human sees both, as everywhere else.
+    expect((await listed(admin)).keys).toEqual(expect.arrayContaining(["d2-al-live", "d2-al-sandbox"]));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE FOURTH CROSSING, found while wiring D2-6 (D2-3 found the key marker,
+// D2-4 the write-time chain rule, D2-5 the event cursor).
+//
+// APPROVING A PROPOSAL IS THE OPERATION. Every scoped mutating route on this
+// platform answers 202 and a proposal; the mint, the deploy, the signature all
+// happen on final approval, in `decide`. And `decide` resolved no use case at
+// all — it loads a PROPOSAL — so `mode-coverage.test.ts` never even considered
+// it, exactly as it never considered `GET /assets`.
+//
+// The consequence is worse than a disclosure. A `tl_test_` key holding
+// `usecases:provision` could approve an OrgAdmin's pending create-use-case
+// proposal for a LIVE programme — deploying real contracts on a real chain
+// with a sandbox credential — and one holding `credentials:issue` could sign a
+// real credential the same way. EN-B closed the SCOPE half of this same gap
+// ("gating only the routes that DRAFT would gate nothing"); this is its mode
+// twin, and it was still open.
+// ---------------------------------------------------------------------------
+
+describe("EN-D2 · approving a proposal is the operation, so it is gated too", () => {
+  /** An OrgAdmin's pending create-use-case proposal, live or sandbox. */
+  async function pendingUseCaseProposal(h: TestAppHandle, orgAdmin: string, key: string, sandbox: boolean) {
+    const res = await createUseCaseOverHttp(h, orgAdmin, key, sandbox);
+    expect(res.statusCode).toBe(202);
+    return res.json().proposal.id as string;
+  }
+
+  const decide = (h: TestAppHandle, cred: string, id: string, verdict: "approve" | "reject" = "approve") =>
+    h.app.inject({ method: "POST", url: `${V1}/proposals/${id}/${verdict}`, headers: auth(cred), payload: {} });
+
+  it("a tl_test_ key may not approve a LIVE proposal, and a tl_live_ key may not approve a sandbox one", async () => {
+    const h = await buildTestAppWithRepos();
+    const { token: orgAdmin } = await seedOrgAdmin(h);
+    const liveProposal = await pendingUseCaseProposal(h, orgAdmin, "d2-prop-live", false);
+    const sandboxProposal = await pendingUseCaseProposal(h, orgAdmin, "d2-prop-sandbox", true);
+    const testKey = (await seedKey(h, { mode: "test" })).secret;
+    const liveKey = (await seedKey(h, { mode: "live" })).secret;
+
+    // THE HOLE: a sandbox credential deploying real contracts on a real chain.
+    const crossed = await decide(h, testKey, liveProposal);
+    expect(crossed.statusCode).toBe(403);
+    expect(crossed.json().error).toBe("WRONG_MODE");
+    // Nothing was recorded and nothing ran — the refusal is BEFORE the approval
+    // is written, so a refused decision cannot even consume the threshold.
+    expect(await h.deps.useCases.has("d2-prop-live")).toBe(false);
+    expect((await h.deps.proposals.get(liveProposal))?.status).toBe("pending");
+    expect((await h.deps.proposals.get(liveProposal))?.approvals).toHaveLength(0);
+
+    // The mirror, and REJECT as well as approve: rejecting runs compensation,
+    // which is just as much a decision on the other environment's business.
+    expect((await decide(h, liveKey, sandboxProposal)).statusCode).toBe(403);
+    expect((await decide(h, liveKey, sandboxProposal, "reject")).statusCode).toBe(403);
+    expect((await h.deps.proposals.get(sandboxProposal))?.status).toBe("pending");
+
+    // THE CONTROLS: each key decides its OWN environment, and the whole
+    // maker-checker path still works end to end. Without these the test would
+    // pass against a gate that simply refused everything.
+    const own = await decide(h, testKey, sandboxProposal);
+    expect(own.statusCode).toBe(200);
+    expect(own.json().proposal.status).toBe("executed");
+    expect(await h.deps.useCases.has("d2-prop-sandbox")).toBe(true);
+
+    const live = await decide(h, liveKey, liveProposal);
+    expect(live.statusCode).toBe(200);
+    expect(live.json().proposal.status).toBe("executed");
+    expect(await h.deps.useCases.has("d2-prop-live")).toBe(true);
+  });
+
+  it("a proposal that names its use case only in its PAYLOAD is gated the same way", async () => {
+    // `issue-usecase-credential` carries `useCaseKey: null` on the record and
+    // names its programme as `credentialUseCaseKey` INSIDE the payload — so a
+    // gate that read only the column would wave it straight through, which is
+    // the quietest possible version of this bug.
+    const h = await buildTestAppWithRepos();
+    const { orgId, token: orgAdmin } = await seedOrgAdmin(h);
+    await seedCredentialUseCase(h, "d2-prop-cred-sbx", true, orgId);
+    const holder = await h.users.create({
+      email: `holder-d2-prop@tokenlayer.dev`, passwordHash: "x", role: "Holder", useCaseKey: null,
+      accountId: null, active: true, kycStatus: "approved", kyc: null, orgId, kind: "human",
+      did: "did:key:zD2PropHolder", didSeedEncrypted: "enc",
+    } as never);
+    const drafted = await h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/d2-prop-cred-sbx/credentials`, headers: auth(orgAdmin),
+      payload: { credentialType: "KycCredential", claims: { legalName: "Acme Ltd" }, subjectUserId: holder.id },
+    });
+    expect(drafted.statusCode).toBe(202);
+    const id = drafted.json().proposal.id as string;
+    expect((await h.deps.proposals.get(id))?.useCaseKey).toBeNull();
+
+    const liveKey = (await seedKey(h, { mode: "live" })).secret;
+    const testKey = (await seedKey(h, { mode: "test" })).secret;
+
+    const crossed = await decide(h, liveKey, id);
+    expect(crossed.statusCode).toBe(403);
+    expect(crossed.json().error).toBe("WRONG_MODE");
+    expect((await h.deps.proposals.get(id))?.status).toBe("pending");
+
+    // The control: its own environment's key still signs it.
+    expect((await decide(h, testKey, id)).statusCode).toBe(200);
+  });
+
+  it("a machine principal's proposal LIST holds only its own environment", async () => {
+    const h = await buildTestAppWithRepos();
+    const { token: orgAdmin } = await seedOrgAdmin(h);
+    await pendingUseCaseProposal(h, orgAdmin, "d2-plist-live", false);
+    await pendingUseCaseProposal(h, orgAdmin, "d2-plist-sandbox", true);
+    const testKey = (await seedKey(h, { mode: "test" })).secret;
+    const liveKey = (await seedKey(h, { mode: "live" })).secret;
+
+    const listed = async (cred: string) => {
+      const res = await h.app.inject({ method: "GET", url: `${V1}/proposals`, headers: auth(cred) });
+      return { keys: (res.json() as { payload: { key: string } }[]).map((p) => p.payload?.key), body: res.payload };
+    };
+
+    const asTest = await listed(testKey);
+    expect(asTest.keys).toEqual(["d2-plist-sandbox"]);
+    expect(asTest.body).not.toContain("d2-plist-live");
+    const asLive = await listed(liveKey);
+    expect(asLive.keys).toEqual(["d2-plist-live"]);
+    expect(asLive.body).not.toContain("d2-plist-sandbox");
+    // The human decides both, so the human sees both.
+    expect((await listed(orgAdmin)).keys).toEqual(expect.arrayContaining(["d2-plist-live", "d2-plist-sandbox"]));
+  });
+});

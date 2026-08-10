@@ -352,6 +352,7 @@
         ],
         "parameters": [
           "query:days",
+          "query:includeSandbox",
           "query:useCaseKey"
         ],
         "requestBody": false,
@@ -1230,6 +1231,36 @@
         }
       }
     },
+    "/api/v1/credential-use-cases/{key}/clone-to-live": {
+      "post": {
+        "tags": [
+          "Credential Use Cases"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "usecases:provision"
+        ],
+        "parameters": [
+          "path:key!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "201": "#CredentialUseCase",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error",
+          "409": "#Error"
+        }
+      }
+    },
     "/api/v1/credential-use-cases/{key}/credentials": {
       "post": {
         "tags": [
@@ -1555,7 +1586,9 @@
         "scopes": [
           "credentials:read"
         ],
-        "parameters": [],
+        "parameters": [
+          "query:includeSandbox"
+        ],
         "requestBody": false,
         "responses": {
           "200": "{}",
@@ -2748,6 +2781,37 @@
         }
       }
     },
+    "/api/v1/use-cases/{key}/clone-to-live": {
+      "post": {
+        "tags": [
+          "Use Cases"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "usecases:provision"
+        ],
+        "parameters": [
+          "path:key!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "201": "#UseCase",
+          "202": "{clonedFrom,key,proposal}",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error",
+          "409": "#Error"
+        }
+      }
+    },
     "/api/v1/use-cases/{key}/code": {
       "get": {
         "tags": [
@@ -2820,6 +2884,7 @@
         ],
         "parameters": [
           "path:key!",
+          "query:includeSandbox",
           "query:status"
         ],
         "requestBody": false,
