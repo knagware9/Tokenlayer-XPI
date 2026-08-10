@@ -287,12 +287,22 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
    * invisible to the keys that maintain it. Returns true once the 409 has been
    * sent; an ABSENT flag on the incoming body means "unchanged", so every
    * pre-EN-D2 client that never sends the field is untouched.
+   *
+   * `domain` picks WHICH clone-to-live route the refusal names. A refusal that
+   * points an identity operator at `/use-cases/:key/clone-to-live` — a 404 for
+   * their key — is a dead end of exactly the kind this feature keeps producing.
    */
-  function sandboxImmutable(reply: FastifyReply, existing: { key: string; sandbox?: boolean }, incoming: { sandbox?: boolean }): boolean {
+  function sandboxImmutable(
+    reply: FastifyReply,
+    existing: { key: string; sandbox?: boolean },
+    incoming: { sandbox?: boolean },
+    domain: OrgDomain = "tokenization",
+  ): boolean {
     if (incoming.sandbox === undefined || !!incoming.sandbox === !!existing.sandbox) return false;
+    const route = domain === "identity" ? "POST /credential-use-cases/:key/clone-to-live" : "POST /use-cases/:key/clone-to-live";
     reply.code(409).send({
       error: "SANDBOX_IMMUTABLE",
-      message: `'${existing.key}' is ${existing.sandbox ? "a sandbox" : "a live"} use case and cannot be changed into the other — use clone-to-live (POST /use-cases/:key/clone-to-live) to create a live copy of a sandbox use case`,
+      message: `'${existing.key}' is ${existing.sandbox ? "a sandbox" : "a live"} use case and cannot be changed into the other — use clone-to-live (${route}) to create a live copy of a sandbox use case`,
       details: { key: existing.key, sandbox: !!existing.sandbox },
     });
     return true;
@@ -818,11 +828,25 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
   app.post("/use-cases/:key/clone-to-live", { schema: S.cloneUseCaseToLive, ...authScoped("usecases:provision") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const { key } = request.params as { key: string };
-    const b = request.body as { key?: string; allowedChainIds: string[]; defaultChainId?: string };
+    const b = request.body as { key?: string; allowedChainIds: string[]; defaultChainId?: string; sandbox?: boolean };
     // The SAME role predicate as POST /use-cases, checked first and with the
     // same 403, so the two answers cannot drift apart.
     if (claims.role !== "PlatformAdmin" && !(claims.role === "OrgAdmin" && claims.orgId)) {
       return reply.code(403).send({ error: "FORBIDDEN", message: "only the Platform Admin or an Org Admin may create use cases" });
+    }
+    // EN-D2 (D2-8). This route creates a LIVE use case by definition, so it
+    // cannot honour `sandbox: true` — which makes REFUSING it the requirement.
+    // The schema's `additionalProperties: false` does NOT do this: Fastify's
+    // ajv runs with `removeAdditional: true`, so an undeclared field is
+    // STRIPPED and the request succeeds having quietly discarded it. That is
+    // the exact failure this task exists to close, so `sandbox` is DECLARED in
+    // the body schema (surviving the strip) purely so it can be answered here.
+    if (b.sandbox === true) {
+      return reply.code(400).send({
+        error: "SANDBOX_NOT_CLONEABLE",
+        message: "clone-to-live always creates a LIVE use case — that is what it is for. To create a sandbox use case, POST /use-cases with sandbox: true.",
+        details: { key, sandbox: true },
+      });
     }
     const source = await deps.useCases.get(key).catch(() => null);
     // Ownership answers 404, not 403: an OrgAdmin must not be able to probe
@@ -998,7 +1022,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     // Same immutability rule as the token domain, and the same pinning: the
     // stored flag wins, so neither a changed nor an omitted `sandbox` in the
     // body can move a credential use case between environments.
-    if (sandboxImmutable(reply, existing, body)) return reply;
+    if (sandboxImmutable(reply, existing, body, "identity")) return reply;
     const def = { ...body, key, sandbox: existing.sandbox };
     const known = await referencedOrgs(def);
     try {
@@ -1032,7 +1056,17 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     const claims = request.user as TokenClaims;
     if (claims.role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only a platform admin may author credential use cases" });
     const key = (request.params as { key: string }).key;
-    const b = (request.body ?? {}) as { key?: string };
+    const b = (request.body ?? {}) as { key?: string; sandbox?: boolean };
+    // Same refusal, same reason as the tokenization clone: this route's whole
+    // job is to produce a LIVE copy, and a stripped-and-ignored `sandbox` would
+    // answer 201 to a request it did not honour.
+    if (b.sandbox === true) {
+      return reply.code(400).send({
+        error: "SANDBOX_NOT_CLONEABLE",
+        message: "clone-to-live always creates a LIVE credential use case — that is what it is for. To create a sandbox one, POST /credential-use-cases with sandbox: true, or provision it with sandbox: true.",
+        details: { key, sandbox: true },
+      });
+    }
     const source = await deps.credentialUseCases.get(key);
     if (!source) return notFound(reply, "credential use case not found");
     if (!modeGate(request, reply, source)) return reply;
@@ -1082,6 +1116,20 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       return reply.code(403).send({ error: "FORBIDDEN", message: "only a platform admin or org admin may save a credential-use-case template" });
     }
     const t = request.body as UseCaseTemplate;
+    // EN-D2 (D2-8). A template is authoring input for
+    // `POST /credential-use-cases/provision`, and `sandbox` is a property of
+    // the PROVISIONING REQUEST, not of the template: one template must be able
+    // to stand up a sandbox programme to rehearse against and a live one to
+    // run. A `sandbox` written into a template would therefore be dropped on
+    // the way to the definition — the silent failure this task closes — so it
+    // is refused at the point it is written, where the author can still see it.
+    const withSandbox = t as UseCaseTemplate & { sandbox?: unknown; body?: { sandbox?: unknown } };
+    if (withSandbox.sandbox !== undefined || withSandbox.body?.sandbox !== undefined) {
+      return reply.code(400).send({
+        error: "SANDBOX_NOT_ON_TEMPLATE",
+        message: "a template cannot carry 'sandbox' — it would be ignored when the template is instantiated. Pass sandbox: true to POST /credential-use-cases/provision instead; the same template then serves both environments.",
+      });
+    }
     try {
       validateTemplate(t);
     } catch (e) {
@@ -1177,13 +1225,42 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     const b = request.body as {
       templateKey: string;
       params?: Record<string, unknown>;
+      sandbox?: boolean;
       provisioning?: {
         issuerOrgName?: string; issuerOrgType?: OrgType;
         createDeskUsers?: boolean; deskEmailDomain?: string; failIfExists?: boolean;
+        sandbox?: unknown;
       };
     };
     const params = b.params ?? {};
     const prov = b.provisioning ?? {};
+    // EN-D2 (D2-8), THE GAP A LIVE WALKTHROUGH FOUND. Provisioning is the
+    // PRIMARY way a credential programme comes into existence — the console
+    // wizard's path, the integration guides' path, and the ONLY path an
+    // OrgAdmin has (authoring one directly is PlatformAdmin-only) — and it
+    // built its definition from a template, which names no `sandbox`. So the
+    // flag was DROPPED, and the caller got a 201 for a LIVE programme they
+    // believed was a sandbox. The whole feature was unreachable for identity.
+    //
+    // `sandbox` is a property of the REQUEST, not of the template: the same
+    // template must be able to stand up a sandbox programme to rehearse against
+    // and a live one to run, so it belongs here beside `templateKey`, exactly
+    // where `POST /credential-use-cases` takes it on the definition.
+    //
+    // A caller reading this body will just as readily put it inside
+    // `provisioning` — that is where the other provisioning knobs live. That
+    // spelling is REFUSED rather than ignored. Silently dropping it is the
+    // worst answer available: every later mode refusal then looks like a bug in
+    // the gate instead of a misconfiguration, and until someone notices, real
+    // credentials are being issued by an operator who thinks they are testing.
+    if (prov.sandbox !== undefined) {
+      return reply.code(400).send({
+        error: "SANDBOX_MISPLACED",
+        message: "'sandbox' belongs at the TOP LEVEL of the provisioning request, beside 'templateKey' — not inside 'provisioning'. It was refused rather than ignored: an ignored flag would have handed you a LIVE programme you believed was a sandbox.",
+        details: { sandbox: prov.sandbox },
+      });
+    }
+    const sandbox = b.sandbox === true;
     // A MACHINE PRINCIPAL MUST NEVER ASK FOR DESK USERS. Step 5 below creates
     // three brand-new HUMAN accounts and returns their SERVER-GENERATED plaintext
     // passwords in the response body. Refused HERE, before any org or use case is
@@ -1222,6 +1299,15 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       }
       throw e;
     }
+    // The flag must survive the construction the template performs. A template
+    // emits a definition and nothing else, so it is stamped on here — and read
+    // back off `def` from this point on, which is what makes the mode gate
+    // below gate the thing this call is actually about to create.
+    //
+    // There is no chain rule to apply (sandboxChainsValid governs
+    // `allowedChainIds`, and a credential use case names no chains) — the same
+    // reason `POST /credential-use-cases` applies only the mode gate.
+    def = { ...def, sandbox };
 
     // 3. Ensure the issuer org, then REBIND the definition's issuer to it.
     const orgName = prov.issuerOrgName ?? (params.issuerOrgName as string | undefined);
@@ -1259,11 +1345,11 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     let created = false;
     const existing = await deps.credentialUseCases.get(def.key);
     // EN-D2. Gated against the EXISTING record when this is a re-provision and
-    // against the definition otherwise — a template names no `sandbox`, so a
-    // provisioned use case is always live and a `tl_test_` key is refused here
-    // outright. The rebind below also PINS the stored flag: the def rebuilt
-    // from the template carries no `sandbox`, and writing it back unpinned
-    // would quietly promote a sandbox programme to live on re-provision.
+    // against the definition otherwise — so a `tl_test_` key may provision the
+    // sandbox programme it asked for and nothing else, and a `tl_live_` key
+    // only a real one. The rebind below also PINS the stored flag: writing the
+    // requested one back would let a re-provision reclassify everything already
+    // issued under the programme.
     if (!modeGate(request, reply, existing ?? def)) return reply;
     if (existing) {
       // A re-provision may only rebind a use case the caller legitimately owns:
@@ -1276,6 +1362,12 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
         return reply.code(403).send({ error: "FORBIDDEN", message: `credential use-case '${def.key}' is owned by another organization` });
       }
       if (prov.failIfExists) return reply.code(409).send({ error: "KEY_TAKEN", message: `credential use-case '${def.key}' already exists` });
+      // A re-provision that asks for the OTHER environment is the same 409 the
+      // edit routes give, and for the same reason: flipping the flag on a
+      // programme that already holds credentials would reclassify all of them
+      // at once. An ABSENT flag still means "unchanged", so every pre-EN-D2
+      // caller re-provisions exactly as before.
+      if (sandboxImmutable(reply, existing, { sandbox: b.sandbox }, "identity")) return reply;
       // Rebind the issuer (and owner) to the resolved org — the rest of the def is
       // deterministic from the template + params, so a re-provision is a no-op.
       try {

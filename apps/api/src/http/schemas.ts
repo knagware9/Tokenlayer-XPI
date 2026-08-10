@@ -174,6 +174,21 @@ export const components: Record<string, unknown>[] = [
         },
       },
       roles: { type: "array", items: { type: "string" } },
+      // EN-D2. DECLARED, not merely tolerated: the component is
+      // `additionalProperties: true`, so the flag always travelled — but an
+      // integrator reading the reference could not see that it exists, and a
+      // field nobody can find is a feature nobody can use. Optional on input
+      // and always present on output (false when it was never set).
+      sandbox: {
+        type: "boolean",
+        description:
+          "Test mode. `true` makes this a SANDBOX use case: it may allow ONLY the `sandbox` chain (an always-simulated " +
+          "ledger — no environment variable promotes it to a real backend), only a `tl_test_` key may act on it, its " +
+          "events go only to `test` webhook endpoints, and it is excluded from analytics unless asked for by name. " +
+          "SET AT CREATION AND NEVER AFTER (**409 `SANDBOX_IMMUTABLE`**) — use `POST /use-cases/{key}/clone-to-live` " +
+          "to promote the configuration into a real use case. Defaults to `false`: every call that omits it creates a " +
+          "live use case, exactly as before.",
+      },
     },
     required: ["key", "name", "tokenStandard", "symbol", "allowedChainIds", "defaultChainId", "metadataSchema", "lifecycle", "compliance", "roles"],
   },
@@ -192,6 +207,18 @@ export const components: Record<string, unknown>[] = [
       verifier: { type: "object", additionalProperties: true },
       ownerOrgId: { type: "string", nullable: true },
       status: { type: "string" },
+      // The identity-domain twin of `UseCase.sandbox`, and declared for the
+      // same reason. There are no chains here, so the whole of the difference
+      // is who may act on it and where its events go.
+      sandbox: {
+        type: "boolean",
+        description:
+          "Test mode. `true` makes this a SANDBOX credential programme: only a `tl_test_` key may act on it, nothing " +
+          "issued under it is a real credential, its events reach only `test` webhook endpoints, and it stays out of " +
+          "the identity dashboard's totals unless asked for by name. SET AT CREATION AND NEVER AFTER " +
+          "(**409 `SANDBOX_IMMUTABLE`**) — use `POST /credential-use-cases/{key}/clone-to-live` to promote the " +
+          "configuration. Defaults to `false`.",
+      },
     },
     required: ["key", "name", "credentialTypes", "issuer", "holderPolicy", "verifier"],
   },
@@ -988,7 +1015,8 @@ export const S: Record<string, FastifySchema> = {
     description:
       "Requires the `usecases:provision` scope. Creates a tokenization use case — the contract template, the chains " +
       "it may deploy on, and the compliance and fee configuration every asset issued under it inherits. Deploying " +
-      "it is a separate call.",
+      "it is a separate call. Pass `sandbox: true` (with `allowedChainIds: [\"sandbox\"]`) to create a TEST-MODE use " +
+      "case; the flag is fixed at creation.",
     body: { $ref: "UseCase#" },
     response: { 201: { $ref: "UseCase#" }, ...errs(400, 401, 403) },
   },
@@ -1036,6 +1064,13 @@ export const S: Record<string, FastifySchema> = {
           description: "Real chains the live clone may deploy on. The `sandbox` chain is refused here (**400 `INVALID_SANDBOX_CHAINS`**).",
         },
         defaultChainId: { type: "string", description: "Defaults to the first of `allowedChainIds`." },
+        sandbox: {
+          type: "boolean",
+          description:
+            "Only `false` is meaningful: this route creates a LIVE use case by definition. `true` answers " +
+            "**400 `SANDBOX_NOT_CLONEABLE`** — it is declared here so it can be refused rather than dropped. To " +
+            "create a sandbox use case, `POST /use-cases` with `sandbox: true`.",
+        },
       },
     },
     response: {
@@ -1094,7 +1129,9 @@ export const S: Record<string, FastifySchema> = {
     tags: ["Credential Use Cases"], summary: "Create a credential use case (PlatformAdmin)", security: eitherCredential,
     description:
       "Requires the `usecases:provision` scope — the same scope as its tokenization counterpart, because " +
-      "configuring who may issue a credential is the same kind of authority as configuring who may mint a token.",
+      "configuring who may issue a credential is the same kind of authority as configuring who may mint a token. " +
+      "Pass `sandbox: true` for a TEST-MODE programme; the flag is fixed at creation. An Org Admin cannot use this " +
+      "route at all — `POST /credential-use-cases/provision` is theirs, and it takes the same flag.",
     body: { type: "object", additionalProperties: true, required: ["key", "name", "credentialTypes", "issuer", "holderPolicy", "verifier"] },
     response: { 201: { $ref: "CredentialUseCase#" }, ...errs(400, 401, 403, 409) },
   },
@@ -1120,7 +1157,16 @@ export const S: Record<string, FastifySchema> = {
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     body: {
       type: "object", additionalProperties: false,
-      properties: { key: { type: "string", description: "Key for the new live credential use case. Defaults to `<source key>-live`. Must be free in BOTH domains." } },
+      properties: {
+        key: { type: "string", description: "Key for the new live credential use case. Defaults to `<source key>-live`. Must be free in BOTH domains." },
+        sandbox: {
+          type: "boolean",
+          description:
+            "Only `false` is meaningful: this route creates a LIVE credential use case by definition. `true` answers " +
+            "**400 `SANDBOX_NOT_CLONEABLE`** — declared here so it is refused rather than dropped. To create a " +
+            "sandbox one, `POST /credential-use-cases` with `sandbox: true`, or provision it with `sandbox: true`.",
+        },
+      },
     },
     response: { 201: { $ref: "CredentialUseCase#" }, ...errs(400, 401, 403, 404, 409) },
   },
@@ -1147,7 +1193,9 @@ export const S: Record<string, FastifySchema> = {
     tags: ["Credential Use Cases"], summary: "Save a custom credential-use-case template (PlatformAdmin/OrgAdmin)", security: eitherCredential,
     description:
       "Requires the `usecases:provision` scope. Saves a reusable credential-use-case template. A template is " +
-      "authoring input and confers nothing until it is instantiated.",
+      "authoring input and confers nothing until it is instantiated. It may NOT carry `sandbox` " +
+      "(**400 `SANDBOX_NOT_ON_TEMPLATE`**): the environment is chosen when the template is provisioned, so one " +
+      "template serves both.",
     body: { type: "object", additionalProperties: true, required: ["key", "name", "category", "parameters", "body"] },
     // The stored template. `builtIn` comes back FALSE whatever you sent — the
     // route forces it, so a saved template can never impersonate a catalog one.
@@ -1186,12 +1234,24 @@ export const S: Record<string, FastifySchema> = {
     description:
       "Requires the `usecases:provision` scope. One call ensures the issuer organization, instantiates the " +
       "template's credential use case, and optionally creates scoped desk users — whose one-time passwords appear " +
-      "in **this response only** and are never retrievable again.",
+      "in **this response only** and are never retrievable again. Pass `sandbox: true` (at the TOP LEVEL, beside " +
+      "`templateKey`) to stand the programme up in TEST MODE — this is the way to create a sandbox credential " +
+      "programme, and the only one available to an Org Admin. The same template serves both environments, so " +
+      "`sandbox` is never written into the template itself.",
     body: {
       type: "object", additionalProperties: true, required: ["templateKey", "params"],
       properties: {
         templateKey: { type: "string" },
         params: { type: "object", additionalProperties: true },
+        sandbox: {
+          type: "boolean",
+          description:
+            "Create the programme in TEST MODE — see `CredentialUseCase.sandbox`. Defaults to `false`, so every " +
+            "existing caller is unaffected. Put it HERE, not inside `provisioning`: the nested spelling answers " +
+            "**400 `SANDBOX_MISPLACED`** rather than being ignored, because a dropped flag would return **201** for " +
+            "a LIVE programme you believed was a sandbox. Re-provisioning with the other value answers " +
+            "**409 `SANDBOX_IMMUTABLE`**; omitting it on a re-provision leaves the stored environment untouched.",
+        },
         provisioning: { type: "object", additionalProperties: true },
       },
     },

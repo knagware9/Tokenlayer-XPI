@@ -1855,3 +1855,377 @@ describe("EN-D2 · minting and rotating a tl_test_ key", () => {
     expect((await h.apiKeys.findById(targetId))?.prefix).toBe(target.json().key.prefix);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Task D2-8 — A FLAG WITH NO ROUTE TO SET IT.
+//
+// A live walkthrough could not create a sandbox CREDENTIAL programme at all.
+// Everything above this line is reachable only once a sandbox use case exists,
+// and for the Identity domain the primary way to make one is
+// `POST /credential-use-cases/provision` — the console wizard's path and the
+// EN-D1 guides' path, and the ONLY path an OrgAdmin has (authoring a credential
+// use case directly is PlatformAdmin-only). Provisioning built its definition
+// from a template, and a template names no `sandbox`, so the flag was dropped —
+// with a 201 on the way out.
+//
+// SILENTLY DROPPING IT IS THE WORST OF THE THREE POSSIBLE ANSWERS. A refusal is
+// survivable: the operator reads it and fixes the call. A 201 that quietly
+// hands back a LIVE programme is not: every later refusal looks like a bug in
+// the gate rather than a misconfiguration, and in the meantime real credentials
+// are issued on a real chain by someone who believes they are testing.
+//
+// So the rule this block pins is not "provision honours sandbox" — that is one
+// route, and the next creation route would reintroduce the gap. It is: EVERY
+// path that can create a use case of either kind must either HONOUR `sandbox`
+// or REFUSE the request. None may answer 2xx having dropped it.
+// ---------------------------------------------------------------------------
+
+/** The parameters the `education-certificate` built-in template needs. */
+const eduParams = (issuerOrgName: string) => ({ issuerOrgName, jurisdiction: "IN" });
+
+/** `education-certificate`'s keyTemplate is `education-${issuerOrgNameSlug}` — the key it will claim. */
+const eduKey = (issuerOrgName: string) =>
+  `education-${issuerOrgName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 48)}`;
+
+const provision = (h: TestAppHandle, cred: string, payload: Record<string, unknown>) =>
+  h.app.inject({ method: "POST", url: `${V1}/credential-use-cases/provision`, headers: auth(cred), payload });
+
+describe("EN-D2 · provisioning a sandbox programme", () => {
+  it("provisioning a SANDBOX credential programme stores sandbox: true", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+
+    const res = await provision(h, admin, {
+      templateKey: "education-certificate",
+      params: eduParams("Sandbox University"),
+      sandbox: true,
+      provisioning: { issuerOrgType: "government", createDeskUsers: false },
+    });
+    expect(res.statusCode).toBe(201);
+    const key = eduKey("Sandbox University");
+    expect(res.json().useCase.key).toBe(key);
+    // The RESPONSE says so — a stored flag the caller cannot see is a flag the
+    // caller cannot trust (fast-json-stringify strips undeclared fields, so
+    // this assertion is also the schema's).
+    expect(res.json().useCase.sandbox).toBe(true);
+    // …and so does the record.
+    expect((await h.deps.credentialUseCases.get(key))?.sandbox).toBe(true);
+    // And reading it back over HTTP, which is where the console looks.
+    const read = await h.app.inject({ method: "GET", url: `${V1}/credential-use-cases/${key}`, headers: auth(admin) });
+    expect(read.json().sandbox).toBe(true);
+
+    // RE-PROVISIONING IS A NO-OP, not a promotion: the same call again keeps the
+    // flag, and asking for the OTHER environment is the immutability 409 rather
+    // than a silent reclassification of everything already issued under it.
+    const again = await provision(h, admin, {
+      templateKey: "education-certificate", params: eduParams("Sandbox University"), sandbox: true,
+      provisioning: { createDeskUsers: false },
+    });
+    expect(again.statusCode).toBe(200);
+    expect((await h.deps.credentialUseCases.get(key))?.sandbox).toBe(true);
+
+    const promoted = await provision(h, admin, {
+      templateKey: "education-certificate", params: eduParams("Sandbox University"), sandbox: false,
+      provisioning: { createDeskUsers: false },
+    });
+    expect(promoted.statusCode).toBe(409);
+    expect(promoted.json().error).toBe("SANDBOX_IMMUTABLE");
+    // …and it names the IDENTITY clone route. Pointing a credential operator at
+    // POST /use-cases/:key/clone-to-live would be a 404 for their key — a
+    // refusal with a dead end in it is barely better than no refusal.
+    expect(promoted.json().message).toContain("POST /credential-use-cases/:key/clone-to-live");
+    expect((await h.deps.credentialUseCases.get(key))?.sandbox).toBe(true);
+  });
+
+  it("provisioning without the flag stores sandbox: false — existing callers unaffected", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+
+    // The pre-EN-D2 body, verbatim: no `sandbox` anywhere.
+    const res = await provision(h, admin, {
+      templateKey: "education-certificate",
+      params: eduParams("Live University"),
+      provisioning: { issuerOrgType: "government", createDeskUsers: false },
+    });
+    expect(res.statusCode).toBe(201);
+    const key = eduKey("Live University");
+    expect(res.json().useCase.sandbox).toBe(false);
+    expect((await h.deps.credentialUseCases.get(key))?.sandbox).toBe(false);
+
+    // A live programme's re-provision is equally unmoved.
+    const again = await provision(h, admin, {
+      templateKey: "education-certificate", params: eduParams("Live University"),
+      provisioning: { createDeskUsers: false },
+    });
+    expect(again.statusCode).toBe(200);
+    expect((await h.deps.credentialUseCases.get(key))?.sandbox).toBe(false);
+  });
+
+  it("an ORG ADMIN can provision one — the only credential-creation path they have", async () => {
+    // The walkthrough's persona. `POST /credential-use-cases` is
+    // PlatformAdmin-only, so if provisioning cannot express `sandbox`, an
+    // enterprise tenant has NO way to make a sandbox credential programme at
+    // all — the feature is not merely awkward for them, it is unreachable.
+    const h = await buildTestAppWithRepos();
+    const { orgId, token } = await seedOrgAdmin(h);
+    const orgName = (await h.organizations.get(orgId)).name;
+
+    const res = await provision(h, token, {
+      templateKey: "education-certificate", params: eduParams(orgName), sandbox: true,
+      provisioning: { createDeskUsers: false },
+    });
+    expect(res.statusCode).toBe(201);
+    const stored = await h.deps.credentialUseCases.get(eduKey(orgName));
+    expect(stored?.sandbox).toBe(true);
+    expect(stored?.ownerOrgId).toBe(orgId);
+  });
+
+  it("a sandbox programme created via provision refuses a tl_live_ key and accepts a tl_test_ one", async () => {
+    // THE END-TO-END CLAIM. Not "the flag was stored" but "the programme the
+    // operator just provisioned behaves as a sandbox": the whole point of
+    // creating one is that a test credential can act on it and a live one
+    // cannot.
+    const h = await buildTestAppWithRepos();
+    const { orgId, token } = await seedOrgAdmin(h);
+    const orgName = (await h.organizations.get(orgId)).name;
+    const key = eduKey(orgName);
+    expect((await provision(h, token, {
+      templateKey: "education-certificate", params: eduParams(orgName), sandbox: true,
+      provisioning: { createDeskUsers: false },
+    })).statusCode).toBe(201);
+
+    const testKey = (await seedKey(h, { mode: "test" })).secret;
+    const liveKey = (await seedKey(h, { mode: "live" })).secret;
+
+    // The live key cannot even READ it, let alone issue on it.
+    const readLive = await h.app.inject({ method: "GET", url: `${V1}/credential-use-cases/${key}`, headers: auth(liveKey) });
+    expect(readLive.statusCode).toBe(403);
+    expect(readLive.json().error).toBe("WRONG_MODE");
+    const issuedLive = await issueOn(h, key, liveKey);
+    expect(issuedLive.statusCode).toBe(403);
+    expect(issuedLive.json().error).toBe("WRONG_MODE");
+
+    // The test key reads it and gets all the way THROUGH the mode gate on
+    // issuance — SUBJECT_REQUIRED is a payload-level complaint about the very
+    // credential type this programme declares, i.e. nothing about its
+    // ENVIRONMENT stopped it.
+    const read = await h.app.inject({ method: "GET", url: `${V1}/credential-use-cases/${key}`, headers: auth(testKey) });
+    expect(read.statusCode).toBe(200);
+    const credentialType = read.json().credentialTypes[0].name as string;
+    const issuedTest = await h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/${key}/credentials`, headers: auth(testKey),
+      payload: { credentialType, claims: {} },
+    });
+    expect(issuedTest.statusCode).toBe(400);
+    expect(issuedTest.json().error).toBe("SUBJECT_REQUIRED");
+
+    // THE CONTROL, or the two assertions above would pass against a programme
+    // that simply refused everyone: a LIVE programme from the same route is the
+    // exact mirror.
+    const liveName = `${orgName} Live`;
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    expect((await provision(h, admin, {
+      templateKey: "education-certificate", params: eduParams(liveName), provisioning: { createDeskUsers: false },
+    })).statusCode).toBe(201);
+    const liveKeyUseCase = eduKey(liveName);
+    expect((await h.app.inject({ method: "GET", url: `${V1}/credential-use-cases/${liveKeyUseCase}`, headers: auth(liveKey) })).statusCode).toBe(200);
+    expect((await h.app.inject({ method: "GET", url: `${V1}/credential-use-cases/${liveKeyUseCase}`, headers: auth(testKey) })).statusCode).toBe(403);
+  });
+});
+
+/**
+ * One creation path, asked to make a SANDBOX thing.
+ *
+ * `run` performs the request; `stored` reads back whatever that path would have
+ * created (null = it created nothing). NEITHER declares the expected verdict —
+ * the assertion derives it from the response, which is the whole point: a path
+ * may answer however it likes, so long as a 2xx means the flag was honoured.
+ */
+interface CreationPath {
+  name: string;
+  run(w: PathWorld): Promise<{ statusCode: number; json(): { proposal?: { id: string } } }>;
+  stored?(w: PathWorld): Promise<{ sandbox?: boolean } | null>;
+  /** Defaults to `key`-based lookup in both use-case repositories. */
+  key?: string;
+}
+
+interface PathWorld {
+  h: TestAppHandle;
+  admin: string;
+  orgAdmin: string;
+  orgId: string;
+  orgName: string;
+}
+
+async function pathWorld(): Promise<PathWorld> {
+  const h = await buildTestAppWithRepos();
+  const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+  const { orgId, token } = await seedOrgAdmin(h);
+  return { h, admin, orgAdmin: token, orgId, orgName: (await h.organizations.get(orgId)).name };
+}
+
+/** Every route that can bring a use case of either kind into existence. */
+const CREATION_PATHS: CreationPath[] = [
+  {
+    name: "POST /use-cases (PlatformAdmin, direct)",
+    key: "d2-path-token-direct",
+    run: (w) => createUseCaseOverHttp(w.h, w.admin, "d2-path-token-direct", true),
+  },
+  {
+    name: "POST /use-cases (OrgAdmin ⇒ create-use-case proposal ⇒ approval)",
+    key: "d2-path-token-proposed",
+    run: (w) => createUseCaseOverHttp(w.h, w.orgAdmin, "d2-path-token-proposed", true),
+  },
+  {
+    name: "POST /use-cases/:key/clone-to-live (body asking for sandbox)",
+    key: "d2-path-clone-live",
+    async run(w) {
+      await seedUseCase(w.h, "d2-path-clone-src", true);
+      return w.h.app.inject({
+        method: "POST", url: `${V1}/use-cases/d2-path-clone-src/clone-to-live`, headers: auth(w.admin),
+        payload: { key: "d2-path-clone-live", allowedChainIds: ["fabric"], sandbox: true },
+      });
+    },
+  },
+  {
+    name: "POST /credential-use-cases (PlatformAdmin, direct)",
+    key: "d2-path-cred-direct",
+    run: (w) => w.h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases`, headers: auth(w.admin),
+      payload: { ...credentialUseCaseDef, key: "d2-path-cred-direct", sandbox: true },
+    }),
+  },
+  {
+    name: "POST /credential-use-cases/:key/clone-to-live (body asking for sandbox)",
+    key: "d2-path-cred-clone-live",
+    async run(w) {
+      await seedCredentialUseCase(w.h, "d2-path-cred-clone-src", true, w.orgId);
+      return w.h.app.inject({
+        method: "POST", url: `${V1}/credential-use-cases/d2-path-cred-clone-src/clone-to-live`, headers: auth(w.admin),
+        payload: { key: "d2-path-cred-clone-live", sandbox: true },
+      });
+    },
+  },
+  {
+    name: "POST /credential-use-cases/provision (PlatformAdmin, sandbox at the top level)",
+    key: eduKey("Path Platform University"),
+    run: (w) => provision(w.h, w.admin, {
+      templateKey: "education-certificate", params: eduParams("Path Platform University"), sandbox: true,
+      provisioning: { createDeskUsers: false },
+    }),
+  },
+  {
+    name: "POST /credential-use-cases/provision (OrgAdmin, sandbox at the top level)",
+    run: (w) => provision(w.h, w.orgAdmin, {
+      templateKey: "education-certificate", params: eduParams(w.orgName), sandbox: true,
+      provisioning: { createDeskUsers: false },
+    }),
+    stored: (w) => w.h.deps.credentialUseCases.get(eduKey(w.orgName)),
+  },
+  {
+    name: "POST /credential-use-cases/provision (sandbox misplaced inside `provisioning`)",
+    key: eduKey("Path Misplaced University"),
+    run: (w) => provision(w.h, w.admin, {
+      templateKey: "education-certificate", params: eduParams("Path Misplaced University"),
+      provisioning: { createDeskUsers: false, sandbox: true },
+    }),
+  },
+  {
+    name: "POST /credential-use-case-templates (a template claiming to be sandbox)",
+    run: (w) => w.h.app.inject({
+      method: "POST", url: `${V1}/credential-use-case-templates`, headers: auth(w.admin),
+      payload: {
+        key: "d2-path-template", name: "D2 path template", category: "custom", parameters: [],
+        body: {
+          keyTemplate: "d2-path-from-template", nameTemplate: "D2 from template", sandbox: true,
+          credentialTypes: [{
+            name: "KycCredential", title: "KYC", validityDays: 365, requiredApprovals: 1,
+            required: ["legalName"], properties: { legalName: { type: "string" } },
+          }],
+          holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
+        },
+      },
+    }),
+    // A template is not a use case, so it can never come back "sandbox": the
+    // only outcome that is not a silent drop is a refusal.
+    stored: async (w) => (await w.h.deps.credentialTemplates.get("d2-path-template")) as { sandbox?: boolean } | null,
+  },
+];
+
+describe("EN-D2 · no creation path may silently drop sandbox", () => {
+  it("every creation path either honours sandbox or REFUSES it — none silently drops it", async () => {
+    // THE TEST THAT STOPS THE NEXT ROUTE FROM REINTRODUCING THE GAP. It asserts
+    // no verdict per path — each entry merely asks for a sandbox thing and says
+    // where to look for it. The rule is derived from the answer:
+    //
+    //   2xx  ⇒ the created record MUST have sandbox: true
+    //   4xx  ⇒ nothing was created
+    //
+    // The forbidden third outcome — 2xx with sandbox falsy — has no branch,
+    // which is exactly how it fails, naming the path that did it.
+    for (const path of CREATION_PATHS) {
+      const w = await pathWorld();
+      const res = await path.run(w);
+
+      // A 202 is a maker-checker path, not a decision: approve it and judge
+      // what the executor actually created, or the flag could be lost between
+      // the proposal and the record with the test none the wiser.
+      if (res.statusCode === 202) {
+        const id = res.json().proposal!.id;
+        const decided = await w.h.app.inject({ method: "POST", url: `${V1}/proposals/${id}/approve`, headers: auth(w.admin), payload: {} });
+        expect(decided.statusCode, `${path.name}: approving its proposal`).toBe(200);
+      }
+
+      const stored = path.stored
+        ? await path.stored(w)
+        : ((await w.h.deps.useCases.get(path.key!).catch(() => null)) ?? (await w.h.deps.credentialUseCases.get(path.key!)));
+
+      if (res.statusCode < 400) {
+        expect(stored, `${path.name} answered ${res.statusCode} but created nothing`).toBeTruthy();
+        expect(
+          stored?.sandbox,
+          `${path.name} answered ${res.statusCode} to a request for a SANDBOX use case and stored sandbox=${String(stored?.sandbox)} — a SILENT DROP: the operator believes they have a sandbox programme and does not`,
+        ).toBe(true);
+      } else {
+        expect(res.statusCode, `${path.name} must refuse with a 4xx, not fail`).toBeLessThan(500);
+        expect(
+          stored,
+          `${path.name} refused with ${res.statusCode} but created something anyway`,
+        ).toBeNull();
+      }
+    }
+  });
+
+  it("the misplaced-flag refusal says where the flag belongs, and provisions NOTHING", async () => {
+    // A refusal that does not say what to do instead is only a slower silent
+    // drop: the operator retries the same body, or gives up and takes the live
+    // programme. `provisioning.sandbox` is exactly where a reader of the
+    // provisioning body puts it, so this is the likely mistake, not a contrived
+    // one — and it must cost nothing, i.e. no org and no use case.
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const res = await provision(h, admin, {
+      templateKey: "education-certificate", params: eduParams("Misplaced University"),
+      provisioning: { createDeskUsers: false, sandbox: true },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("SANDBOX_MISPLACED");
+    expect(res.json().message).toContain("sandbox");
+    expect(await h.deps.credentialUseCases.get(eduKey("Misplaced University"))).toBeNull();
+    expect((await h.organizations.list()).some((o) => o.name === "Misplaced University")).toBe(false);
+  });
+
+  it("a sandbox value that is not a boolean is refused, never read for truthiness", async () => {
+    // `sandbox` is DECLARED as a boolean in the body schema, so a value that is
+    // not one fails validation. The alternative — `!!body.sandbox` — would read
+    // every non-empty string as "yes", including the string "false".
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const res = await provision(h, admin, {
+      templateKey: "education-certificate", params: eduParams("Stringly University"),
+      sandbox: "yes", provisioning: { createDeskUsers: false },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(await h.deps.credentialUseCases.get(eduKey("Stringly University"))).toBeNull();
+  });
+});

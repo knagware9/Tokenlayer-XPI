@@ -402,6 +402,10 @@ export const api = {
   saveUseCaseTemplate: (token: string, body: UseCaseTemplate) => request<UseCaseTemplate>("/credential-use-case-templates", token, { method: "POST", body: JSON.stringify(body) }),
   previewUseCaseTemplate: (token: string, key: string, params: Record<string, unknown>) =>
     request<{ definition: unknown }>(`/credential-use-case-templates/${encodeURIComponent(key)}/preview`, token, { method: "POST", body: JSON.stringify({ params }) }),
-  provisionUseCase: (token: string, body: { templateKey: string; params: Record<string, unknown>; provisioning: { issuerOrgName: string; issuerOrgType?: string; createDeskUsers: boolean; deskEmailDomain?: string; failIfExists?: boolean } }) =>
+  // EN-D2: `sandbox` sits at the TOP LEVEL, beside `templateKey` — NOT inside
+  // `provisioning`, which the server refuses (400 SANDBOX_MISPLACED) rather
+  // than ignoring. The type says so too: `provisioning` has no `sandbox`, so
+  // the wrong spelling does not compile.
+  provisionUseCase: (token: string, body: { templateKey: string; params: Record<string, unknown>; sandbox?: boolean; provisioning: { issuerOrgName: string; issuerOrgType?: string; createDeskUsers: boolean; deskEmailDomain?: string; failIfExists?: boolean } }) =>
     request<ProvisionResult>("/credential-use-cases/provision", token, { method: "POST", body: JSON.stringify(body) }),
 };
