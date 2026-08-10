@@ -2316,6 +2316,11 @@ While the servers are up, walk the designer itself: palette chips add, drag move
 
 Dispatch a reviewer against the whole branch diff with the instruction to **hunt independently rather than verify the spec's own list**. On every one of the five preceding sub-projects of this program that review found a real defect the per-task reviews missed. Give it the spec, the branch range, and this recipe for a fresh worktree: `pnpm install`, `npx hardhat compile` in `packages/contracts`, `npx prisma generate` in `apps/api`.
 
+**Carried forward from the per-task implementers — hand these to the reviewer as known, unclosed items rather than letting it rediscover them:**
+
+- **`background.documentId` is bound to nothing.** `validateCredentialUseCase` checks only that it is a non-empty string. `POST /documents` is deliberately unscoped, and the render does `deps.documents.get(id)` with no org check, no content-type check and no sha256 pin — so any use-case author can name ANY document id in the store and have those bytes rendered full-bleed into a public, unauthenticated PDF. Unguessable ids are the only thing in the way. `logoDocumentId` has had the identical property since ID-I, so this is pre-existing rather than introduced here — but artwork makes it far more legible, because the whole document is rendered rather than an 80pt thumbnail. The cheap hardening is to pin `background` to `{documentId, sha256}` at save time, re-check on render, and reject a stored `contentType` that is not an allowed image type. Deliberately NOT done in this branch; decide whether it should be.
+- **Stored `contentType` is ignored at render time.** Only the bytes matter to pdfkit, so the upload allowlist is not what gates the renderer.
+
 Areas worth pointing it at, without limiting it to them: the public unauthenticated render route now draws caller-controlled artwork and caller-controlled text; the preview route renders arbitrary claims for any principal holding `usecases:provision`; the built-in fallback in the preview route is not SAMPLE-stamped (a known gap, recorded in Task 6); template instantiation drops the background but nothing stops a caller PUTting a background directly onto a use case they own.
 
 - [ ] **Step 6: Fix whatever it finds, then merge**
