@@ -524,6 +524,41 @@ describe("GET /credential-use-cases/:key/certificate/artwork", () => {
     expect((await fetchArt(w, w.orgAdmin, "NotAType")).statusCode).toBe(404);
   });
 
+  it("ignores a documentId in the query — the type's own background is the only thing it will serve", async () => {
+    // The discipline this route exists to keep, and the one a later "just let
+    // the canvas ask for any id it already knows" change would quietly undo.
+    // A stored document no design references — invoice evidence is exactly what
+    // `canReadDoc` keeps away from tenants — must stay unreachable HERE too,
+    // ownership check or not. Verified by mutation: read `documentId` off the
+    // query with the background as a fallback, and only this test turns red.
+    const w = await world();
+    const secret = await storeDoc(w.h, "text/plain", Buffer.from("off-ledger invoice evidence").toString("base64"));
+
+    // 1. With no artwork on the type, a supplied id must not become the answer.
+    const naked = await w.h.app.inject({
+      method: "GET",
+      url: `${V1}/credential-use-cases/${w.key}/certificate/artwork?credentialType=CourseCompletion&documentId=${secret.id}`,
+      headers: auth(w.orgAdmin),
+    });
+    expect(naked.statusCode).toBe(404);
+
+    // 2. And with artwork set, the id is not an override either.
+    const up = await w.h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/${w.key}/certificate/artwork`,
+      headers: auth(w.orgAdmin), payload: { contentType: "image/png", dataBase64: PNG_2x1_B64 },
+    });
+    const { documentId, sha256 } = up.json() as { documentId: string; sha256: string };
+    await design(w, w.orgAdmin, { credentialType: "CourseCompletion", background: { documentId, sha256 } });
+    const res = await w.h.app.inject({
+      method: "GET",
+      url: `${V1}/credential-use-cases/${w.key}/certificate/artwork?credentialType=CourseCompletion&documentId=${secret.id}`,
+      headers: auth(w.orgAdmin),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toContain("image/png");
+    expect(res.rawPayload.equals(Buffer.from(PNG_2x1_B64, "base64"))).toBe(true);
+  });
+
   it("refuses a foreign org — the use case you own IS the capability", async () => {
     const w = await world();
     const up = await w.h.app.inject({
