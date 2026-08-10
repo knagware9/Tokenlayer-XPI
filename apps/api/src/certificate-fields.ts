@@ -6,8 +6,23 @@
 import type { CertificateFieldRef, CredentialTypeSpec } from "@tokenlayer/core";
 import type { CredentialRecord } from "./persistence/types.js";
 
-/** First non-blank of fullName / legalName / holderName, else the holder DID.
- *  A certificate with a blank name line is worse than one showing a DID. */
+/**
+ * First non-blank of fullName / legalName / holderName, else the holder DID.
+ * A certificate with a blank name line is worse than one showing a DID.
+ *
+ * NOT byte-identical to the inline expression this replaced, and the difference
+ * is deliberate. The old chain was `(typeof v === "string" && v) || …`, which
+ * takes the value UNTRIMMED and treats any non-empty string as a win — so
+ * `fullName: "   "` printed three spaces where a name should be instead of
+ * falling through, and `" Ada "` printed its padding. Both are plausible
+ * outputs of a real form. This trims and tests the trimmed value, so whitespace
+ * falls through and padding is dropped.
+ *
+ * Recorded because the plan called the extraction "behaviour-preserving" and it
+ * is not: it is a small, intentional improvement to two edge cases that no
+ * existing test covered. If a certificate ever needs to print a name exactly as
+ * captured, that is a change here, not an accident to discover later.
+ */
 export function certificateSubjectName(credential: CredentialRecord): string {
   const claims = (credential.subjectClaims ?? {}) as Record<string, unknown>;
   for (const key of ["fullName", "legalName", "holderName"]) {

@@ -797,7 +797,7 @@ and replace the inline subject-name expression (the `const subjectName = (typeof
   const subjectName = certificateSubjectName(c);
 ```
 
-This is behaviour-preserving: the old expression had exactly this precedence with the same DID fallback. It is extracted so the two renderers cannot drift on who the holder is.
+Same precedence, same DID fallback — but **not** byte-identical, and the difference is intentional. The old chain took the value untrimmed and treated any non-empty string as a win, so `fullName: "   "` printed three spaces where a name should be, and `" Ada "` printed its padding. The shared function trims and tests the trimmed value. No existing test covers either case (checked), so the oracle suite still passes; the improvement is deliberate and is documented at the function. Do not describe this extraction as behaviour-preserving in the commit message.
 
 - [ ] **Step 5: Run the new test AND the untouched certificate suite**
 
