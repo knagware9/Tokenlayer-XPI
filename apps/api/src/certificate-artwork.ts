@@ -134,16 +134,84 @@ const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
  * on every fetch of a public certificate URL. Inflating here converts that into
  * an ordinary synchronous throw the route can catch and fall back from, which is
  * the whole point of having a fallback.
+ *
+ * `assertPngScanlinesDecodable` below closes the second, subtler half of the
+ * same hazard; the two together are why this function exists rather than a bare
+ * `openImage` call.
+ */
+
+/**
+ * What `openImage` really returns: a pdfkit `PNGImage` wrapper carrying width,
+ * height and the raw `imgData`, with the png-js instance NESTED at `.image`.
+ * The IHDR-derived geometry lives on the nested one, not the wrapper — checked
+ * at runtime rather than assumed, because @types/pdfkit describes neither.
+ */
+interface ProbedImage {
+  width: number;
+  height: number;
+  imgData?: Buffer;
+  image?: {
+    /** From IHDR. 1 = Adam7 interlacing. */
+    interlaceMethod?: number;
+    /** Bits per pixel: bit depth × channels, derived by png-js. */
+    pixelBitlength?: number;
+  };
+}
+
+/**
+ * The SECOND uncatchable throw on the same code path, closed for the same
+ * reason. Inflating proves the zlib stream is intact; it does not prove the
+ * bytes inside it decode. png-js walks the inflated data one scanline at a time
+ * and `throw`s "Invalid filter algorithm" from that same async callback if a
+ * row's leading filter byte is not 0–4 — so a PNG whose stream is perfectly
+ * valid and whose filter bytes are garbage still kills the process.
+ *
+ * Natural corruption trips the adler checksum first, which the inflate above
+ * catches. This one has to be BUILT — which is exactly why it is worth closing
+ * on a public, unauthenticated route: the reachable version of this bug is the
+ * deliberate one.
+ *
+ * Interlaced PNGs are REFUSED rather than validated. Adam7 splits the image
+ * into seven sub-images with their own row geometry, so checking it means
+ * reimplementing the decoder's layout maths — and a half-check would be worse
+ * than none, because flipping the interlace flag would walk straight past it.
+ * Refusing costs an issuer nothing: the fallback renders the built-in layout,
+ * and interlaced artwork is vanishingly rare (no encoder defaults to it).
+ */
+function assertPngScanlinesDecodable(img: ProbedImage, inflated: Buffer): void {
+  if (img.image?.interlaceMethod === 1) throw new Error("interlaced PNG artwork is not supported");
+  const bitsPerPixel = img.image?.pixelBitlength;
+  if (!bitsPerPixel || !Number.isFinite(bitsPerPixel)) throw new Error("PNG pixel geometry is unreadable");
+  // Each scanline is one filter byte followed by ceil(width × bpp / 8) bytes.
+  const stride = Math.ceil((img.width * bitsPerPixel) / 8) + 1;
+  if (inflated.length < stride * img.height) throw new Error("PNG pixel data is shorter than its declared size");
+  for (let row = 0; row < img.height; row++) {
+    const filter = inflated[row * stride];
+    if (filter === undefined || filter > 4) throw new Error(`invalid PNG filter algorithm ${String(filter)} on row ${row}`);
+  }
+}
+
+/**
+ * Open the artwork, and prove it can actually be DRAWN — not merely parsed.
+ *
+ * `openImage` reads a PNG's IHDR and stops; the pixels are inflated much later,
+ * while pdfkit flushes the document, inside a zlib callback that `throw`s on a
+ * bad stream. That throw surfaces as an uncaughtException — no try/catch around
+ * the render and no rejected promise can see it — so a PNG with a valid header
+ * and a truncated IDAT (an interrupted upload) would take the API process down
+ * on every fetch of a public certificate URL. Inflating here converts that into
+ * an ordinary synchronous throw the route can catch and fall back from, which is
+ * the whole point of having a fallback.
  */
 function openArtwork(bytes: Buffer): { width: number; height: number } {
   // `openImage` is real and public on pdfkit's mixin chain but absent from
   // @types/pdfkit, so the cast is the type gap, not a claim about the value.
-  const probe = new PDFDocument({ size: "A4" }) as unknown as {
-    openImage(b: Buffer): { width: number; height: number; imgData?: Buffer };
-  };
+  const probe = new PDFDocument({ size: "A4" }) as unknown as { openImage(b: Buffer): ProbedImage };
   const img = probe.openImage(bytes);
   // PNG only: a JPEG's `imgData` is the raw scan, not a zlib stream.
-  if (bytes.subarray(0, PNG_MAGIC.length).equals(PNG_MAGIC) && Buffer.isBuffer(img.imgData)) inflateSync(img.imgData);
+  if (bytes.subarray(0, PNG_MAGIC.length).equals(PNG_MAGIC) && Buffer.isBuffer(img.imgData)) {
+    assertPngScanlinesDecodable(img, inflateSync(img.imgData));
+  }
   return img;
 }
 
