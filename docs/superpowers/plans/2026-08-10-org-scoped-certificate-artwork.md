@@ -439,6 +439,131 @@ git commit -m "feat(api): verify a certificate background's pin and content type
 
 ### Task 3: The ownership gate and `PATCH /credential-use-cases/:key/certificate`
 
+- [ ] **Step 0: fold in the Task 2 review findings** (do this first, in `apps/api/src/http/routes.ts`, and commit it separately)
+
+Three fixes the Task 2 review surfaced, all of which start to bite at the strict door you are about to build.
+
+**(a) Only PNG and JPEG are renderable artwork.** `startsWith("image/")` lets `image/webp` through, but `openArtwork` in `apps/api/src/certificate-artwork.ts` is pdfkit's `openImage`, which reads PNG and JPEG only — so a webp background saves with a 201 and then silently degrades to the built-in layout on every render. The web file input offers webp today, so this is reachable by accident, not by attack. Above `checkBackgroundDocument`, add:
+
+```ts
+/**
+ * The artwork formats the renderer can actually DRAW, which is narrower than
+ * "an image": `openArtwork` is pdfkit's `openImage`, and that reads PNG and
+ * JPEG and nothing else. An `image/webp` background passes an `image/*` check,
+ * stores with a 201, renders on the browser canvas — and then degrades to the
+ * built-in layout on every real certificate, with nothing telling the customer
+ * why their design vanished. The designer's file input offered webp, so this
+ * was reachable by accident rather than by attack.
+ */
+const RENDERABLE_ARTWORK_TYPES = new Set(["image/png", "image/jpeg"]);
+const isRenderableArtwork = (contentType: string): boolean =>
+  RENDERABLE_ARTWORK_TYPES.has(contentType.toLowerCase().trim());
+```
+
+and in `checkBackgroundDocument` replace the content-type branch with:
+
+```ts
+    if (!isRenderableArtwork(doc.contentType)) {
+      return { error: "BACKGROUND_NOT_AN_IMAGE", message: `certificate background document '${documentId}' is ${doc.contentType}; artwork must be image/png or image/jpeg — the renderer can draw nothing else` };
+    }
+```
+
+**(b) A supplied-but-malformed pin must be refused, not ignored.** `checkBackgroundDocument` reads the pin with `typeof … === "string"`, so `sha256: 12345` sets `pin = null` and the whole verification is skipped. On POST/PATCH `validateCredentialUseCase` catches it first, but the preview route runs only `validateCertificatePlacements` — and at the strict door you are about to build it would answer `BACKGROUND_PIN_REQUIRED` to a caller who *did* supply a pin, in the wrong shape. Use core's predicate, which is what it was extracted for:
+
+```ts
+    // A pin in the wrong SHAPE is a caller error, not an absent pin. Answering
+    // "you must supply a pin" to someone who just did sends them looking in the
+    // wrong place — and on the preview door, where no definition validator runs
+    // first, a malformed pin would otherwise skip verification entirely.
+    if (background.sha256 !== undefined && !isDocumentSha256(background.sha256)) {
+      return { error: "BACKGROUND_PIN_MALFORMED", message: `certificate background sha256 must be a 0x-prefixed 64-character lowercase hex digest, as POST /credential-use-cases/{key}/certificate/artwork returns it` };
+    }
+    const pin = isDocumentSha256(background.sha256) ? background.sha256 : null;
+```
+
+Import `isDocumentSha256` from `@tokenlayer/core` alongside the other core imports at the top of `routes.ts`.
+
+**(c) Drop the `as never`.** In `checkDefinitionBackgrounds`, widen the parameter type instead — it compiles clean and `as never` is assignable to anything, so it would survive a future signature change silently:
+
+```ts
+  async function checkDefinitionBackgrounds(
+    def: { credentialTypes?: Array<{ certificate?: { background?: { documentId?: unknown; sha256?: unknown } | null } }> },
+  ): Promise<{ error: string; message: string } | null> {
+    for (const ct of def.credentialTypes ?? []) {
+      const problem = await checkBackgroundDocument(ct.certificate?.background, { requirePin: false });
+      if (problem) return problem;
+    }
+    return null;
+  }
+```
+
+Then add the two tests these need, in `apps/api/test/certificate-org-design.test.ts` inside the existing `describe("a supplied background sha256 is verified at every writing door", …)`:
+
+```ts
+  it("refuses a webp background — the renderer can draw only PNG and JPEG", async () => {
+    // It would otherwise store with a 201 and silently print the built-in
+    // layout on every certificate, which reads as "our design vanished".
+    const w = await world();
+    const doc = await storeDoc(w.h, "image/webp", PNG_2x1_B64);
+    const res = await w.h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases`, headers: auth(w.platform),
+      payload: {
+        key: `webp-${Math.random().toString(36).slice(2, 8)}`, name: "Webp",
+        credentialTypes: [{
+          name: "C", title: "C", validityDays: 365, requiredApprovals: 1,
+          claimSchema: { type: "object", required: ["fullName"], properties: { fullName: { type: "string" } } },
+          certificate: { enabled: true, background: { documentId: doc.id } },
+        }],
+        issuer: { kind: "platform" }, holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("BACKGROUND_NOT_AN_IMAGE");
+  });
+
+  it("the preview route refuses a malformed pin rather than ignoring it", async () => {
+    // No definition validator runs on this door, so a non-string pin used to
+    // set `pin = null` and skip verification entirely with a 200.
+    const w = await world();
+    const doc = await storeDoc(w.h, "image/png", PNG_2x1_B64);
+    const res = await w.h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/preview-certificate`, headers: auth(w.platform),
+      payload: {
+        credentialType: {
+          name: "C", title: "C", validityDays: 365, requiredApprovals: 1,
+          claimSchema: { type: "object", required: ["fullName"], properties: { fullName: { type: "string" } } },
+          certificate: { enabled: true, background: { documentId: doc.id, sha256: "not-a-digest" }, placements: [] },
+        },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("BACKGROUND_PIN_MALFORMED");
+  });
+
+  it("PATCH /credential-use-cases/:key verifies the background too", async () => {
+    // Wired identically to POST, and previously pinned only by inspection.
+    const w = await world();
+    const doc = await storeDoc(w.h, "image/png", PNG_2x1_B64);
+    const current = (await w.h.app.inject({ method: "GET", url: `${V1}/credential-use-cases/${w.key}`, headers: auth(w.platform) })).json() as Record<string, unknown>;
+    const types = (current.credentialTypes as Array<Record<string, unknown>>).map((c) => ({
+      ...c, certificate: { enabled: true, background: { documentId: doc.id, sha256: "0x" + "f".repeat(64) } },
+    }));
+    const res = await w.h.app.inject({
+      method: "PATCH", url: `${V1}/credential-use-cases/${w.key}`, headers: auth(w.platform),
+      payload: { ...current, credentialTypes: types },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("BACKGROUND_DOCUMENT_MISMATCH");
+  });
+```
+
+Run `cd apps/api && npx vitest run test/certificate-org-design.test.ts test/certificate-artwork.test.ts test/certificate-preview.test.ts` (expect 7 + 20 + 10 = 37) and `npx tsc --noEmit`, then commit:
+
+```bash
+git add apps/api/src/http/routes.ts apps/api/test/certificate-org-design.test.ts
+git commit -m "fix(api): artwork must be renderable, and a malformed pin is refused not ignored"
+```
+
 **Files:**
 - Modify: `apps/api/src/http/routes.ts` (after the `preview-certificate` route, currently ending line 1325)
 - Modify: `apps/api/src/http/schemas.ts`
@@ -998,8 +1123,10 @@ In `apps/api/src/http/routes.ts`, immediately after the `PATCH …/certificate` 
     const existing = await ownedCredentialUseCase(request, reply, key);
     if (!existing) return reply;
     const b = request.body as { contentType: string; dataBase64: string };
-    if (!b?.contentType?.startsWith("image/")) {
-      return reply.code(415).send({ error: "UNSUPPORTED_DOCUMENT_TYPE", message: "certificate artwork must be an image (image/png, image/jpeg, image/webp)" });
+    // The RENDERABLE set, not `image/*`: pdfkit draws PNG and JPEG only, and
+    // accepting a webp here would store artwork that silently never prints.
+    if (!b?.contentType || !isRenderableArtwork(b.contentType)) {
+      return reply.code(415).send({ error: "UNSUPPORTED_DOCUMENT_TYPE", message: "certificate artwork must be image/png or image/jpeg" });
     }
     // Reuses the shared storer, so size caps, the empty-body refusal and the
     // store's own allowlist cannot drift from the general upload route.
@@ -1020,13 +1147,13 @@ In `apps/api/src/http/schemas.ts`, after `updateCertificateDesign`:
       "credential use case. Stores an image and returns the `documentId` + `sha256` to pass to " +
       "`PATCH /credential-use-cases/{key}/certificate`. This door exists because the general document store " +
       "(`POST /documents`) is restricted to issue-capable roles, which an Org Admin is not; the capability here is " +
-      "bounded by the use case you own. Images only — anything else answers **415** " +
+      "bounded by the use case you own. PNG or JPEG only — anything else answers **415** " +
       "`UNSUPPORTED_DOCUMENT_TYPE`.",
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     body: {
       type: "object", additionalProperties: false, required: ["contentType", "dataBase64"],
       properties: {
-        contentType: { type: "string", description: "`image/png`, `image/jpeg` or `image/webp`." },
+        contentType: { type: "string", description: "`image/png` or `image/jpeg` — the only formats the certificate renderer can draw." },
         dataBase64: { type: "string", description: "The image bytes, base64-encoded. Max 5 MB decoded." },
       },
     },

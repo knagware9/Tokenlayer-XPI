@@ -145,8 +145,12 @@ GET  /credential-use-cases/:key/certificate/artwork?credentialType=<name>  → t
 Both are `authScoped("usecases:provision")` plus the same six gates as the
 PATCH (role, existence, mode, ownership). The POST takes the existing
 `{ contentType, dataBase64 }` body under `DOC_UPLOAD_BODY_LIMIT` and reuses
-`storeUploadedDocument`, refusing any `contentType` that is not `image/*` — a
-narrower allowlist than the store's, because this door exists for artwork only.
+`storeUploadedDocument`, refusing any `contentType` that is not `image/png` or
+`image/jpeg` — narrower than the store's allowlist *and* narrower than
+`image/*`, because `openArtwork` is pdfkit's `openImage` and that draws PNG
+and JPEG only. A webp background would pass an `image/*` check, store with a
+201, render on the browser canvas, and then silently degrade to the built-in
+layout on every real certificate.
 The GET serves the bytes of the document **currently named by that credential
 type's `background`**, and nothing else: the use case the caller owns is the
 capability, so no document id is accepted from the caller and no unreferenced
