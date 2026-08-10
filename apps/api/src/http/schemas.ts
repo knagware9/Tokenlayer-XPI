@@ -1273,7 +1273,9 @@ export const S: Record<string, FastifySchema> = {
       "document store recorded for those exact bytes — and the document must be a PNG or JPEG: a `documentId` " +
       "alone is a guessable reference. Answers **400** `BACKGROUND_PIN_REQUIRED`, `BACKGROUND_DOCUMENT_NOT_FOUND`, " +
       "`BACKGROUND_DOCUMENT_MISMATCH`, `BACKGROUND_NOT_AN_IMAGE` or `INVALID_CERTIFICATE_PLACEMENT` (which names the " +
-      "offending placement index).",
+      "offending placement index). Upload the artwork through " +
+      "`POST /credential-use-cases/{key}/certificate/artwork`, which returns the `documentId` and the `sha256` to " +
+      "send here — the general document store is closed to an Org Admin.",
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     body: {
       type: "object", additionalProperties: true, required: ["credentialType"],
@@ -1294,6 +1296,31 @@ export const S: Record<string, FastifySchema> = {
       },
     },
     response: { 200: { $ref: "CredentialUseCase#" }, ...errs(400, 401, 403, 404) },
+  },
+  uploadCertificateArtwork: {
+    tags: ["Credential Use Cases"], summary: "Upload certificate artwork for a credential use case your organization owns", security: eitherCredential,
+    description:
+      "Requires the `usecases:provision` scope **and** a PlatformAdmin or an OrgAdmin whose organization OWNS this " +
+      "credential use case. Stores an image and returns the `documentId` + `sha256` to pass to " +
+      "`PATCH /credential-use-cases/{key}/certificate`. This door exists because the general document store " +
+      "(`POST /documents`) is restricted to issue-capable roles, which an Org Admin is not; the capability here is " +
+      "bounded by the use case you own. PNG or JPEG only — anything else answers **415** " +
+      "`UNSUPPORTED_DOCUMENT_TYPE`.",
+    params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
+    body: {
+      type: "object", additionalProperties: false, required: ["contentType", "dataBase64"],
+      properties: {
+        contentType: { type: "string", description: "`image/png` or `image/jpeg` — the only formats the certificate renderer can draw." },
+        dataBase64: { type: "string", description: "The image bytes, base64-encoded. Max 5 MB decoded." },
+      },
+    },
+    response: {
+      201: {
+        type: "object", additionalProperties: true,
+        properties: { documentId: { type: "string" }, sha256: { type: "string" }, size: { type: "integer" } },
+      },
+      ...errs(400, 401, 403, 404, 413, 415),
+    },
   },
   provisionUseCase: {
     tags: ["Credential Use Cases"], summary: "One-step enterprise provisioning from a template: ensure the issuer org, instantiate the bound credential use case, and optionally create scoped desk users (PlatformAdmin; OrgAdmin scoped to their own org)", security: eitherCredential,

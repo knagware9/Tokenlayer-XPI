@@ -434,3 +434,62 @@ describe("PATCH /credential-use-cases/:key/certificate", () => {
     expect(((await readBack(w)).credentialTypes[0].certificate as { enabled: boolean }).enabled).toBe(true);
   });
 });
+
+describe("POST /credential-use-cases/:key/certificate/artwork", () => {
+  const upload = (w: World, token: string, payload: unknown) =>
+    w.h.app.inject({ method: "POST", url: `${V1}/credential-use-cases/${w.key}/certificate/artwork`, headers: auth(token), payload });
+
+  it("admits an owner OrgAdmin, who the general document store refuses", async () => {
+    const w = await world();
+    // THE CONTROL, and the reason this route exists: RbacPolicy grants OrgAdmin
+    // only `read`, so the general store is closed to them in both directions.
+    const store = await w.h.app.inject({
+      method: "POST", url: `${V1}/documents`, headers: auth(w.orgAdmin),
+      payload: { contentType: "image/png", dataBase64: PNG_2x1_B64 },
+    });
+    expect(store.statusCode).toBe(403);
+
+    const res = await upload(w, w.orgAdmin, { contentType: "image/png", dataBase64: PNG_2x1_B64 });
+    expect(res.statusCode).toBe(201);
+    const body = res.json() as { documentId: string; sha256: string; size: number };
+    expect(body.documentId).toBeTruthy();
+    expect(body.sha256).toMatch(/^0x[0-9a-f]{64}$/);
+
+    // And what it returns is directly usable as the pin.
+    const set = await design(w, w.orgAdmin, {
+      credentialType: "CourseCompletion",
+      background: { documentId: body.documentId, sha256: body.sha256 },
+    });
+    expect(set.statusCode).toBe(200);
+  });
+
+  it("refuses a non-image upload — this door is for artwork only", async () => {
+    const w = await world();
+    const res = await upload(w, w.orgAdmin, { contentType: "application/pdf", dataBase64: Buffer.from("%PDF-1.4").toString("base64") });
+    expect(res.statusCode).toBe(415);
+    expect(res.json().error).toBe("UNSUPPORTED_DOCUMENT_TYPE");
+  });
+
+  it("refuses a foreign org, an unknown key, and a non-admin role", async () => {
+    const w = await world();
+    const tag = Math.random().toString(36).slice(2, 10);
+    const foreignOrg = await w.h.organizations.create({
+      name: `Foreign U ${tag}`, orgType: "issuer", registrationId: null, jurisdiction: null,
+      did: `did:key:zFU${tag}`, didSeedEncrypted: "enc", status: "active", verified: true,
+      verifiedAt: new Date().toISOString(), companyProfile: null, capabilities: null,
+    });
+    await w.h.users.create({
+      email: `foreign-u-${tag}@tokenlayer.dev`, passwordHash: bcrypt.hashSync(`foreign-u-${tag}`, TEST_ROUNDS),
+      role: "OrgAdmin", useCaseKey: null, accountId: null, active: true, kycStatus: "approved",
+      kyc: null, orgId: foreignOrg.id, kind: "human",
+    });
+    const foreign = await loginAs(w.h.app, `foreign-u-${tag}@tokenlayer.dev`, `foreign-u-${tag}`);
+    expect((await upload(w, foreign, { contentType: "image/png", dataBase64: PNG_2x1_B64 })).statusCode).toBe(403);
+
+    const unknown = await w.h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/nope-nope/certificate/artwork`,
+      headers: auth(w.orgAdmin), payload: { contentType: "image/png", dataBase64: PNG_2x1_B64 },
+    });
+    expect(unknown.statusCode).toBe(404);
+  });
+});

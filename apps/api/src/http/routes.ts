@@ -1539,6 +1539,42 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     return reply.code(200).send(updated);
   });
 
+  /**
+   * ARTWORK UPLOAD, SCOPED BY THE USE CASE IT IS FOR.
+   *
+   * `RbacPolicy` grants `OrgAdmin` exactly one action — `read` — so
+   * `POST /documents` (gated on `issue`) and `GET /documents/:id` (gated on
+   * `canReadDoc`) are both closed to the very role this feature is for.
+   * Organizations reach the store today only through
+   * `POST /orgs/register/documents`, which is public because it runs before the
+   * org exists.
+   *
+   * WIDENING `canReadDoc` WAS THE WRONG FIX: it is what keeps stored off-ledger
+   * invoice evidence away from tenants. So the capability is bounded by the use
+   * case instead — you may upload artwork for a programme you own, and the
+   * upload allowlist here is narrower than the store's (images only), because
+   * this door exists for artwork and nothing else.
+   */
+  app.post("/credential-use-cases/:key/certificate/artwork", {
+    schema: S.uploadCertificateArtwork,
+    bodyLimit: DOC_UPLOAD_BODY_LIMIT,
+    ...authScoped("usecases:provision"),
+  }, async (request, reply) => {
+    const key = (request.params as { key: string }).key;
+    const existing = await ownedCredentialUseCase(request, reply, key);
+    if (!existing) return reply;
+    const b = request.body as { contentType: string; dataBase64: string };
+    // The RENDERABLE set, not `image/*`: pdfkit draws PNG and JPEG only, and
+    // accepting a webp here would store artwork that silently never prints.
+    if (!b?.contentType || !isRenderableArtwork(b.contentType)) {
+      return reply.code(415).send({ error: "UNSUPPORTED_DOCUMENT_TYPE", message: "certificate artwork must be image/png or image/jpeg" });
+    }
+    // Reuses the shared storer, so size caps, the empty-body refusal and the
+    // store's own allowlist cannot drift from the general upload route.
+    const doc = await storeUploadedDocument(deps.documents, b);
+    return reply.code(201).send({ documentId: doc.id, sha256: doc.sha256, size: doc.size });
+  });
+
   // Validate + create a credential use case from a fully-bound definition, reusing
   // the SAME checks as POST /credential-use-cases (referenced-org existence,
   // cross-type KEY_TAKEN guard). Throws coded errors the provisioner maps to HTTP.
