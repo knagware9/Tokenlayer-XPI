@@ -4289,8 +4289,8 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
   // They act only on a credential the caller ALREADY holds and confer no
   // authority over anyone else: accepting/rejecting/asking-for-changes changes
   // the caller's own acceptance state. Contrast POST /verification-requests/:id/
-  // consent, which is scoped `credentials:read` because it DISCLOSES those
-  // credentials to a third-party verifier.
+  // consent, which needs `credentials:present` because it signs AS the holder
+  // and DISCLOSES those credentials to a third-party verifier, irreversibly.
   app.post("/me/credentials/:id/accept", { schema: S.acceptCredential, ...auth }, async (request, reply) => {
     const cred = await holderCredentialInState(request, reply, ["pending", "changes_requested"]);
     if (!cred) return reply;
@@ -4748,7 +4748,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     return vreqView(r);
   });
 
-  app.post("/verification-requests/:id/consent", { schema: S.consentVerificationRequest, ...authScoped("credentials:read") }, async (request, reply) => {
+  app.post("/verification-requests/:id/consent", { schema: S.consentVerificationRequest, ...authScoped("credentials:present") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const { id } = request.params as { id: string };
     const { credentialIds } = request.body as { credentialIds: string[] };

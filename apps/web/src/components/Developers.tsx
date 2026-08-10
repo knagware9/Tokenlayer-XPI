@@ -41,13 +41,19 @@ const KEY_ROLES: Role[] = ["OrgAdmin", "UseCaseAdmin", "Issuer", "Trader", "Buye
 /**
  * One plain line per scope, for the integrator choosing them. Typed as a total
  * record over `ApiScope`, so adding a scope to the mirrored vocabulary in
- * types.ts without describing it here fails the build rather than shipping a
- * blank checkbox.
+ * types.ts without describing it here is a TYPE error.
+ *
+ * A type error and NOT a build failure, which this comment used to claim:
+ * `npm run build` is `vite build`, and esbuild strips types without checking
+ * them. Two scopes shipped here as blank checkboxes with a green build, and it
+ * took opening the page to see it. `npm run typecheck` is the check that
+ * catches this — run it, not just the build.
  */
 const SCOPE_DESCRIPTIONS: Record<ApiScope, string> = {
   "credentials:read": "Read issued credentials and their status.",
   "credentials:issue": "Issue new credentials to holders.",
   "credentials:revoke": "Revoke credentials this organization issued.",
+  "credentials:present": "Consent to a verification request — sign and disclose held credentials.",
   "verifications:read": "Read verification requests and their outcomes.",
   "verifications:request": "Ask a holder to present credentials.",
   "verifications:verify": "Run a verification and read its result.",
@@ -57,6 +63,8 @@ const SCOPE_DESCRIPTIONS: Record<ApiScope, string> = {
   "users:read": "List the users this key's role can see.",
   "users:onboard": "Onboard and manage users — new members get a DID.",
   "org:read": "Read the organization's profile and its member list.",
+  "webhooks:read": "List webhook endpoints and read the event log and delivery history.",
+  "webhooks:write": "Register, update, rotate and delete webhook endpoints.",
   "usecases:provision": "Create, update, deploy and provision use cases and templates.",
 };
 

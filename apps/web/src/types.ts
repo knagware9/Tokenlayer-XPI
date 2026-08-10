@@ -411,6 +411,7 @@ export const API_SCOPES = [
   "credentials:read",
   "credentials:issue",
   "credentials:revoke",
+  "credentials:present",
   "verifications:read",
   "verifications:request",
   "verifications:verify",
@@ -420,6 +421,12 @@ export const API_SCOPES = [
   "users:read",
   "users:onboard",
   "org:read",
+  // These two were added to core by EN-C and NOT mirrored here, so the console
+  // could not mint a key for the Webhooks section on its own screen. The
+  // mirror's stated failure mode ("can never grant a scope, only fail to offer
+  // one") is exactly what happened; caught while adding credentials:present.
+  "webhooks:read",
+  "webhooks:write",
   "usecases:provision",
 ] as const;
 export type ApiScope = (typeof API_SCOPES)[number];

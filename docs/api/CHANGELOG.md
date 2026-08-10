@@ -19,6 +19,38 @@ diff. That file is generated, not written by hand; see the header of
 
 ---
 
+## Unreleased — consenting to a verification needs its own scope
+
+**ACTION REQUIRED if a machine key consents to verification requests on a
+holder's behalf.** `POST /verification-requests/{id}/consent` required
+`credentials:read`. It now requires **`credentials:present`**, a new scope.
+
+The route is not a read. It decrypts the holder's custodial signing key, signs a
+Verifiable Presentation **as them**, and releases the selected credentials'
+contents to a third-party verifier — and the disclosure cannot be recalled. A
+key minted for a dashboard, an expiry sweep or a reconciliation job wants
+`credentials:read` and has no business doing any of that.
+
+- **Who is affected:** a key whose grant list contains `credentials:read` (or
+  any other exact scope) but not `credentials:present`. It now gets **403
+  `INSUFFICIENT_SCOPE`** with `details: { required: "credentials:present" }`.
+- **Who is not:** a key granted `credentials:*` or `*` is unaffected — the
+  wildcard covers the new scope, and since the scope is new nobody could have
+  been granted it explicitly before now. Human sessions are unaffected; scopes
+  are a property of keys only.
+- **What to do:** rotate the key with `credentials:present` added, or grant
+  `credentials:*` if the key legitimately acts for the holder end to end.
+  `credentials:present` is deliberately **not** implied by `credentials:issue`
+  either: issuing speaks for the ISSUER, presenting speaks for the HOLDER.
+
+Separately, the Developers console's scope picker was missing `webhooks:read`
+and `webhooks:write` — added by EN-C to the server but never mirrored into the
+web app, so you could not mint a webhook-managing key from the same screen that
+manages webhooks. Both now appear. Server-side validation was always correct;
+this only affects what the console offers.
+
+---
+
 ## Unreleased — every sandbox boundary, not just the ones with a use case (EN-D2 review)
 
 The mode gate was written for routes that name a use case. The final review
