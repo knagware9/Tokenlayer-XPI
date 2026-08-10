@@ -40,13 +40,12 @@ export interface CertificateConfig {
    * selects the renderer: with it, the built-in layout is replaced entirely and
    * only `placements` are drawn; without it, nothing about the existing
    * certificate changes.
-   */
-  /**
-   * EN-F follow-up: the digest of the artwork bytes, as `POST /documents`
-   * reports it. OPTIONAL so every record written by EN-F stays valid, and the
-   * org-scoped design route REQUIRES it: `documentId` alone is bound to
-   * nothing, so a pin is what stops a caller naming a document id it merely
-   * guessed. Verified wherever it is supplied.
+   *
+   * `sha256` — EN-F follow-up: the digest of the artwork bytes, as
+   * `POST /documents` reports it. OPTIONAL so every record written by EN-F
+   * stays valid, and the org-scoped design route REQUIRES it: `documentId`
+   * alone is bound to nothing, so a pin is what stops a caller naming a
+   * document id it merely guessed. Verified wherever it is supplied.
    */
   background?: { documentId: string; sha256?: string };
   /** EN-F. Where each field prints on the artwork. Inert without `background`,
