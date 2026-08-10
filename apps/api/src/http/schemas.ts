@@ -427,7 +427,20 @@ export const components: Record<string, unknown>[] = [
     description: "A maker-checker proposal: a gated operation captured pending approval.",
     properties: {
       id: { type: "string" },
-      useCaseKey: { type: "string" },
+      // NULLABLE, and this is load-bearing rather than tidiness. Credential and
+      // governance proposals genuinely have no use case, so `ProposalRecord`
+      // types this `string | null` — but fast-json-stringify COERCES null to ""
+      // for a non-nullable string, so the wire said "" where the row said null.
+      // This codebase has been bitten twice by ""-vs-null (a binding gate
+      // skipped because "" is falsy, and a member-binding check bypassed the
+      // same way), and here the API was manufacturing the empty string FOR
+      // consumers who then apply their own truthiness checks.
+      useCaseKey: { type: "string", nullable: true },
+      // Declared for the same reason: `ProposalRecord.orgId` is `string | null`.
+      // It reached the wire only because `additionalProperties: true` passes
+      // undeclared fields through untouched — which is exactly the accident that
+      // kept it correct while its declared neighbour was being coerced.
+      orgId: { type: "string", nullable: true, description: "Set for org-scoped kinds; null for token kinds." },
       assetId: { type: "string", nullable: true },
       kind: { type: "string" },
       payload: { type: "object", additionalProperties: true },
@@ -498,13 +511,12 @@ export const components: Record<string, unknown>[] = [
       "request — never of the user, credential or asset named in it, which may never exist at all if a checker " +
       "rejects it. There is NO single-proposal GET: to learn the outcome, list `GET /proposals` and match on the " +
       "id, or — for a machine integration — subscribe to the `proposal.executed` event instead of polling.",
-    // NOT `$ref: "Proposal#"`, and the reason is a live wire fact rather than
-    // taste. `Proposal#` declares `useCaseKey` as a NON-NULLABLE required string
-    // while `ProposalRecord.useCaseKey` is `string | null`, so referencing it
-    // here would make fast-json-stringify coerce a credential proposal's null
-    // key to `""` — changing what these 202s put on the wire, which this task
-    // must not do. (The `/proposals` read routes DO reference it and so already
-    // emit `""`; that pre-existing coercion is left exactly as it is.)
+    // Spelled out rather than `$ref: "Proposal#"`, purely so the 202 body can
+    // carry its own field descriptions — the two now agree on nullability, and
+    // `proposal-null-usecase-key.test.ts` pins that agreement in both
+    // directions. (It did NOT always: `Proposal#` declared `useCaseKey` as a
+    // non-nullable string, so the read routes emitted `""` for a credential
+    // proposal while this envelope emitted `null` for the very same row.)
     properties: {
       proposal: {
         type: "object",

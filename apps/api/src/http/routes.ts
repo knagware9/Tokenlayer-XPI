@@ -4295,7 +4295,19 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
         const seen = new Set(byUseCase.map((p) => p.id));
         return [...byUseCase, ...byOrg.filter((p) => !seen.has(p.id))];
       })();
-    return rows.filter((p) => decidableByPrincipal(request, p.kind)).map(proposalView);
+    // THE SAME `canView` THE FETCH-ONE PATH USES. The index narrowing above is a
+    // query optimisation, not the boundary: `deps.proposals.list(useCaseKey)`
+    // returns EVERY proposal at that desk, and `listByOrg(orgId)` every proposal
+    // of that org, while each kind admits a far narrower audience — `onboard-user`
+    // only a UseCaseAdmin of the desk, the credential and governance kinds only an
+    // OrgAdmin of the org. Without this the listing handed an Issuer, Trader,
+    // Auditor or Holder rows whose `payload` carries the subject's KYC (legalName,
+    // country, idType, idNumber) and whose approval answers 404 — a listing that
+    // shows you what you may not read and offers you a decision you may not make.
+    // `scopedProposal` has always enforced it one route away; this is that gate.
+    const decidable = rows.filter((p) => decidableByPrincipal(request, p.kind));
+    const viewable = await Promise.all(decidable.map((p) => proposalKind(p.kind).canView(deps, claims, p)));
+    return decidable.filter((_, i) => viewable[i]).map(proposalView);
   });
 
   // Run the finalized proposal's operation as the PROPOSER's identity (RBAC +
