@@ -1020,6 +1020,44 @@ git commit -m "feat(api): an org may set certificate artwork on a use case it ow
 - Modify: `apps/api/src/http/schemas.ts`
 - Test: `apps/api/test/certificate-org-design.test.ts`
 
+- [ ] **Step 0: four small fixes from the Task 3 review** (do first; commit separately)
+
+In `apps/api/src/http/routes.ts`:
+
+**(a)** The `BACKGROUND_PIN_MALFORMED` message names `POST /credential-use-cases/{key}/certificate/artwork`, which does not exist yet — the same dangling reference `openapi-contract.test.ts` forced out of the schema description, surviving in a runtime string the oracle cannot see. Since THIS task adds that route, the reference becomes true here. Leave the message as it is **and confirm at Step 6** that the path now resolves; if you end up not adding it, reword to describe the shape only.
+
+**(b)** Guard the claim-schema read in the `PATCH …/certificate` handler — a stored type whose `claimSchema` has no `properties` currently throws `TypeError: Cannot convert undefined or null to object` and surfaces as a baffling 400:
+
+```ts
+      validateCertificatePlacements(b.placements, Object.keys(type.claimSchema.properties ?? {}), type.name);
+```
+
+**(c)** One comment line in the same handler, above the `validateCredentialUseCase` re-run, recording why it is there and that it is deliberately unpinned:
+
+```ts
+    // The second door, unchanged: a narrow route that skipped the whole-
+    // definition validator would be a cheaper way into the store than the front
+    // one. Defence in depth today — everything this route can change is already
+    // checked above — so no test pins it, and that is deliberate rather than a
+    // coverage gap. It earns its place the first time a stored definition is
+    // legacy-shaped.
+```
+
+**(d)** And one recording why this route, unlike its two siblings, does not call `credentialUseCaseCapabilityViolation`:
+
+```ts
+    // No capability check: that gate exists for BINDINGS (issuer, verifier,
+    // owner domain), and this route changes none of them. The envelope was
+    // already satisfied when the use case was created.
+```
+
+Verify with `cd apps/api && npx vitest run test/certificate-org-design.test.ts` and `npx tsc --noEmit`, then commit:
+
+```bash
+git add apps/api/src/http/routes.ts
+git commit -m "fix(api): guard a legacy claim schema and record two unwritten reasons"
+```
+
 - [ ] **Step 1: Write the failing tests**
 
 Append to `apps/api/test/certificate-org-design.test.ts`:
@@ -1744,6 +1782,15 @@ export function CertificateDesignPanel(props: CertificateDesignPanelProps): JSX.
   );
 }
 ```
+
+- [ ] **Step 1b: Stop offering webp in the file picker**
+
+The server now refuses `image/webp` (pdfkit draws PNG and JPEG only), so a picker that still offers it hands the user a hard 400 on a file it invited them to choose. Two places, both `accept="image/png,image/jpeg,image/webp"`:
+
+- `apps/web/src/components/CertificateDesigner.tsx:58`
+- `apps/web/src/components/CredentialUseCaseBuilder.tsx:575`
+
+Drop `,image/webp` from both.
 
 - [ ] **Step 2: Confirm the helpers this file imports actually exist**
 
