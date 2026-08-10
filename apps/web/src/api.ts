@@ -253,7 +253,11 @@ export const api = {
   // no read route returns it and nothing here stores it.
   listApiKeys: (token: string, orgId: string) =>
     request<ApiKeyView[]>(`/orgs/${encodeURIComponent(orgId)}/api-keys`, token),
-  createApiKey: (token: string, orgId: string, body: { name: string; role: Role; useCaseKey?: string; scopes: string[]; expiresAt?: string }) =>
+  // `mode` (EN-D2) picks the ENVIRONMENT the key acts in and is fixed at
+  // creation — rotation preserves it and no route moves a key between the two.
+  // Omitted means `live`, the server's own default. Binding a key to a use case
+  // in the other environment is refused with 403 WRONG_MODE.
+  createApiKey: (token: string, orgId: string, body: { name: string; role: Role; useCaseKey?: string; scopes: string[]; expiresAt?: string; mode?: ResourceMode }) =>
     // 201 → { key, secret }.
     request<MintedApiKey>(`/orgs/${encodeURIComponent(orgId)}/api-keys`, token, { method: "POST", body: JSON.stringify(body) }),
   rotateApiKey: (token: string, orgId: string, keyId: string) =>

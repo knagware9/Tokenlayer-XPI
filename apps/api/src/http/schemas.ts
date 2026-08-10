@@ -617,8 +617,19 @@ export const components: Record<string, unknown>[] = [
       revokedBy: { type: "string", nullable: true },
       createdBy: { type: "string" },
       createdAt: { type: "string" },
+      // EN-D2 (D2-8). DECLARED, not merely projected: fast-json-stringify
+      // serialises against this schema and silently strips anything it does
+      // not name, so a `mode` added to `apiKeyView` and not to this list would
+      // vanish between the handler and the wire — with nothing failing.
+      mode: {
+        type: "string", enum: ["live", "test"],
+        description:
+          "Which environment this key acts in. A `test` key reads `tl_test_…`, acts ONLY on sandbox use cases and is " +
+          "refused **403 `WRONG_MODE`** on real ones; a `live` key is the mirror. Fixed at creation — rotation " +
+          "preserves it, and there is no route that moves a key between environments.",
+      },
     },
-    required: ["id", "orgId", "userId", "name", "prefix", "scopes", "status", "createdBy", "createdAt"],
+    required: ["id", "orgId", "userId", "name", "prefix", "scopes", "status", "createdBy", "createdAt", "mode"],
   },
   {
     $id: "WebhookEndpoint",
@@ -1945,12 +1956,28 @@ export const S: Record<string, FastifySchema> = {
     tags: ["API Keys"], summary: "Mint an org API key (secret returned once, never again)", security: humanOnly,
     description:
       "Session-only. An API key is refused with **403 `MACHINE_PRINCIPAL`** — minting a key is the one path by " +
-      "which a machine principal could widen itself, so only a human session may take it.",
+      "which a machine principal could widen itself, so only a human session may take it.\n\n" +
+      "`mode` picks the ENVIRONMENT the key acts in and defaults to `live`, so a caller that has never heard of the " +
+      "field mints exactly what it always did. A `test` key is returned as a `tl_test_…` secret and may act only on " +
+      "sandbox use cases. If `useCaseKey` is given, the two must agree: binding a `test` key to a live use case (or " +
+      "the reverse) is refused with **403 `WRONG_MODE`**, because such a key would be refused at every call it " +
+      "could ever make.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: {
       type: "object", additionalProperties: false, required: ["name", "role", "scopes"],
       properties: {
         name: { type: "string", minLength: 1 },
+        // ENUMERATED rather than a free string. The body is
+        // `additionalProperties: false`, which STRIPS an unknown field instead
+        // of refusing it — so before this existed a `mode` sent by an
+        // integrator was dropped and answered with a `tl_live_` secret. The
+        // enum is what makes `"sandbox"` (the word the console and the errors
+        // use for the environment) a 400 rather than a silent production
+        // credential.
+        mode: {
+          type: "string", enum: ["live", "test"],
+          description: "Environment for this key. Omitted = `live`. A `test` key mints a `tl_test_…` secret that acts only on sandbox use cases.",
+        },
         // Same enum as createMember: an out-of-rank role is a 403 from
         // canCreateOrgMember (authorization), not a 400 (validation).
         role: { type: "string", enum: ["PlatformAdmin", "OrgAdmin", "UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor", "Holder", "Verifier"] },
@@ -1968,7 +1995,7 @@ export const S: Record<string, FastifySchema> = {
         type: "object", additionalProperties: true,
         properties: {
           key: { $ref: "ApiKeyView#" },
-          secret: { type: "string", description: "The full `tl_live_…` credential, returned HERE AND NOWHERE ELSE. Store it before acknowledging this call." },
+          secret: { type: "string", description: "The full credential — `tl_live_…`, or `tl_test_…` when `mode` is `test` — returned HERE AND NOWHERE ELSE. Store it before acknowledging this call." },
         },
         required: ["key", "secret"],
       },
@@ -1985,7 +2012,10 @@ export const S: Record<string, FastifySchema> = {
   },
   rotateApiKey: {
     tags: ["API Keys"], summary: "Rotate an API key's secret (the old one dies immediately)", security: humanOnly,
-    description: "Session-only. An API key is refused with **403 `MACHINE_PRINCIPAL`** — key lifecycle is a human act.",
+    description:
+      "Session-only. An API key is refused with **403 `MACHINE_PRINCIPAL`** — key lifecycle is a human act. " +
+      "Rotation PRESERVES the key's environment: a `test` key rotates to another `tl_test_…` secret, and there is " +
+      "no way to move a key between environments.",
     params: { type: "object", required: ["id", "keyId"], properties: { id: { type: "string" }, keyId: { type: "string" } } },
     body: { type: "object", additionalProperties: false, properties: {} },
     response: {
@@ -1993,7 +2023,7 @@ export const S: Record<string, FastifySchema> = {
         type: "object", additionalProperties: true,
         properties: {
           key: { $ref: "ApiKeyView#" },
-          secret: { type: "string", description: "The NEW credential. The previous one stops authenticating the moment this returns — there is no overlap window." },
+          secret: { type: "string", description: "The NEW credential, carrying the SAME marker the key already had. The previous one stops authenticating the moment this returns — there is no overlap window." },
         },
         required: ["key", "secret"],
       },

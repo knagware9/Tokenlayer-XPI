@@ -1547,3 +1547,311 @@ describe("EN-D2 · approving a proposal is the operation, so it is gated too", (
     expect((await listed(orgAdmin)).keys).toEqual(expect.arrayContaining(["d2-plist-live", "d2-plist-sandbox"]));
   });
 });
+
+// ---------------------------------------------------------------------------
+// Task D2-8 — A TEST KEY YOU CANNOT MINT IS NOT A FEATURE.
+//
+// Everything above this line assumes a `tl_test_` key exists: the marker, the
+// gate, the mode-scoped event stream, the console's pills. Every one of those
+// tests SEEDS one straight through the repos, because the only route that
+// mints a key never learned the word. `POST /orgs/:id/api-keys` has an
+// `additionalProperties: false` body, so a `mode` an integrator sends is
+// DROPPED rather than refused — a 201 carrying a `tl_live_` secret in answer to
+// a request for a sandbox one, which is the worst of the three possible
+// outcomes (the other two being a working test key and an honest 400).
+//
+// The rotate route carries the same defect one step further along: it minted
+// with the DEFAULT mode and never read the row's, so rotating a test key would
+// stamp `tl_live_` on a row stored as `test` — and `requirePrincipal` refuses
+// exactly that disagreement with a 401. The operator would be walked through
+// the one-time-secret ceremony and handed a credential that is dead on
+// arrival. Unreachable only while test keys cannot be minted, which is what
+// the rest of this block fixes, so the two belong in one change.
+// ---------------------------------------------------------------------------
+
+/** The create route, with whatever body the caller wants to try. */
+const mintKeyOverHttp = (h: TestAppHandle, cred: string, orgId: string, body: Record<string, unknown>) =>
+  h.app.inject({ method: "POST", url: `${V1}/orgs/${orgId}/api-keys`, headers: auth(cred), payload: body });
+
+/** The one call every "does this credential work at all" assertion below makes. */
+const meWith = (h: TestAppHandle, cred: string) =>
+  h.app.inject({ method: "GET", url: `${V1}/me`, headers: auth(cred) });
+
+/**
+ * An org created THROUGH the platform rather than straight into the repo.
+ *
+ * `seedOrgAdmin` above fakes `didSeedEncrypted`, which is fine for everything
+ * that only READS the org — but minting a key mints a member, and a member gets
+ * a membership VC signed with that seed. Only a real ceremony produces one that
+ * decrypts.
+ */
+async function keyOrg(h: TestAppHandle, admin: string): Promise<string> {
+  const tag = Math.random().toString(36).slice(2, 10);
+  const res = await h.app.inject({
+    method: "POST", url: `${V1}/orgs`, headers: auth(admin), payload: { name: `D2 Keys ${tag}`, orgType: "corporate" },
+  });
+  expect(res.statusCode).toBe(201);
+  return res.json().id as string;
+}
+
+/** `seedUseCase`, but OWNED by an org — so an OrgAdmin principal can see it. */
+const seedOrgUseCase = (h: TestAppHandle, orgId: string, key: string, sandbox: boolean) =>
+  h.deps.useCases.create({
+    ...useCaseDef, key, name: key, sandbox, ownerOrgId: orgId,
+    allowedChainIds: sandbox ? [SANDBOX_CHAIN_ID] : ["fabric"],
+    defaultChainId: sandbox ? SANDBOX_CHAIN_ID : "fabric",
+  });
+
+describe("EN-D2 · minting and rotating a tl_test_ key", () => {
+  it("mints a test key whose secret carries tl_test_ and whose row says test", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const orgId = await keyOrg(h, admin);
+
+    const res = await mintKeyOverHttp(h, admin, orgId, { name: "sandbox erp", role: "Issuer", scopes: ["assets:read"], mode: "test" });
+    expect(res.statusCode).toBe(201);
+    const { key, secret } = res.json() as { key: { id: string; prefix: string; mode?: string }; secret: string };
+
+    // THE STRING, THE VIEW AND THE ROW — all three, because any two of them
+    // agreeing while the third does not is precisely the failure the marker
+    // check exists to catch.
+    expect(secret.startsWith("tl_test_")).toBe(true);
+    expect(key.prefix).toBe(secret.slice("tl_test_".length, "tl_test_".length + 8));
+    expect(key.mode).toBe("test");
+    expect((await h.apiKeys.findById(key.id))?.mode).toBe("test");
+  });
+
+  it("defaults to live when no mode is given — every existing caller is unaffected", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const orgId = await keyOrg(h, admin);
+
+    // The pre-EN-D2 body, byte for byte: no `mode` field at all.
+    const res = await mintKeyOverHttp(h, admin, orgId, { name: "erp", role: "Issuer", scopes: ["assets:read"] });
+    expect(res.statusCode).toBe(201);
+    const { key, secret } = res.json() as { key: { id: string; mode?: string }; secret: string };
+    expect(secret.startsWith("tl_live_")).toBe(true);
+    expect(key.mode).toBe("live");
+    expect((await h.apiKeys.findById(key.id))?.mode).toBe("live");
+
+    // …and an EXPLICIT live is the same key, not a second dialect.
+    const explicit = await mintKeyOverHttp(h, admin, orgId, { name: "erp2", role: "Issuer", scopes: ["assets:read"], mode: "live" });
+    expect(explicit.statusCode).toBe(201);
+    expect((explicit.json().secret as string).startsWith("tl_live_")).toBe(true);
+    expect(explicit.json().key.mode).toBe("live");
+  });
+
+  it("refuses a mode that is not a mode, rather than quietly minting a live key", async () => {
+    // The body is `additionalProperties: false`, so before this task a `mode`
+    // was DROPPED. Now that the field exists it is also ENUMERATED: `"sandbox"`
+    // — the word the UI and the errors use for the environment — must not
+    // silently produce a production credential.
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const orgId = await keyOrg(h, admin);
+
+    const res = await mintKeyOverHttp(h, admin, orgId, { name: "typo", role: "Issuer", scopes: ["assets:read"], mode: "sandbox" });
+    expect(res.statusCode).toBe(400);
+    expect(await h.apiKeys.listByOrg(orgId)).toEqual([]);
+  });
+
+  it("a minted test key AUTHENTICATES", async () => {
+    // THE END-TO-END CLAIM. Everything above asserts on strings and columns;
+    // this one takes the secret the route actually returned and presents it.
+    // It is what proves the marker/mode agreement check in `requirePrincipal`
+    // passes for a key this route produced — a mint that stamped the marker and
+    // the column independently would satisfy every other assertion here and
+    // 401 on the very first call.
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const orgId = await keyOrg(h, admin);
+    await seedOrgUseCase(h, orgId, "d2-mint-sbx", true);
+    await seedOrgUseCase(h, orgId, "d2-mint-live", false);
+
+    const minted = await mintKeyOverHttp(h, admin, orgId, { name: "sandbox erp", role: "OrgAdmin", scopes: ["*"], mode: "test" });
+    expect(minted.statusCode).toBe(201);
+    const secret = minted.json().secret as string;
+
+    const me = await meWith(h, secret);
+    expect(me.statusCode).toBe(200);
+
+    // …and it authenticates AS A TEST PRINCIPAL. `request.apiKey.mode` is what
+    // every gate downstream reads, so a mint that got the marker right and the
+    // principal wrong would still 200 above. The catalog is narrowed by
+    // `modeFilter` off exactly that field: this key's org owns one use case in
+    // each environment and the key may see only its own.
+    const catalog = async (cred: string) => {
+      const res = await h.app.inject({ method: "GET", url: `${V1}/use-cases`, headers: auth(cred) });
+      expect(res.statusCode).toBe(200);
+      return (res.json() as { key: string }[]).map((u) => u.key).sort();
+    };
+    expect(await catalog(secret)).toEqual(["d2-mint-sbx"]);
+
+    // The control: the same mint one word different sees the other half, so
+    // the narrowing above is the MODE and not some accident of this org.
+    const liveMint = await mintKeyOverHttp(h, admin, orgId, { name: "live erp", role: "OrgAdmin", scopes: ["*"] });
+    expect(liveMint.statusCode).toBe(201);
+    expect(await catalog(liveMint.json().secret as string)).toEqual(["d2-mint-live"]);
+  });
+
+  it("ROTATING a test key preserves its mode and the rotated secret still authenticates", async () => {
+    // Without the fix this yields a `tl_live_` secret on a row stored as
+    // `test`, and `requirePrincipal` refuses the disagreement: the operator
+    // acknowledges a one-time secret and every call it makes is a 401 with no
+    // hint as to why.
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const orgId = await keyOrg(h, admin);
+
+    const minted = await mintKeyOverHttp(h, admin, orgId, { name: "rotating sandbox", role: "Issuer", scopes: ["assets:read"], mode: "test" });
+    expect(minted.statusCode).toBe(201);
+    const first = minted.json() as { key: { id: string }; secret: string };
+    expect((await meWith(h, first.secret)).statusCode).toBe(200);
+
+    const rotated = await h.app.inject({
+      method: "POST", url: `${V1}/orgs/${orgId}/api-keys/${first.key.id}/rotate`, headers: auth(admin), payload: {},
+    });
+    expect(rotated.statusCode).toBe(200);
+    const next = rotated.json() as { key: { id: string; prefix: string; mode?: string }; secret: string };
+
+    expect(next.secret).not.toBe(first.secret);
+    expect(next.secret.startsWith("tl_test_")).toBe(true);
+    expect(next.key.prefix).toBe(next.secret.slice("tl_test_".length, "tl_test_".length + 8));
+    expect(next.key.mode).toBe("test");
+    expect((await h.apiKeys.findById(first.key.id))?.mode).toBe("test");
+
+    // THE POINT OF THE WHOLE TEST: the rotated credential works.
+    expect((await meWith(h, next.secret)).statusCode).toBe(200);
+    // …and the old one is dead, exactly as it is for a live key.
+    expect((await meWith(h, first.secret)).statusCode).toBe(401);
+
+    // The live half of rotation is unchanged — a rotated live key stays live.
+    const liveMint = await mintKeyOverHttp(h, admin, orgId, { name: "rotating live", role: "Issuer", scopes: ["assets:read"] });
+    const liveId = liveMint.json().key.id as string;
+    const liveRotated = await h.app.inject({
+      method: "POST", url: `${V1}/orgs/${orgId}/api-keys/${liveId}/rotate`, headers: auth(admin), payload: {},
+    });
+    expect(liveRotated.statusCode).toBe(200);
+    expect((liveRotated.json().secret as string).startsWith("tl_live_")).toBe(true);
+    expect(liveRotated.json().key.mode).toBe("live");
+    expect((await meWith(h, liveRotated.json().secret)).statusCode).toBe(200);
+  });
+
+  it("a read route reveals a key's environment", async () => {
+    // `apiKeyView` is the ONLY projection of a key, so a mode it does not
+    // name is a mode no read route can ever show — and the console would
+    // render a sandbox credential with a `tl_live_` marker beside it. (The
+    // schema half matters just as much: fast-json-stringify strips whatever
+    // `ApiKeyView#` does not declare, so the field can be present in the
+    // handler and absent on the wire.)
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const orgId = await keyOrg(h, admin);
+
+    const test = await mintKeyOverHttp(h, admin, orgId, { name: "sbx", role: "Issuer", scopes: ["assets:read"], mode: "test" });
+    const live = await mintKeyOverHttp(h, admin, orgId, { name: "prod", role: "Issuer", scopes: ["assets:read"] });
+    expect([test.statusCode, live.statusCode]).toEqual([201, 201]);
+
+    const listed = await h.app.inject({ method: "GET", url: `${V1}/orgs/${orgId}/api-keys`, headers: auth(admin) });
+    expect(listed.statusCode).toBe(200);
+    const rows = listed.json() as { id: string; name: string; mode?: string }[];
+    expect(Object.fromEntries(rows.map((k) => [k.name, k.mode]))).toEqual({ sbx: "test", prod: "live" });
+
+    // Revoke answers with the same view, so it must carry the field too.
+    const revoked = await h.app.inject({
+      method: "DELETE", url: `${V1}/orgs/${orgId}/api-keys/${test.json().key.id}`, headers: auth(admin), payload: {},
+    });
+    expect(revoked.statusCode).toBe(200);
+    expect(revoked.json().key.mode).toBe("test");
+  });
+
+  it("a key may not be minted into an environment its bound use case does not live in", async () => {
+    // THE CROSSING THIS TASK TURNED UP. `modeGate` asks what the CALLING
+    // principal may act on, and the caller here is always a human (see the
+    // MACHINE_PRINCIPAL test below), so that question has no answer on this
+    // route. The one that does: the key being minted has a mode, and the use
+    // case it is BOUND to has one — and a disagreement produces a credential
+    // that is refused by `modeGate` at every single call it will ever make.
+    // Minting it is worse than refusing it: the operator leaves the one-time
+    // secret ceremony holding a key that works nowhere, and nothing said so.
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const orgId = await keyOrg(h, admin);
+    await seedUseCase(h, "d2-bind-live", false);
+    await seedUseCase(h, "d2-bind-sbx", true);
+
+    const crossed = await mintKeyOverHttp(h, admin, orgId, { name: "x", role: "Issuer", scopes: ["assets:read"], mode: "test", useCaseKey: "d2-bind-live" });
+    expect(crossed.statusCode).toBe(403);
+    expect(crossed.json().error).toBe("WRONG_MODE");
+
+    // The mirror — and it bites the DEFAULT mode, which is the direction an
+    // operator hits by accident the first time they bind a key to the sandbox
+    // programme they just built.
+    const mirrored = await mintKeyOverHttp(h, admin, orgId, { name: "y", role: "Issuer", scopes: ["assets:read"], useCaseKey: "d2-bind-sbx" });
+    expect(mirrored.statusCode).toBe(403);
+    expect(mirrored.json().error).toBe("WRONG_MODE");
+
+    // NOTHING WAS CREATED. The refusal runs before the service user is minted,
+    // so a refused mint leaves no principal behind — the partial-rollback path
+    // exists for a reason and this must not depend on it.
+    expect(await h.apiKeys.listByOrg(orgId)).toEqual([]);
+    expect((await h.users.listByOrg(orgId)).filter((u) => u.kind === "service")).toEqual([]);
+
+    // THE CONTROLS, both ways round, or the test above would pass against a
+    // gate that simply refused every bound key.
+    const sandboxOk = await mintKeyOverHttp(h, admin, orgId, { name: "ok-sbx", role: "Issuer", scopes: ["assets:read"], mode: "test", useCaseKey: "d2-bind-sbx" });
+    expect(sandboxOk.statusCode).toBe(201);
+    expect(sandboxOk.json().key).toMatchObject({ mode: "test", useCaseKey: "d2-bind-sbx" });
+    expect((sandboxOk.json().secret as string).startsWith("tl_test_")).toBe(true);
+    // …and the bound test key really can act on its own programme.
+    expect((await h.app.inject({ method: "GET", url: `${V1}/use-cases/d2-bind-sbx`, headers: auth(sandboxOk.json().secret) })).statusCode).toBe(200);
+
+    const liveOk = await mintKeyOverHttp(h, admin, orgId, { name: "ok-live", role: "Issuer", scopes: ["assets:read"], useCaseKey: "d2-bind-live" });
+    expect(liveOk.statusCode).toBe(201);
+    expect(liveOk.json().key).toMatchObject({ mode: "live", useCaseKey: "d2-bind-live" });
+
+    // An UNBOUND key crosses nothing at mint time — it is gated per act, on
+    // its own mode, by `modeGate` — so both modes are mintable without a key.
+    expect((await mintKeyOverHttp(h, admin, orgId, { name: "free", role: "Issuer", scopes: ["assets:read"], mode: "test" })).statusCode).toBe(201);
+  });
+
+  it("a tl_test_ key cannot mint or rotate ANY key — the crossing is unreachable, not merely gated", async () => {
+    // WHAT THE MODE GATE ON KEY CREATION AMOUNTS TO. `createOrgMember` does
+    // carry `modeGateByKey`, and a key mints its principal through it — but
+    // `apiKeyScope` refuses every machine principal on all four key routes
+    // FIRST, so `actorMode` on this route is always null and that gate can
+    // never fire here. This test is the proof of that claim rather than an
+    // assumption about it: if the machine-principal refusal were ever relaxed,
+    // this fails and the mode question on these routes becomes live again.
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const orgId = await keyOrg(h, admin);
+    const target = await mintKeyOverHttp(h, admin, orgId, { name: "target", role: "Issuer", scopes: ["assets:read"], mode: "test" });
+    expect(target.statusCode).toBe(201);
+    const targetId = target.json().key.id as string;
+
+    // An OrgAdmin-roled SANDBOX key: it has the rank to mint members, so only
+    // the machine-principal refusal stands between it and a fresh credential.
+    const testKey = await seedOrgKey(h, orgId, "test");
+    const liveKey = await seedOrgKey(h, orgId, "live");
+
+    for (const cred of [testKey, liveKey]) {
+      const attempts = await Promise.all([
+        mintKeyOverHttp(h, cred, orgId, { name: "wider", role: "Issuer", scopes: ["*"], mode: "live" }),
+        mintKeyOverHttp(h, cred, orgId, { name: "wider", role: "Issuer", scopes: ["*"], mode: "test" }),
+        h.app.inject({ method: "POST", url: `${V1}/orgs/${orgId}/api-keys/${targetId}/rotate`, headers: auth(cred), payload: {} }),
+        h.app.inject({ method: "GET", url: `${V1}/orgs/${orgId}/api-keys`, headers: auth(cred) }),
+      ]);
+      for (const res of attempts) {
+        expect(res.statusCode).toBe(403);
+        expect(res.json().error).toBe("MACHINE_PRINCIPAL");
+      }
+    }
+    // Nothing was minted — the two seeded keys and the target are all that
+    // exist — and the target's secret was not rotated out from under its holder.
+    const names = (await h.apiKeys.listByOrg(orgId)).map((k) => k.name);
+    expect(names.filter((n) => n === "wider")).toEqual([]);
+    expect(names).toContain("target");
+    expect((await h.apiKeys.findById(targetId))?.prefix).toBe(target.json().key.prefix);
+  });
+});

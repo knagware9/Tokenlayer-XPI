@@ -3292,6 +3292,14 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       status: k.revokedAt !== null ? "revoked" : expired ? "expired" : "active",
       lastUsedAt: k.lastUsedAt, expiresAt: k.expiresAt, revokedAt: k.revokedAt, revokedBy: k.revokedBy,
       createdBy: k.createdBy, createdAt: k.createdAt,
+      // EN-D2 (D2-8). THE COLUMN IS USELESS TO A READER UNTIL SOMETHING SHOWS
+      // IT. A `tl_test_` secret and a `tl_live_` one are the same length, the
+      // same shape and the same eight-character prefix here, so a console that
+      // cannot read the mode has no way to tell a sandbox credential from a
+      // production one and must guess — and it would guess "live", because that
+      // is the column's default. `ApiKeyView#` declares the field too; without
+      // that, fast-json-stringify strips it here and this line does nothing.
+      mode: k.mode,
     };
   }
 
@@ -3330,16 +3338,73 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     return k;
   }
 
+  /**
+   * EN-D2 (D2-8) — THE MODE GATE ON KEY CREATION, and it deliberately asks a
+   * different question from `modeGate`.
+   *
+   * `modeGate` asks what the CALLING principal may act on. On the key routes
+   * that question has no answer: `apiKeyScope` refuses every machine principal
+   * before this runs, so `actorMode` here is always null (a human session) and
+   * the `modeGateByKey` that `createOrgMember` already carries can never fire
+   * on this path. `sandbox-mode.test.ts` pins that as a fact rather than an
+   * assumption — if the MACHINE_PRINCIPAL refusal is ever relaxed, that test
+   * fails and this comment stops being true.
+   *
+   * The question that DOES have an answer here: the key being minted has a
+   * mode, and if it is bound to a use case, that use case has one too. A
+   * disagreement mints a credential that `modeGate` refuses at every single
+   * call it will ever make — a dead key handed over at the end of a one-time
+   * secret ceremony, with nothing anywhere saying why. Refusing at the mint is
+   * the only moment the operator is still looking.
+   *
+   * BOTH DIRECTIONS, and the live one is the accident that actually happens:
+   * `mode` defaults to live, so binding a key to the sandbox programme you just
+   * built without naming the mode is the first thing anybody tries.
+   *
+   * An UNBOUND key crosses nothing here and is left alone in either mode — it
+   * is judged per act, by `modeGate`, on its own mode. An UNRESOLVABLE key is
+   * also passed through: `createOrgMember` answers 404 USE_CASE_NOT_FOUND for
+   * it, which is the better error, and inventing a mode for a use case that
+   * does not exist would only turn that 404 into a confusing 403.
+   */
+  async function modeGateNewKey(reply: FastifyReply, keyMode: ResourceMode, useCaseKey: string | null): Promise<boolean> {
+    if (!useCaseKey) return true;
+    const resolved = (await deps.useCases.get(useCaseKey).catch(() => null))
+      ?? (await deps.credentialUseCases.get(useCaseKey).catch(() => null));
+    if (!resolved) return true;
+    const useCaseMode: ResourceMode = resolved.sandbox ? "test" : "live";
+    if (modeAllows(keyMode, useCaseMode)) return true;
+    return wrongMode(
+      reply,
+      `a ${keyMode} API key may not be bound to the ${useCaseMode} use case '${useCaseKey}' — it would be refused on every call it could make`,
+      { keyMode, useCaseMode },
+    );
+  }
+
   app.post("/orgs/:id/api-keys", { schema: S.createApiKey, ...auth }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const { id } = request.params as { id: string };
-    const b = request.body as { name: string; role: Role; useCaseKey?: string; scopes: unknown; expiresAt?: string };
+    const b = request.body as { name: string; role: Role; useCaseKey?: string; scopes: unknown; expiresAt?: string; mode?: ResourceMode };
     if (!(await apiKeyScope(request, reply, id))) return;
     const scopes = validateScopes(b.scopes); // 400 INVALID_SCOPES on anything unknown
     const expiresAt = b.expiresAt ?? null;
     if (expiresAt !== null && !(Date.parse(expiresAt) > Date.now())) {
       return reply.code(400).send({ error: "INVALID_EXPIRY", message: "expiresAt must be a future timestamp" });
     }
+    // EN-D2 (D2-8). THE ENVIRONMENT THIS KEY ACTS IN, defaulting to live — the
+    // mode of every key minted before this feature and of every client that has
+    // not heard of the field, so no existing caller changes behaviour.
+    //
+    // The gate runs BEFORE `createOrgMember`, which is what makes a refusal
+    // leave nothing behind: the service user, its DID and its membership VC are
+    // all minted in there, and the rollback path below is deliberately partial
+    // (it cannot unwrite a hash-chained audit entry). A refusal that has to be
+    // rolled back is a refusal that leaves litter.
+    const keyMode: ResourceMode = b.mode ?? "live";
+    // "" is not a use-case binding, it is an empty string — normalized once,
+    // here, so the gate and the member path read the same value.
+    const boundUseCaseKey = b.useCaseKey || null;
+    if (!(await modeGateNewKey(reply, keyMode, boundUseCaseKey))) return reply;
     // The bound principal is an ordinary org member minted through the ordinary
     // member path — so canCreateOrgMember, the EN-A envelope filter and the EN-A
     // binding check all judge this key's authority at creation, and a key can
@@ -3355,12 +3420,17 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     }, "service");
     if (!made) return;
 
-    const minted = await mintSecret(API_KEY_BCRYPT_ROUNDS);
+    // ONE `mode`, read by the mint and by the row. The secret's marker and the
+    // stored column are checked against each other on every authenticated
+    // request (see `requirePrincipal`), so passing the mode to one of these two
+    // and not the other does not produce a mislabelled key — it produces a key
+    // that 401s forever.
+    const minted = await mintSecret(API_KEY_BCRYPT_ROUNDS, keyMode);
     let key: ApiKeyRecord;
     try {
       key = await deps.apiKeys.create({
         orgId: id, userId: made.user.id, name: b.name, prefix: minted.prefix, secretHash: minted.hash,
-        scopes, expiresAt, createdBy: claims.id,
+        scopes, expiresAt, createdBy: claims.id, mode: keyMode,
       });
     } catch (err) {
       // Partial rollback, and deliberately partial. Removing the user is what
@@ -3379,7 +3449,10 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     // logged, or returned by any read route — this response is its only life.
     await deps.audit.append({
       actorId: claims.id, action: "api-key-created" as LifecycleAction,
-      payload: { orgId: id, keyId: key.id, name: key.name, scopes: key.scopes, userId: made.user.id, role: b.role },
+      // `mode` belongs in the trail for the same reason it belongs in the view:
+      // "an API key was minted for this org" reads very differently depending
+      // on whether the credential can touch the real register.
+      payload: { orgId: id, keyId: key.id, name: key.name, scopes: key.scopes, userId: made.user.id, role: b.role, mode: key.mode },
     });
     return reply.code(201).send({ key: apiKeyView(key, made.user), secret: minted.secret });
   });
@@ -3398,7 +3471,16 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     if (!key) return;
     if (key.revokedAt !== null) return reply.code(409).send({ error: "KEY_REVOKED", message: "a revoked key cannot be rotated" });
 
-    const minted = await mintSecret(API_KEY_BCRYPT_ROUNDS);
+    // EN-D2 (D2-8). `key.mode`, NOT the default. Rotation replaces the secret
+    // and nothing else — the row's mode is untouched — so minting the new
+    // secret with the default would stamp a `tl_live_` marker on a row stored
+    // as `test`, and `requirePrincipal` refuses exactly that disagreement with
+    // a 401. The operator would be walked through the one-time-secret ceremony
+    // and handed a credential that is dead on its first call, with no error
+    // that names the cause. There is no way to CHANGE a key's environment here
+    // and there should not be: it would silently reclassify a credential
+    // already deployed in somebody's configuration.
+    const minted = await mintSecret(API_KEY_BCRYPT_ROUNDS, key.mode);
     const rotated = await deps.apiKeys.rotate(key.id, { prefix: minted.prefix, secretHash: minted.hash });
     // The cache is keyed to the row's secretHash, so the old entry could never
     // match the rotated row anyway; dropping BOTH prefixes is belt and braces.

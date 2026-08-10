@@ -451,13 +451,13 @@ export interface ApiKeyView {
    * EN-D2: which environment this key acts in. A `test` key acts only on
    * sandbox use cases and reads `tl_test_…`; a `live` one only on real ones.
    *
-   * OPTIONAL BECAUSE THE SERVER DOES NOT SEND IT YET. `ApiKey.mode` is
-   * persisted and the auth path checks a secret's marker against it, but
-   * `apiKeyView` (apps/api/src/http/routes.ts) does not project it and
-   * `POST /orgs/:id/api-keys` accepts no `mode` in its body — so every key this
-   * console can see or mint is a live one. Absent is read as `live`, which is
-   * exactly what the column's default says, and the day the route projects it
-   * the rows below start telling the truth without another change here.
+   * SENT ON EVERY KEY SINCE D2-8 — `apiKeyView` projects it and `ApiKeyView#`
+   * declares it, which are both required (fast-json-stringify strips whatever
+   * the schema does not name). Still OPTIONAL here, and only for the version
+   * skew this console cannot rule out: a browser tab left open across a deploy,
+   * or a build pointed at an older API. Absent is read as `live`, which is what
+   * the column's own default says, so the wrong guess is impossible rather than
+   * merely unlikely.
    */
   mode?: ResourceMode;
 }

@@ -13,22 +13,18 @@ import { Card, EmptyState, Pill, SectionHeader } from "./ui.js";
 /**
  * The marker map moved to `src/lib/modes.ts` (EN-D2, D2-7) so the console has
  * ONE place that knows how an environment is named, marked and coloured. This
- * alias keeps the reading sites below about the ORDINARY key, which is what
- * they mean: every key this console can mint today really is a live one.
+ * alias keeps the few reading sites below about the ORDINARY key, which is what
+ * they mean — the redaction placeholder and the "what a secret looks like"
+ * prose, neither of which is about a particular key.
  *
- * WHY IT IS STILL "EVERY KEY". `ApiKey.mode` is persisted and the auth path
- * checks a secret's marker against it, but no route sets it:
- * `POST /orgs/:id/api-keys` takes no `mode` in its body (its schema is
- * `additionalProperties: false`) and `apiKeyView` does not project the column,
- * so nothing here can mint a `tl_test_` key or know that it is looking at one.
- * The rows below therefore read the mode DEFENSIVELY — `k.mode ?? "live"` — so
- * they start telling the truth the day the route projects it, rather than
- * confidently labelling a sandbox key `tl_live_`.
+ * ANYTHING SHOWING A PARTICULAR KEY READS ITS OWN MODE (`keyModeOf`), because
+ * since D2-8 both environments are mintable here: `POST /orgs/:id/api-keys`
+ * takes `mode` and `apiKeyView` projects the column back.
  */
 const KEY_MARKER = KEY_MARKERS.live;
 
 /** The environment a key row is showing. Absent means live — the column's own
- *  default, and the only mode any route can currently produce. */
+ *  default, and the only reading that is safe against an older API. */
 function keyModeOf(k: Pick<ApiKeyView, "mode">): ResourceMode {
   return k.mode ?? "live";
 }
@@ -483,18 +479,17 @@ function ApiKeys({ orgId, org }: { orgId: string | null; org: Organization | nul
                         available for anything not already revoked.
                       */}
                       {/*
-                        …and NOT for a test key, for the same reason it is not
-                        offered for an expired one: the rotate route calls
-                        `mintSecret(rounds)` with the default mode, so it would
-                        stamp a `tl_live_` marker on a row whose stored mode is
-                        `test` — and the auth path refuses a secret whose marker
-                        disagrees with its row. The ceremony would hand over a
-                        credential that 401s on its very first call.
-                        UNREACHABLE TODAY (no route mints a test key and
-                        `ApiKeyView` carries no mode), which is exactly why it is
-                        gated here rather than left to be noticed later.
+                        …and it is offered for a TEST key on the same terms as a
+                        live one. D2-7 withheld it because the rotate route
+                        minted with the default mode — stamping a `tl_live_`
+                        marker on a row stored as `test`, which the auth path
+                        refuses, so the ceremony handed over a credential that
+                        401'd on its first call. D2-8 fixed the route to mint
+                        with `key.mode`, so rotation now preserves the
+                        environment and the withholding would only be a control
+                        that does nothing.
                       */}
-                      {canRotate(k.status) && keyModeOf(k) === "live" && (
+                      {canRotate(k.status) && (
                         <button
                           onClick={() => void rotate(k)}
                           disabled={busyId === k.id}
@@ -673,6 +668,23 @@ function CreateKey({ orgId, capabilities, onCreated }: {
   // No default role — see EMPTY_KEY_DRAFT above for why.
   const [role, setRole] = useState<Role | "">(EMPTY_KEY_DRAFT.role);
   const [useCaseKey, setUseCaseKey] = useState("");
+  /**
+   * The environment, and it is deliberately NOT part of `KeyDraft`.
+   *
+   * `checkKeyDraft` exists to stop a draft that CANNOT be sent — an empty name,
+   * an unchosen role, no scopes. There is no such state here: the control is
+   * two buttons, one of them is always pressed, and both values are always
+   * valid. Putting it on the check's ok arm would imply a narrowing that does
+   * not happen (the pattern `checkWebhookDraft` already declines for the same
+   * field, for the same reason).
+   *
+   * Defaulting to LIVE, unlike the role above, and the difference is real: a
+   * privileged default is one that grants authority nobody chose, and `test`
+   * grants strictly LESS than `live`. Live is also the server's own default and
+   * the mode of every key that already exists. What matters is that the choice
+   * is visible before the secret is minted, which is what the picker buys.
+   */
+  const [mode, setMode] = useState<ResourceMode>("live");
   const [scopes, setScopes] = useState<ApiScope[]>([...EMPTY_KEY_DRAFT.scopes]);
   const [expiry, setExpiry] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -700,6 +712,7 @@ function CreateKey({ orgId, capabilities, onCreated }: {
         useCaseKey: useCaseKey.trim() || undefined,
         scopes,
         expiresAt,
+        mode,
       });
       // Hand the secret straight to the panel and keep NO copy here: this form
       // is about to be unmounted, and the secret must not outlive the handoff.
@@ -715,20 +728,48 @@ function CreateKey({ orgId, capabilities, onCreated }: {
     <form onSubmit={submit} className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 space-y-4">
       <h2 className="font-semibold text-slate-900">Create an API key</h2>
       {/*
-        NO ENVIRONMENT PICKER, and that is a statement about the API rather than
-        a choice about the form. `POST /orgs/:id/api-keys` accepts no `mode` (its
-        body schema is `additionalProperties: false`, so one sent anyway is
-        dropped, not refused), and `apiKeyView` does not return the column — so a
-        picker here would collect a choice, discard it silently, and label the
-        resulting live key as a sandbox one. Saying so is the honest version.
+        THE ENVIRONMENT, and it is the first control on the form rather than the
+        last. Everything below it — the role, the use case, the scopes — is
+        about what the key may do; this decides WHICH WORLD it does it in, and
+        it is the one choice that cannot be corrected afterwards (there is no
+        route that moves a key between environments, by design: doing so would
+        silently reclassify a credential already sitting in somebody's config).
       */}
-      <div className="rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-600 px-3 py-2">
-        This mints a <strong className="font-semibold text-slate-800">{modeLabel("live")}</strong> key — a{" "}
-        <span className="font-mono">{KEY_MARKERS.live}…</span> secret that acts on real use cases only. Sandbox keys
-        (<span className="font-mono">{KEY_MARKERS.test}…</span>) are not mintable from this console yet: the create route takes
-        no environment. To exercise a sandbox use case in the meantime, drive it from a signed-in session — a human session has
-        no mode and may act on both environments.
-      </div>
+      <fieldset>
+        <legend className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1.5">Environment</legend>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {(["live", "test"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              aria-pressed={mode === m}
+              onClick={() => setMode(m)}
+              className={`text-left rounded-xl border p-3 transition ${
+                mode === m
+                  ? m === "test"
+                    ? "border-amber-500 bg-amber-50/60 shadow-sm"
+                    : "border-brand-500 bg-brand-50/40 shadow-sm"
+                  : "border-slate-200 hover:border-brand-300"
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-semibold text-slate-800">{modeLabel(m)}</span>
+                <Pill tone={modeTone(m)}>{modeLabel(m)}</Pill>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                A <span className="font-mono">{KEY_MARKERS[m]}…</span> secret,{" "}
+                {m === "test" ? "acting only on sandbox use cases." : "acting only on real use cases."}
+              </p>
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-slate-500 mt-2">
+          The two never cross: a key is refused <span className="font-mono">403 WRONG_MODE</span> on anything in the other
+          environment. <strong className="font-semibold text-slate-700">Fixed at creation</strong> — rotation keeps it, and
+          nothing moves a key between environments. If you name a use case below it must live in this environment, or the
+          create call is refused rather than handing you a key that works nowhere.
+        </p>
+      </fieldset>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label className="block text-xs font-medium text-slate-500 mb-1">Name</label>
