@@ -20,7 +20,8 @@
 - **Run api tests:** `cd apps/api && ./node_modules/.bin/vitest run test/<file> --testTimeout=180000`
 - **Run web tests:** `cd apps/web && ./node_modules/.bin/vitest run test/<file>`
 - **Typecheck:** `npx tsc --noEmit -p apps/api` and `npx tsc --noEmit -p apps/web` from the repo root. **`npm run build` in `apps/web` is `vite build` and does NOT typecheck** — running only the build is how two blank checkboxes shipped on 2026-08-10.
-- **Never edit an existing test.** The current suites are the back-compatibility oracle. If one fails, the change is wrong.
+- **Never edit an existing test** — meaning never weaken or delete an assertion. The current suites are the back-compatibility oracle; if one fails, the change is wrong.
+  **One exception, and it is the mechanism working as designed:** the coverage tests (`scope-coverage`, `openapi-contract`, `mode-coverage`) carry allowlists — `DELIBERATELY_UNSCOPED`, `DOCUMENTATION_DEFERRED`, `MODE_EXEMPT` — whose own failure messages instruct you to add a row with a written reason, and each has a companion staleness check that deletes the row the day it stops being true. Adding one justified row is answering the gate, not dodging it. Say so in your report; never add one silently.
 - **THE PARITY RULE does not apply here** — nothing in this project adds a persisted column. `CertificateConfig` is stored as JSON inside the existing `CredentialUseCase.credentialTypes` blob, so there is no Prisma migration and no memory/prisma mapper to keep in step. Do not add one.
 - **THE ADDITIVITY RULE does apply** — `fast-json-stringify` silently strips undeclared response fields. You may ADD `properties` to a response schema; never remove `additionalProperties: true` and never narrow one.
 
