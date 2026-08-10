@@ -1241,6 +1241,26 @@ export const S: Record<string, FastifySchema> = {
       ...errs(401, 404),
     },
   },
+  previewCertificate: {
+    tags: ["Credential Use Cases"], summary: "Render a draft certificate design as a PDF", security: eitherCredential,
+    description:
+      "Requires the `usecases:provision` scope: this is a configuration-authoring act, and the body is a DRAFT " +
+      "credential type — you are designing before the use case is saved, so nothing is read from storage except the " +
+      "background artwork it names. The rendered PDF is stamped **SAMPLE — NOT A CREDENTIAL** on the diagonal, " +
+      "always: it renders arbitrary caller-supplied claims through the same code that renders real certificates, " +
+      "and without the stamp it would be a certificate generator for made-up facts.",
+    body: {
+      type: "object", additionalProperties: false, required: ["credentialType"],
+      properties: {
+        credentialType: { type: "object", additionalProperties: true, description: "A full CredentialTypeSpec, `certificate` included." },
+        sampleClaims: { type: "object", additionalProperties: true, description: "Values to print. Missing claims fall back to a humanized key so every placement is still visible." },
+      },
+    },
+    // The 200 is opaque PDF bytes, so there is no field to name — the same
+    // shape `credentialCertificate` already uses. `openapi-contract.test.ts`
+    // records the deferral for both.
+    response: { ...errs(400, 401, 403) },
+  },
   provisionUseCase: {
     tags: ["Credential Use Cases"], summary: "One-step enterprise provisioning from a template: ensure the issuer org, instantiate the bound credential use case, and optionally create scoped desk users (PlatformAdmin; OrgAdmin scoped to their own org)", security: eitherCredential,
     description:

@@ -404,6 +404,10 @@ const INTEGRATION_SURFACE = new Set([
 /** Integration-surface routes whose response is deliberately not enumerated. */
 const DOCUMENTATION_DEFERRED: Record<string, string> = {
   "GET /credentials/:id/certificate.pdf": "returns opaque PDF bytes, not a JSON object",
+  // EN-F's designer preview. Same answer as the route above and for the same
+  // reason: the 200 is a rendered PDF. Declaring a JSON 2xx here would be a
+  // false statement about the response, not a more complete one.
+  "POST /credential-use-cases/preview-certificate": "returns opaque PDF bytes, not a JSON object",
   // A MAP keyed by credential-type NAME, so its keys are data rather than a
   // fixed field set — there is nothing to put in `properties`. Enumerating
   // today's built-in keys would pin a core constant into the response schema
