@@ -228,12 +228,22 @@ export function instantiateTemplate(
           return out || undefined;
         };
         const claimOrder = src.claimOrder?.filter((k) => k in properties);
+        // EN-F: `placements` travel, `background` NEVER does. Templates are
+        // listable by any authenticated user and documents are readable by
+        // role rather than by org, so shipping one tenant's artwork id inside a
+        // template hands another tenant a pixel-exact impersonation of their
+        // certificates — on a public, unauthenticated render route. The layout
+        // is the reusable part; the letterhead is not.
+        const placements = src.placements?.filter(
+          (p) => !p.field.startsWith("claim:") || p.field.slice("claim:".length) in properties,
+        );
         certificate = {
           enabled: src.enabled,
           heading: interpOrUndef(src.heading),
           subheading: interpOrUndef(src.subheading),
           claimOrder: claimOrder?.length ? claimOrder : undefined,
           logoDocumentId: src.logoDocumentId,
+          ...(placements?.length ? { placements } : {}),
         };
       }
       return {

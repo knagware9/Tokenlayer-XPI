@@ -6,6 +6,7 @@
 import { PolicyError } from "./errors.js";
 import type { MetadataSchema, OrgType } from "./types.js";
 import { validateMetadataSchema } from "./validation.js";
+import { validateCertificatePlacements, type CertificateFieldPlacement } from "./certificate-fields.js";
 
 export interface CredentialTypeSpec {
   /** Machine name, unique within the use case, e.g. "MCACredential". */
@@ -34,6 +35,16 @@ export interface CertificateConfig {
   claimOrder?: string[];
   /** Optional logo/seal image, referencing a stored Document id. */
   logoDocumentId?: string;
+  /**
+   * EN-F. Full-page artwork, referencing a stored image Document. Its PRESENCE
+   * selects the renderer: with it, the built-in layout is replaced entirely and
+   * only `placements` are drawn; without it, nothing about the existing
+   * certificate changes.
+   */
+  background?: { documentId: string };
+  /** EN-F. Where each field prints on the artwork. Inert without `background`,
+   *  which is exactly the state a template instantiation lands in. */
+  placements?: CertificateFieldPlacement[];
 }
 
 export type IssuerBinding = { kind: "platform" } | { kind: "org"; orgId: string };
@@ -124,6 +135,13 @@ export function validateCredentialUseCase(
         for (const k of cert.claimOrder)
           if (!(k in ct.claimSchema.properties)) fail(`credential type '${ct.name}' certificate.claimOrder references unknown claim '${k}'`);
       }
+      if (cert.background !== undefined) {
+        if (!cert.background || typeof cert.background !== "object" || typeof cert.background.documentId !== "string" || !cert.background.documentId.trim())
+          fail(`credential type '${ct.name}' certificate.background.documentId must be a non-empty string`);
+      }
+      // Throws INVALID_CERTIFICATE_PLACEMENT — a distinct code from this
+      // function's INVALID_USECASE, so a 400 tells the designer which chip.
+      validateCertificatePlacements(cert.placements, Object.keys(ct.claimSchema.properties), ct.name);
     }
   }
   if (def.holderAcceptance !== undefined && typeof def.holderAcceptance !== "boolean")
