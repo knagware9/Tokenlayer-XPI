@@ -51,12 +51,12 @@ Append to `packages/core/test/certificate-config.test.ts` (inside the existing `
   it("accepts a background with a 64-char lowercase hex sha256 pin", () => {
     expect(() => validateCredentialUseCase(def({
       enabled: true,
-      background: { documentId: "doc_1", sha256: "a".repeat(64) },
+      background: { documentId: "doc_1", sha256: "0x" + "a".repeat(64) },
     }), ctx)).not.toThrow();
   });
 
   it("rejects a malformed sha256 — too short, uppercase, or not hex", () => {
-    for (const bad of ["abc", "A".repeat(64), "z".repeat(64), 7]) {
+    for (const bad of ["abc", "a".repeat(64), "0x" + "A".repeat(64), "0x" + "z".repeat(64), "0x" + "a".repeat(65), " 0x" + "a".repeat(64), null, 7]) {
       expect(() => validateCredentialUseCase(def({
         enabled: true, background: { documentId: "doc_1", sha256: bad },
       }), ctx)).toThrow(/background\.sha256/);
@@ -124,7 +124,7 @@ In `packages/core/src/credential-use-cases.ts`, replace the `cert.background` bl
         // produces in the document store. A pin in any other shape can never
         // match a stored digest, so accepting it would store a check that
         // always fails at the door which enforces it.
-        if (cert.background.sha256 !== undefined && (typeof cert.background.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(cert.background.sha256)))
+        if (cert.background.sha256 !== undefined && (typeof cert.background.sha256 !== "string" || !isDocumentSha256(cert.background.sha256)))
           fail(`credential type '${ct.name}' certificate.background.sha256 must be a 64-character lowercase hex digest`);
       }
 ```
@@ -135,7 +135,7 @@ In `packages/core/src/use-case-templates.ts`, replace lines 148–149:
     if (cert.background !== undefined && (typeof cert.background !== "object" || cert.background === null || typeof cert.background.documentId !== "string"))
       fail(`credential type '${ct.name}' certificate.background.documentId must be a string`);
     // Both doors, same rule — the reason this file validates placements at all.
-    if (cert.background?.sha256 !== undefined && (typeof cert.background.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(cert.background.sha256)))
+    if (cert.background?.sha256 !== undefined && (typeof cert.background.sha256 !== "string" || !isDocumentSha256(cert.background.sha256)))
       fail(`credential type '${ct.name}' certificate.background.sha256 must be a 64-character lowercase hex digest`);
 ```
 
@@ -251,7 +251,7 @@ describe("a supplied background sha256 is verified at every writing door", () =>
         credentialTypes: [{
           name: "C", title: "C", validityDays: 365, requiredApprovals: 1,
           claimSchema: { type: "object", required: ["fullName"], properties: { fullName: { type: "string" } } },
-          certificate: { enabled: true, background: { documentId: doc.id, sha256: "b".repeat(64) } },
+          certificate: { enabled: true, background: { documentId: doc.id, sha256: "0x" + "b".repeat(64) } },
         }],
         issuer: { kind: "platform" }, holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
       },
@@ -308,7 +308,7 @@ describe("a supplied background sha256 is verified at every writing door", () =>
         credentialType: {
           name: "C", title: "C", validityDays: 365, requiredApprovals: 1,
           claimSchema: { type: "object", required: ["fullName"], properties: { fullName: { type: "string" } } },
-          certificate: { enabled: true, background: { documentId: doc.id, sha256: "c".repeat(64) }, placements: [] },
+          certificate: { enabled: true, background: { documentId: doc.id, sha256: "0x" + "c".repeat(64) }, placements: [] },
         },
       },
     });
@@ -580,10 +580,10 @@ describe("PATCH /credential-use-cases/:key/certificate", () => {
     expect(noPin.statusCode).toBe(400);
     expect(noPin.json().error).toBe("BACKGROUND_PIN_REQUIRED");
 
-    const wrongPin = await design(w, w.orgAdmin, { credentialType: "CourseCompletion", background: { documentId: doc.id, sha256: "d".repeat(64) } });
+    const wrongPin = await design(w, w.orgAdmin, { credentialType: "CourseCompletion", background: { documentId: doc.id, sha256: "0x" + "d".repeat(64) } });
     expect(wrongPin.json().error).toBe("BACKGROUND_DOCUMENT_MISMATCH");
 
-    const missing = await design(w, w.orgAdmin, { credentialType: "CourseCompletion", background: { documentId: "doc_nope", sha256: "e".repeat(64) } });
+    const missing = await design(w, w.orgAdmin, { credentialType: "CourseCompletion", background: { documentId: "doc_nope", sha256: "0x" + "e".repeat(64) } });
     expect(missing.json().error).toBe("BACKGROUND_DOCUMENT_NOT_FOUND");
 
     const notImage = await design(w, w.orgAdmin, { credentialType: "CourseCompletion", background: { documentId: text.id, sha256: text.sha256 } });
@@ -918,7 +918,7 @@ describe("POST /credential-use-cases/:key/certificate/artwork", () => {
     expect(res.statusCode).toBe(201);
     const body = res.json() as { documentId: string; sha256: string; size: number };
     expect(body.documentId).toBeTruthy();
-    expect(body.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(body.sha256).toMatch(/^0x[0-9a-f]{64}$/);
 
     // And what it returns is directly usable as the pin.
     const set = await design(w, w.orgAdmin, {

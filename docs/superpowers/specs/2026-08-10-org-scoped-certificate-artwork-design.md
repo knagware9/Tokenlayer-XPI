@@ -166,8 +166,10 @@ makes that materially worse, so the binding is tightened as part of this work.
 
 **Core.** `background?: { documentId: string; sha256?: string }`. `sha256` stays
 optional so every record written by EN-F remains valid; when present it must
-match `/^[0-9a-f]{64}$/` (the store's `createHash("sha256").digest("hex")`
-casing). Enforced in `validateCredentialUseCaseDefinition` and in
+match `/^0x[0-9a-f]{64}$/` — the shape the document store actually writes
+(`"0x" + createHash("sha256").digest("hex")`, see `DocumentRepository.create`),
+exposed as `isDocumentSha256` in core so the API doors reuse it rather than
+re-typing the regex. Enforced in `validateCredentialUseCaseDefinition` and in
 `validateTemplate`, so both doors agree.
 
 **API.** One helper, two strictnesses:
