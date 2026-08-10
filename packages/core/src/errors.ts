@@ -12,6 +12,9 @@ export type PolicyErrorCode =
   // handler, the designer UI) branch on the code rather than sniffing the
   // message.
   | "INVALID_CERTIFICATE_PLACEMENT"
+  // EN-E: distinct from INVALID_METADATA — a 400 can name the field
+  // ("brandAccent") instead of a caller having to sniff the message.
+  | "INVALID_BRAND_ACCENT"
   | "INVALID_TERMS"
   | "CHAIN_NOT_ALLOWED"
   | "USE_CASE_NOT_DEPLOYED_ON_CHAIN"
