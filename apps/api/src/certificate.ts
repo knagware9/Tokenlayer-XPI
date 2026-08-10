@@ -1,5 +1,6 @@
 import PDFDocument from "pdfkit";
 import QRCode from "qrcode";
+import { certificateSubjectName } from "./certificate-fields.js";
 import type { CredentialRecord } from "./persistence/types.js";
 import type { CredentialTypeSpec } from "@tokenlayer/core";
 
@@ -56,7 +57,7 @@ export async function renderCredentialCertificate(input: RenderCertificateInput)
   doc.fontSize(22).font("Helvetica-Bold").fillColor("#0f172a").text(heading, { align: "center" });
   if (cert?.subheading?.trim()) doc.moveDown(0.2).fontSize(12).font("Helvetica").text(cert.subheading.trim(), { align: "center" });
   doc.moveDown(1).fontSize(11).font("Helvetica").fillColor("#334155").text("This certifies that", { align: "center" });
-  const subjectName = (typeof claims.fullName === "string" && claims.fullName) || (typeof claims.legalName === "string" && claims.legalName) || (typeof claims.holderName === "string" && claims.holderName) || c.holderDid;
+  const subjectName = certificateSubjectName(c);
   doc.moveDown(0.3).fontSize(16).font("Helvetica-Bold").fillColor("#0f172a").text(String(subjectName), { align: "center" });
   doc.moveDown(1);
 
