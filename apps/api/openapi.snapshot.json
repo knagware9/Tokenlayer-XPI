@@ -217,6 +217,7 @@
       "error",
       "id",
       "kind",
+      "orgId",
       "payload",
       "proposerId",
       "proposerLabel",
