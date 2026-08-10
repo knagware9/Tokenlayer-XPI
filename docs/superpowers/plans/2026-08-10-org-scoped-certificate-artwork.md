@@ -1139,6 +1139,12 @@ In `apps/api/src/http/routes.ts`, immediately after the `PATCH …/certificate` 
 
 In `apps/api/src/http/schemas.ts`, after `updateCertificateDesign`:
 
+**First, restore the two forward references Task 3 had to remove or soften**, now that this route exists:
+
+- In `S.updateCertificateDesign`'s description, put back the sentence pointing at `POST /credential-use-cases/{key}/certificate/artwork` as the source of the `sha256`. Task 3 dropped it because `openapi-contract.test.ts` refuses a description naming a path the API does not serve.
+- In `checkBackgroundDocument`'s `BACKGROUND_PIN_MALFORMED` message (`apps/api/src/http/routes.ts`), the same path is already named. Confirm it is now accurate rather than aspirational.
+
+
 ```ts
   uploadCertificateArtwork: {
     tags: ["Credential Use Cases"], summary: "Upload certificate artwork for a credential use case your organization owns", security: eitherCredential,
