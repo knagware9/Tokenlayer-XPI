@@ -13,6 +13,17 @@ export const API_SCOPES = [
   "credentials:read",
   "credentials:issue",
   "credentials:revoke",
+  // DISCLOSURE, and deliberately not a read. Consenting to a verification
+  // request decrypts the holder's custodial signing key, signs a Verifiable
+  // Presentation as them, and hands the selected credentials' CONTENTS to a
+  // third-party verifier. That is an act performed AS the holder, and it is
+  // irreversible — the disclosure cannot be recalled. A key granted "may read
+  // credentials" (for a dashboard, an expiry sweep, a reconciliation job) must
+  // not be able to do it, which is what gating consent on `credentials:read`
+  // meant. Separate from `credentials:issue` too: issuing speaks for the
+  // ISSUER, presenting speaks for the HOLDER, and no principal should get one
+  // by asking for the other.
+  "credentials:present",
   "verifications:read",
   "verifications:request",
   "verifications:verify",

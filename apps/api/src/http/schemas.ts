@@ -2691,8 +2691,11 @@ export const S: Record<string, FastifySchema> = {
   consentVerificationRequest: {
     tags: ["Verification"], summary: "Holder consents, selecting credentials to disclose", security: eitherCredential,
     description:
-      "Requires the `credentials:read` scope, not a verification scope: the holder is choosing which of their OWN " +
-      "credentials to disclose, so it is gated as a read of those credentials.",
+      "Requires the `credentials:present` scope — a DISCLOSURE scope of its own, not `credentials:read` and not a " +
+      "verification scope. This route decrypts the holder's custodial signing key, signs a Verifiable Presentation " +
+      "as them, and releases the selected credentials' contents to the verifier; the disclosure cannot be recalled. " +
+      "A key that may merely read credentials must not be able to perform it, and `verifications:*` describes the " +
+      "VERIFIER's side of the exchange rather than the holder's.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: { type: "object", additionalProperties: false, required: ["credentialIds"], properties: { credentialIds: { type: "array", items: { type: "string" }, minItems: 1 } } },
     // The request, now `consented`. The signed presentation itself is NOT

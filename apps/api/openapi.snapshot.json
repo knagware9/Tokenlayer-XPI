@@ -3336,7 +3336,7 @@
           ]
         ],
         "scopes": [
-          "credentials:read"
+          "credentials:present"
         ],
         "parameters": [
           "path:id!"

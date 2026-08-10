@@ -48,6 +48,7 @@ const SCOPE_DESCRIPTIONS: Record<ApiScope, string> = {
   "credentials:read": "Read issued credentials and their status.",
   "credentials:issue": "Issue new credentials to holders.",
   "credentials:revoke": "Revoke credentials this organization issued.",
+  "credentials:present": "Consent to a verification request — sign and disclose held credentials.",
   "verifications:read": "Read verification requests and their outcomes.",
   "verifications:request": "Ask a holder to present credentials.",
   "verifications:verify": "Run a verification and read its result.",
