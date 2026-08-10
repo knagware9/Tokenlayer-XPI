@@ -1261,6 +1261,40 @@ export const S: Record<string, FastifySchema> = {
     // records the deferral for both.
     response: { ...errs(400, 401, 403) },
   },
+  updateCertificateDesign: {
+    tags: ["Credential Use Cases"], summary: "Set certificate artwork and field placements on a credential use case your organization owns", security: eitherCredential,
+    description:
+      "Requires the `usecases:provision` scope **and** a PlatformAdmin or an OrgAdmin whose organization OWNS this " +
+      "credential use case (`ownerOrgId`). The narrow, org-facing counterpart of `PATCH /credential-use-cases/{key}`: " +
+      "it writes `certificate.background` and `certificate.placements` on ONE named credential type and nothing " +
+      "else — every other field of the definition is read from storage, so sending them changes nothing. Omit a " +
+      "field to leave it unchanged; send `background: null` to drop the artwork (reverting to the built-in layout) " +
+      "or `placements: []` to clear the layout. `background` must carry the artwork's `sha256` — the digest the " +
+      "document store recorded for those exact bytes — and the document must be a PNG or JPEG: a `documentId` " +
+      "alone is a guessable reference. Answers **400** `BACKGROUND_PIN_REQUIRED`, `BACKGROUND_DOCUMENT_NOT_FOUND`, " +
+      "`BACKGROUND_DOCUMENT_MISMATCH`, `BACKGROUND_NOT_AN_IMAGE` or `INVALID_CERTIFICATE_PLACEMENT` (which names the " +
+      "offending placement index).",
+    params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
+    body: {
+      type: "object", additionalProperties: true, required: ["credentialType"],
+      properties: {
+        credentialType: { type: "string", description: "Name of the credential type within this use case." },
+        background: {
+          // `sha256` is REQUIRED, but by the handler and not by this schema: the
+          // pin check lives in `checkBackgroundDocument(…, { requirePin: true })`
+          // so a pin-less background answers the coded `BACKGROUND_PIN_REQUIRED`
+          // this route's own description promises. Listing it here instead would
+          // answer the generic `VALIDATION_ERROR` before the handler ever ran,
+          // making that documented code unreachable and `requirePin` dead.
+          type: ["object", "null"], additionalProperties: false, required: ["documentId"],
+          properties: { documentId: { type: "string" }, sha256: { type: "string" } },
+          description: "The stored artwork document and its digest. `sha256` is required — a bare `documentId` answers `BACKGROUND_PIN_REQUIRED`. `null` clears the artwork.",
+        },
+        placements: { type: "array", items: { type: "object", additionalProperties: true }, description: "Where each field prints, in 0–1 fractions of the page." },
+      },
+    },
+    response: { 200: { $ref: "CredentialUseCase#" }, ...errs(400, 401, 403, 404) },
+  },
   provisionUseCase: {
     tags: ["Credential Use Cases"], summary: "One-step enterprise provisioning from a template: ensure the issuer org, instantiate the bound credential use case, and optionally create scoped desk users (PlatformAdmin; OrgAdmin scoped to their own org)", security: eitherCredential,
     description:

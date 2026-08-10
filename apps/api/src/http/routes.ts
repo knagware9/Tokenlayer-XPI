@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ApiKeyRecord, AssetRecord, CashflowRecord, CompanyProfile, CredentialRecord, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord, WebhookEndpointRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, certificatePageSize, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, isDocumentSha256, issueCredential, issuerBindingAllows, modeAllows, normalizeUseCaseDefinition, ORG_OPERATING_ROLES, orgDomainEnabled, orgRoleEnabled, PolicyError, presentCredential, presentCredentials, SANDBOX_CHAIN_ID, sandboxChainsValid, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateCertificatePlacements, validateCredentialUseCase, validateEventTypes, validateMetadata, scopeAllows, validateOrgCapabilities, validateScopes, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ApiScope, type ChainEntry, type CredentialTypeSpec, type CredentialUseCaseDefinition, type LifecycleAction, type OrgDomain, type OrgOperatingRole, type OrgType, type ResourceMode, type Role, type UseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
+import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, certificatePageSize, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, isDocumentSha256, issueCredential, issuerBindingAllows, modeAllows, normalizeUseCaseDefinition, ORG_OPERATING_ROLES, orgDomainEnabled, orgRoleEnabled, PolicyError, presentCredential, presentCredentials, SANDBOX_CHAIN_ID, sandboxChainsValid, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateCertificatePlacements, validateCredentialUseCase, validateEventTypes, validateMetadata, scopeAllows, validateOrgCapabilities, validateScopes, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ApiScope, type CertificateFieldPlacement, type ChainEntry, type CredentialTypeSpec, type CredentialUseCaseDefinition, type LifecycleAction, type OrgDomain, type OrgOperatingRole, type OrgType, type ResourceMode, type Role, type UseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
 import qrcode from "qrcode";
 import type { AppDeps } from "../context.js";
 import { certificateStatusBanner, humanizeKey, renderCredentialCertificate } from "../certificate.js";
@@ -1405,6 +1405,132 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       .header("x-content-type-options", "nosniff")
       .header("content-disposition", 'inline; filename="certificate-preview.pdf"')
       .send(pdf);
+  });
+
+  /**
+   * The credential use case a caller may DESIGN CERTIFICATES for, or null when
+   * it has already been refused (this helper replies, so a caller that forgets
+   * to act on the null cannot leak a second reply).
+   *
+   * THREE CHECKS, AND EACH ONE HAS BEEN THE MISSING ONE SOMEWHERE IN THIS FILE.
+   *
+   * 1. THE ROLE. `authScoped` composes `requireScope`, which short-circuits on
+   *    `if (!key) return` — scopes are a property of API KEYS, so a human JWT
+   *    session passes it unconditionally. Without an explicit role predicate
+   *    these routes would be open to every authenticated user, which is exactly
+   *    what the EN-F final review proved on `preview-certificate` by walking a
+   *    seeded tokenization Buyer through it.
+   *
+   * 2. THE MODE. `modeGate` against the STORED record, so a `tl_test_` key
+   *    cannot edit a live programme's certificates and vice versa.
+   *
+   * 3. THE OWNER, guarded on `claims.orgId` FIRST. A legacy or platform-owned
+   *    record carries `ownerOrgId: null` and a caller without an org carries
+   *    `orgId: undefined`/`null`; written as a bare `===` those two answer
+   *    "owned by me" for a use case nobody owns. Null-as-allow is the shape
+   *    EN-B, EN-D2 and EN-F each produced once, so the emptiness check comes
+   *    before the comparison rather than being implied by it.
+   */
+  async function ownedCredentialUseCase(
+    request: FastifyRequest, reply: FastifyReply, key: string,
+  ): Promise<CredentialUseCaseDefinition | null> {
+    const claims = request.user as TokenClaims;
+    if (claims.role !== "PlatformAdmin" && claims.role !== "OrgAdmin") {
+      await reply.code(403).send({ error: "FORBIDDEN", message: "only a platform admin or org admin may design certificates" });
+      return null;
+    }
+    const existing = await deps.credentialUseCases.get(key);
+    if (!existing) { notFound(reply, "credential use case not found"); return null; }
+    if (!modeGate(request, reply, existing)) return null;
+    if (claims.role !== "PlatformAdmin") {
+      const orgId = typeof claims.orgId === "string" ? claims.orgId.trim() : "";
+      if (!orgId || existing.ownerOrgId !== orgId) {
+        await reply.code(403).send({ error: "FORBIDDEN", message: `credential use case '${key}' is owned by another organization` });
+        return null;
+      }
+    }
+    return existing;
+  }
+
+  /**
+   * EN-F follow-up: THE ORG'S OWN DOOR ONTO ITS OWN CERTIFICATE DESIGN.
+   *
+   * EN-F shipped the designer and left `background` writable only through
+   * `POST`/`PATCH /credential-use-cases`, both PlatformAdmin-only — while the
+   * org self-service path (`provision`) instantiates a template, which drops
+   * artwork on purpose. So "let an issuing organization upload their own
+   * certificate artwork" was delivered as "the platform operator does it for
+   * them". This is the missing door, and it is deliberately NOT the definition
+   * PATCH opened up: issuer binding, holder policy and claim schemas stay
+   * platform-governed.
+   *
+   * THE DEFINITION WRITTEN IS THE STORED ONE. Only
+   * `credentialTypes[i].certificate.{background,placements}` is taken from the
+   * body; `key`, `sandbox`, `ownerOrgId` and every binding are read back from
+   * storage, so an extra field in the request is inert rather than trusted.
+   *
+   * Absent means UNCHANGED and explicit means CLEAR — `background: null` drops
+   * the artwork (reverting to the built-in layout) and `placements: []` empties
+   * the layout. Without the distinction there is no way to remove artwork here,
+   * and reverting is a thing an org legitimately wants.
+   */
+  app.patch("/credential-use-cases/:key/certificate", { schema: S.updateCertificateDesign, ...authScoped("usecases:provision") }, async (request, reply) => {
+    const key = (request.params as { key: string }).key;
+    const existing = await ownedCredentialUseCase(request, reply, key);
+    if (!existing) return reply;
+    const b = request.body as {
+      credentialType: string;
+      background?: { documentId: string; sha256?: string } | null;
+      placements?: unknown;
+    };
+    const index = existing.credentialTypes.findIndex((t) => t.name === b.credentialType);
+    if (index < 0) return notFound(reply, `unknown credential type '${b.credentialType}' in use case '${key}'`);
+    const type = existing.credentialTypes[index] as CredentialTypeSpec;
+
+    if (b.placements !== undefined) {
+      // The same validator both existing doors call, so a design that saves
+      // here cannot be one the definition PATCH would have refused.
+      try {
+        validateCertificatePlacements(b.placements, Object.keys(type.claimSchema.properties), type.name);
+      } catch (err) {
+        return reply.code(400).send({ error: "INVALID_CERTIFICATE_PLACEMENT", message: (err as Error).message });
+      }
+    }
+    if (b.background) {
+      const problem = await checkBackgroundDocument(b.background, { requirePin: true });
+      if (problem) return reply.code(400).send(problem);
+    }
+
+    // `enabled` is preserved when a block exists and never toggled here. With
+    // NO block, one is created enabled: the render route requires
+    // `enabled === true`, an OrgAdmin cannot set it any other way, and refusing
+    // would rebuild the dead end this route exists to remove.
+    const current = type.certificate;
+    const certificate = {
+      ...(current ?? { enabled: true }),
+      ...(b.background === undefined ? {} : b.background === null ? { background: undefined } : { background: b.background }),
+      ...(b.placements === undefined ? {} : { placements: b.placements as CertificateFieldPlacement[] }),
+    };
+    if (certificate.background === undefined) delete (certificate as { background?: unknown }).background;
+
+    const credentialTypes = existing.credentialTypes.map((t, i) => (i === index ? { ...t, certificate } : t));
+    const def: CredentialUseCaseDefinition = { ...existing, credentialTypes };
+    // The second door, unchanged: a narrow route that skipped the whole-
+    // definition validator would be a cheaper way into the store than the front
+    // one.
+    const known = await referencedOrgs(def);
+    try {
+      validateCredentialUseCase(def, { orgExists: (id) => known.has(id) });
+    } catch (err) {
+      return reply.code(400).send({ error: "INVALID_CREDENTIAL_USECASE", message: (err as Error).message });
+    }
+    const updated = await deps.credentialUseCases.update(key, def);
+    await deps.audit.append({
+      actorId: (request.user as TokenClaims).id,
+      action: "credential-usecase-updated" as LifecycleAction,
+      payload: { key, credentialType: type.name, certificateDesign: true },
+    });
+    return reply.code(200).send(updated);
   });
 
   // Validate + create a credential use case from a fully-bound definition, reusing

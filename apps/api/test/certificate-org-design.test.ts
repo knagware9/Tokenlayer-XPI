@@ -59,6 +59,22 @@ async function storeDoc(h: TestAppHandle, contentType: string, b64: string): Pro
   return { id: d.id, sha256: d.sha256 };
 }
 
+/** An org-scoped API key of the given mode, bound to a service OrgAdmin. */
+async function orgKey(h: TestAppHandle, orgId: string, scopes: string[], mode: "live" | "test" = "live"): Promise<string> {
+  const tag = Math.random().toString(36).slice(2, 10);
+  const svc = await h.users.create({
+    email: `svc-design-${tag}@tokenlayer.dev`, passwordHash: bcrypt.hashSync(`unguessable-${tag}`, TEST_ROUNDS),
+    role: "OrgAdmin", useCaseKey: null, accountId: null, active: true, kycStatus: "approved",
+    kyc: null, orgId, kind: "service",
+  });
+  const minted = await mintSecret(TEST_ROUNDS, mode);
+  await h.apiKeys.create({
+    orgId, userId: svc.id, name: `key ${tag}`, prefix: minted.prefix, secretHash: minted.hash,
+    scopes, expiresAt: null, createdBy: "test", mode,
+  });
+  return minted.secret;
+}
+
 describe("a supplied background sha256 is verified at every writing door", () => {
   it("POST /credential-use-cases refuses a background whose pin does not match the stored bytes", async () => {
     const w = await world();
@@ -189,5 +205,232 @@ describe("a supplied background sha256 is verified at every writing door", () =>
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe("BACKGROUND_DOCUMENT_MISMATCH");
+  });
+});
+
+const design = (w: World, token: string, payload: unknown) =>
+  w.h.app.inject({ method: "PATCH", url: `${V1}/credential-use-cases/${w.key}/certificate`, headers: auth(token), payload });
+
+const readBack = async (w: World) => {
+  const res = await w.h.app.inject({ method: "GET", url: `${V1}/credential-use-cases/${w.key}`, headers: auth(w.platform) });
+  return res.json() as { credentialTypes: Array<{ name: string; certificate?: Record<string, unknown> }>; ownerOrgId?: string | null; issuer: { kind: string; orgId?: string }; sandbox?: boolean };
+};
+
+describe("PATCH /credential-use-cases/:key/certificate", () => {
+  it("an owner OrgAdmin sets artwork and placements on their own use case", async () => {
+    const w = await world();
+    const doc = await storeDoc(w.h, "image/png", PNG_2x1_B64);
+    const res = await design(w, w.orgAdmin, {
+      credentialType: "CourseCompletion",
+      background: { documentId: doc.id, sha256: doc.sha256 },
+      placements: [{ field: "claim:fullName", x: 0.5, y: 0.4, align: "center", fontSize: 22 }],
+    });
+    expect(res.statusCode).toBe(200);
+    const cert = (await readBack(w)).credentialTypes[0].certificate as Record<string, unknown>;
+    expect(cert.background).toEqual({ documentId: doc.id, sha256: doc.sha256 });
+    expect(cert.placements).toHaveLength(1);
+  });
+
+  it("an OrgAdmin of a DIFFERENT org is refused", async () => {
+    const w = await world();
+    const res = await design(w, w.orgAdmin, { credentialType: "CourseCompletion", placements: [] });
+    expect(res.statusCode).toBe(200); // control: the owner still passes
+    // The foreign admin must live in THIS app instance — a second `world()`
+    // builds a separate app whose tokens this one has never issued, so a 403
+    // from it would prove nothing about ownership.
+    const tag = Math.random().toString(36).slice(2, 10);
+    const foreignOrg = await w.h.organizations.create({
+      name: `Foreign ${tag}`, orgType: "issuer", registrationId: null, jurisdiction: null,
+      did: `did:key:zF${tag}`, didSeedEncrypted: "enc", status: "active", verified: true,
+      verifiedAt: new Date().toISOString(), companyProfile: null, capabilities: null,
+    });
+    await w.h.users.create({
+      email: `foreign-${tag}@tokenlayer.dev`, passwordHash: bcrypt.hashSync(`foreign-${tag}`, TEST_ROUNDS),
+      role: "OrgAdmin", useCaseKey: null, accountId: null, active: true, kycStatus: "approved",
+      kyc: null, orgId: foreignOrg.id, kind: "human",
+    });
+    const foreign = await loginAs(w.h.app, `foreign-${tag}@tokenlayer.dev`, `foreign-${tag}`);
+    const denied = await design(w, foreign, { credentialType: "CourseCompletion", placements: [] });
+    expect(denied.statusCode).toBe(403);
+    expect(denied.json().error).toBe("FORBIDDEN");
+  });
+
+  it("a use case with a NULL ownerOrgId refuses every OrgAdmin — null is not a match", async () => {
+    // The recurring shape: `undefined === undefined` and `null === null` both
+    // read as "owned by me" if the guard is written as a bare comparison.
+    const w = await world({ ownerOrgId: null });
+    const res = await design(w, w.orgAdmin, { credentialType: "CourseCompletion", placements: [] });
+    expect(res.statusCode).toBe(403);
+    // CONTROL: a PlatformAdmin may still design it.
+    expect((await design(w, w.platform, { credentialType: "CourseCompletion", placements: [] })).statusCode).toBe(200);
+  });
+
+  it("an ORG-LESS OrgAdmin is refused an UNOWNED use case — the case a bare `!==` lets through", async () => {
+    // The test above does NOT reach the emptiness guard: its admin carries a
+    // real orgId, so `null !== "org_…"` refuses on the comparison alone and a
+    // bare `existing.ownerOrgId !== claims.orgId` would pass it. THIS is the
+    // pairing that makes null-as-allow bite — `orgId: null` on the caller and
+    // `ownerOrgId: null` on the record, where `null !== null` is false and the
+    // route answers 200 for a use case nobody owns. Verified by mutation: drop
+    // the `!orgId` half and this test, and only this test, turns green at 200.
+    const w = await world({ ownerOrgId: null });
+    const tag = Math.random().toString(36).slice(2, 10);
+    await w.h.users.create({
+      email: `orgless-${tag}@tokenlayer.dev`, passwordHash: bcrypt.hashSync(`orgless-${tag}`, TEST_ROUNDS),
+      role: "OrgAdmin", useCaseKey: null, accountId: null, active: true, kycStatus: "approved",
+      kyc: null, orgId: null, kind: "human",
+    });
+    const orgless = await loginAs(w.h.app, `orgless-${tag}@tokenlayer.dev`, `orgless-${tag}`);
+    const res = await design(w, orgless, { credentialType: "CourseCompletion", placements: [] });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("FORBIDDEN");
+  });
+
+  it("a role that is neither PlatformAdmin nor OrgAdmin is refused, though authScoped admits every human", async () => {
+    const w = await world();
+    const tag = Math.random().toString(36).slice(2, 10);
+    await w.h.users.create({
+      email: `holder-${tag}@tokenlayer.dev`, passwordHash: bcrypt.hashSync(`holder-${tag}`, TEST_ROUNDS),
+      role: "Holder", useCaseKey: w.key, accountId: null, active: true, kycStatus: "approved",
+      kyc: null, orgId: w.orgId, kind: "human",
+    });
+    const holder = await loginAs(w.h.app, `holder-${tag}@tokenlayer.dev`, `holder-${tag}`);
+    const res = await design(w, holder, { credentialType: "CourseCompletion", placements: [] });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("FORBIDDEN");
+  });
+
+  it("a key without usecases:provision is refused; one with it passes", async () => {
+    const w = await world();
+    const wrong = await orgKey(w.h, w.orgId, ["credentials:read"]);
+    const denied = await design(w, wrong, { credentialType: "CourseCompletion", placements: [] });
+    expect(denied.statusCode).toBe(403);
+    expect(denied.json()).toMatchObject({ error: "INSUFFICIENT_SCOPE", details: { required: "usecases:provision" } });
+
+    const right = await orgKey(w.h, w.orgId, ["usecases:provision"]);
+    expect((await design(w, right, { credentialType: "CourseCompletion", placements: [] })).statusCode).toBe(200);
+  });
+
+  it("a tl_test_ key may not design a LIVE use case", async () => {
+    const w = await world();
+    const testKey = await orgKey(w.h, w.orgId, ["usecases:provision"], "test");
+    const res = await design(w, testKey, { credentialType: "CourseCompletion", placements: [] });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("WRONG_MODE");
+  });
+
+  it("404s an unknown use case and an unknown credential type", async () => {
+    const w = await world();
+    const noKey = await w.h.app.inject({
+      method: "PATCH", url: `${V1}/credential-use-cases/nope-nope/certificate`,
+      headers: auth(w.orgAdmin), payload: { credentialType: "CourseCompletion", placements: [] },
+    });
+    expect(noKey.statusCode).toBe(404);
+    const noType = await design(w, w.orgAdmin, { credentialType: "NotAType", placements: [] });
+    expect(noType.statusCode).toBe(404);
+    expect(noType.json().message).toContain("NotAType");
+  });
+
+  it("changes NOTHING but the certificate, whatever else the body carries", async () => {
+    const w = await world();
+    const before = await readBack(w);
+    const res = await design(w, w.orgAdmin, {
+      credentialType: "CourseCompletion",
+      placements: [{ field: "claim:fullName", x: 0.2, y: 0.2 }],
+      // Every one of these is a field the definition PATCH would honour.
+      key: "hijacked", sandbox: true, ownerOrgId: "org_someone_else",
+      issuer: { kind: "platform" }, holderPolicy: { who: "specific", orgIds: [] },
+      credentialTypes: [], name: "Renamed",
+    });
+    expect(res.statusCode).toBe(200);
+    const after = await readBack(w);
+    expect(after.ownerOrgId).toBe(before.ownerOrgId);
+    expect(after.issuer).toEqual(before.issuer);
+    expect(after.sandbox ?? false).toBe(before.sandbox ?? false);
+    expect(after.credentialTypes.map((c) => c.name)).toEqual(before.credentialTypes.map((c) => c.name));
+    expect((await w.h.app.inject({ method: "GET", url: `${V1}/credential-use-cases/hijacked`, headers: auth(w.platform) })).statusCode).toBe(404);
+  });
+
+  it("requires the pin, and refuses a mismatch, a missing document and a non-image", async () => {
+    const w = await world();
+    const doc = await storeDoc(w.h, "image/png", PNG_2x1_B64);
+    const text = await storeDoc(w.h, "text/plain", Buffer.from("nope").toString("base64"));
+
+    const noPin = await design(w, w.orgAdmin, { credentialType: "CourseCompletion", background: { documentId: doc.id } });
+    expect(noPin.statusCode).toBe(400);
+    expect(noPin.json().error).toBe("BACKGROUND_PIN_REQUIRED");
+
+    const wrongPin = await design(w, w.orgAdmin, { credentialType: "CourseCompletion", background: { documentId: doc.id, sha256: "0x" + "d".repeat(64) } });
+    expect(wrongPin.json().error).toBe("BACKGROUND_DOCUMENT_MISMATCH");
+
+    const missing = await design(w, w.orgAdmin, { credentialType: "CourseCompletion", background: { documentId: "doc_nope", sha256: "0x" + "e".repeat(64) } });
+    expect(missing.json().error).toBe("BACKGROUND_DOCUMENT_NOT_FOUND");
+
+    const notImage = await design(w, w.orgAdmin, { credentialType: "CourseCompletion", background: { documentId: text.id, sha256: text.sha256 } });
+    expect(notImage.json().error).toBe("BACKGROUND_NOT_AN_IMAGE");
+  });
+
+  it("omitting a field leaves it alone; null background clears the artwork; [] clears placements", async () => {
+    const w = await world();
+    const doc = await storeDoc(w.h, "image/png", PNG_2x1_B64);
+    await design(w, w.orgAdmin, {
+      credentialType: "CourseCompletion",
+      background: { documentId: doc.id, sha256: doc.sha256 },
+      placements: [{ field: "claim:fullName", x: 0.5, y: 0.4 }],
+    });
+
+    // Placements only — the artwork stays.
+    await design(w, w.orgAdmin, { credentialType: "CourseCompletion", placements: [{ field: "claim:grade", x: 0.6, y: 0.6 }] });
+    let cert = (await readBack(w)).credentialTypes[0].certificate as Record<string, unknown>;
+    expect((cert.background as { documentId: string }).documentId).toBe(doc.id);
+    expect(cert.placements).toHaveLength(1);
+
+    // Artwork cleared — placements survive, inert, exactly as an instantiated
+    // template lands.
+    await design(w, w.orgAdmin, { credentialType: "CourseCompletion", background: null });
+    cert = (await readBack(w)).credentialTypes[0].certificate as Record<string, unknown>;
+    expect(cert.background).toBeUndefined();
+    expect(cert.placements).toHaveLength(1);
+
+    await design(w, w.orgAdmin, { credentialType: "CourseCompletion", placements: [] });
+    cert = (await readBack(w)).credentialTypes[0].certificate as Record<string, unknown>;
+    expect(cert.placements).toEqual([]);
+  });
+
+  it("refuses a malformed placement with the placement code, naming the chip", async () => {
+    const w = await world();
+    const res = await design(w, w.orgAdmin, {
+      credentialType: "CourseCompletion",
+      placements: [{ field: "claim:fullName", x: 0.5, y: 0.5 }, { field: "claim:nope", x: 0.1, y: 0.1 }],
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("INVALID_CERTIFICATE_PLACEMENT");
+    expect(res.json().message).toContain("[1]");
+  });
+
+  it("never toggles `enabled` on a type that has a certificate block, and creates one enabled when it does not", async () => {
+    const w = await world();
+    // The seeded type has { enabled: true }; turn it off through the platform
+    // door, then design and confirm the design did not turn it back on.
+    const full = (await readBack(w)) as unknown as Record<string, unknown>;
+    const types = (full.credentialTypes as Array<Record<string, unknown>>).map((c) => ({ ...c, certificate: { enabled: false } }));
+    const off = await w.h.app.inject({
+      method: "PATCH", url: `${V1}/credential-use-cases/${w.key}`, headers: auth(w.platform),
+      payload: { ...full, credentialTypes: types },
+    });
+    expect(off.statusCode).toBe(200);
+    await design(w, w.orgAdmin, { credentialType: "CourseCompletion", placements: [{ field: "claim:fullName", x: 0.1, y: 0.1 }] });
+    expect(((await readBack(w)).credentialTypes[0].certificate as { enabled: boolean }).enabled).toBe(false);
+
+    // And with no block at all, designing creates one that is enabled —
+    // otherwise the org has produced dead config it cannot turn on.
+    const bare = (await readBack(w)) as unknown as Record<string, unknown>;
+    const stripped = (bare.credentialTypes as Array<Record<string, unknown>>).map(({ certificate, ...rest }) => { void certificate; return rest; });
+    expect((await w.h.app.inject({
+      method: "PATCH", url: `${V1}/credential-use-cases/${w.key}`, headers: auth(w.platform),
+      payload: { ...bare, credentialTypes: stripped },
+    })).statusCode).toBe(200);
+    await design(w, w.orgAdmin, { credentialType: "CourseCompletion", placements: [{ field: "claim:fullName", x: 0.1, y: 0.1 }] });
+    expect(((await readBack(w)).credentialTypes[0].certificate as { enabled: boolean }).enabled).toBe(true);
   });
 });
