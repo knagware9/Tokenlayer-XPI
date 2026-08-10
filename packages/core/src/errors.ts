@@ -7,6 +7,11 @@ export type PolicyErrorCode =
   | "UNKNOWN_USECASE"
   | "INVALID_METADATA"
   | "INVALID_USECASE"
+  // EN-F: distinct from INVALID_USECASE — "your chip is off the page" and
+  // "your use case is malformed" have different fixes, and callers (the 400
+  // handler, the designer UI) branch on the code rather than sniffing the
+  // message.
+  | "INVALID_CERTIFICATE_PLACEMENT"
   | "INVALID_TERMS"
   | "CHAIN_NOT_ALLOWED"
   | "USE_CASE_NOT_DEPLOYED_ON_CHAIN"
