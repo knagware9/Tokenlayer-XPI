@@ -1491,7 +1491,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       // The same validator both existing doors call, so a design that saves
       // here cannot be one the definition PATCH would have refused.
       try {
-        validateCertificatePlacements(b.placements, Object.keys(type.claimSchema.properties), type.name);
+        validateCertificatePlacements(b.placements, Object.keys(type.claimSchema.properties ?? {}), type.name);
       } catch (err) {
         return reply.code(400).send({ error: "INVALID_CERTIFICATE_PLACEMENT", message: (err as Error).message });
       }
@@ -1517,13 +1517,19 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     const def: CredentialUseCaseDefinition = { ...existing, credentialTypes };
     // The second door, unchanged: a narrow route that skipped the whole-
     // definition validator would be a cheaper way into the store than the front
-    // one.
+    // one. Defence in depth today — everything this route can change is already
+    // checked above — so no test pins it, and that is deliberate rather than a
+    // coverage gap. It earns its place the first time a stored definition is
+    // legacy-shaped.
     const known = await referencedOrgs(def);
     try {
       validateCredentialUseCase(def, { orgExists: (id) => known.has(id) });
     } catch (err) {
       return reply.code(400).send({ error: "INVALID_CREDENTIAL_USECASE", message: (err as Error).message });
     }
+    // No capability check: that gate exists for BINDINGS (issuer, verifier,
+    // owner domain), and this route changes none of them. The envelope was
+    // already satisfied when the use case was created.
     const updated = await deps.credentialUseCases.update(key, def);
     await deps.audit.append({
       actorId: (request.user as TokenClaims).id,
