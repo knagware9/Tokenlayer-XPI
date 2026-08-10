@@ -134,4 +134,60 @@ describe("a supplied background sha256 is verified at every writing door", () =>
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe("BACKGROUND_DOCUMENT_MISMATCH");
   });
+
+  it("refuses a webp background — the renderer can draw only PNG and JPEG", async () => {
+    // It would otherwise store with a 201 and silently print the built-in
+    // layout on every certificate, which reads as "our design vanished".
+    const w = await world();
+    const doc = await storeDoc(w.h, "image/webp", PNG_2x1_B64);
+    const res = await w.h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases`, headers: auth(w.platform),
+      payload: {
+        key: `webp-${Math.random().toString(36).slice(2, 8)}`, name: "Webp",
+        credentialTypes: [{
+          name: "C", title: "C", validityDays: 365, requiredApprovals: 1,
+          claimSchema: { type: "object", required: ["fullName"], properties: { fullName: { type: "string" } } },
+          certificate: { enabled: true, background: { documentId: doc.id } },
+        }],
+        issuer: { kind: "platform" }, holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("BACKGROUND_NOT_AN_IMAGE");
+  });
+
+  it("the preview route refuses a malformed pin rather than ignoring it", async () => {
+    // No definition validator runs on this door, so a non-string pin used to
+    // set `pin = null` and skip verification entirely with a 200.
+    const w = await world();
+    const doc = await storeDoc(w.h, "image/png", PNG_2x1_B64);
+    const res = await w.h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/preview-certificate`, headers: auth(w.platform),
+      payload: {
+        credentialType: {
+          name: "C", title: "C", validityDays: 365, requiredApprovals: 1,
+          claimSchema: { type: "object", required: ["fullName"], properties: { fullName: { type: "string" } } },
+          certificate: { enabled: true, background: { documentId: doc.id, sha256: "not-a-digest" }, placements: [] },
+        },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("BACKGROUND_PIN_MALFORMED");
+  });
+
+  it("PATCH /credential-use-cases/:key verifies the background too", async () => {
+    // Wired identically to POST, and previously pinned only by inspection.
+    const w = await world();
+    const doc = await storeDoc(w.h, "image/png", PNG_2x1_B64);
+    const current = (await w.h.app.inject({ method: "GET", url: `${V1}/credential-use-cases/${w.key}`, headers: auth(w.platform) })).json() as Record<string, unknown>;
+    const types = (current.credentialTypes as Array<Record<string, unknown>>).map((c) => ({
+      ...c, certificate: { enabled: true, background: { documentId: doc.id, sha256: "0x" + "f".repeat(64) } },
+    }));
+    const res = await w.h.app.inject({
+      method: "PATCH", url: `${V1}/credential-use-cases/${w.key}`, headers: auth(w.platform),
+      payload: { ...current, credentialTypes: types },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("BACKGROUND_DOCUMENT_MISMATCH");
+  });
 });

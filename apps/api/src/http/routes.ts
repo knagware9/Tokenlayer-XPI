@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ApiKeyRecord, AssetRecord, CashflowRecord, CompanyProfile, CredentialRecord, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord, WebhookEndpointRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, certificatePageSize, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, issueCredential, issuerBindingAllows, modeAllows, normalizeUseCaseDefinition, ORG_OPERATING_ROLES, orgDomainEnabled, orgRoleEnabled, PolicyError, presentCredential, presentCredentials, SANDBOX_CHAIN_ID, sandboxChainsValid, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateCertificatePlacements, validateCredentialUseCase, validateEventTypes, validateMetadata, scopeAllows, validateOrgCapabilities, validateScopes, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ApiScope, type ChainEntry, type CredentialTypeSpec, type CredentialUseCaseDefinition, type LifecycleAction, type OrgDomain, type OrgOperatingRole, type OrgType, type ResourceMode, type Role, type UseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
+import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, certificatePageSize, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, isDocumentSha256, issueCredential, issuerBindingAllows, modeAllows, normalizeUseCaseDefinition, ORG_OPERATING_ROLES, orgDomainEnabled, orgRoleEnabled, PolicyError, presentCredential, presentCredentials, SANDBOX_CHAIN_ID, sandboxChainsValid, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateCertificatePlacements, validateCredentialUseCase, validateEventTypes, validateMetadata, scopeAllows, validateOrgCapabilities, validateScopes, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ApiScope, type ChainEntry, type CredentialTypeSpec, type CredentialUseCaseDefinition, type LifecycleAction, type OrgDomain, type OrgOperatingRole, type OrgType, type ResourceMode, type Role, type UseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
 import qrcode from "qrcode";
 import type { AppDeps } from "../context.js";
 import { certificateStatusBanner, humanizeKey, renderCredentialCertificate } from "../certificate.js";
@@ -980,6 +980,19 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
   }
 
   /**
+   * The artwork formats the renderer can actually DRAW, which is narrower than
+   * "an image": `openArtwork` is pdfkit's `openImage`, and that reads PNG and
+   * JPEG and nothing else. An `image/webp` background passes an `image/*` check,
+   * stores with a 201, renders on the browser canvas — and then degrades to the
+   * built-in layout on every real certificate, with nothing telling the customer
+   * why their design vanished. The designer's file input offered webp, so this
+   * was reachable by accident rather than by attack.
+   */
+  const RENDERABLE_ARTWORK_TYPES = new Set(["image/png", "image/jpeg"]);
+  const isRenderableArtwork = (contentType: string): boolean =>
+    RENDERABLE_ARTWORK_TYPES.has(contentType.toLowerCase().trim());
+
+  /**
    * What a `certificate.background` may name, checked at the WRITE.
    *
    * `documentId` was bound to nothing: validation asked only for a non-empty
@@ -1007,7 +1020,14 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
   ): Promise<{ error: string; message: string } | null> {
     if (!background || typeof background.documentId !== "string") return null;
     const documentId = background.documentId;
-    const pin = typeof background.sha256 === "string" ? background.sha256 : null;
+    // A pin in the wrong SHAPE is a caller error, not an absent pin. Answering
+    // "you must supply a pin" to someone who just did sends them looking in the
+    // wrong place — and on the preview door, where no definition validator runs
+    // first, a malformed pin would otherwise skip verification entirely.
+    if (background.sha256 !== undefined && !isDocumentSha256(background.sha256)) {
+      return { error: "BACKGROUND_PIN_MALFORMED", message: `certificate background sha256 must be a 0x-prefixed 64-character lowercase hex digest, as POST /credential-use-cases/{key}/certificate/artwork returns it` };
+    }
+    const pin = isDocumentSha256(background.sha256) ? background.sha256 : null;
     if (opts.requirePin && !pin) {
       return { error: "BACKGROUND_PIN_REQUIRED", message: `certificate background must carry the artwork's sha256 alongside documentId '${documentId}'` };
     }
@@ -1016,8 +1036,8 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       if (!opts.requirePin) return null; // the render-time fallback is the guard on these doors
       return { error: "BACKGROUND_DOCUMENT_NOT_FOUND", message: `certificate background document '${documentId}' not found` };
     }
-    if (!doc.contentType.startsWith("image/")) {
-      return { error: "BACKGROUND_NOT_AN_IMAGE", message: `certificate background document '${documentId}' is ${doc.contentType}, not an image` };
+    if (!isRenderableArtwork(doc.contentType)) {
+      return { error: "BACKGROUND_NOT_AN_IMAGE", message: `certificate background document '${documentId}' is ${doc.contentType}; artwork must be image/png or image/jpeg — the renderer can draw nothing else` };
     }
     if (pin && pin !== doc.sha256) {
       return { error: "BACKGROUND_DOCUMENT_MISMATCH", message: `certificate background document '${documentId}' does not match the supplied sha256` };
@@ -1027,10 +1047,10 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
 
   /** `checkBackgroundDocument` across every credential type of a definition. */
   async function checkDefinitionBackgrounds(
-    def: { credentialTypes?: Array<{ certificate?: { background?: unknown } }> },
+    def: { credentialTypes?: Array<{ certificate?: { background?: { documentId?: unknown; sha256?: unknown } | null } }> },
   ): Promise<{ error: string; message: string } | null> {
     for (const ct of def.credentialTypes ?? []) {
-      const problem = await checkBackgroundDocument(ct.certificate?.background as never, { requirePin: false });
+      const problem = await checkBackgroundDocument(ct.certificate?.background, { requirePin: false });
       if (problem) return problem;
     }
     return null;
