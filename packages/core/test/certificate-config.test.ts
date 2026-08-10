@@ -134,7 +134,9 @@ describe("validateTemplate is the SECOND door, and enforces the same placement r
   });
 
   it("rejects two QRs", () => {
-    expect(() => validateTemplate(tpl({ enabled: true, placements: [{ field: "qr", x: 0.1, y: 0.1 }, { field: "qr", x: 0.9, y: 0.9 }] })))
+    // Both coordinates FIT on the page, so the duplicate rule is what fires
+    // rather than the geometry rule that runs before it.
+    expect(() => validateTemplate(tpl({ enabled: true, placements: [{ field: "qr", x: 0.1, y: 0.1 }, { field: "qr", x: 0.8, y: 0.8 }] })))
       .toThrow(/at most one/);
   });
 

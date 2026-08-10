@@ -69,6 +69,8 @@ export interface CertificateFieldPlacement {
 
 export const MAX_CERTIFICATE_PLACEMENTS = 40;
 export const DEFAULT_QR_WIDTH = 0.14;
+/** Below this a printed QR stops being reliably scannable by a phone camera. */
+export const MIN_QR_WIDTH = 0.06;
 export const DEFAULT_FONT_SIZE = 11;
 export const DEFAULT_COLOR = "#0f172a";
 
@@ -179,6 +181,31 @@ export function validateCertificatePlacements(
     if (p.bold !== undefined && typeof p.bold !== "boolean") at("bold must be a boolean");
     if (p.color !== undefined && (typeof p.color !== "string" || !HEX_COLOR.test(p.color))) at("color must be a #rrggbb hex string");
   });
+
+  // RULE 1 IS ABOUT THE PAGE, NOT THE ARRAY.
+  //
+  // "A QR is always drawn" was enforced against the draw list — exactly one op —
+  // and against nothing else. `x: 1` put the square's top-left corner ON the
+  // page boundary, so the whole code fell outside the MediaBox; `width: 0.0001`
+  // produced a QR 0.08pt across. Both validated, both rendered a perfectly valid
+  // PDF, and both left a certificate asserting something with no way to check
+  // it. Reachable by ACCIDENT as easily as by attack: dragging the chip into a
+  // corner clamps to 1, and the canvas draws only a text label, so nothing tells
+  // the designer the code was clipped away.
+  for (const [i, raw] of list.entries()) {
+    const p = raw as { field?: unknown; x?: number; y?: number; width?: number };
+    if (p.field !== "qr") continue;
+    const w = p.width ?? DEFAULT_QR_WIDTH;
+    if (w < MIN_QR_WIDTH) {
+      fail(`certificate.placements[${i}] qr width ${w} is below ${MIN_QR_WIDTH} — smaller than a phone can reliably scan`);
+    }
+    // The page is at most as tall as it is wide (or vice versa); requiring the
+    // square to fit in BOTH axes as a fraction of width is the conservative
+    // reading and needs no page geometry here.
+    if ((p.x ?? 0) + w > 1 || (p.y ?? 0) + w > 1) {
+      fail(`certificate.placements[${i}] qr at (${p.x}, ${p.y}) with width ${w} extends past the page — it would be clipped away entirely`);
+    }
+  }
 
   // Duplicate CLAIMS are fine (a name may print twice). A second QR is not:
   // the renderer guarantees exactly one, and two placements would silently

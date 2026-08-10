@@ -1,4 +1,4 @@
-import { inflateSync } from "node:zlib";
+import { deflateSync, inflateSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { certificatePageSize } from "@tokenlayer/core";
 import { artworkDimensions, certificateDrawList, drawCertificate } from "../src/certificate-artwork.js";
@@ -353,5 +353,44 @@ describe("x is the anchor, and align picks which edge sits on it", () => {
     const [l, c, r] = [await render("left"), await render("center"), await render("right")];
     expect(l).toBeGreaterThan(c);
     expect(c).toBeGreaterThan(r);
+  });
+});
+
+describe("EN-F final review — artwork decompression is bounded", () => {
+  /** A 12000x12000 8-bit greyscale PNG of zeros: ~137KB stored, ~144MB inflated. */
+  function bomb(): Buffer {
+    const TAB = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+    const crc32 = (b: Buffer): number => { let c = 0xffffffff; for (const x of b) c = TAB[(c ^ x) & 0xff]! ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+    const chunk = (type: string, data: Buffer): Buffer => {
+      const t = Buffer.from(type, "latin1");
+      const l = Buffer.alloc(4); l.writeUInt32BE(data.length);
+      const c = Buffer.alloc(4); c.writeUInt32BE(crc32(Buffer.concat([t, data])));
+      return Buffer.concat([l, t, data, c]);
+    };
+    const W = 12000, H = 12000;
+    const ihdr = Buffer.alloc(13);
+    ihdr.writeUInt32BE(W, 0); ihdr.writeUInt32BE(H, 4);
+    ihdr[8] = 8; ihdr[9] = 0; // 8-bit greyscale
+    const raw = Buffer.alloc((W + 1) * H); // all zeros: filter 0 + zero pixels
+    return Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw, { level: 9 })), chunk("IEND", Buffer.alloc(0)),
+    ]);
+  }
+
+  it("refuses a decompression bomb well inside the 5MB upload cap", async () => {
+    const png = bomb();
+    // Small enough to store, ~144MB inflated — and this runs on a PUBLIC,
+    // unauthenticated route, twice per render.
+    expect(png.length).toBeLessThan(5 * 1024 * 1024);
+    const page = certificatePageSize(2, 1);
+    const ops = certificateDrawList({ placements: [], values: new Map(), page, statusUrl: "https://api.example/s", banner: null });
+    await expect(drawCertificate(ops, png, page)).rejects.toThrow(/pixels are allowed/);
+  });
+
+  it("THE CONTROL: an ordinary certificate-sized image still renders", async () => {
+    const page = certificatePageSize(2, 1);
+    const ops = certificateDrawList({ placements: [], values: new Map(), page, statusUrl: "https://api.example/s", banner: null });
+    expect((await drawCertificate(ops, PNG_2x1, page)).subarray(0, 4).toString("latin1")).toBe("%PDF");
   });
 });

@@ -121,6 +121,13 @@ const PDF_FONTS: Record<CertificateFont, { normal: string; bold: string }> = {
   mono: { normal: "Courier", bold: "Courier-Bold" },
 };
 
+/** ~35 megapixels: comfortably above any real certificate scan (a 300dpi A4 is
+ *  ~8.7MP) and far below what makes a decode expensive. */
+const MAX_ARTWORK_PIXELS = 35_000_000;
+/** The inflate's own ceiling, for a header that lies about its dimensions.
+ *  35MP x 4 channels + per-row filter bytes, rounded up. */
+const MAX_ARTWORK_INFLATED_BYTES = 160 * 1024 * 1024;
+
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 /**
@@ -208,9 +215,23 @@ function openArtwork(bytes: Buffer): { width: number; height: number } {
   // @types/pdfkit, so the cast is the type gap, not a claim about the value.
   const probe = new PDFDocument({ size: "A4" }) as unknown as { openImage(b: Buffer): ProbedImage };
   const img = probe.openImage(bytes);
+  // A DECOMPRESSION BOMB IS THE THIRD HAZARD ON THIS PATH, and the first that
+  // costs memory rather than the process. The document store caps the STORED
+  // bytes at 5MB; a PNG says nothing about what it inflates to. The final review
+  // built a 137KB 12000x12000 greyscale PNG that inflates to 144MB in 47ms —
+  // ~30x the upload cap, on a public unauthenticated route, and this function
+  // runs TWICE per render (measure, then draw).
+  //
+  // Two bounds, because either alone is bypassable: the declared pixel count
+  // (which is what pdfkit will allocate for) and the inflate itself (which is
+  // what a lying header would otherwise reach).
+  const pixels = Number(img.width) * Number(img.height);
+  if (!Number.isFinite(pixels) || pixels > MAX_ARTWORK_PIXELS) {
+    throw new Error(`artwork is ${img.width}x${img.height}; at most ${MAX_ARTWORK_PIXELS} pixels are allowed`);
+  }
   // PNG only: a JPEG's `imgData` is the raw scan, not a zlib stream.
   if (bytes.subarray(0, PNG_MAGIC.length).equals(PNG_MAGIC) && Buffer.isBuffer(img.imgData)) {
-    assertPngScanlinesDecodable(img, inflateSync(img.imgData));
+    assertPngScanlinesDecodable(img, inflateSync(img.imgData, { maxOutputLength: MAX_ARTWORK_INFLATED_BYTES }));
   }
   return img;
 }

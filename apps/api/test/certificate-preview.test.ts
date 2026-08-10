@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import { describe, expect, it } from "vitest";
 import { certificatePageSize } from "@tokenlayer/core";
 import { mintSecret } from "../src/api-keys.js";
-import { auth, buildTestAppWithRepos, loginAs, V1, type TestAppHandle } from "./helpers.js";
+import { auth, buildTestAppWithRepos, loginAs, onboardUser, PLATFORM_ADMIN_2, V1, type TestAppHandle } from "./helpers.js";
 
 const TEST_ROUNDS = 4;
 
@@ -222,5 +222,81 @@ describe("POST /credential-use-cases/preview-certificate", () => {
       method: "POST", url: `${V1}/credential-use-cases/preview-certificate`, headers: auth(right), payload: body(null),
     });
     expect(ok.statusCode).toBe(200);
+  });
+});
+
+
+/**
+ * THE FINAL REVIEW'S FINDINGS, each pinned by the exploit it was proved with.
+ */
+describe("EN-F final review — the preview route is role-gated, not scope-gated alone", () => {
+  it("a Buyer with no business here is refused, though authScoped admits every human", async () => {
+    // `requireScope` short-circuits on `if (!key) return` — scopes narrow API
+    // KEYS only. So for a browser session `authScoped` gated authentication and
+    // nothing else, and the reviewer walked a seeded tokenization Buyer through:
+    // 403 from GET /documents/:id, then 200 from HERE naming the same id, with
+    // those bytes embedded full-bleed in the returned PDF.
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const admin2 = await loginAs(h.app, PLATFORM_ADMIN_2.email, PLATFORM_ADMIN_2.password);
+    await onboardUser(h.app, admin, admin2, {
+      email: "prev-buyer@tokenlayer.dev", password: "buyer-secret-1", role: "Buyer", useCaseKey: "carbon-credit",
+    });
+    const buyer = await loginAs(h.app, "prev-buyer@tokenlayer.dev", "buyer-secret-1");
+
+    const denied = await h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/preview-certificate`, headers: auth(buyer), payload: body(null),
+    });
+    expect(denied.statusCode).toBe(403);
+    expect(denied.json().error).toBe("FORBIDDEN");
+
+    // THE CONTROL: the same call as a PlatformAdmin still renders.
+    const ok = await h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/preview-certificate`, headers: auth(admin), payload: body(null),
+    });
+    expect(ok.statusCode).toBe(200);
+  });
+});
+
+describe("EN-F final review — a template never STORES artwork, not merely never instantiates it", () => {
+  it("saving a design as a template strips background before it is readable", async () => {
+    // `instantiateTemplate` dropped it, but the stored RECORD kept the id and
+    // `GET /credential-use-case-templates/:key` is open to any authenticated
+    // user — so the reviewer read Org A's artwork id out of the template and
+    // rendered their letterhead. The defence was one layer too late.
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const template = {
+      key: `enf-strip-${Math.random().toString(36).slice(2, 8)}`, name: "Design", category: "education",
+      parameters: [{ name: "orgName", label: "Org", type: "string", required: true }],
+      body: {
+        keyTemplate: "${orgName}-c", nameTemplate: "${orgName} C",
+        credentialTypes: [{
+          name: "C", title: "C", validityDays: 365, requiredApprovals: 1,
+          required: ["fullName"], properties: { fullName: { type: "string" } },
+          certificate: {
+            enabled: true,
+            background: { documentId: "doc_org_a_letterhead" },
+            placements: [{ field: "claim:fullName", x: 0.5, y: 0.4, align: "center" }],
+          },
+        }],
+        holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
+      },
+    };
+    const created = await h.app.inject({
+      method: "POST", url: `${V1}/credential-use-case-templates`, headers: auth(admin), payload: template,
+    });
+    expect(created.statusCode).toBe(201);
+
+    const read = await h.app.inject({
+      method: "GET", url: `${V1}/credential-use-case-templates/${template.key}`, headers: auth(admin),
+    });
+    expect(read.statusCode).toBe(200);
+    const cert = read.json().body.credentialTypes[0].certificate;
+    expect(cert.background).toBeUndefined();
+    // The layout — the reusable part — still travels.
+    expect(cert.placements).toHaveLength(1);
+    // And nothing anywhere in the stored record still names the document.
+    expect(read.payload).not.toContain("doc_org_a_letterhead");
   });
 });

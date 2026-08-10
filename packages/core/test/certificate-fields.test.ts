@@ -121,3 +121,31 @@ describe("validateCertificatePlacements", () => {
     expect(AUTO_QR_PLACEMENT.y).toBeGreaterThan(0.5);
   });
 });
+
+describe("the QR must actually land on the page", () => {
+  // Rule 1 says a QR is ALWAYS drawn. Enforcing that against the draw list only
+  // — exactly one op — let a designer place it entirely outside the MediaBox or
+  // shrink it below anything scannable, and still emit a valid PDF.
+  it("refuses a QR that would fall off the page", () => {
+    expect(failure([{ field: "qr", x: 1, y: 1, width: 0.14 }])).toContain("past the page");
+    expect(failure([{ field: "qr", x: 0.95, y: 0.5, width: 0.14 }])).toContain("past the page");
+    expect(failure([{ field: "qr", x: 0.5, y: 0.95, width: 0.14 }])).toContain("past the page");
+  });
+
+  it("refuses a QR too small to scan", () => {
+    expect(failure([{ field: "qr", x: 0.5, y: 0.5, width: 0.0001 }])).toContain("reliably scan");
+  });
+
+  it("still accepts a QR that fits, including one hard against the far corner", () => {
+    expect(failure([{ field: "qr", x: 0.86, y: 0.86, width: 0.14 }])).toBeNull();
+    expect(failure([{ field: "qr", x: 0.5, y: 0.5 }])).toBeNull(); // default width
+  });
+
+  it("applies none of this to TEXT placements, which may legitimately sit at the edge", () => {
+    expect(failure([{ field: "subject.name", x: 1, y: 1 }])).toBeNull();
+  });
+
+  it("AUTO_QR_PLACEMENT itself satisfies the rule — the fallback cannot be off-page", () => {
+    expect(failure([AUTO_QR_PLACEMENT])).toBeNull();
+  });
+});
