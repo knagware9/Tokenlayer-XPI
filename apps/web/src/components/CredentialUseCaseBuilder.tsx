@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api.js";
 import { useAuth } from "../auth.js";
+import { withoutStalePlacements } from "../lib/certificate-layout.js";
 import { SANDBOX_IMMUTABLE_NOTE, modeBlurb, modeLabel, modeTone } from "../lib/modes.js";
-import type { CredentialTypeSpec, CredentialUseCase, HolderPolicy, IssuerBinding, Organization, OrgType, UseCaseTemplate, VerifierBinding } from "../types.js";
+import type { CertificateFieldPlacement, CredentialTypeSpec, CredentialUseCase, HolderPolicy, IssuerBinding, Organization, OrgType, UseCaseTemplate, VerifierBinding } from "../types.js";
+import { CertificateDesigner } from "./CertificateDesigner.js";
 import { SchemaFieldEditor, fieldsToSchema, type FieldKind, type FieldRow } from "./SchemaFieldEditor.js";
 import { Icon, Pill } from "./ui.js";
 
@@ -24,12 +26,20 @@ interface CredTypeDraft {
   certSubheading: string;
   certClaimKeys: string[];
   certLogoDocumentId: string;
+  /** EN-F. Full-page artwork; its presence replaces the built-in layout, so the
+   *  placements below are inert without it. */
+  certBackgroundDocumentId: string;
+  certPlacements: CertificateFieldPlacement[];
 }
 
 const ORG_TYPES: OrgType[] = ["bank", "corporate", "msme", "government", "verifier"];
 const STEPS = ["Basics", "Credential types", "Roles", "Review"] as const;
 
 const slugify = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+
+/** The claim keys a draft actually declares — unnamed rows contribute nothing to
+ *  the emitted schema (see fieldsToSchema), so they are not placeable either. */
+const claimKeysOf = (c: CredTypeDraft): string[] => c.fields.map((f) => f.name.trim()).filter(Boolean);
 
 /** Turn a starter template's claim schema into editable field rows. */
 function templateToFields(spec: CredentialTypeSpec): FieldRow[] {
@@ -57,6 +67,7 @@ function templateToFields(spec: CredentialTypeSpec): FieldRow[] {
 const emptyCredType = (): CredTypeDraft => ({
   name: "", title: "", validityDays: 365, requiredApprovals: 1, fields: [], templateKey: "",
   certEnabled: false, certHeading: "", certSubheading: "", certClaimKeys: [], certLogoDocumentId: "",
+  certBackgroundDocumentId: "", certPlacements: [],
 });
 
 /** Guided 4-step wizard that authors a CredentialUseCase (POST /credential-use-cases). */
@@ -113,6 +124,48 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
     void api.orgs(token).then(setOrgs).catch(() => setOrgs([]));
   }, [token]);
 
+  // ---------- EN-F: certificate artwork, fetched for the designer canvas ------
+  /**
+   * Object URLs for uploaded artwork, keyed by document id. `GET /documents/:id`
+   * requires a bearer token, so an `<img src="/api/v1/documents/…">` would 401 —
+   * the bytes are fetched here and handed to the designer as an object URL.
+   */
+  const [artworkUrls, setArtworkUrls] = useState<Record<string, string>>({});
+  /** Ids already fetched or in flight. A REF, not the state above: two renders
+   *  in the same tick both read the pre-update state, so a state guard would
+   *  start two downloads for one id and leak the loser's object URL. */
+  const artworkFetched = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!token) return;
+    for (const id of credTypes.map((c) => c.certBackgroundDocumentId).filter(Boolean)) {
+      if (artworkFetched.current.has(id)) continue;
+      artworkFetched.current.add(id);
+      void api
+        .downloadDocument(token, id)
+        .then((b) => setArtworkUrls((m) => ({ ...m, [id]: URL.createObjectURL(b) })))
+        // Retryable: a dangling id renders the empty canvas, and clearing the
+        // mark lets a later render try again rather than never.
+        .catch(() => artworkFetched.current.delete(id));
+    }
+  }, [credTypes, token]);
+
+  /**
+   * Each object URL pins its blob in memory until it is revoked, and the wizard
+   * can outlive several artwork uploads. The ref mirrors the map so the UNMOUNT
+   * cleanup revokes the latest set — an effect depending on `artworkUrls` would
+   * instead revoke each URL the moment the next upload replaced the map, while
+   * the canvas was still displaying it.
+   */
+  const artworkUrlsRef = useRef(artworkUrls);
+  artworkUrlsRef.current = artworkUrls;
+  useEffect(
+    () => () => {
+      for (const url of Object.values(artworkUrlsRef.current)) URL.revokeObjectURL(url);
+    },
+    [],
+  );
+
   // ---------- derived validation ----------
   const keyValid = /^[a-z0-9]+(-[a-z0-9]+)*$/.test(key);
   const step1Valid = name.trim().length > 0 && keyValid;
@@ -146,6 +199,12 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
       patchCredType(i, { templateKey: "" });
       return;
     }
+    // A saved template CARRIES its certificate config (buildTemplate below copies
+    // it verbatim), so seeding from one has to load the design back or the
+    // artwork and every placement on it are silently dropped the moment the
+    // template is chosen — the one path in this create-only wizard where an
+    // existing design is re-opened.
+    const cert = spec.certificate;
     patchCredType(i, {
       templateKey,
       name: spec.name,
@@ -153,7 +212,64 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
       validityDays: spec.validityDays,
       requiredApprovals: spec.requiredApprovals,
       fields: templateToFields(spec),
+      certEnabled: cert?.enabled ?? false,
+      certHeading: cert?.heading ?? "",
+      certSubheading: cert?.subheading ?? "",
+      certClaimKeys: cert?.claimOrder ?? [],
+      certLogoDocumentId: cert?.logoDocumentId ?? "",
+      certBackgroundDocumentId: cert?.background?.documentId ?? "",
+      certPlacements: cert?.placements ?? [],
     });
+  }
+
+  /** Store certificate artwork and hang its document id on the draft. Same
+   *  base64 upload the logo input above uses. */
+  async function uploadArtwork(i: number, file: File): Promise<void> {
+    if (!token) return;
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let bin = "";
+    for (let n = 0; n < bytes.length; n++) bin += String.fromCharCode(bytes[n] as number);
+    try {
+      const r = await api.uploadDocument(token, file.type, btoa(bin));
+      patchCredType(i, { certBackgroundDocumentId: r.id });
+    } catch {
+      setError("artwork upload failed");
+    }
+  }
+
+  /** Render the DRAFT design server-side and open the PDF. The canvas is only an
+   *  approximation of the PDF renderer's text layout, so this is the only honest
+   *  answer to "what will actually print". Always comes back stamped SAMPLE. */
+  async function previewCertificate(c: CredTypeDraft): Promise<void> {
+    if (!token) return;
+    const placements = withoutStalePlacements(c.certPlacements, claimKeysOf(c));
+    try {
+      const blob = await api.previewCertificate(token, {
+        credentialType: {
+          name: c.name.trim() || "Draft",
+          title: c.title.trim() || c.name.trim() || "Draft",
+          validityDays: c.validityDays,
+          requiredApprovals: c.requiredApprovals,
+          claimSchema: fieldsToSchema(c.fields),
+          certificate: {
+            enabled: true,
+            heading: c.certHeading.trim() || undefined,
+            subheading: c.certSubheading.trim() || undefined,
+            claimOrder: c.certClaimKeys.length ? c.certClaimKeys : undefined,
+            logoDocumentId: c.certLogoDocumentId || undefined,
+            ...(c.certBackgroundDocumentId ? { background: { documentId: c.certBackgroundDocumentId } } : {}),
+            ...(placements.length ? { placements } : {}),
+          },
+        },
+      });
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank");
+      // Revoking immediately would race the new tab's own load of the blob, so
+      // hold it briefly; without any revoke every preview leaks a whole PDF.
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "preview failed");
+    }
   }
 
   // ---------- multi-select toggles ----------
@@ -174,18 +290,27 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
       description: description.trim() || undefined,
       credentialTypes: credTypes
         .filter((c) => c.name.trim())
-        .map((c) => ({
-          name: c.name.trim(), title: c.title.trim() || c.name.trim(),
-          validityDays: c.validityDays, requiredApprovals: c.requiredApprovals,
-          claimSchema: fieldsToSchema(c.fields),
-          ...(c.certEnabled ? { certificate: {
-            enabled: true,
-            heading: c.certHeading.trim() || undefined,
-            subheading: c.certSubheading.trim() || undefined,
-            claimOrder: c.certClaimKeys.length ? c.certClaimKeys : undefined,
-            logoDocumentId: c.certLogoDocumentId || undefined,
-          } } : {}),
-        })),
+        .map((c) => {
+          // A placement whose claim was renamed or deleted after it was placed
+          // would make the server reject the WHOLE use case; it could not print
+          // anything either way, so it is dropped here. The designer warns about
+          // them, so this is never the first the author hears of it.
+          const placements = withoutStalePlacements(c.certPlacements, claimKeysOf(c));
+          return {
+            name: c.name.trim(), title: c.title.trim() || c.name.trim(),
+            validityDays: c.validityDays, requiredApprovals: c.requiredApprovals,
+            claimSchema: fieldsToSchema(c.fields),
+            ...(c.certEnabled ? { certificate: {
+              enabled: true,
+              heading: c.certHeading.trim() || undefined,
+              subheading: c.certSubheading.trim() || undefined,
+              claimOrder: c.certClaimKeys.length ? c.certClaimKeys : undefined,
+              logoDocumentId: c.certLogoDocumentId || undefined,
+              ...(c.certBackgroundDocumentId ? { background: { documentId: c.certBackgroundDocumentId } } : {}),
+              ...(placements.length ? { placements } : {}),
+            } } : {}),
+          };
+        }),
       issuer,
       holderPolicy,
       verifier,
@@ -457,6 +582,20 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
                               }} />
                             {ct.certLogoDocumentId && <span className="ml-2 text-emerald-600">✓ uploaded</span>}
                           </label>
+                          <details className="rounded border border-slate-200 p-2">
+                            <summary className="cursor-pointer text-[11px] font-medium text-brand-700">Design certificate →</summary>
+                            <div className="mt-2">
+                              <CertificateDesigner
+                                backgroundDocumentId={ct.certBackgroundDocumentId || null}
+                                artworkObjectUrl={artworkUrls[ct.certBackgroundDocumentId] ?? null}
+                                placements={ct.certPlacements}
+                                claimKeys={claimKeysOf(ct)}
+                                onChange={(next) => patchCredType(i, { certPlacements: next })}
+                                onUploadArtwork={(file) => { void uploadArtwork(i, file); }}
+                                onPreview={() => { void previewCertificate(ct); }}
+                              />
+                            </div>
+                          </details>
                         </div>
                       )}
                     </div>

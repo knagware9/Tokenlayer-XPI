@@ -785,7 +785,20 @@ export interface StagedInvoice {
 export interface InvoiceRowResult { index: number; status: "staged" | "duplicate" | "invalid"; id?: string; error?: string }
 export interface TokenizeResult { id: string; status: "tokenized" | "skipped" | "failed"; assetId?: string; error?: string }
 
-export interface CertificateConfig { enabled: boolean; heading?: string; subheading?: string; claimOrder?: string[]; logoDocumentId?: string; }
+export interface CertificateConfig {
+  enabled: boolean;
+  heading?: string;
+  subheading?: string;
+  claimOrder?: string[];
+  logoDocumentId?: string;
+  /** EN-F. Full-page artwork, referencing a stored image Document. Its PRESENCE
+   *  selects the renderer: with it, the built-in layout is replaced entirely and
+   *  only `placements` are drawn. Mirrors core's `CertificateConfig`. */
+  background?: { documentId: string };
+  /** EN-F. Where each field prints on the artwork. Inert without `background`,
+   *  which is exactly the state a template instantiation lands in. */
+  placements?: CertificateFieldPlacement[];
+}
 export interface CredentialTypeSpec { name: string; title: string; claimSchema: { type: "object"; required?: string[]; properties: Record<string, { type: string; pattern?: string; enum?: string[] }> }; validityDays: number; requiredApprovals: number; certificate?: CertificateConfig; }
 export interface EligibleHolder { kind: "user" | "org"; id: string; label: string; did: string; subLabel: string | null; }
 export type IssuerBinding = { kind: "platform" } | { kind: "org"; orgId: string };
