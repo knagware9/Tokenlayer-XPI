@@ -979,6 +979,63 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     return out;
   }
 
+  /**
+   * What a `certificate.background` may name, checked at the WRITE.
+   *
+   * `documentId` was bound to nothing: validation asked only for a non-empty
+   * string, and both renderers read whatever id they were handed with no
+   * content-type check. This is the write-time half of that; the render keeps
+   * its fallback, because a document can be deleted long after a config was
+   * written and a missing one must not turn every certificate of that type into
+   * an error.
+   *
+   * `requirePin` is the difference between the two kinds of door. The
+   * org-scoped design route sets it: `documentId` alone is a guessable
+   * reference, and a pin is what proves the caller has actually seen the file.
+   * The three pre-existing PlatformAdmin doors leave it false, so a bare
+   * documentId — including one naming nothing — keeps working exactly as it did
+   * before, which is what `certificate-artwork.test.ts` pins.
+   *
+   * Returns null when there is nothing to refuse; otherwise the coded 400 the
+   * caller sends. Never replies itself: three of its four call sites are inside
+   * loops over credential types, where a helper that had already answered would
+   * be a second reply on the same request.
+   */
+  async function checkBackgroundDocument(
+    background: { documentId?: unknown; sha256?: unknown } | null | undefined,
+    opts: { requirePin: boolean },
+  ): Promise<{ error: string; message: string } | null> {
+    if (!background || typeof background.documentId !== "string") return null;
+    const documentId = background.documentId;
+    const pin = typeof background.sha256 === "string" ? background.sha256 : null;
+    if (opts.requirePin && !pin) {
+      return { error: "BACKGROUND_PIN_REQUIRED", message: `certificate background must carry the artwork's sha256 alongside documentId '${documentId}'` };
+    }
+    const doc = await deps.documents.get(documentId).catch(() => null);
+    if (!doc) {
+      if (!opts.requirePin) return null; // the render-time fallback is the guard on these doors
+      return { error: "BACKGROUND_DOCUMENT_NOT_FOUND", message: `certificate background document '${documentId}' not found` };
+    }
+    if (!doc.contentType.startsWith("image/")) {
+      return { error: "BACKGROUND_NOT_AN_IMAGE", message: `certificate background document '${documentId}' is ${doc.contentType}, not an image` };
+    }
+    if (pin && pin !== doc.sha256) {
+      return { error: "BACKGROUND_DOCUMENT_MISMATCH", message: `certificate background document '${documentId}' does not match the supplied sha256` };
+    }
+    return null;
+  }
+
+  /** `checkBackgroundDocument` across every credential type of a definition. */
+  async function checkDefinitionBackgrounds(
+    def: { credentialTypes?: Array<{ certificate?: { background?: unknown } }> },
+  ): Promise<{ error: string; message: string } | null> {
+    for (const ct of def.credentialTypes ?? []) {
+      const problem = await checkBackgroundDocument(ct.certificate?.background as never, { requirePin: false });
+      if (problem) return problem;
+    }
+    return null;
+  }
+
   // EN-A config-time envelope gates for a credential-use-case definition: a
   // bound issuer org must be an identity-domain Issuer, every LISTED verifier
   // org a Verifier, and an owner org identity-domained. Null envelopes (legacy
@@ -1027,6 +1084,8 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     } catch (err) {
       return reply.code(400).send({ error: "INVALID_CREDENTIAL_USECASE", message: (err as Error).message });
     }
+    const badBackground = await checkDefinitionBackgrounds(def);
+    if (badBackground) return reply.code(400).send(badBackground);
     const violation = await credentialUseCaseCapabilityViolation(def, known);
     if (violation) return orgCapabilityMissing(reply, violation.org, violation.missing);
     const created = await deps.credentialUseCases.create({ ...def, ownerOrgId: def.ownerOrgId ?? null });
@@ -1053,6 +1112,8 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     } catch (err) {
       return reply.code(400).send({ error: "INVALID_CREDENTIAL_USECASE", message: (err as Error).message });
     }
+    const badBackground = await checkDefinitionBackgrounds(def);
+    if (badBackground) return reply.code(400).send(badBackground);
     const ownerOrgId = def.ownerOrgId ?? existing.ownerOrgId ?? null;
     const violation = await credentialUseCaseCapabilityViolation({ ...def, ownerOrgId }, known);
     if (violation) return orgCapabilityMissing(reply, violation.org, violation.missing);
@@ -1249,6 +1310,8 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     // Validate the DRAFT exactly as saving would, so a design that previews
     // cannot fail to save. Throws INVALID_CERTIFICATE_PLACEMENT → 400.
     validateCertificatePlacements(spec.certificate?.placements, Object.keys(spec.claimSchema.properties), spec.name || "credential type");
+    const badBackground = await checkBackgroundDocument(spec.certificate?.background, { requirePin: false });
+    if (badBackground) return reply.code(400).send(badBackground);
 
     // A fabricated credential: every value is visibly sample data, and the id is
     // not a real one, so the QR resolves to a status route that answers 404.
