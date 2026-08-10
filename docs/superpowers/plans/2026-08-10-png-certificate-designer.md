@@ -1047,7 +1047,7 @@ export function certificateDrawList(input: CertificateDrawListInput): DrawOp[] {
 - [ ] **Step 4: Run the test**
 
 Run: `cd apps/api && ./node_modules/.bin/vitest run test/certificate-drawlist.test.ts --testTimeout=180000`
-Expected: PASS, 11 tests.
+Expected: PASS, 10 tests (the plan's own block has 10 `it` blocks; an 11th for the null-width case is added during review).
 
 - [ ] **Step 5: Mutation-check the two rules that matter**
 
@@ -1301,7 +1301,15 @@ export async function drawCertificate(
   return done;
 }
 
-/** Measure artwork without rendering it. Throws on unusable bytes. */
+/**
+ * Measure artwork without rendering it. Throws on unusable bytes.
+ *
+ * The draw list resolves every coordinate against the page it is GIVEN and
+ * trusts it, so a page built by hand with a zero or non-finite edge would yield
+ * a QR of size 0 — rule 1 satisfied structurally and vacuous in fact, a QR
+ * nobody can scan. Every caller must derive the page from THIS measurement via
+ * `certificatePageSize`, which guards the degenerate cases.
+ */
 export function artworkDimensions(bytes: Buffer): { width: number; height: number } {
   const probe = new PDFDocument({ size: "A4" });
   const img = probe.openImage(bytes) as { width: number; height: number };

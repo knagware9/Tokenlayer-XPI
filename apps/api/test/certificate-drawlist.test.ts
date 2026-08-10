@@ -47,6 +47,15 @@ describe("certificateDrawList", () => {
     expect(t.width).toBeNull(); // omitted width ⇒ one unwrapped line
   });
 
+  it("treats an explicit null width as unwrapped, not as a zero-width box", () => {
+    // Reachable only on the unvalidated path the duplicate-`qr` guard also
+    // defends: `validateCertificatePlacements` rejects a null width, but a
+    // hand-written config or a future caller can still produce one, and `0`
+    // means "wrap to nothing" to pdfkit — an empty line where a name should be.
+    const p = { field: "subject.name", x: 0.1, y: 0.1, width: null } as unknown as CertificateFieldPlacement;
+    expect(texts(certificateDrawList({ ...base, placements: [p] }))[0]!.width).toBeNull();
+  });
+
   it("skips a placement whose value is absent, instead of printing 'undefined'", () => {
     const ops = certificateDrawList({ ...base, placements: [{ field: "claim:missing" as CertificateFieldRef, x: 0.5, y: 0.5 }] });
     expect(texts(ops)).toHaveLength(0);

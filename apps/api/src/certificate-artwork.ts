@@ -69,7 +69,14 @@ export function certificateDrawList(input: CertificateDrawListInput): DrawOp[] {
       text,
       x: p.x * page.width,
       y: p.y * page.height,
-      width: p.width === undefined ? null : p.width * page.width,
+      // `== null` catches an explicit JSON `null` as well as undefined. With
+      // `===` a stored `"width": null` resolved to 0 — a zero-width wrap box,
+      // i.e. text wrapped to nothing, which prints as an empty certificate line
+      // rather than as the unwrapped default it means. `validateCertificatePlacements`
+      // rejects null, so this only bites on the same unvalidated path the
+      // duplicate-`qr` guard below was written to survive; defending against
+      // one and not the other is the inconsistency, not the defence.
+      width: p.width == null ? null : p.width * page.width,
       fontSize: p.fontSize ?? DEFAULT_FONT_SIZE,
       font: p.font ?? "sans",
       bold: p.bold ?? false,
