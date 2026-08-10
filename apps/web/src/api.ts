@@ -1,3 +1,4 @@
+import type { ResourceMode } from "./lib/modes.js";
 import type { AccountState, ActivityEvent, AnalyticsSummary, ApiKeyView, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, ChainInfo, ChainStatus, CompanyCategory, ContractCode, CredentialStatusInfo, CredentialTypeInfo, CredentialTypeSpec, CredentialUseCase, DidDocument, EligibleHolder, HeldCredential, IdentityDashboardData, IdentityRegistryInfo, IdentityResult, InvoiceRowResult, IssuedCredential, Listing, LoginKeyInfo, MintedApiKey, MintedWebhook, OrgCapabilities, OrgMember, OrgType, Organization, PlatformEvent, Portfolio, ProvisionResult, Proposal, QrLoginPoll, QrLoginStart, Role, SessionPrincipal, SessionUser, StagedInvoice, TokenInfo, TokenStandard, TokenizeResult, Trade, UseCase, UseCaseTemplate, UseCaseTemplateMeta, VerificationRequest, VerificationResult, WebhookDelivery, WebhookEndpoint } from "./types.js";
 
 export interface Currency { code: string; label: string; }
@@ -119,18 +120,38 @@ export const api = {
   previewCode: (token: string, body: { tokenStandard: TokenStandard; symbol: string; name: string; allowlist?: boolean; chainId: string }) =>
     request<ContractCode>("/use-cases/preview-code", token, { method: "POST", body: JSON.stringify(body) }),
   useCases: (token: string) => request<UseCase[]>("/use-cases", token),
-  analytics: (token: string, opts: { useCaseKey?: string; days?: number } = {}) => {
+  // EN-D2: sandbox use cases are OUT of the aggregate unless `includeSandbox` is
+  // passed — a simulated asset inside a real supply total is a reporting defect
+  // nobody catches. The flag is ignored for an API key (its environment is fixed
+  // by its own mode), so it only ever means anything for a human session.
+  analytics: (token: string, opts: { useCaseKey?: string; days?: number; includeSandbox?: boolean } = {}) => {
     const q = new URLSearchParams();
     if (opts.useCaseKey) q.set("useCaseKey", opts.useCaseKey);
     if (opts.days) q.set("days", String(opts.days));
+    if (opts.includeSandbox) q.set("includeSandbox", "true");
     const qs = q.toString();
     return request<AnalyticsSummary>(`/analytics${qs ? `?${qs}` : ""}`, token);
   },
-  identityDashboard: (token: string) => request<IdentityDashboardData>("/identity/dashboard", token),
+  // Same sandbox exclusion as `/analytics`, and for the same reason.
+  identityDashboard: (token: string, includeSandbox = false) =>
+    request<IdentityDashboardData>(`/identity/dashboard${includeSandbox ? "?includeSandbox=true" : ""}`, token),
   accounts: (token: string) => request<{ address: string; label: string }[]>("/accounts", token),
   // 201 → the UseCase; 202 (gated: an OrgAdmin proposes) → { proposal } pending platform approval.
   createUseCase: (token: string, def: UseCase) =>
     request<UseCase | { proposal: Proposal }>("/use-cases", token, { method: "POST", body: JSON.stringify(def) }),
+  // EN-D2: THE SUPPORTED WAY OUT OF THE SANDBOX. `sandbox` cannot be changed on
+  // an existing use case (409 SANDBOX_IMMUTABLE), so this copies a sandbox one's
+  // CONFIGURATION — schema, lifecycle, compliance, fees — and NO data: no
+  // assets, holders, staged invoices, proposals or events come with it, and the
+  // clone starts undeployed. Governance is POST /use-cases's verbatim: 201 for a
+  // PlatformAdmin, 202 → { proposal } for an OrgAdmin.
+  //
+  // SESSION ONLY. The act spans both environments, so an API key of EITHER mode
+  // is refused with 403 WRONG_MODE — which is why this console offers it and an
+  // integration cannot script it.
+  cloneUseCaseToLive: (token: string, key: string, body: { key?: string; allowedChainIds: string[]; defaultChainId?: string }) =>
+    request<UseCase | { proposal: Proposal; key: string; clonedFrom: string }>(
+      `/use-cases/${encodeURIComponent(key)}/clone-to-live`, token, { method: "POST", body: JSON.stringify(body) }),
   deployUseCase: (token: string, key: string, chainId: string) =>
     request<UseCase>(`/use-cases/${encodeURIComponent(key)}/deploy`, token, { method: "POST", body: JSON.stringify({ chainId }) }),
   assets: (token: string, useCaseKey?: string) =>
@@ -248,7 +269,10 @@ export const api = {
   // wrapper unwraps it — callers get the row(s) and never the envelope.
   listWebhooks: (token: string, orgId: string) =>
     request<{ endpoints: WebhookEndpoint[] }>(`/orgs/${encodeURIComponent(orgId)}/webhooks`, token).then((r) => r.endpoints),
-  createWebhook: (token: string, orgId: string, body: { url: string; description?: string; eventTypes: string[]; useCaseKey?: string }) =>
+  // `mode` (EN-D2) picks which stream the endpoint joins and is FIXED at
+  // registration — there is no PATCH for it, which is why `updateWebhook` below
+  // does not offer one. Omitted means `live`, the server's own default.
+  createWebhook: (token: string, orgId: string, body: { url: string; description?: string; eventTypes: string[]; useCaseKey?: string; mode?: ResourceMode }) =>
     // 201 → { endpoint, secret }. 400 INVALID_WEBHOOK_URL when the URL fails the
     // SSRF guard; 403 ORG_CAPABILITY_MISSING when a type is outside the envelope.
     request<MintedWebhook>(`/orgs/${encodeURIComponent(orgId)}/webhooks`, token, { method: "POST", body: JSON.stringify(body) }),
@@ -326,8 +350,18 @@ export const api = {
   rejectVerification: (token: string, id: string) =>
     request<VerificationRequest>(`/verification-requests/${encodeURIComponent(id)}/reject`, token, { method: "POST", body: JSON.stringify({}) }),
   verifyVerification: (token: string, id: string) => request<VerificationResult>(`/verification-requests/${encodeURIComponent(id)}/verify`, token),
-  invoices: (token: string, key: string, status?: "staged" | "tokenized") =>
-    request<StagedInvoice[]>(`/use-cases/${encodeURIComponent(key)}/invoices${status ? `?status=${status}` : ""}`, token),
+  // `includeSandbox` is REQUIRED to see a sandbox use case's register at all:
+  // without it the server returns an EMPTY LIST rather than a refusal (the
+  // register is the customer's record of real invoices), so a caller that omits
+  // it for a sandbox key sees "no invoices" and not "wrong environment". Callers
+  // pass the use case's own `sandbox` flag — see InvoiceRegister.tsx.
+  invoices: (token: string, key: string, status?: "staged" | "tokenized", includeSandbox = false) => {
+    const q = new URLSearchParams();
+    if (status) q.set("status", status);
+    if (includeSandbox) q.set("includeSandbox", "true");
+    const qs = q.toString();
+    return request<StagedInvoice[]>(`/use-cases/${encodeURIComponent(key)}/invoices${qs ? `?${qs}` : ""}`, token);
+  },
   importInvoices: (token: string, key: string, rows: Record<string, unknown>[]) =>
     request<{ staged: number; results: InvoiceRowResult[] }>(`/use-cases/${encodeURIComponent(key)}/invoices/import`, token, { method: "POST", body: JSON.stringify({ rows }) }),
   pullErpInvoices: (token: string, key: string) =>

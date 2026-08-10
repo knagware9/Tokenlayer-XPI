@@ -1,3 +1,5 @@
+import type { ResourceMode } from "./lib/modes.js";
+
 export type Role = "PlatformAdmin" | "OrgAdmin" | "UseCaseAdmin" | "Issuer" | "Trader" | "Buyer" | "Auditor" | "Holder" | "Verifier";
 
 // ---- EN-A: organization capability envelope --------------------------------
@@ -148,6 +150,18 @@ export interface UseCase {
   roles: Role[];
   /** The organization that owns this use case. */
   ownerOrgId?: string | null;
+  /**
+   * EN-D2 test mode. A sandbox use case runs ONLY on the always-simulated
+   * `sandbox` chain, is invisible to a `tl_live_` key, and is left out of
+   * analytics and the invoice register unless asked for by name.
+   *
+   * OPTIONAL, and absent means LIVE: it is a column with a DB default, so it is
+   * missing from every row that predates EN-D2 — read it through `modeOf`
+   * (src/lib/modes.ts) rather than by hand. It is set at CREATION and never
+   * after (409 SANDBOX_IMMUTABLE); the supported way to a live copy is
+   * `POST /use-cases/:key/clone-to-live`.
+   */
+  sandbox?: boolean;
 }
 
 export interface Asset {
@@ -433,6 +447,19 @@ export interface ApiKeyView {
   revokedBy: string | null;
   createdBy: string;
   createdAt: string;
+  /**
+   * EN-D2: which environment this key acts in. A `test` key acts only on
+   * sandbox use cases and reads `tl_test_…`; a `live` one only on real ones.
+   *
+   * OPTIONAL BECAUSE THE SERVER DOES NOT SEND IT YET. `ApiKey.mode` is
+   * persisted and the auth path checks a secret's marker against it, but
+   * `apiKeyView` (apps/api/src/http/routes.ts) does not project it and
+   * `POST /orgs/:id/api-keys` accepts no `mode` in its body — so every key this
+   * console can see or mint is a live one. Absent is read as `live`, which is
+   * exactly what the column's default says, and the day the route projects it
+   * the rows below start telling the truth without another change here.
+   */
+  mode?: ResourceMode;
 }
 
 /**
@@ -533,6 +560,17 @@ export interface WebhookEndpoint {
   createdBy?: string;
   createdAt: string;
   lastDeliveryAt: string | null;
+  /**
+   * EN-D2: which stream this endpoint receives. A `test` endpoint hears ONLY
+   * sandbox events and a `live` one ONLY real ones — the two never cross, so a
+   * sandbox event can never reach a production handler. FIXED at registration.
+   *
+   * Unlike `ApiKeyView.mode` this is genuinely sent by the server (it is in the
+   * `WebhookEndpoint` response schema and `required` there), and the create
+   * route accepts it in the body. Typed optional all the same, so a row from an
+   * older API build renders as live rather than as a blank pill.
+   */
+  mode?: ResourceMode;
 }
 
 /** One queued/attempted delivery. Carries no payload — read that from /events. */
@@ -684,7 +722,9 @@ export interface EligibleHolder { kind: "user" | "org"; id: string; label: strin
 export type IssuerBinding = { kind: "platform" } | { kind: "org"; orgId: string };
 export type HolderPolicy = { who: "any-onboarded" } | { who: "orgType"; orgTypes: string[] } | { who: "specific"; orgIds: string[] };
 export type VerifierBinding = { kind: "any" } | { kind: "orgs"; orgIds: string[] };
-export interface CredentialUseCase { key: string; name: string; description?: string; credentialTypes: CredentialTypeSpec[]; issuer: IssuerBinding; holderPolicy: HolderPolicy; verifier: VerifierBinding; holderAcceptance?: boolean; ownerOrgId?: string | null; status?: string; }
+/** `sandbox` is the Identity-domain twin of `UseCase.sandbox` — same optionality,
+ *  same "absent means live" reading, same immutability after creation. */
+export interface CredentialUseCase { key: string; name: string; description?: string; credentialTypes: CredentialTypeSpec[]; issuer: IssuerBinding; holderPolicy: HolderPolicy; verifier: VerifierBinding; holderAcceptance?: boolean; ownerOrgId?: string | null; status?: string; sandbox?: boolean; }
 
 export type TemplateParamType = "text" | "number" | "enum" | "boolean";
 export interface TemplateParam { name: string; label: string; type: TemplateParamType; required: boolean; default?: string | number | boolean; options?: string[]; min?: number; max?: number; help?: string; }

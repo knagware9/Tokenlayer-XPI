@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { API_BASE, ApiError, api } from "../api.js";
 import { useAuth } from "../auth.js";
 import { isOrgOperatingRole, orgRoleEnabled } from "../lib/capabilities.js";
+import { KEY_MARKERS, keyMarker, modeLabel, modeTone, type ResourceMode } from "../lib/modes.js";
 import { confirmNavigation, setNavGuard } from "../lib/nav-guard.js";
 import { API_SCOPES, type ApiKeyView, type ApiScope, type OrgCapabilities, type Organization, type Role } from "../types.js";
 import { ApiReference } from "./ApiReference.js";
@@ -10,21 +11,27 @@ import { Webhooks } from "./Webhooks.js";
 import { Card, EmptyState, Pill, SectionHeader } from "./ui.js";
 
 /**
- * The public markers a secret can carry — mirrors the API's
- * `KEY_PREFIX_MARKERS` (apps/api/src/api-keys.ts), on the same terms as the
- * `API_SCOPES` mirror in types.ts: the web app has no dependency on the API
- * package, so this list is updated by hand. It is display-only — the server
- * parses the real marker and refuses anything else.
- */
-const KEY_MARKERS = { live: "tl_live_", test: "tl_test_" } as const;
-
-/**
- * Every key this console can mint or list today is a LIVE key: no route accepts
- * a mode and `ApiKeyView` carries none, so there is nothing to choose from yet.
- * Read through the map rather than a bare literal so the display follows when
- * that changes, instead of confidently labelling a sandbox key `tl_live_`.
+ * The marker map moved to `src/lib/modes.ts` (EN-D2, D2-7) so the console has
+ * ONE place that knows how an environment is named, marked and coloured. This
+ * alias keeps the reading sites below about the ORDINARY key, which is what
+ * they mean: every key this console can mint today really is a live one.
+ *
+ * WHY IT IS STILL "EVERY KEY". `ApiKey.mode` is persisted and the auth path
+ * checks a secret's marker against it, but no route sets it:
+ * `POST /orgs/:id/api-keys` takes no `mode` in its body (its schema is
+ * `additionalProperties: false`) and `apiKeyView` does not project the column,
+ * so nothing here can mint a `tl_test_` key or know that it is looking at one.
+ * The rows below therefore read the mode DEFENSIVELY — `k.mode ?? "live"` — so
+ * they start telling the truth the day the route projects it, rather than
+ * confidently labelling a sandbox key `tl_live_`.
  */
 const KEY_MARKER = KEY_MARKERS.live;
+
+/** The environment a key row is showing. Absent means live — the column's own
+ *  default, and the only mode any route can currently produce. */
+function keyModeOf(k: Pick<ApiKeyView, "mode">): ResourceMode {
+  return k.mode ?? "live";
+}
 
 /**
  * Roles a key's bound service user may take. Mirrors the server's
@@ -236,6 +243,16 @@ function Overview(): JSX.Element {
             from a 202 and follow it to a terminal state — treating a 202 as a completed create is the most common integration
             mistake made here.
           </p>
+          <p>
+            <strong className="font-semibold text-slate-800">Two environments, told apart by the secret itself.</strong> A{" "}
+            <span className="font-mono text-xs">{KEY_MARKERS.live}…</span> key acts only on real use cases; a{" "}
+            <span className="font-mono text-xs">{KEY_MARKERS.test}…</span> key acts only on <em>sandbox</em> ones, whose assets
+            mint on a simulated in-memory ledger. Crossing between them is a{" "}
+            <span className="font-mono text-xs">403 WRONG_MODE</span> in both directions — a test key cannot touch real data,
+            and a live key cannot quietly read the sandbox either. Webhook endpoints carry the same split, so a sandbox event
+            can never arrive at a production handler. A human session has no mode and may act on both, which is why cloning a
+            sandbox use case to live is a person&rsquo;s act and not a key&rsquo;s.
+          </p>
         </div>
       </Card>
       <UsingYourKey />
@@ -418,6 +435,7 @@ function ApiKeys({ orgId, org }: { orgId: string | null; org: Organization | nul
             <thead className="text-xs text-slate-500 bg-slate-50 uppercase tracking-wide">
               <tr>
                 <th className="text-left font-medium px-4 py-2.5">Name</th>
+                <th className="text-left font-medium px-4 py-2.5">Environment</th>
                 <th className="text-left font-medium px-4 py-2.5">Key</th>
                 <th className="text-left font-medium px-4 py-2.5">Scopes</th>
                 <th className="text-left font-medium px-4 py-2.5">Role</th>
@@ -431,7 +449,13 @@ function ApiKeys({ orgId, org }: { orgId: string | null; org: Organization | nul
               {keys.map((k) => (
                 <tr key={k.id} className="border-t border-slate-100 align-top">
                   <td className="px-4 py-2 font-medium text-slate-800">{k.name}</td>
-                  <td className="px-4 py-2 font-mono text-xs text-slate-500 whitespace-nowrap">{KEY_MARKER}{k.prefix}…</td>
+                  {/* The environment, on every row and never inferred from the
+                      name a person typed. A test key acts only on sandbox use
+                      cases; a live one only on real ones (403 WRONG_MODE). */}
+                  <td className="px-4 py-2"><Pill tone={modeTone(keyModeOf(k))}>{modeLabel(keyModeOf(k))}</Pill></td>
+                  {/* …and the marker follows the same reading, so the secret's
+                      shape and the row's label can never disagree. */}
+                  <td className="px-4 py-2 font-mono text-xs text-slate-500 whitespace-nowrap">{keyMarker(keyModeOf(k))}{k.prefix}…</td>
                   <td className="px-4 py-2">
                     <div className="flex flex-wrap gap-1">
                       {k.scopes.length === 0
@@ -458,7 +482,19 @@ function ApiKeys({ orgId, org }: { orgId: string | null; org: Organization | nul
                         new one, not by rotating the dead one. Revoke stays
                         available for anything not already revoked.
                       */}
-                      {canRotate(k.status) && (
+                      {/*
+                        …and NOT for a test key, for the same reason it is not
+                        offered for an expired one: the rotate route calls
+                        `mintSecret(rounds)` with the default mode, so it would
+                        stamp a `tl_live_` marker on a row whose stored mode is
+                        `test` — and the auth path refuses a secret whose marker
+                        disagrees with its row. The ceremony would hand over a
+                        credential that 401s on its very first call.
+                        UNREACHABLE TODAY (no route mints a test key and
+                        `ApiKeyView` carries no mode), which is exactly why it is
+                        gated here rather than left to be noticed later.
+                      */}
+                      {canRotate(k.status) && keyModeOf(k) === "live" && (
                         <button
                           onClick={() => void rotate(k)}
                           disabled={busyId === k.id}
@@ -678,6 +714,21 @@ function CreateKey({ orgId, capabilities, onCreated }: {
   return (
     <form onSubmit={submit} className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 space-y-4">
       <h2 className="font-semibold text-slate-900">Create an API key</h2>
+      {/*
+        NO ENVIRONMENT PICKER, and that is a statement about the API rather than
+        a choice about the form. `POST /orgs/:id/api-keys` accepts no `mode` (its
+        body schema is `additionalProperties: false`, so one sent anyway is
+        dropped, not refused), and `apiKeyView` does not return the column — so a
+        picker here would collect a choice, discard it silently, and label the
+        resulting live key as a sandbox one. Saying so is the honest version.
+      */}
+      <div className="rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-600 px-3 py-2">
+        This mints a <strong className="font-semibold text-slate-800">{modeLabel("live")}</strong> key — a{" "}
+        <span className="font-mono">{KEY_MARKERS.live}…</span> secret that acts on real use cases only. Sandbox keys
+        (<span className="font-mono">{KEY_MARKERS.test}…</span>) are not mintable from this console yet: the create route takes
+        no environment. To exercise a sandbox use case in the meantime, drive it from a signed-in session — a human session has
+        no mode and may act on both environments.
+      </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label className="block text-xs font-medium text-slate-500 mb-1">Name</label>

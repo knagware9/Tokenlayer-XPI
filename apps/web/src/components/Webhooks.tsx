@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { ApiError, api } from "../api.js";
 import { useAuth } from "../auth.js";
 import { orgDomainEnabled } from "../lib/capabilities.js";
+import { modeBlurb, modeLabel, modeTone, type ResourceMode } from "../lib/modes.js";
 import { setNavGuard } from "../lib/nav-guard.js";
 import {
   EVENT_DESCRIPTIONS,
@@ -73,6 +74,14 @@ export interface WebhookDraft {
   eventTypes: readonly EventType[];
   /** "" means "every use case in this org", which is also the server's `null`. */
   useCaseKey: string;
+  /**
+   * Which stream to join (EN-D2). Not on `checkWebhookDraft`'s ok arm and
+   * deliberately so: unlike a url or an event list there is no draft state that
+   * fails validation — both values are always valid and one is always chosen —
+   * so it travels beside the check like `description` does, rather than
+   * pretending to be something the check narrows.
+   */
+  mode: ResourceMode;
 }
 
 /**
@@ -86,7 +95,16 @@ export interface WebhookDraft {
  * delivery the operator goes looking for; over-subscribing is a firehose at a
  * URL that was only ever meant to hear about one thing. The choice is required.
  */
-export const EMPTY_WEBHOOK_DRAFT: WebhookDraft = { url: "", description: "", eventTypes: [], useCaseKey: "" };
+/**
+ * …and starting in the LIVE stream, which is the one place in this form a
+ * default is right. It is the server's own default, it is the pre-EN-D2
+ * behaviour of every endpoint that already exists, and — unlike the role on a
+ * key or the event list here — neither value is the privileged one: a `test`
+ * endpoint hears strictly less. What matters is that the choice is VISIBLE, so
+ * an operator registering a sandbox listener cannot do it without seeing which
+ * stream they picked.
+ */
+export const EMPTY_WEBHOOK_DRAFT: WebhookDraft = { url: "", description: "", eventTypes: [], useCaseKey: "", mode: "live" };
 
 /**
  * Everything the draft must satisfy before it is worth sending. A discriminated
@@ -157,6 +175,18 @@ function fmt(iso: string | null | undefined): string {
   if (!iso) return "—";
   const t = Date.parse(iso);
   return Number.isNaN(t) ? "—" : new Date(t).toLocaleString();
+}
+
+/**
+ * Which stream an endpoint (and therefore every delivery to it) belongs to.
+ *
+ * ABSENT MEANS LIVE. The server sends `mode` and declares it `required` on the
+ * `WebhookEndpoint` schema, so this default only covers a row from an older API
+ * build — but a blank pill on a row that decides whether a payload is real is
+ * worse than a default that matches the column's own.
+ */
+function endpointMode(e: Pick<WebhookEndpoint, "mode">): ResourceMode {
+  return e.mode ?? "live";
 }
 
 function deliveryTone(status: WebhookDelivery["status"]): "ok" | "warn" | "danger" | "info" | "muted" {
@@ -338,6 +368,9 @@ export function Webhooks({ orgId, org }: { orgId: string | null; org: Organizati
             <div className="min-w-0">
               <h3 className="text-sm font-semibold text-red-800">This endpoint is switched off and is receiving nothing</h3>
               <p className="font-mono text-xs text-slate-700 mt-1 break-all">{e.url}</p>
+              {/* Which stream it was on, so an operator with a live and a test
+                  endpoint at similar URLs knows which one went dark. */}
+              <p className="mt-1"><Pill tone={modeTone(endpointMode(e))}>{modeLabel(endpointMode(e))}</Pill></p>
               <p className="text-xs text-red-700 mt-2">
                 <span className="font-medium">Reason:</span> {e.disabledReason ?? "not recorded"}
               </p>
@@ -400,6 +433,7 @@ export function Webhooks({ orgId, org }: { orgId: string | null; org: Organizati
             <thead className="text-xs text-slate-500 bg-slate-50 uppercase tracking-wide">
               <tr>
                 <th className="text-left font-medium px-4 py-2.5">Endpoint</th>
+                <th className="text-left font-medium px-4 py-2.5">Stream</th>
                 <th className="text-left font-medium px-4 py-2.5">Events</th>
                 <th className="text-left font-medium px-4 py-2.5">Status</th>
                 <th className="text-left font-medium px-4 py-2.5">Last delivery</th>
@@ -417,6 +451,15 @@ export function Webhooks({ orgId, org }: { orgId: string | null; org: Organizati
                       <div className="text-xs text-slate-400 mt-0.5">
                         {e.useCaseKey ? <>only <span className="font-mono">{e.useCaseKey}</span></> : "all use cases"}
                       </div>
+                    </td>
+                    {/* Which environment's facts arrive here. Not derivable from
+                        anything else on the row, and the difference between a
+                        real payload and a simulated one. */}
+                    <td className="px-4 py-2">
+                      <Pill tone={modeTone(endpointMode(e))}>{modeLabel(endpointMode(e))}</Pill>
+                      {endpointMode(e) === "test" && (
+                        <div className="text-[11px] text-slate-400 mt-0.5 max-w-[10rem]">sandbox events only</div>
+                      )}
                     </td>
                     <td className="px-4 py-2">
                       <div className="flex flex-wrap gap-1 max-w-xs">
@@ -482,7 +525,7 @@ export function Webhooks({ orgId, org }: { orgId: string | null; org: Organizati
                   </tr>
                   {openDeliveries === e.id && (
                     <tr className="border-t border-slate-100 bg-slate-50/60">
-                      <td colSpan={6} className="px-4 py-3">
+                      <td colSpan={7} className="px-4 py-3">
                         <Deliveries orgId={orgId} endpoint={e} />
                       </td>
                     </tr>
@@ -639,6 +682,7 @@ function CreateWebhook({ orgId, capabilities, role, onCreated }: {
   const [url, setUrl] = useState(EMPTY_WEBHOOK_DRAFT.url);
   const [description, setDescription] = useState(EMPTY_WEBHOOK_DRAFT.description);
   const [useCaseKey, setUseCaseKey] = useState(EMPTY_WEBHOOK_DRAFT.useCaseKey);
+  const [mode, setMode] = useState<ResourceMode>(EMPTY_WEBHOOK_DRAFT.mode);
   // Nothing preselected — see EMPTY_WEBHOOK_DRAFT for why.
   const [eventTypes, setEventTypes] = useState<EventType[]>([...EMPTY_WEBHOOK_DRAFT.eventTypes]);
   const [error, setError] = useState<string | null>(null);
@@ -651,7 +695,7 @@ function CreateWebhook({ orgId, capabilities, role, onCreated }: {
   async function submit(e: React.FormEvent): Promise<void> {
     e.preventDefault();
     setError(null);
-    const check = checkWebhookDraft({ url, description, eventTypes, useCaseKey });
+    const check = checkWebhookDraft({ url, description, eventTypes, useCaseKey, mode });
     if (!check.ok) { setError(check.message); return; }
     setBusy(true);
     try {
@@ -662,6 +706,10 @@ function CreateWebhook({ orgId, capabilities, role, onCreated }: {
         eventTypes: check.eventTypes,
         description: description.trim() || undefined,
         useCaseKey: useCaseKey.trim() || undefined,
+        // FIXED AT REGISTRATION — there is no PATCH for it, so this is the only
+        // moment the choice can be made and the reason it is on this form and
+        // nowhere else.
+        mode,
       });
       // Hand the secret straight to the reveal panel and keep NO copy here: this
       // form is about to unmount, and the secret must not outlive the handoff.
@@ -695,6 +743,42 @@ function CreateWebhook({ orgId, capabilities, role, onCreated }: {
           <p className="text-xs text-slate-500 mt-1">Leave empty to receive this organization&rsquo;s events from every use case.</p>
         </div>
       </div>
+
+      <fieldset>
+        <legend className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1.5">Stream</legend>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {(["live", "test"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              aria-pressed={mode === m}
+              onClick={() => setMode(m)}
+              className={`text-left rounded-xl border p-3 transition ${
+                mode === m
+                  ? m === "test"
+                    ? "border-amber-500 bg-amber-50/60 shadow-sm"
+                    : "border-brand-500 bg-brand-50/40 shadow-sm"
+                  : "border-slate-200 hover:border-brand-300"
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-semibold text-slate-800">{modeLabel(m)}</span>
+                <Pill tone={modeTone(m)}>{modeLabel(m)}</Pill>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                {m === "test"
+                  ? "Hears only events from sandbox use cases."
+                  : "Hears only events from real use cases."}
+              </p>
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-slate-500 mt-2">
+          The two streams never cross, so a sandbox event can never reach a production handler and a real one can never reach a
+          test rig. <strong className="font-semibold text-slate-700">Fixed at registration</strong> — an endpoint cannot be
+          moved between streams afterwards; register a second one instead.
+        </p>
+      </fieldset>
 
       <fieldset>
         <legend className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1.5">Events to receive</legend>
@@ -773,7 +857,17 @@ function Deliveries({ orgId, endpoint }: { orgId: string; endpoint: WebhookEndpo
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-3">
-        <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Deliveries</h4>
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 flex items-center gap-2">
+          Deliveries
+          {/*
+            A DELIVERY'S STREAM IS ITS ENDPOINT'S, by construction: the
+            dispatcher only ever matches an event to an endpoint of the same
+            mode, so every row below carries the same one. Repeating it per row
+            would be noise; omitting it entirely would leave the one screen where
+            payloads are inspected silent about whether they are real.
+          */}
+          <Pill tone={modeTone(endpointMode(endpoint))}>{modeLabel(endpointMode(endpoint))}</Pill>
+        </h4>
         <button onClick={reload} className="text-xs rounded border border-slate-300 text-slate-600 px-2.5 py-1 font-medium hover:bg-slate-50">
           Refresh
         </button>
@@ -844,6 +938,12 @@ function Deliveries({ orgId, endpoint }: { orgId: string; endpoint: WebhookEndpo
       <p className="text-xs text-slate-500">
         A delivery row records the attempt, not the payload. Read the event body from{" "}
         <span className="font-mono">GET /events</span> using the event id or seq above.
+        {endpointMode(endpoint) === "test" && (
+          <>
+            {" "}Every delivery here is a <strong className="font-semibold text-slate-700">{modeLabel("test")}</strong> event:{" "}
+            {modeBlurb("test")}
+          </>
+        )}
       </p>
     </div>
   );
