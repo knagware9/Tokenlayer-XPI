@@ -39,8 +39,23 @@ export function CertificateDesignPanel(props: CertificateDesignPanelProps): JSX.
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  /**
+   * Did the user actually CHANGE the artwork in this session? Set by an upload
+   * and by "Remove artwork", and by nothing else — see `save()` for the failure
+   * this exists to prevent.
+   */
+  const [artworkTouched, setArtworkTouched] = useState(false);
 
   const claimKeys = Object.keys(type?.claimSchema?.properties ?? {});
+
+  // What is STORED, as opposed to what this session has staged. A design
+  // authored before artwork was pinned has a documentId and no digest; the
+  // artwork GET needs no pin, so those bytes still render on the canvas.
+  const storedDocumentId = cert?.background?.documentId ?? null;
+  const storedUnpinned = storedDocumentId !== null && !cert?.background?.sha256;
+  // Artwork the user can actually SEE, which is what the controls must reflect:
+  // the staged state once touched, the stored record until then.
+  const hasArtwork = artworkTouched ? background !== null : storedDocumentId !== null;
 
   /**
    * Every object URL pins its blob until revoked, and this panel can outlive
@@ -78,6 +93,7 @@ export function CertificateDesignPanel(props: CertificateDesignPanelProps): JSX.
     try {
       const r = await api.uploadCertificateArtwork(token, useCase.key, file.type, btoa(bin));
       setBackground({ documentId: r.documentId, sha256: r.sha256 });
+      setArtworkTouched(true);
       // Shown from the local File: no round trip, and it is the same bytes.
       if (artworkUrlRef.current) URL.revokeObjectURL(artworkUrlRef.current);
       setArtworkUrl(URL.createObjectURL(file));
@@ -90,16 +106,19 @@ export function CertificateDesignPanel(props: CertificateDesignPanelProps): JSX.
   async function preview(): Promise<void> {
     if (!token || !type) return;
     setError(null);
+    // The preview must show what SAVE would store, including a change staged
+    // but not yet saved. Spreading the stored `cert` alone would reprint the
+    // artwork a user had just removed; the stored background is otherwise kept
+    // exactly as it is, unpinned legacy record included (this door takes no pin).
+    const nextCert = {
+      ...(cert ?? { enabled: true }),
+      ...(artworkTouched && background ? { background } : {}),
+      placements: withoutStalePlacements(placements, claimKeys),
+    };
+    if (artworkTouched && !background) delete (nextCert as { background?: unknown }).background;
     try {
       const blob = await api.previewCertificate(token, {
-        credentialType: {
-          ...type,
-          certificate: {
-            ...(cert ?? { enabled: true }),
-            ...(background ? { background } : {}),
-            placements: withoutStalePlacements(placements, claimKeys),
-          },
-        },
+        credentialType: { ...type, certificate: nextCert },
       });
       const url = URL.createObjectURL(blob);
       window.open(url, "_blank");
@@ -117,7 +136,15 @@ export function CertificateDesignPanel(props: CertificateDesignPanelProps): JSX.
     try {
       await api.updateCertificateDesign(token, useCase.key, {
         credentialType: credentialTypeName,
-        background,
+        // OMIT means unchanged, `null` means clear — the route's own contract,
+        // and the reason this is a conditional spread rather than a value.
+        // Sending the state unconditionally deleted artwork nobody touched: a
+        // design authored before pinning stores a documentId with NO sha256, so
+        // `background` initialises to null while the canvas happily displays the
+        // bytes (the artwork GET takes no pin). Nudging one placement and saving
+        // then cleared artwork the panel cannot re-pin — it never uploaded those
+        // bytes, and the PATCH door refuses a background without a digest.
+        ...(artworkTouched ? { background } : {}),
         // A placement whose claim was renamed or deleted after it was placed
         // would make the server refuse the whole design; it could not print
         // anything either way. The designer warns about these, so dropping them
@@ -157,7 +184,7 @@ export function CertificateDesignPanel(props: CertificateDesignPanelProps): JSX.
       />
       <Card>
         <CertificateDesigner
-          backgroundDocumentId={background?.documentId ?? null}
+          backgroundDocumentId={artworkTouched ? (background?.documentId ?? null) : storedDocumentId}
           artworkObjectUrl={artworkUrl}
           placements={placements}
           claimKeys={claimKeys}
@@ -174,11 +201,15 @@ export function CertificateDesignPanel(props: CertificateDesignPanelProps): JSX.
           >
             {busy ? "Saving…" : "Save design"}
           </button>
-          {background && (
+          {/* Gated on what is VISIBLE, not on the pinned state: a legacy record
+              shows its artwork on the canvas while `background` is null, and
+              hiding the control there told the user there was nothing to remove
+              while they were looking straight at it. */}
+          {hasArtwork && (
             <button
               type="button"
               disabled={busy}
-              onClick={() => { setBackground(null); setArtworkUrl(null); fetchedFor.current = null; setSaved(false); }}
+              onClick={() => { setBackground(null); setArtworkUrl(null); fetchedFor.current = null; setArtworkTouched(true); setSaved(false); }}
               className="rounded-lg border border-slate-200 text-slate-600 px-3 py-1.5 text-xs font-medium hover:border-brand-400 hover:text-brand-700"
             >
               Remove artwork
@@ -187,6 +218,12 @@ export function CertificateDesignPanel(props: CertificateDesignPanelProps): JSX.
           {saved && <span className="text-[11px] text-emerald-600">Saved.</span>}
           {error && <span className="text-[11px] text-rose-600">{error}</span>}
         </div>
+        {storedUnpinned && !artworkTouched && (
+          <p className="mt-2 text-[11px] text-amber-700">
+            This artwork predates digest pinning, so it can be kept or removed here but not edited in place. To change
+            it, upload the file again.
+          </p>
+        )}
         <p className="mt-2 text-[11px] text-slate-500">
           Removing the artwork reverts this credential type to the built-in certificate layout. Your placements are
           kept and simply stop printing until artwork is uploaded again.
