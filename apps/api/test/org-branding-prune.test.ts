@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import { describe, expect, it } from "vitest";
 import { auth, buildTestAppWithRepos, loginAs, V1, type TestAppHandle } from "./helpers.js";
+import { PLATFORM_ORG_NAME } from "../src/platform-org.js";
 
 const ROUNDS = 4;
 const PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAAFElEQVR4nGP8z8Dwn4GBgYGJAQIABiAB/8s3lOgAAAAASUVORK5CYII=";
@@ -611,16 +612,200 @@ describe("POST /orgs/:id/branding/logo prunes superseded uploads", () => {
     expect(await getDoc(h, bLogo.id)).not.toBeNull();
   });
 
-  it("a PlatformAdmin uploading on an org's behalf prunes THAT org's rows", async () => {
+  it("a PlatformAdmin uploading on an org's behalf prunes THAT org's rows, not the platform org's", async () => {
     const h = await buildTestAppWithRepos();
     const a = await org(h, "Acme");
     const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const platformOrg = await h.organizations.findByName(PLATFORM_ORG_NAME);
+    if (!platformOrg) throw new Error("platform org fixture missing");
+
+    // Give the platform org its own brand-logo row FIRST. Without this the
+    // platform org owns no brand-logo row in the fixture at all, and this
+    // test would pass even for a prune that swept every org indiscriminately
+    // — it never establishes the negative it claims to.
+    const platformLogo = (await upload(h, platformOrg.id, admin)).json();
 
     const first = (await upload(h, a.id, admin)).json();
     const second = (await upload(h, a.id, admin)).json();
 
     expect(await getDoc(h, first.id)).toBeNull();
     expect(await getDoc(h, second.id)).not.toBeNull();
+    expect(await getDoc(h, platformLogo.id)).not.toBeNull();
+  });
+
+  it("an ownerOrgId=null brand-logo row is never pruned — pinned by nothing, owned by no one", async () => {
+    const h = await buildTestAppWithRepos();
+    const a = await org(h, "Acme");
+    const orphan = await h.deps.documents.create({ contentType: "image/png", bytes: Buffer.from(PNG_B64, "base64"), ownerOrgId: null, purpose: "brand-logo" });
+
+    await upload(h, a.id, a.token);
+    await upload(h, a.id, a.token);
+
+    expect(await getDoc(h, orphan.id)).not.toBeNull();
+  });
+
+  /**
+   * A NOTE ON HOW THESE TWO TESTS ARE BUILT.
+   *
+   * `Promise.all` of two plain `app.inject()` calls does NOT create genuine
+   * concurrent execution in this harness — verified empirically by tracing:
+   * `MemoryDocumentRepository` has no real I/O latency, so the first
+   * request's entire handler chain (list → store → prune) resolves purely
+   * through microtasks and runs to completion before the second request's
+   * handler is even dispatched, every single time. This held even across two
+   * separate Fastify instances sharing the same `deps`, and even over a real
+   * TCP loopback connection with `fetch()` — there is simply no forced yield
+   * point anywhere in the handler when nothing it calls does real I/O. A
+   * naive `Promise.all` test here would therefore either always fail (for
+   * "two uploads", since the second deterministically supersedes the first —
+   * which is exactly the intended, non-buggy feature behaviour for two
+   * requests with no real overlap) or always pass for the wrong reason (for
+   * "racing a PATCH", since the PATCH would simply finish first) — confirmed
+   * by literally reverting each fix and watching a naive version of these
+   * tests keep passing regardless.
+   *
+   * In production this doesn't apply: a real Prisma call against Postgres or
+   * SQLite is real network/disk I/O, which is exactly the kind of operation
+   * that lets two requests' handlers genuinely interleave — which is the
+   * condition these two fixes exist for. `tick()` below simulates that one
+   * property (a real repository call yields to the event loop) so the test
+   * can exercise it — it does not fake any outcome; `documents.create` and
+   * `documents.listByOwnerPurpose` still do exactly what they always do,
+   * just after yielding once, the way a real database driver would.
+   */
+  const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+  /**
+   * CRITICAL 1 (quality review): the earlier version listed rows AFTER
+   * storing this call's own upload and pruned anything that wasn't its own
+   * row or the pinned mark, with no regard for timing — two overlapping
+   * uploads would each see the OTHER as an abandoned pick and delete it.
+   */
+  it("two concurrent uploads to the same org do not delete each other", async () => {
+    const h = await buildTestAppWithRepos();
+    const a = await org(h, "Acme");
+
+    const realList = h.deps.documents.listByOwnerPurpose.bind(h.deps.documents);
+    const realCreate = h.deps.documents.create.bind(h.deps.documents);
+    h.deps.documents.listByOwnerPurpose = async (...args: Parameters<typeof realList>) => { await tick(); return realList(...args); };
+    h.deps.documents.create = async (...args: Parameters<typeof realCreate>) => { await tick(); return realCreate(...args); };
+    let r1, r2;
+    try {
+      [r1, r2] = await Promise.all([upload(h, a.id, a.token), upload(h, a.id, a.token)]);
+    } finally {
+      h.deps.documents.listByOwnerPurpose = realList;
+      h.deps.documents.create = realCreate;
+    }
+
+    expect(r1.statusCode).toBe(201);
+    expect(r2.statusCode).toBe(201);
+    const doc1 = r1.json();
+    const doc2 = r2.json();
+
+    expect(await getDoc(h, doc1.id)).not.toBeNull();
+    expect(await getDoc(h, doc2.id)).not.toBeNull();
+  });
+
+  /**
+   * CRITICAL 2 (quality review): the earlier version read the pin ONCE,
+   * before the whole sweep, so a PATCH pinning an older mark anywhere during
+   * the sweep was invisible to it. The pin is now re-read fresh immediately
+   * before each candidate delete. Two rows are used deliberately: the PATCH
+   * is triggered by the FIRST row's own delete completing, so it lands
+   * strictly BETWEEN that moment and the SECOND row's own fresh pin check —
+   * a window the old "read once, up front" code could not see into no
+   * matter when the PATCH landed, and the new per-row read does.
+   */
+  it("an upload racing a PATCH that pins an older mark spares the newly pinned bytes", async () => {
+    const h = await buildTestAppWithRepos();
+    const a = await org(h, "Acme");
+
+    // Each upload prunes after itself, so setting up TWO unpinned candidates
+    // side by side needs pruning suppressed for these two setup uploads —
+    // otherwise the second setup upload would immediately delete the first,
+    // and there would be nothing left for the real, triggering upload below
+    // to race against.
+    const realList = h.deps.documents.listByOwnerPurpose.bind(h.deps.documents);
+    h.deps.documents.listByOwnerPurpose = async () => [];
+    const otherOld = (await upload(h, a.id, a.token)).json(); // candidate #1 — processed first
+    const willBePinnedMidSweep = (await upload(h, a.id, a.token)).json(); // candidate #2 — processed second
+    h.deps.documents.listByOwnerPurpose = realList;
+
+    const realRemove = h.deps.documents.removeByOwnerPurpose.bind(h.deps.documents);
+    let firedOnce = false;
+    h.deps.documents.removeByOwnerPurpose = async (id: string, ownerOrgId: string, purpose: "brand-logo") => {
+      if (id === otherOld.id && !firedOnce) {
+        firedOnce = true;
+        // The REAL PATCH route, run mid-sweep — not a faked outcome.
+        const patchRes = await patchBranding(h, a.id, a.token, { brandLogoDocumentId: willBePinnedMidSweep.id });
+        expect(patchRes.statusCode).toBe(200);
+      }
+      return realRemove(id, ownerOrgId, purpose);
+    };
+    let uploadRes;
+    try {
+      uploadRes = await upload(h, a.id, a.token); // candidates snapshot: [otherOld, willBePinnedMidSweep]
+    } finally {
+      h.deps.documents.removeByOwnerPurpose = realRemove;
+    }
+    expect(uploadRes.statusCode).toBe(201);
+
+    expect(await getDoc(h, otherOld.id)).toBeNull(); // genuinely superseded, deleted as normal
+    expect(await getDoc(h, willBePinnedMidSweep.id)).not.toBeNull(); // pinned mid-sweep — spared
+    // And the live mark is still served, which is what a user would notice.
+    const served = await h.app.inject({ method: "GET", url: `${V1}/orgs/${a.id}/branding/logo`, headers: auth(a.token) });
+    expect(served.statusCode).toBe(200);
+  });
+
+  /**
+   * IMPORTANT 3 (quality review): the org re-read at the top of the handler
+   * proves the org exists, but the PRUNE re-reads it again itself — and if
+   * THAT read comes back null (the org vanished in between; `organizations
+   * .remove` exists and is called elsewhere in this file), the earlier
+   * version treated "unknown" as "nothing pinned" and deleted freely. Forcing
+   * only the prune's own re-read to fail (not the handler's initial
+   * existence check) proves the fix, not just the unit-level guard.
+   */
+  it("prunes nothing when the organization cannot be re-read partway through the request", async () => {
+    const h = await buildTestAppWithRepos();
+    const a = await org(h, "Acme");
+    const first = (await upload(h, a.id, a.token)).json();
+
+    const realGet = h.deps.organizations.get.bind(h.deps.organizations);
+    let calls = 0;
+    h.deps.organizations.get = async (orgId: string) => {
+      calls++;
+      // Call 1 is the handler's own top-of-route existence check — let it
+      // through so the upload proceeds normally. Calls after that are the
+      // prune's re-read; make the org look gone from there on.
+      if (orgId === a.id && calls > 1) return null;
+      return realGet(orgId);
+    };
+    try {
+      const res = await upload(h, a.id, a.token);
+      expect(res.statusCode).toBe(201);
+      const second = res.json();
+
+      expect(await getDoc(h, first.id)).not.toBeNull();
+      expect(await getDoc(h, second.id)).not.toBeNull();
+    } finally {
+      h.deps.organizations.get = realGet;
+    }
+  });
+
+  it("a prune failure at the route level still returns 201 for the upload", async () => {
+    const h = await buildTestAppWithRepos();
+    const a = await org(h, "Acme");
+    await upload(h, a.id, a.token);
+
+    const realList = h.deps.documents.listByOwnerPurpose.bind(h.deps.documents);
+    h.deps.documents.listByOwnerPurpose = async () => { throw new Error("database is on fire"); };
+    try {
+      const res = await upload(h, a.id, a.token);
+      expect(res.statusCode).toBe(201);
+    } finally {
+      h.deps.documents.listByOwnerPurpose = realList;
+    }
   });
 
   it("leaves documents from the other upload doors untouched", async () => {
@@ -634,16 +819,23 @@ describe("POST /orgs/:id/branding/logo prunes superseded uploads", () => {
     expect(await getDoc(h, artwork.id)).not.toBeNull();
   });
 
-  it("records what it removed in the audit log", async () => {
+  it("records what it removed in the audit log, including kept and pinned", async () => {
     const h = await buildTestAppWithRepos();
     const a = await org(h, "Acme");
     const first = (await upload(h, a.id, a.token)).json();
-    await upload(h, a.id, a.token);
+    const second = (await upload(h, a.id, a.token)).json();
 
     const entries = await h.audit.list();
     const pruned = entries.filter((e) => e.action === "brand-logo-pruned");
     expect(pruned).toHaveLength(1);
-    expect(pruned[0]!.payload).toMatchObject({ orgId: a.id, removed: [first.id] });
+    const payload = pruned[0]!.payload as { orgId: string; removed: Array<{ id: string; size: number; createdAt: string }>; kept: string; pinned: string | null };
+    expect(payload.orgId).toBe(a.id);
+    expect(payload.kept).toBe(second.id);
+    expect(payload.pinned).toBeNull();
+    // `removed` carries full DocumentSummary rows, not bare ids — an id alone
+    // resolves to nothing once the row is gone.
+    expect(payload.removed.map((r) => r.id)).toEqual([first.id]);
+    expect(payload.removed[0]).toMatchObject({ id: first.id, size: expect.any(Number), createdAt: expect.any(String) });
   });
 
   it("writes no audit entry when there was nothing to prune", async () => {

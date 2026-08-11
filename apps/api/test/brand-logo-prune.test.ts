@@ -55,43 +55,83 @@ describe("MemoryDocumentRepository — purpose", () => {
 });
 
 describe("pruneSupersededBrandLogos", () => {
-  it("deletes the org's other brand logos, sparing the new one and the pinned one", async () => {
+  it("deletes every candidate that isn't pinned", async () => {
     const docs = new MemoryDocumentRepository();
     const make = () => docs.create({ contentType: "image/png", bytes: PNG, ownerOrgId: "org_a", purpose: "brand-logo" as const });
     const pinned = await make();
     const abandoned = await make();
-    const fresh = await make();
+    // The candidate list IS the whole design: it's whatever the caller
+    // listed BEFORE storing its own new upload, so a just-uploaded row is
+    // never in it and needs no special case here.
+    const candidates = await docs.listByOwnerPurpose("org_a", "brand-logo");
 
-    const removed = await pruneSupersededBrandLogos(docs, "org_a", { justUploaded: fresh.id, pinned: pinned.id });
+    const result = await pruneSupersededBrandLogos(docs, "org_a", { candidates, getPinned: async () => pinned.id });
 
-    expect(removed).toEqual([abandoned.id]);
+    expect(result.removed.map((r) => r.id)).toEqual([abandoned.id]);
+    expect(result.lostPinnedId).toBeNull();
     expect(await docs.get(abandoned.id)).toBeNull();
     expect(await docs.get(pinned.id)).not.toBeNull();
-    expect(await docs.get(fresh.id)).not.toBeNull();
   });
 
-  it("spares nothing but the new upload when the org has no logo pinned", async () => {
+  it("deletes every candidate when nothing is pinned", async () => {
     const docs = new MemoryDocumentRepository();
     const make = () => docs.create({ contentType: "image/png", bytes: PNG, ownerOrgId: "org_a", purpose: "brand-logo" as const });
     const first = await make();
     const second = await make();
+    const candidates = await docs.listByOwnerPurpose("org_a", "brand-logo");
 
-    const removed = await pruneSupersededBrandLogos(docs, "org_a", { justUploaded: second.id, pinned: null });
+    const result = await pruneSupersededBrandLogos(docs, "org_a", { candidates, getPinned: async () => null });
 
-    expect(removed).toEqual([first.id]);
-    expect(await docs.get(second.id)).not.toBeNull();
+    expect(result.removed.map((r) => r.id).sort()).toEqual([first.id, second.id].sort());
   });
 
-  it("never touches another org's rows, or this org's non-brand-logo documents", async () => {
+  /**
+   * CRITICAL 1 (quality review): the earlier version listed rows AFTER
+   * storing this call's own upload and deleted anything that wasn't its own
+   * row or the pinned one, with no regard for timing — two overlapping
+   * uploads would each see the OTHER as an abandoned pick and delete it, and
+   * the symmetric case lost both. A first fix attempt compared `createdAt`
+   * timestamps (spare anything at-or-after this call's own instant), which
+   * is wrong in practice: millisecond-resolution clocks tie constantly
+   * against an in-process store with no real I/O, which made ORDINARY
+   * sequential uploads flaky too (empirically: ~1 run in 3).
+   *
+   * The actual fix doesn't touch `createdAt` at all. The caller lists
+   * existing rows BEFORE storing its own upload and passes THAT snapshot in
+   * as `candidates` — nothing else is ever considered. This proves the
+   * consequence directly: a row created strictly AFTER the snapshot was
+   * taken (simulating a concurrent sibling's upload landing mid-sweep) is
+   * simply invisible to this call and is never touched, no matter what.
+   */
+  it("CRITICAL 1: never touches a row created after the candidate snapshot was taken", async () => {
+    const docs = new MemoryDocumentRepository();
+    const make = () => docs.create({ contentType: "image/png", bytes: PNG, ownerOrgId: "org_a", purpose: "brand-logo" as const });
+    const before = await make();
+    // The snapshot is taken HERE — `before` is in it.
+    const candidates = await docs.listByOwnerPurpose("org_a", "brand-logo");
+    // A concurrent sibling upload landing after the snapshot but before this
+    // call's prune runs.
+    const concurrentSibling = await make();
+
+    const result = await pruneSupersededBrandLogos(docs, "org_a", { candidates, getPinned: async () => null });
+
+    expect(result.removed.map((r) => r.id)).toEqual([before.id]);
+    expect(await docs.get(concurrentSibling.id)).not.toBeNull();
+  });
+
+  it("never touches another org's rows or this org's non-brand-logo documents", async () => {
+    // Scoping itself is `listByOwnerPurpose`'s contract; this proves the
+    // prune only ever acts on what's IN `candidates` — a caller who scoped
+    // the snapshot correctly gets correct scoping here for free.
     const docs = new MemoryDocumentRepository();
     const mine = await docs.create({ contentType: "image/png", bytes: PNG, ownerOrgId: "org_a", purpose: "brand-logo" });
-    const fresh = await docs.create({ contentType: "image/png", bytes: PNG, ownerOrgId: "org_a", purpose: "brand-logo" });
     const artwork = await docs.create({ contentType: "image/png", bytes: PNG, ownerOrgId: "org_a", purpose: null });
     const theirs = await docs.create({ contentType: "image/png", bytes: PNG, ownerOrgId: "org_b", purpose: "brand-logo" });
+    const candidates = await docs.listByOwnerPurpose("org_a", "brand-logo");
 
-    const removed = await pruneSupersededBrandLogos(docs, "org_a", { justUploaded: fresh.id, pinned: null });
+    const result = await pruneSupersededBrandLogos(docs, "org_a", { candidates, getPinned: async () => null });
 
-    expect(removed).toEqual([mine.id]);
+    expect(result.removed.map((r) => r.id)).toEqual([mine.id]);
     expect(await docs.get(artwork.id)).not.toBeNull();
     expect(await docs.get(theirs.id)).not.toBeNull();
   });
@@ -100,7 +140,7 @@ describe("pruneSupersededBrandLogos", () => {
     const docs = new MemoryDocumentRepository();
     const doomed = await docs.create({ contentType: "image/png", bytes: PNG, ownerOrgId: "org_a", purpose: "brand-logo" });
     const other = await docs.create({ contentType: "image/png", bytes: PNG, ownerOrgId: "org_a", purpose: "brand-logo" });
-    const fresh = await docs.create({ contentType: "image/png", bytes: PNG, ownerOrgId: "org_a", purpose: "brand-logo" });
+    const candidates = await docs.listByOwnerPurpose("org_a", "brand-logo");
 
     const realRemove = docs.removeByOwnerPurpose.bind(docs);
     docs.removeByOwnerPurpose = async (id: string, ownerOrgId: string, purpose: "brand-logo") => {
@@ -108,17 +148,68 @@ describe("pruneSupersededBrandLogos", () => {
       await realRemove(id, ownerOrgId, purpose);
     };
 
-    const removed = await pruneSupersededBrandLogos(docs, "org_a", { justUploaded: fresh.id, pinned: null });
+    const result = await pruneSupersededBrandLogos(docs, "org_a", { candidates, getPinned: async () => null });
 
-    expect(removed).toEqual([other.id]);
+    expect(result.removed.map((r) => r.id)).toEqual([other.id]);
     expect(await docs.get(doomed.id)).not.toBeNull();
   });
 
-  it("returns an empty list when listing itself fails", async () => {
+  it("prunes nothing when candidates is empty — e.g. the caller's pre-store listing failed", async () => {
     const docs = new MemoryDocumentRepository();
-    const fresh = await docs.create({ contentType: "image/png", bytes: PNG, ownerOrgId: "org_a", purpose: "brand-logo" });
-    docs.listByOwnerPurpose = async () => { throw new Error("database is on fire"); };
+    const existing = await docs.create({ contentType: "image/png", bytes: PNG, ownerOrgId: "org_a", purpose: "brand-logo" });
 
-    await expect(pruneSupersededBrandLogos(docs, "org_a", { justUploaded: fresh.id, pinned: null })).resolves.toEqual([]);
+    const result = await pruneSupersededBrandLogos(docs, "org_a", { candidates: [], getPinned: async () => null });
+
+    expect(result).toEqual({ removed: [], lostPinnedId: null });
+    expect(await docs.get(existing.id)).not.toBeNull();
+  });
+
+  /**
+   * IMPORTANT 3 (quality review): `getPinned` throwing — the org could not be
+   * re-read, so the pin state is UNKNOWN — must fail closed (leave the row),
+   * never be treated as "nothing is pinned".
+   */
+  it("fails closed: leaves a row in place when the pin state cannot be determined", async () => {
+    const docs = new MemoryDocumentRepository();
+    const old = await docs.create({ contentType: "image/png", bytes: PNG, ownerOrgId: "org_a", purpose: "brand-logo" });
+    const candidates = await docs.listByOwnerPurpose("org_a", "brand-logo");
+
+    const result = await pruneSupersededBrandLogos(docs, "org_a", {
+      candidates,
+      getPinned: async () => { throw new Error("cannot reach the organization row"); },
+    });
+
+    expect(result.removed).toEqual([]);
+    expect(await docs.get(old.id)).not.toBeNull();
+  });
+
+  /**
+   * CRITICAL 2 (quality review): the pin is now re-read fresh immediately
+   * before each delete, which closes the wide "read once up front" window —
+   * but a PATCH landing strictly between that fresh read and the DELETE
+   * succeeding is still possible. This proves the residual is DETECTED
+   * (`lostPinnedId`), not silently absorbed.
+   */
+  it("reports lostPinnedId when a row becomes pinned between its own check and the delete completing", async () => {
+    const docs = new MemoryDocumentRepository();
+    const raced = await docs.create({ contentType: "image/png", bytes: PNG, ownerOrgId: "org_a", purpose: "brand-logo" });
+    const candidates = await docs.listByOwnerPurpose("org_a", "brand-logo");
+
+    let pinnedNow: string | null = null;
+    const realRemove = docs.removeByOwnerPurpose.bind(docs);
+    docs.removeByOwnerPurpose = async (id: string, ownerOrgId: string, purpose: "brand-logo") => {
+      // Simulates a PATCH pinning `raced` in the gap between the per-row
+      // getPinned() read (which had already returned null) and this delete.
+      if (id === raced.id) pinnedNow = raced.id;
+      await realRemove(id, ownerOrgId, purpose);
+    };
+
+    const result = await pruneSupersededBrandLogos(docs, "org_a", { candidates, getPinned: async () => pinnedNow });
+
+    // The row was still deleted — the window is narrowed, not closed — but
+    // the loss is detected and reported rather than silently absorbed.
+    expect(await docs.get(raced.id)).toBeNull();
+    expect(result.removed.map((r) => r.id)).toEqual([raced.id]);
+    expect(result.lostPinnedId).toBe(raced.id);
   });
 });

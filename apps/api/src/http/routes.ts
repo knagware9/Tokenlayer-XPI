@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { ApiKeyRecord, AssetRecord, BrandingPatch, CashflowRecord, CompanyProfile, CredentialRecord, DocumentPurpose, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord, WebhookEndpointRecord } from "../persistence/types.js";
+import type { ApiKeyRecord, AssetRecord, BrandingPatch, CashflowRecord, CompanyProfile, CredentialRecord, DocumentPurpose, DocumentSummary, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord, WebhookEndpointRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
 import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, certificatePageSize, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, issueCredential, issuerBindingAllows, modeAllows, normalizeUseCaseDefinition, ORG_OPERATING_ROLES, orgDomainEnabled, orgRoleEnabled, PolicyError, presentCredential, presentCredentials, SANDBOX_CHAIN_ID, sandboxChainsValid, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateBrandAccent, validateCertificatePlacements, validateCredentialUseCase, validateEventTypes, validateMetadata, scopeAllows, validateOrgCapabilities, validateScopes, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, isDocumentSha256, type Actor, type ApiScope, type ChainEntry, type CredentialTypeSpec, type CredentialUseCaseDefinition, type LifecycleAction, type OrgDomain, type OrgOperatingRole, type OrgType, type ResourceMode, type Role, type UseCaseDefinition, type UseCaseTemplate, type CertificateFieldPlacement } from "@tokenlayer/core";
 import qrcode from "qrcode";
@@ -4186,6 +4186,24 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     if (!isRenderableArtwork(b.contentType)) {
       return reply.code(415).send({ error: "UNSUPPORTED_DOCUMENT_TYPE", message: "a brand logo must be image/png or image/jpeg — the renderer can draw nothing else" });
     }
+    // SNAPSHOT BEFORE STORING, NOT AFTER. This is what actually stops two
+    // concurrent uploads from deleting each other (see the long comment in
+    // `brand-logo-prune.ts` — an earlier attempt compared `createdAt`
+    // timestamps instead, and empirically that made ORDINARY sequential
+    // uploads flaky, because millisecond-resolution clocks tie constantly
+    // against an in-process store with no real I/O). Everything in this list
+    // demonstrably existed before this request wrote its own bytes; a row
+    // created by a genuinely concurrent request after this call cannot appear
+    // in it and so can never be touched by this request, no matter what
+    // happens afterward. Best-effort: if this listing fails, nothing is
+    // pruned this time, not that the upload fails.
+    let candidates: DocumentSummary[] = [];
+    try {
+      candidates = await deps.documents.listByOwnerPurpose(id, "brand-logo");
+    } catch (err) {
+      request.log.error({ err, orgId: id }, "brand-logo-prune: pre-upload listing failed — nothing will be pruned for this upload");
+    }
+
     // OWNED BY THE ORG BEING BRANDED, not by the caller. A PlatformAdmin
     // uploading a mark on an org's behalf is acting for that org, and their own
     // `claims.orgId` (the platform org, or none) would record the wrong owner —
@@ -4197,22 +4215,44 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     // until the new bytes are safely written — a prune-first ordering would, on
     // a failed upload, leave the org with no logo at all.
     //
-    // `brandLogoDocumentId` is RE-READ here rather than taken from the `org`
-    // fetched at the top of the handler: the upload of a multi-megabyte body sits
-    // between the two, and a mark pinned during that window must not be deleted
-    // by this call.
-    const fresh = await deps.organizations.get(id);
-    const removed = await pruneSupersededBrandLogos(deps.documents, id, {
-      justUploaded: doc.id,
-      pinned: fresh?.brandLogoDocumentId ?? null,
-    });
+    // `getPinned` is called FRESH by the prune, immediately before each
+    // candidate delete, not once up front — a PATCH that pins an older mark
+    // anywhere before that per-row read is correctly seen and the row is
+    // spared. That shrinks the window to one round trip per row; it does NOT
+    // make "a mark pinned meanwhile survives" a guarantee — see `lostPinnedId`
+    // below for the residual, and what is lost when it is hit: that row's
+    // bytes, plus a `brandLogoDocumentId` left pointing at nothing.
+    //
+    // THROWS rather than returning a guessed null when the org cannot be
+    // re-read (`organizations.remove` exists and is called at :3791, so a
+    // vanished org is reachable, not just theoretical) — treating "unknown"
+    // as "nothing pinned" would let this delete the org's live mark. The
+    // throw is caught per-row inside the prune and treated as "leave it",
+    // which is also what makes this best-effort: it cannot 500 the request
+    // after the upload has already succeeded.
+    const getPinned = async (): Promise<string | null> => {
+      const fresh = await deps.organizations.get(id);
+      if (!fresh) throw new Error(`brand-logo prune: organization ${id} could not be re-read`);
+      return fresh.brandLogoDocumentId;
+    };
+
+    const { removed, lostPinnedId } = await pruneSupersededBrandLogos(deps.documents, id, { candidates, getPinned }, request.log);
+
     // Only when something actually went, so the log records deletions rather
-    // than every upload.
+    // than every upload. `audit.append` itself is NOT best-effort here — it
+    // matches every other call site in this file, and on this path the
+    // deletion has already happened, so a 500 here means the caller retries
+    // and the retry adds one more (bounded, later-collected) row, not that
+    // anything unsafe repeats.
     if (removed.length) {
+      const pinnedForAudit = await getPinned().catch(() => null);
       await deps.audit.append({
         actorId: claims.id,
         action: "brand-logo-pruned" as LifecycleAction,
-        payload: { orgId: id, removed, kept: doc.id, pinned: fresh?.brandLogoDocumentId ?? null },
+        payload: {
+          orgId: id, removed, kept: doc.id, pinned: pinnedForAudit,
+          ...(lostPinnedId ? { lostPinnedId } : {}),
+        },
       });
     }
     return reply.code(201).send(doc);
