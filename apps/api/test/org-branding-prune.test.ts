@@ -565,3 +565,93 @@ describe("a brand logo may not ride a clone to live either", () => {
     expect(res.statusCode).toBe(201);
   });
 });
+
+const getDoc = (h: TestAppHandle, id: string) => h.deps.documents.get(id);
+
+describe("POST /orgs/:id/branding/logo prunes superseded uploads", () => {
+  it("a second upload deletes the unpinned first", async () => {
+    const h = await buildTestAppWithRepos();
+    const a = await org(h, "Acme");
+
+    const first = (await upload(h, a.id, a.token)).json();
+    const second = (await upload(h, a.id, a.token)).json();
+
+    expect(await getDoc(h, first.id)).toBeNull();
+    expect(await getDoc(h, second.id)).not.toBeNull();
+  });
+
+  it("THE SAFETY PROPERTY: the pinned mark survives an upload", async () => {
+    const h = await buildTestAppWithRepos();
+    const a = await org(h, "Acme");
+
+    const live = (await upload(h, a.id, a.token)).json();
+    expect((await patchBranding(h, a.id, a.token, { brandLogoDocumentId: live.id })).statusCode).toBe(200);
+
+    const tryOne = (await upload(h, a.id, a.token)).json();
+    const tryTwo = (await upload(h, a.id, a.token)).json();
+
+    expect(await getDoc(h, live.id)).not.toBeNull();
+    expect(await getDoc(h, tryOne.id)).toBeNull();
+    expect(await getDoc(h, tryTwo.id)).not.toBeNull();
+
+    // And the live mark is still served, which is what a user would notice.
+    const served = await h.app.inject({ method: "GET", url: `${V1}/orgs/${a.id}/branding/logo`, headers: auth(a.token) });
+    expect(served.statusCode).toBe(200);
+  });
+
+  it("is org-scoped: one org's upload leaves another's rows alone", async () => {
+    const h = await buildTestAppWithRepos();
+    const a = await org(h, "Acme");
+    const b = await org(h, "Globex");
+
+    const bLogo = (await upload(h, b.id, b.token)).json();
+    await upload(h, a.id, a.token);
+    await upload(h, a.id, a.token);
+
+    expect(await getDoc(h, bLogo.id)).not.toBeNull();
+  });
+
+  it("a PlatformAdmin uploading on an org's behalf prunes THAT org's rows", async () => {
+    const h = await buildTestAppWithRepos();
+    const a = await org(h, "Acme");
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+
+    const first = (await upload(h, a.id, admin)).json();
+    const second = (await upload(h, a.id, admin)).json();
+
+    expect(await getDoc(h, first.id)).toBeNull();
+    expect(await getDoc(h, second.id)).not.toBeNull();
+  });
+
+  it("leaves documents from the other upload doors untouched", async () => {
+    const h = await buildTestAppWithRepos();
+    const a = await org(h, "Acme");
+    const artwork = await h.deps.documents.create({ contentType: "image/png", bytes: Buffer.from(PNG_B64, "base64"), ownerOrgId: a.id, purpose: null });
+
+    await upload(h, a.id, a.token);
+    await upload(h, a.id, a.token);
+
+    expect(await getDoc(h, artwork.id)).not.toBeNull();
+  });
+
+  it("records what it removed in the audit log", async () => {
+    const h = await buildTestAppWithRepos();
+    const a = await org(h, "Acme");
+    const first = (await upload(h, a.id, a.token)).json();
+    await upload(h, a.id, a.token);
+
+    const entries = await h.audit.list();
+    const pruned = entries.filter((e) => e.action === "brand-logo-pruned");
+    expect(pruned).toHaveLength(1);
+    expect(pruned[0]!.payload).toMatchObject({ orgId: a.id, removed: [first.id] });
+  });
+
+  it("writes no audit entry when there was nothing to prune", async () => {
+    const h = await buildTestAppWithRepos();
+    const a = await org(h, "Acme");
+    await upload(h, a.id, a.token);
+
+    const entries = await h.audit.list();
+    expect(entries.filter((e) => e.action === "brand-logo-pruned")).toHaveLength(0);
+  });
+});

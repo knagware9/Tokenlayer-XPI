@@ -26,6 +26,7 @@ import type { OnboardUserPayload } from "../user-kinds.js";
 import { resolveDid } from "../did-resolver.js";
 import { checkUrl } from "../webhooks/url-guard.js";
 import { API_KEY_BCRYPT_ROUNDS, invalidateVerifiedPrefix, mintSecret } from "../api-keys.js";
+import { pruneSupersededBrandLogos } from "../brand-logo-prune.js";
 import { S } from "./schemas.js";
 import { actorOf, claimsOf, contextOf, isPositiveIntString, machinePrincipal, notFound, requirePrincipal, requireScope, scopedToCaller, type TokenClaims } from "./support.js";
 
@@ -4191,6 +4192,29 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     // which the artwork review established is an authorization fact, not a
     // label. `id` is already proven to be a real org two lines up.
     const doc = await storeUploadedDocument(deps.documents, b, id, "brand-logo");
+
+    // THE PRUNE RUNS AFTER THE STORE, NEVER BEFORE. The old mark is not dropped
+    // until the new bytes are safely written — a prune-first ordering would, on
+    // a failed upload, leave the org with no logo at all.
+    //
+    // `brandLogoDocumentId` is RE-READ here rather than taken from the `org`
+    // fetched at the top of the handler: the upload of a multi-megabyte body sits
+    // between the two, and a mark pinned during that window must not be deleted
+    // by this call.
+    const fresh = await deps.organizations.get(id);
+    const removed = await pruneSupersededBrandLogos(deps.documents, id, {
+      justUploaded: doc.id,
+      pinned: fresh?.brandLogoDocumentId ?? null,
+    });
+    // Only when something actually went, so the log records deletions rather
+    // than every upload.
+    if (removed.length) {
+      await deps.audit.append({
+        actorId: claims.id,
+        action: "brand-logo-pruned" as LifecycleAction,
+        payload: { orgId: id, removed, kept: doc.id, pinned: fresh?.brandLogoDocumentId ?? null },
+      });
+    }
     return reply.code(201).send(doc);
   });
 
