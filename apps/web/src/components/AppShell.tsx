@@ -17,26 +17,29 @@ export type NavItem = { id: string; label: string; icon: IconName; pinned?: bool
  * for the life of the tab.
  *
  * TWO DOORS, because the two callers are asking different questions (Task 6b).
- * Pass `orgId` and it fetches `GET /orgs/:id/branding/logo` — the org's SAVED
- * mark, readable by every member of that org. That is what the shell needs, and
- * `GET /documents/:id` cannot serve it: that route requires the `issue`
- * capability or the Auditor role, so it 403s for an OrgAdmin, a Trader, a
- * Buyer, a Holder and a Verifier — every role but a desk operator's.
- * Omit `orgId` and it falls back to the document store, which is the only way
- * to render a logo that has been UPLOADED but not yet saved as the org's mark.
+ * It fetches `GET /orgs/:id/branding/logo` — the org's SAVED mark, readable by
+ * every member of that org. `GET /documents/:id` cannot serve this: that route
+ * requires the `issue` capability or the Auditor role, so it 403s for an
+ * OrgAdmin, a Trader, a Buyer, a Holder and a Verifier — every role but a desk
+ * operator's, which is every role that most needs to see its own org's mark.
  *
- * `documentId` stays the trigger either way: it is what changes when the brand
- * changes, and a falsy one means "unbranded", so no request is made at all.
+ * There is deliberately NO id-addressed fallback. A logo that has been uploaded
+ * but not yet saved is previewed from the `File` the browser already holds (see
+ * `OrgBrandingCard`), so nothing needs to read the document store by id, and no
+ * caller can quietly reintroduce the 403.
+ *
+ * `documentId` is the trigger: it is what changes when the brand changes, and a
+ * falsy one means "unbranded", so no request is made at all.
  */
-export function useOrgLogo(documentId: string | null | undefined, token: string | null, orgId?: string | null): string | null {
+export function useOrgLogo(documentId: string | null | undefined, token: string | null, orgId: string | null | undefined): string | null {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
-    if (!documentId || !token) { setUrl(null); return; }
+    if (!documentId || !token || !orgId) { setUrl(null); return; }
     let objectUrl: string | null = null;
     // A slow fetch that resolves after the id changed must not install its blob
     // over the newer one — and its URL is revoked in this effect's own cleanup.
     let cancelled = false;
-    void (orgId ? api.brandLogo(token, orgId) : api.downloadDocument(token, documentId))
+    void api.brandLogo(token, orgId)
       .then((blob) => {
         if (cancelled) return;
         objectUrl = URL.createObjectURL(blob);
@@ -50,7 +53,6 @@ export function useOrgLogo(documentId: string | null | undefined, token: string 
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       setUrl(null);
     };
-    // Unchanged lifecycle, one more string in the dependency list.
   }, [documentId, token, orgId]);
   return url;
 }

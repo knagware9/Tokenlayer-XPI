@@ -33,14 +33,33 @@ describe("the org logo goes through GET /orgs/:id/branding/logo", () => {
     expect(method).toContain("res.blob()");
   });
 
-  it("useOrgLogo prefers the org door, and the shell passes the org id so it takes it", () => {
+  it("useOrgLogo uses the org door and has NO id-addressed fallback", () => {
     const hook = shell.slice(shell.indexOf("export function useOrgLogo"), shell.indexOf("export function AppShell"));
     expect(hook).toContain("api.brandLogo(token, orgId)");
-    // The document-store call survives ON PURPOSE: it is the only way to render
-    // a logo that has been uploaded but not yet saved as the org's mark, which
-    // is what the brand editor's preview shows.
-    expect(hook).toContain("api.downloadDocument(token, documentId)");
+    // TIGHTENED after Task 6b. The hook first kept a `downloadDocument` fallback
+    // for the one case the org door cannot serve — a logo UPLOADED but not yet
+    // saved, which is not the org's mark yet. But that path 403s for an
+    // OrgAdmin, so the brand editor's own preview was still blank for the role
+    // the editor exists for: the 403 moved rather than closed.
+    //
+    // The editor now previews a pending upload from the `File` the browser
+    // already read to upload it — no request, no gate, same bytes — so the
+    // fallback has no remaining caller. Asserting its ABSENCE is the stronger
+    // claim: nobody can quietly reintroduce the 403 by reaching for it.
+    expect(hook).not.toContain("downloadDocument");
     expect(shell).toContain("useOrgLogo(user?.brandLogoDocumentId, token, user?.orgId)");
+  });
+
+  it("the brand editor previews a pending upload locally, not through the document store", () => {
+    const orgs = read("../src/components/Organizations.tsx");
+    const card = orgs.slice(orgs.indexOf("function OrgBrandingCard"), orgs.indexOf("export function Organizations"));
+    // The saved mark comes through the org's door...
+    expect(card).toContain("useOrgLogo(org.brandLogoDocumentId ?? null, token, org.id)");
+    // ...and the pending one from the File itself, never re-fetched by id.
+    expect(card).toContain("URL.createObjectURL(file)");
+    expect(card).not.toContain("downloadDocument");
+    // One object URL alive at a time: the previous is revoked before replacing.
+    expect(card).toContain("URL.revokeObjectURL(prev)");
   });
 
   it("the object-URL lifecycle is intact — a leaked blob outlives the tab", () => {

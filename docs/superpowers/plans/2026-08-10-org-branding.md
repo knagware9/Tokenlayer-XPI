@@ -728,7 +728,16 @@ describe("contrastRatio", () => {
 
 describe("clampAccent", () => {
   it("leaves a colour that already passes AA against white text alone", () => {
-    const dark = "#0e8c75";
+    // CORRECTED DURING TASK 5. This fixture was `#0e8c75` (our own brand-600),
+    // asserted to already pass. It does not: measured 4.178:1, below the 4.5:1
+    // the module enforces. `#0a6f5d` (brand-700) is 6.096:1 and does.
+    //
+    // Worth knowing beyond the fixture: our DEFAULT brand-600 does not clear AA
+    // for white text either. That is pre-existing and untouched here, but it
+    // means an org that picks our own teal gets it darkened, so a branded shell
+    // can look slightly darker than the unbranded one. Not a bug — the clamp is
+    // stricter than the palette it replaces.
+    const dark = "#0a6f5d";
     expect(contrastRatio(dark, "#ffffff")).toBeGreaterThanOrEqual(4.5);
     expect(clampAccent(dark)).toBe(dark);
   });

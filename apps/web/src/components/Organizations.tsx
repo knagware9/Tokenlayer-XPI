@@ -236,7 +236,25 @@ function OrgBrandingCard({ org, onChanged }: { org: Organization; onChanged: () 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
-  const preview = useOrgLogo(logoId, token);
+  // TWO SOURCES, and the reason is an authorization one.
+  //
+  // The SAVED mark comes through the org's own door, which every member of the
+  // org may read. A logo that has been uploaded but NOT yet saved has no such
+  // door — it is not the org's mark yet — and the document store 403s for an
+  // OrgAdmin, the very role this card exists for. So the pending one is
+  // previewed from the `File` the browser already read to upload it: no request,
+  // no gate, and the bytes are the same bytes.
+  const savedPreview = useOrgLogo(org.brandLogoDocumentId ?? null, token, org.id);
+  const [pendingPreview, setPendingPreview] = useState<string | null>(null);
+  // The pending preview wins while it exists: it is the newer choice.
+  const preview = pendingPreview ?? savedPreview;
+  // One object URL alive at a time, and none after unmount.
+  const showPending = (file: File | null): void =>
+    setPendingPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return file ? URL.createObjectURL(file) : null;
+    });
+  useEffect(() => () => setPendingPreview((prev) => { if (prev) URL.revokeObjectURL(prev); return null; }), []);
 
   if (!canEdit) return null;
 
@@ -260,6 +278,7 @@ function OrgBrandingCard({ org, onChanged }: { org: Organization; onChanged: () 
       // Uploaded, not yet applied: the id only becomes the org's mark on Save,
       // so a mis-picked file can be replaced without ever having been live.
       setLogoId(up.id);
+      showPending(file);
       setNote("Logo uploaded — press Save to apply it.");
     } catch (err) {
       setError(errMessage(err, "Upload failed"));
@@ -275,6 +294,9 @@ function OrgBrandingCard({ org, onChanged }: { org: Organization; onChanged: () 
       const updated = await api.updateBranding(token, org.id, patch);
       setAccent(updated.brandAccent ?? DEFAULT_ACCENT);
       setLogoId(updated.brandLogoDocumentId ?? null);
+      // Saved (or cleared): the org's own door is now the truth, so drop the
+      // local preview rather than keep showing bytes the record may no longer name.
+      showPending(null);
       setNote(patch.brandAccent === null && patch.brandLogoDocumentId === null ? "Branding cleared." : "Branding saved.");
       onChanged();
       // The brand rides the SESSION, not the org list — without this the shell
