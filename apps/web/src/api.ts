@@ -1,5 +1,5 @@
 import type { ResourceMode } from "./lib/modes.js";
-import type { AccountState, ActivityEvent, AnalyticsSummary, ApiKeyView, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, ChainInfo, ChainStatus, CompanyCategory, ContractCode, CredentialStatusInfo, CredentialTypeInfo, CredentialTypeSpec, CredentialUseCase, DidDocument, EligibleHolder, HeldCredential, IdentityDashboardData, IdentityRegistryInfo, IdentityResult, InvoiceRowResult, IssuedCredential, Listing, LoginKeyInfo, MintedApiKey, MintedWebhook, OrgCapabilities, OrgMember, OrgType, Organization, PlatformEvent, Portfolio, ProvisionResult, Proposal, QrLoginPoll, QrLoginStart, Role, SessionPrincipal, SessionUser, StagedInvoice, TokenInfo, TokenStandard, TokenizeResult, Trade, UseCase, UseCaseTemplate, UseCaseTemplateMeta, VerificationRequest, VerificationResult, WebhookDelivery, WebhookEndpoint } from "./types.js";
+import type { AccountState, ActivityEvent, AnalyticsSummary, ApiKeyView, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, CertificateFieldPlacement, ChainInfo, ChainStatus, CompanyCategory, ContractCode, CredentialStatusInfo, CredentialTypeInfo, CredentialTypeSpec, CredentialUseCase, DidDocument, EligibleHolder, HeldCredential, IdentityDashboardData, IdentityRegistryInfo, IdentityResult, InvoiceRowResult, IssuedCredential, Listing, LoginKeyInfo, MintedApiKey, MintedWebhook, OrgCapabilities, OrgMember, OrgType, Organization, PlatformEvent, Portfolio, ProvisionResult, Proposal, QrLoginPoll, QrLoginStart, Role, SessionPrincipal, SessionUser, StagedInvoice, TokenInfo, TokenStandard, TokenizeResult, Trade, UseCase, UseCaseTemplate, UseCaseTemplateMeta, VerificationRequest, VerificationResult, WebhookDelivery, WebhookEndpoint } from "./types.js";
 
 export interface Currency { code: string; label: string; }
 export interface CashBalance { currency: string; address: string; amount: string; }
@@ -127,6 +127,39 @@ export const api = {
       let parsed: { message?: string; error?: string } | null = null;
       try { parsed = text ? (JSON.parse(text) as { message?: string; error?: string }) : null; } catch { /* non-JSON error body */ }
       throw new ApiError(parsed?.message ?? parsed?.error ?? res.statusText, res.status, parsed?.error);
+    }
+    return res.blob();
+  },
+  /** Set artwork + placements on ONE credential type of a use case the caller's
+   *  org owns. Writes nothing else on the definition — see the route's own
+   *  comment for why that is the point. */
+  updateCertificateDesign: (
+    token: string,
+    key: string,
+    body: { credentialType: string; background?: { documentId: string; sha256: string } | null; placements?: CertificateFieldPlacement[] },
+  ) =>
+    request<CredentialUseCase>(`/credential-use-cases/${encodeURIComponent(key)}/certificate`, token, {
+      method: "PATCH", body: JSON.stringify(body),
+    }),
+  /** Store certificate artwork for a use case the caller's org owns.
+   *  `POST /documents` is closed to an OrgAdmin (it is gated on `issue`), so
+   *  this is the door an organization actually has. */
+  uploadCertificateArtwork: (token: string, key: string, contentType: string, dataBase64: string) =>
+    request<{ documentId: string; sha256: string; size: number }>(
+      `/credential-use-cases/${encodeURIComponent(key)}/certificate/artwork`, token,
+      { method: "POST", body: JSON.stringify({ contentType, dataBase64 }) },
+    ),
+  /** The artwork a saved design currently uses, for the designer canvas. */
+  certificateArtwork: async (token: string, key: string, credentialType: string): Promise<Blob> => {
+    const res = await fetch(
+      `${BASE}/credential-use-cases/${encodeURIComponent(key)}/certificate/artwork?credentialType=${encodeURIComponent(credentialType)}`,
+      { headers: { authorization: `Bearer ${token}` } },
+    );
+    if (!res.ok) {
+      const text = await res.text();
+      let body: { message?: string; error?: string } | null = null;
+      try { body = text ? (JSON.parse(text) as { message?: string; error?: string }) : null; } catch { /* non-JSON error body */ }
+      throw new ApiError(body?.message ?? body?.error ?? res.statusText, res.status, body?.error);
     }
     return res.blob();
   },

@@ -1285,6 +1285,96 @@ export const S: Record<string, FastifySchema> = {
     // records the deferral for both.
     response: { ...errs(400, 401, 403) },
   },
+  updateCertificateDesign: {
+    tags: ["Credential Use Cases"], summary: "Set certificate artwork and field placements on a credential use case your organization owns", security: eitherCredential,
+    description:
+      "Requires the `usecases:provision` scope **and** a PlatformAdmin or an OrgAdmin whose organization OWNS this " +
+      "credential use case (`ownerOrgId`). The narrow, org-facing counterpart of `PATCH /credential-use-cases/{key}`: " +
+      "it writes `certificate.background` and `certificate.placements` on ONE named credential type and nothing " +
+      "else — every other field of the definition is read from storage, so sending them changes nothing. Omit a " +
+      "field to leave it unchanged; send `background: null` to drop the artwork (reverting to the built-in layout) " +
+      "or `placements: []` to clear the layout. `background` must carry the artwork's `sha256` — the digest the " +
+      "document store recorded for those exact bytes — and the document must be a PNG or JPEG: a `documentId` " +
+      "alone is a guessable reference. Answers **400** `BACKGROUND_PIN_REQUIRED`, `BACKGROUND_DOCUMENT_NOT_FOUND`, " +
+      "`BACKGROUND_DOCUMENT_MISMATCH`, `BACKGROUND_NOT_AN_IMAGE` or `INVALID_CERTIFICATE_PLACEMENT` (which names the " +
+      "offending placement index). Upload the artwork through " +
+      "`POST /credential-use-cases/{key}/certificate/artwork`, which returns the `documentId` and the `sha256` to " +
+      "send here — the general document store is closed to an Org Admin.",
+    params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
+    body: {
+      type: "object", additionalProperties: true, required: ["credentialType"],
+      properties: {
+        credentialType: { type: "string", description: "Name of the credential type within this use case." },
+        background: {
+          // `sha256` is REQUIRED, but by the handler and not by this schema: the
+          // pin check lives in `checkBackgroundDocument(…, { requirePin: true })`
+          // so a pin-less background answers the coded `BACKGROUND_PIN_REQUIRED`
+          // this route's own description promises. Listing it here instead would
+          // answer the generic `VALIDATION_ERROR` before the handler ever ran,
+          // making that documented code unreachable and `requirePin` dead.
+          type: ["object", "null"], additionalProperties: false, required: ["documentId"],
+          properties: { documentId: { type: "string" }, sha256: { type: "string" } },
+          description: "The stored artwork document and its digest. `sha256` is required — a bare `documentId` answers `BACKGROUND_PIN_REQUIRED`. `null` clears the artwork.",
+        },
+        placements: { type: "array", items: { type: "object", additionalProperties: true }, description: "Where each field prints, in 0–1 fractions of the page." },
+        enabled: {
+          type: "boolean",
+          description:
+            "Only meaningful when the credential type has NO certificate configured yet, where `true` is REQUIRED to " +
+            "create one — enabling a certificate publishes a public, unauthenticated PDF of every already-issued " +
+            "credential's claims, so it is confirmed rather than inferred (**400 `CERTIFICATE_NOT_ENABLED`** " +
+            "otherwise). It never toggles an existing block: this route cannot switch a certificate off.",
+        },
+      },
+    },
+    response: { 200: { $ref: "CredentialUseCase#" }, ...errs(400, 401, 403, 404) },
+  },
+  uploadCertificateArtwork: {
+    tags: ["Credential Use Cases"], summary: "Upload certificate artwork for a credential use case your organization owns", security: eitherCredential,
+    description:
+      "Requires the `usecases:provision` scope **and** a PlatformAdmin or an OrgAdmin whose organization OWNS this " +
+      "credential use case. Stores an image and returns the `documentId` + `sha256` to pass to " +
+      "`PATCH /credential-use-cases/{key}/certificate`. This door exists because the general document store " +
+      "(`POST /documents`) is restricted to issue-capable roles, which an Org Admin is not; the capability here is " +
+      "bounded by the use case you own. PNG or JPEG only — anything else answers **415** " +
+      "`UNSUPPORTED_DOCUMENT_TYPE`.",
+    params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
+    body: {
+      type: "object", additionalProperties: false, required: ["contentType", "dataBase64"],
+      properties: {
+        contentType: { type: "string", description: "`image/png` or `image/jpeg` — the only formats the certificate renderer can draw." },
+        dataBase64: { type: "string", description: "The image bytes, base64-encoded. Max 5 MB decoded." },
+      },
+    },
+    response: {
+      201: {
+        type: "object", additionalProperties: true,
+        properties: { documentId: { type: "string" }, sha256: { type: "string" }, size: { type: "integer" } },
+      },
+      ...errs(400, 401, 403, 404, 413, 415),
+    },
+  },
+  getCertificateArtwork: {
+    tags: ["Credential Use Cases"], summary: "Fetch the certificate artwork a credential type currently uses", security: eitherCredential,
+    description:
+      "Requires the `usecases:provision` scope **and** a PlatformAdmin or an OrgAdmin whose organization OWNS this " +
+      "credential use case. Returns the image bytes that credential type's `certificate.background` names. It takes " +
+      "no document id: the use case you own is the capability, so a stored document that no design references is " +
+      "not reachable here. **404** when the type carries no artwork.",
+    params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
+    querystring: {
+      type: "object", required: ["credentialType"],
+      properties: { credentialType: { type: "string", description: "Name of the credential type within this use case." } },
+    },
+    // The 200 is opaque image bytes, so there is no field to name — the same
+    // deferral `credentialCertificate` and `previewCertificate` already record.
+    //
+    // 400 is declared because `credentialType` is a REQUIRED querystring param:
+    // omitting it is answered by the schema layer with VALIDATION_ERROR, before
+    // the handler runs. A response an integrator can actually receive belongs in
+    // the contract whether or not this file's own code produces it.
+    response: { ...errs(400, 401, 403, 404) },
+  },
   provisionUseCase: {
     tags: ["Credential Use Cases"], summary: "One-step enterprise provisioning from a template: ensure the issuer org, instantiate the bound credential use case, and optionally create scoped desk users (PlatformAdmin; OrgAdmin scoped to their own org)", security: eitherCredential,
     description:

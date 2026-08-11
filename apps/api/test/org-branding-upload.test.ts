@@ -126,3 +126,48 @@ describe("POST /orgs/:id/branding/logo", () => {
     expect(withNoScope.json().error).toBe("MACHINE_PRINCIPAL");
   });
 });
+
+/**
+ * FOUND BY MERGING `main` INTO THIS BRANCH, not by writing the branch.
+ *
+ * The certificate-artwork review established that a document id is not a
+ * capability and gave every stored document an `ownerOrgId`. This branch was
+ * written before that landed, so its branding door still accepted any document
+ * id that existed and happened to be an image — and `orgView` PUBLISHES
+ * `brandLogoDocumentId`, so org B could read org A's logo id straight off the
+ * org list, pin it as B's own brand, and have `GET /orgs/B/branding/logo` serve
+ * A's letterhead to every member of B.
+ *
+ * Same shape as the artwork finding, on a different column. Recorded here
+ * because "two features written in parallel each satisfy their own review and
+ * the hole is in the seam" is the failure this program keeps repeating.
+ */
+describe("PATCH /orgs/:id/branding — a logo must be a document the org OWNS", () => {
+  it("org B cannot pin org A's brand logo, even though the org view publishes its id", async () => {
+    const h = await buildTestAppWithRepos();
+    const a = await org(h, "Acme");
+    const b = await org(h, "Beta");
+
+    // A uploads and applies its own mark, the ordinary way.
+    const up = await upload(h, a.id, a.token, { contentType: "image/png", dataBase64: PNG_B64 });
+    expect(up.statusCode).toBe(201);
+    const aLogoId = up.json().id as string;
+    expect((await patchBranding(h, a.id, a.token, { brandLogoDocumentId: aLogoId })).statusCode).toBe(200);
+
+    // B reads the id off the published org view — no privileged access needed.
+    const list = await h.app.inject({ method: "GET", url: `${V1}/orgs/${a.id}`, headers: auth(b.token) });
+    if (list.statusCode === 200) expect(list.json().brandLogoDocumentId).toBe(aLogoId);
+
+    // ...and cannot use it.
+    const stolen = await patchBranding(h, b.id, b.token, { brandLogoDocumentId: aLogoId });
+    expect(stolen.statusCode).toBe(403);
+    expect(stolen.json().error).toBe("DOCUMENT_NOT_OWNED");
+
+    // B's own upload still works, so the guard refuses theft and nothing else.
+    const own = await upload(h, b.id, b.token, { contentType: "image/png", dataBase64: PNG_B64 });
+    expect(own.statusCode).toBe(201);
+    const ok = await patchBranding(h, b.id, b.token, { brandLogoDocumentId: own.json().id });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json().brandLogoDocumentId).toBe(own.json().id);
+  });
+});

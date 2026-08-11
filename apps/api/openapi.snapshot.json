@@ -1262,6 +1262,93 @@
         }
       }
     },
+    "/api/v1/credential-use-cases/{key}/certificate": {
+      "patch": {
+        "tags": [
+          "Credential Use Cases"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "usecases:provision"
+        ],
+        "parameters": [
+          "path:key!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "#CredentialUseCase",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/credential-use-cases/{key}/certificate/artwork": {
+      "get": {
+        "tags": [
+          "Credential Use Cases"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "usecases:provision"
+        ],
+        "parameters": [
+          "path:key!",
+          "query:credentialType!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      },
+      "post": {
+        "tags": [
+          "Credential Use Cases"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "usecases:provision"
+        ],
+        "parameters": [
+          "path:key!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "201": "{documentId,sha256,size}",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error",
+          "413": "#Error",
+          "415": "#Error"
+        }
+      }
+    },
     "/api/v1/credential-use-cases/{key}/clone-to-live": {
       "post": {
         "tags": [

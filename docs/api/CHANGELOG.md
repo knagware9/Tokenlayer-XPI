@@ -64,10 +64,85 @@ stripped when it is stored — templates are readable by any authenticated user,
 and one tenant's letterhead must not become another's. The instantiating
 organization uploads their own.
 
-**Today this is configured BY THE PLATFORM OPERATOR.** `background` is writable
-only through `POST`/`PATCH /credential-use-cases`, which are PlatformAdmin-only;
-the org self-service path (`provision`) goes through template instantiation and
-therefore carries no artwork. Organization-owned artwork upload is a follow-up.
+**New: `PATCH /credential-use-cases/{key}/certificate`** — `usecases:provision`
+plus a PlatformAdmin, or an OrgAdmin whose organization **owns** the use case
+(`ownerOrgId`). This is how an organization sets its own artwork. It writes
+`certificate.background` and `certificate.placements` on ONE named credential
+type and nothing else: every other field of the definition is read from storage,
+so sending `issuer`, `sandbox`, `ownerOrgId` or `key` alongside changes none of
+them. Omit a field to leave it unchanged; `background: null` drops the artwork
+(reverting to the built-in layout) and `placements: []` clears the layout.
+Editing the rest of a credential use case remains PlatformAdmin-only.
+
+**New: `POST` / `GET /credential-use-cases/{key}/certificate/artwork`** — same
+scope, same ownership rule. `POST` stores the artwork and returns
+`{documentId, sha256}`; `GET ?credentialType=<name>` returns the bytes that
+type's design currently uses, and takes **no document id** — the use case you
+own is the capability, so a stored document no design references is not
+reachable through it. These exist because `POST /documents` and
+`GET /documents/{id}` are restricted to issue-capable roles, which an Org Admin
+is not: the general document store holds off-ledger invoice evidence, so the
+capability is bounded by the use case you own rather than granted over the
+store.
+
+**Artwork must be `image/png` or `image/jpeg`** — **415** otherwise. This is
+narrower than `image/*` on purpose: the renderer is pdfkit's `openImage`, which
+draws nothing else, so a `image/webp` background would have stored with a 201,
+looked right in the designer, and then silently printed the built-in layout on
+every certificate.
+
+**`background` now takes an optional `sha256`** — the digest the document store
+recorded for those exact bytes, `0x`-prefixed. The org route above **requires**
+it and refuses a document that does not exist, does not hash to it, or is not
+renderable artwork. The three older doors (`POST`/`PATCH /credential-use-cases`
+and `preview-certificate`) verify a `sha256` you supply and refuse a
+non-renderable one, but still accept a bare `documentId`, including one naming a
+document that has since been deleted: that case degrades to the built-in layout
+at render time, and that behaviour is unchanged.
+
+### Follow-up: a digest was never a capability
+
+An adversarial review of the above found that the pin did not do the job claimed
+for it, and these are the corrections. **ACTION REQUIRED if you reference
+documents across organizations.**
+
+- **A certificate background must now name a document YOUR ORGANIZATION
+  UPLOADED.** Documents carry an owner (`Document.ownerOrgId`), set from the
+  uploader — for `POST /credential-use-cases/{key}/certificate/artwork`, from the
+  organization that owns the use case. A background naming a document owned by
+  anyone else is refused **exactly as if the document did not exist**, so the
+  refusal discloses nothing about ids you do not own. Rows written before this
+  release have no owner and can be referenced only by a PlatformAdmin: re-upload
+  the artwork through the artwork route to make it yours.
+  *Why:* `GET /credential-use-cases` is open to any authenticated user and
+  serialised the whole certificate block, digest included. Reading another
+  tenant's `{documentId, sha256}` there, pinning it onto a use case you do own,
+  and fetching your own artwork returned their file byte for byte. A digest
+  answers "are these the bytes I meant", never "may I have them".
+- **`POST /credential-use-cases/preview-certificate` will not render a document
+  your organization does not own.** It previews the built-in layout instead —
+  the same answer as a background naming nothing, deliberately, so the two are
+  indistinguishable. This door never required a pin, so it was open to every
+  OrgAdmin.
+- **`GET /credential-use-cases` and `GET /credential-use-cases/{key}` no longer
+  include `certificate.background` or `certificate.logoDocumentId`** for callers
+  who are neither a PlatformAdmin nor the owning organization. Every other field
+  is unchanged, and owners see their design in full.
+- **Creating a certificate on a type that has none now requires `enabled:
+  true`** in the body of `PATCH /credential-use-cases/{key}/certificate`;
+  otherwise **400 `CERTIFICATE_NOT_ENABLED`**. Designing a layout used to create
+  the block implicitly — and because `GET /credentials/{id}/certificate.pdf` is
+  public and unauthenticated, that turned every already-issued credential of
+  that type into a downloadable PDF of its subject's claims. Publishing is a
+  decision, so it is now stated. This route still never switches an existing
+  certificate off.
+
+**ACTION REQUIRED only if you wrote `background` before this release and want to
+edit it through the new org route.** A stored background with no `sha256` can be
+kept or removed, but not edited in place — the org route will not accept a
+pinless background, and nothing can honestly produce a digest for bytes the
+caller did not upload. Re-upload the artwork to pin it. Existing certificates
+render exactly as before either way.
 
 ---
 

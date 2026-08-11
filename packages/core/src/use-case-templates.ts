@@ -11,12 +11,13 @@
  */
 import { validateCertificatePlacements } from "./certificate-fields.js";
 import { PolicyError } from "./errors.js";
-import type {
-  CredentialUseCaseDefinition,
-  CredentialTypeSpec,
-  HolderPolicy,
-  VerifierBinding,
-  CertificateConfig,
+import {
+  isDocumentSha256,
+  type CredentialUseCaseDefinition,
+  type CredentialTypeSpec,
+  type HolderPolicy,
+  type VerifierBinding,
+  type CertificateConfig,
 } from "./credential-use-cases.js";
 import type { MetadataSchema, PropertySchema } from "./types.js";
 
@@ -141,12 +142,23 @@ export function validateTemplate(t: UseCaseTemplate): void {
     // nothing when the work happens on approval) and EN-D2's mode gate. When a
     // rule has two doors, both get the check.
     //
-    // `background` is deliberately NOT validated here beyond its type, because
-    // `instantiate()` drops it: a template may carry one, and it never reaches a
-    // definition. See the comment there for why.
+    // `background` gets SHAPE validation only — `documentId`'s type and, when
+    // present, the pin's format — never existence or content: nothing here
+    // checks the document exists or that the pin matches its bytes, because
+    // `instantiate()` drops the whole `background` before it ever reaches a
+    // definition (see the comment there for why). The format check still
+    // earns its place on this door even though the value never survives:
+    // it's what stops a template author saving a `sha256` that could never
+    // match anything, on the door where THEY get the 201 — the same
+    // shape-now/policy-later split `validateCertificatePlacements` draws.
     validateCertificatePlacements(cert.placements, Object.keys(ct.properties), ct.name);
-    if (cert.background !== undefined && (typeof cert.background !== "object" || cert.background === null || typeof cert.background.documentId !== "string"))
-      fail(`credential type '${ct.name}' certificate.background.documentId must be a string`);
+    if (cert.background !== undefined) {
+      if (typeof cert.background !== "object" || cert.background === null || typeof cert.background.documentId !== "string")
+        fail(`credential type '${ct.name}' certificate.background.documentId must be a string`);
+      // Both doors, same rule — see `isDocumentSha256` in credential-use-cases.ts.
+      if (cert.background.sha256 !== undefined && !isDocumentSha256(cert.background.sha256))
+        fail(`credential type '${ct.name}' certificate.background.sha256 must be a 0x-prefixed 64-character lowercase hex digest`);
+    }
   }
   if (t.body.holderAcceptance !== undefined && typeof t.body.holderAcceptance !== "boolean")
     fail("body.holderAcceptance must be a boolean");

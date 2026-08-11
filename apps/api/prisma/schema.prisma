@@ -228,6 +228,13 @@ model Document {
   size        Int
   bytes       Bytes
   createdAt   DateTime @default(now())
+  // WHICH ORGANIZATION OWNS THESE BYTES, and NULL means NOBODY does — a
+  // platform upload, a pre-org KYB registration, or a row written before this
+  // column existed. Null is NOT "anyone may use it": every gate that consults
+  // it requires a non-null match, so a legacy document can be referenced by a
+  // PlatformAdmin and by no one else. Nullable rather than backfilled because
+  // there is no honest way to guess the owner of an existing row.
+  ownerOrgId  String?
 }
 
 // A maker-checker proposal: a gated operation captured pending approval. The

@@ -25,17 +25,25 @@ async function org(h: TestAppHandle, label: string) {
 }
 
 /**
- * Upload a document as the PLATFORM ADMIN, not as the OrgAdmin under test.
- * `POST /documents` gates on `rbac.can(role, "issue")` and the OrgAdmin role
- * holds "read" alone, so an OrgAdmin cannot upload at all today. That is a real
- * product gap for the brand editor (see the report), but it is not what these
- * tests are about: what they need is a stored document id of a known type.
+ * A stored document of a known type, OWNED BY `ownerOrgId`.
+ *
+ * Was: upload as the PLATFORM ADMIN through `POST /documents`, because
+ * `rbac.can("OrgAdmin", "issue")` is false and an OrgAdmin could not upload at
+ * all. Two things have since changed and both matter here. Task 3b built the
+ * org's own upload door, so the workaround is obsolete; and the
+ * certificate-artwork review gave every document an `ownerOrgId` and made the
+ * branding door refuse one this org does not own — so a platform-uploaded
+ * document is no longer a realistic stand-in for an org's own logo, and using
+ * one made these tests assert against a state the product cannot produce.
+ *
+ * Written straight to the repository rather than through the branding upload
+ * route because one case below needs a `text/plain` document, which that route
+ * refuses at 415 — by design. The ownership fact is what these tests need; the
+ * upload path is `org-branding-upload.test.ts`'s subject, not theirs.
  */
-async function upload(h: TestAppHandle, contentType: string, dataBase64: string): Promise<string> {
-  const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
-  const res = await h.app.inject({ method: "POST", url: `${V1}/documents`, headers: auth(admin), payload: { contentType, dataBase64 } });
-  expect(res.statusCode).toBe(201);
-  return res.json().id as string;
+async function upload(h: TestAppHandle, contentType: string, dataBase64: string, ownerOrgId: string): Promise<string> {
+  const doc = await h.deps.documents.create({ contentType, bytes: Buffer.from(dataBase64, "base64"), ownerOrgId });
+  return doc.id;
 }
 
 const patch = (h: TestAppHandle, orgId: string, token: string, body: unknown) =>
@@ -45,7 +53,7 @@ describe("PATCH /orgs/:id/branding", () => {
   it("an OrgAdmin brands their own organization, and it comes back on GET /orgs/:id", async () => {
     const h = await buildTestAppWithRepos();
     const a = await org(h, "Acme");
-    const docId = await upload(h, "image/png", PNG_B64);
+    const docId = await upload(h, "image/png", PNG_B64, a.id);
 
     const res = await patch(h, a.id, a.token, { brandLogoDocumentId: docId, brandAccent: "#0E8C75" });
     expect(res.statusCode).toBe(200);
@@ -98,7 +106,7 @@ describe("PATCH /orgs/:id/branding", () => {
   it("rejects a logo document that is not an image", async () => {
     const h = await buildTestAppWithRepos();
     const a = await org(h, "Acme");
-    const txtId = await upload(h, "text/plain", Buffer.from("not an image").toString("base64"));
+    const txtId = await upload(h, "text/plain", Buffer.from("not an image").toString("base64"), a.id);
     const res = await patch(h, a.id, a.token, { brandLogoDocumentId: txtId });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe("BRAND_LOGO_NOT_AN_IMAGE");

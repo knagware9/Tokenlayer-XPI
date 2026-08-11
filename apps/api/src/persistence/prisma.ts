@@ -292,15 +292,15 @@ function toAuditRecord(r: {
 }
 
 export class PrismaDocumentRepository implements DocumentRepository {
-  async create({ contentType, bytes }: { contentType: string; bytes: Buffer }): Promise<{ id: string; sha256: string; size: number }> {
+  async create({ contentType, bytes, ownerOrgId }: { contentType: string; bytes: Buffer; ownerOrgId: string | null }): Promise<{ id: string; sha256: string; size: number }> {
     const sha256 = "0x" + createHash("sha256").update(bytes).digest("hex");
-    const row = await prisma.document.create({ data: { contentType, sha256, size: bytes.length, bytes } });
+    const row = await prisma.document.create({ data: { contentType, sha256, size: bytes.length, bytes, ownerOrgId } });
     return { id: row.id, sha256, size: bytes.length };
   }
   async get(id: string): Promise<DocumentRecord | null> {
     const r = await prisma.document.findUnique({ where: { id } });
     return r
-      ? { id: r.id, contentType: r.contentType, sha256: r.sha256, size: r.size, bytes: Buffer.from(r.bytes), createdAt: r.createdAt.toISOString() }
+      ? { id: r.id, contentType: r.contentType, sha256: r.sha256, size: r.size, bytes: Buffer.from(r.bytes), createdAt: r.createdAt.toISOString(), ownerOrgId: r.ownerOrgId ?? null }
       : null;
   }
 }

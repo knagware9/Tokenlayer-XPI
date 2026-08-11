@@ -806,7 +806,7 @@ export interface CertificateConfig {
   /** EN-F. Full-page artwork, referencing a stored image Document. Its PRESENCE
    *  selects the renderer: with it, the built-in layout is replaced entirely and
    *  only `placements` are drawn. Mirrors core's `CertificateConfig`. */
-  background?: { documentId: string };
+  background?: { documentId: string; sha256?: string };
   /** EN-F. Where each field prints on the artwork. Inert without `background`,
    *  which is exactly the state a template instantiation lands in. */
   placements?: CertificateFieldPlacement[];
