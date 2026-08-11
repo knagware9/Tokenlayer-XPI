@@ -572,7 +572,7 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
                           </div>
                           <label className="block text-[11px] text-slate-500">
                             Logo / seal (optional):
-                            <input type="file" accept="image/png,image/jpeg,image/webp" className="mt-1 block text-[11px]"
+                            <input type="file" accept="image/png,image/jpeg" className="mt-1 block text-[11px]"
                               onChange={async (e) => {
                                 const file = e.target.files?.[0]; if (!file || !token) return;
                                 const bytes = new Uint8Array(await file.arrayBuffer());
