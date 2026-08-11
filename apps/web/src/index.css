@@ -4,6 +4,14 @@
 
 :root {
   color-scheme: light;
+
+  /* EN-E defaults = the XI Tokenize palette these stops used to hardcode. */
+  --brand-50: 233 249 244;    /* #e9f9f4 */
+  --brand-100: 205 238 230;   /* #cdeee6 */
+  --brand-400: 26 200 169;    /* #1AC8A9 */
+  --brand-500: 18 179 154;    /* #12b39a */
+  --brand-600: 14 140 117;    /* #0E8C75 */
+  --brand-700: 10 111 93;     /* #0a6f5d */
 }
 
 body {

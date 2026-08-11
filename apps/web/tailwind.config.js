@@ -4,15 +4,17 @@ export default {
   theme: {
     extend: {
       colors: {
-        // XI Tokenize brand palette (from the product deck):
-        // primary teal — re-skins every existing `brand-*` usage.
+        // EN-E: each stop reads a CSS custom property so an organization's
+        // shell can override the palette without a single component changing.
+        // `<alpha-value>` keeps Tailwind's `/50` opacity modifiers working,
+        // which is why the variables hold "r g b" and not "#rrggbb".
         brand: {
-          50: "#e9f9f4",
-          100: "#cdeee6",
-          400: "#1AC8A9",
-          500: "#12b39a",
-          600: "#0E8C75",
-          700: "#0a6f5d",
+          50: "rgb(var(--brand-50) / <alpha-value>)",
+          100: "rgb(var(--brand-100) / <alpha-value>)",
+          400: "rgb(var(--brand-400) / <alpha-value>)",
+          500: "rgb(var(--brand-500) / <alpha-value>)",
+          600: "rgb(var(--brand-600) / <alpha-value>)",
+          700: "rgb(var(--brand-700) / <alpha-value>)",
         },
         xiblue: "#0098DB",
         xigreen: "#3FA66B",
