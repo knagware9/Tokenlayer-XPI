@@ -347,11 +347,11 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
               <span className="text-[11px] text-slate-400">{new Date(e.createdAt).toLocaleTimeString()}</span>
             </li>
           ))}
-          {audit.length === 0 && (
-            <li>
-              <EmptyState title="No activity yet." />
-            </li>
-          )}
+          {/* Stays a one-liner. `EmptyState` is a PANEL primitive — a 48px icon
+              and py-10 — and every other use of it fills a Card body, a section
+              or a table body. Inside this dense two-line-per-row feed it is
+              taller than the list it replaces. */}
+          {audit.length === 0 && <li className="text-sm text-slate-400">No activity yet.</li>}
         </ol>
       </div>
 
@@ -602,11 +602,8 @@ function Market({
                   <span className="ml-auto text-[11px] text-slate-400">{new Date(t.at).toLocaleString()}</span>
                 </li>
               ))}
-              {trades.length === 0 && (
-                <li>
-                  <EmptyState title="No trades yet." />
-                </li>
-              )}
+              {/* One-liner for the same reason as the audit trail above. */}
+              {trades.length === 0 && <li className="text-xs text-slate-400">No trades yet.</li>}
             </ol>
           </div>
         </>
