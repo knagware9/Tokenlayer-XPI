@@ -48,6 +48,7 @@ async function world(): Promise<World> {
     name: `XR Verifier ${tag}`, orgType: "verifier", registrationId: null, jurisdiction: null,
     did: `did:key:zXR${tag}`, didSeedEncrypted: "enc", status: "active", verified: true,
     verifiedAt: new Date().toISOString(), companyProfile: null, capabilities: null,
+    brandLogoDocumentId: null, brandAccent: null,
   });
   const email = `xr-admin-${tag}@tokenlayer.dev`;
   const password = `xr-admin-${tag}`;

@@ -28,6 +28,12 @@ export interface SessionUser {
   useCaseDomain?: "tokenization" | "identity" | null;
   /** The signed-in user's org envelope; null (or absent) = unrestricted legacy. */
   orgCapabilities?: OrgCapabilities | null;
+  /** EN-E: the org's mark and accent, from `GET /me`. ABSENT and `null` differ
+   * here — `POST /auth/login` does not carry either field, so `undefined` means
+   * "not yet fetched" and `null` means "fetched, and this org is unbranded".
+   * `AppShell` reads exactly that distinction to decide whether to refresh. */
+  brandLogoDocumentId?: string | null;
+  brandAccent?: string | null;
 }
 
 /**
@@ -41,6 +47,8 @@ export interface SessionPrincipal {
   useCaseKey: string | null;
   useCaseDomain?: "tokenization" | "identity" | null;
   orgCapabilities?: OrgCapabilities | null;
+  brandLogoDocumentId?: string | null;
+  brandAccent?: string | null;
 }
 
 export type TokenStandard = "ERC-20" | "ERC-721" | "ERC-3643";
@@ -381,6 +389,10 @@ export interface Organization {
   credentials?: { id: string; type: string; issuerDid: string; issuedAt: string; revoked: boolean }[];
   /** EN-A capability envelope; null = unrestricted legacy. Absent on pre-EN-A responses. */
   capabilities?: OrgCapabilities | null;
+  /** EN-E: an image Document id used as this org's mark; null = unbranded. */
+  brandLogoDocumentId?: string | null;
+  /** EN-E: lowercase `#rrggbb`; null = the platform palette. */
+  brandAccent?: string | null;
   createdAt?: string;
 }
 

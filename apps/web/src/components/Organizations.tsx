@@ -1,12 +1,32 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ApiError, api } from "../api.js";
 import { useAuth } from "../auth.js";
+import { clampAccent } from "../lib/branding.js";
 import { DOMAIN_LABELS, ROLE_LABELS, fullCapabilities, isOrgOperatingRole, orgRoleEnabled, toggleCapability, validateEnvelope } from "../lib/capabilities.js";
 import { ORG_DOMAINS, ORG_OPERATING_ROLES, type CompanyCategory, type CredentialStatusInfo, type DidDocument, type KybDocumentRef, type OrgCapabilities, type OrgDomain, type OrgMember, type OrgOperatingRole, type OrgType, type Organization, type Role } from "../types.js";
+import { useOrgLogo } from "./AppShell.js";
 import { CredentialsPanel } from "./CredentialsPanel.js";
 import { Card, EmptyState, Pill, SectionHeader } from "./ui.js";
 
 const ORG_TYPES: OrgType[] = ["bank", "corporate", "msme", "government", "verifier"];
+
+/** The platform's own `--brand-500`. Seeds the picker for an unbranded org so it
+ * opens on the colour that org is actually wearing, not on black. */
+const DEFAULT_ACCENT = "#12b39a";
+
+/** Read a File as base64 (no data-URL prefix) via FileReader — safe for MB-sized files. */
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("could not read file"));
+    reader.onload = () => {
+      const result = String(reader.result);
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 const CATEGORY_LABELS: Record<CompanyCategory, string> = {
   "private-limited": "Private Limited",
@@ -200,6 +220,192 @@ function OrgCapabilitiesCard({ org, onChanged }: { org: Organization; onChanged:
 }
 
 /**
+ * EN-E: the org's own mark and accent colour.
+ *
+ * Gated in the UI exactly as the two routes behind it are gated — a
+ * PlatformAdmin or an OrgAdmin of THIS org — so the control is never offered to
+ * somebody who would only earn a 403 by pressing it.
+ *
+ * Mounted with key={org.id} so the draft re-seeds when the selection changes.
+ */
+function OrgBrandingCard({ org, onChanged }: { org: Organization; onChanged: () => void }): JSX.Element | null {
+  const { token, user, refreshSession } = useAuth();
+  const canEdit = user?.role === "PlatformAdmin" || (user?.role === "OrgAdmin" && user.orgId === org.id);
+  const [accent, setAccent] = useState<string>(org.brandAccent ?? DEFAULT_ACCENT);
+  const [logoId, setLogoId] = useState<string | null>(org.brandLogoDocumentId ?? null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  // TWO SOURCES, and the reason is an authorization one.
+  //
+  // The SAVED mark comes through the org's own door, which every member of the
+  // org may read. A logo that has been uploaded but NOT yet saved has no such
+  // door — it is not the org's mark yet — and the document store 403s for an
+  // OrgAdmin, the very role this card exists for. So the pending one is
+  // previewed from the `File` the browser already read to upload it: no request,
+  // no gate, and the bytes are the same bytes.
+  const savedPreview = useOrgLogo(org.brandLogoDocumentId ?? null, token, org.id);
+  const [pendingPreview, setPendingPreview] = useState<string | null>(null);
+  // The pending preview wins while it exists: it is the newer choice.
+  const preview = pendingPreview ?? savedPreview;
+  // One object URL alive at a time, and none after unmount. The live URL is
+  // tracked in a REF, not read out of the state updater: `<StrictMode>`
+  // double-invokes updaters, so creating and revoking inside one leaked a blob
+  // per pick, and React makes no promise an updater runs at all on unmount.
+  const pendingUrl = useRef<string | null>(null);
+  const showPending = (file: File | null): void => {
+    if (pendingUrl.current) URL.revokeObjectURL(pendingUrl.current);
+    pendingUrl.current = file ? URL.createObjectURL(file) : null;
+    setPendingPreview(pendingUrl.current);
+  };
+  useEffect(() => () => { if (pendingUrl.current) URL.revokeObjectURL(pendingUrl.current); pendingUrl.current = null; }, []);
+
+  if (!canEdit) return null;
+
+  // Only the SAVED accent is the org's colour; an unsaved draft must not claim
+  // to be one, hence the comparison against the record rather than a dirty flag.
+  const dirty = accent !== (org.brandAccent ?? DEFAULT_ACCENT) || logoId !== (org.brandLogoDocumentId ?? null);
+  // The platform default does not itself clear AA, so an untouched picker would
+  // otherwise open with a contrast warning about a colour nobody chose. Only
+  // warn once the accent on screen is one this org owns or its admin just set.
+  const accentChosen = org.brandAccent != null || accent !== DEFAULT_ACCENT;
+
+  /**
+   * THE PATCH IS BUILT BY PRESENCE, never by sending both keys.
+   *
+   * Sending both meant an OrgAdmin who uploaded a logo and never opened the
+   * colour picker persisted `DEFAULT_ACCENT` — the PLATFORM's teal — as their
+   * organization's own accent. It is not the same as leaving it unset: the
+   * stored value runs through `clampAccent`, which darkens it (our default is
+   * 2.6:1 against white), so the whole console shifted colour for an org that
+   * chose nothing. It also made `accentChosen` true, pinning the "Darkened for
+   * legibility" note permanently — about a colour nobody picked, which is the
+   * exact thing that guard exists to prevent.
+   *
+   * The API, both repositories and the client were built for this: an omitted
+   * key leaves the column alone, an explicit null clears it. This is the caller
+   * that has to use it.
+   */
+  function changedBranding(): { brandAccent?: string | null; brandLogoDocumentId?: string | null } {
+    const patch: { brandAccent?: string | null; brandLogoDocumentId?: string | null } = {};
+    if (accent !== (org.brandAccent ?? DEFAULT_ACCENT)) patch.brandAccent = accent;
+    if (logoId !== (org.brandLogoDocumentId ?? null)) patch.brandLogoDocumentId = logoId;
+    return patch;
+  }
+  const darkened = accentChosen && clampAccent(accent) !== accent.toLowerCase();
+
+  async function upload(file: File): Promise<void> {
+    if (!token) return;
+    setError(null); setNote(null);
+    // PNG or JPEG, matching the server — pdfkit draws nothing else, and the old
+    // copy recommended SVG, which the document store has never accepted.
+    if (!/^image\/(png|jpeg)$/.test(file.type)) { setError("A brand logo must be a PNG or a JPEG"); return; }
+    if (file.size > 2 * 1024 * 1024) { setError("Logo too large (max 2 MB)"); return; }
+    setBusy(true);
+    try {
+      const up = await api.uploadBrandLogo(token, org.id, file.type, await fileToBase64(file));
+      // Uploaded, not yet applied: the id only becomes the org's mark on Save,
+      // so a mis-picked file can be replaced without ever having been live.
+      setLogoId(up.id);
+      showPending(file);
+      setNote("Logo uploaded — press Save to apply it.");
+    } catch (err) {
+      setError(errMessage(err, "Upload failed"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function save(patch: { brandLogoDocumentId?: string | null; brandAccent?: string | null }): Promise<void> {
+    if (!token) return;
+    setBusy(true); setError(null); setNote(null);
+    try {
+      const updated = await api.updateBranding(token, org.id, patch);
+      setAccent(updated.brandAccent ?? DEFAULT_ACCENT);
+      setLogoId(updated.brandLogoDocumentId ?? null);
+      // Saved (or cleared): the org's own door is now the truth, so drop the
+      // local preview rather than keep showing bytes the record may no longer name.
+      showPending(null);
+      setNote(patch.brandAccent === null && patch.brandLogoDocumentId === null ? "Branding cleared." : "Branding saved.");
+      onChanged();
+      // The brand rides the SESSION, not the org list — without this the shell
+      // keeps painting the old palette until the next sign-in. Best-effort: the
+      // save already succeeded, so a refresh failure must not read as a failure.
+      await refreshSession().catch(() => undefined);
+    } catch (err) {
+      setError(errMessage(err, "Could not save branding"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card
+      title="Branding"
+      description="Your logo and one accent colour. Members of this organization see them across the console, and the logo appears on the certificates it issues."
+    >
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+        <div className="space-y-2">
+          <span className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Accent colour</span>
+          <div className="flex items-center gap-3">
+            <input
+              type="color" value={accent} disabled={busy}
+              onChange={(e) => { setAccent(e.target.value); setNote(null); }}
+              className="h-9 w-14 rounded border border-slate-300 bg-white p-1 cursor-pointer disabled:opacity-40"
+              aria-label="Accent colour"
+            />
+            <span className="font-mono text-sm text-slate-600">{accent}</span>
+          </div>
+          {darkened && (
+            <p className="text-[11px] text-amber-700">
+              Darkened for legibility — white text on your colour would not meet contrast guidelines. Your saved colour is unchanged.
+            </p>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <span className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Logo</span>
+          <div className="flex items-center gap-3">
+            <div className="h-12 w-24 rounded border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden shrink-0">
+              {preview
+                ? <img src={preview} alt="" className="max-h-full max-w-full object-contain" />
+                : <span className="text-[11px] text-slate-400">none</span>}
+            </div>
+            <input
+              type="file" accept="image/png,image/jpeg" disabled={busy}
+              onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void upload(f); }}
+              className="block w-full text-xs text-slate-600 file:mr-3 file:rounded file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-slate-700 hover:file:bg-slate-200"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
+        <button
+          onClick={() => void save(changedBranding())}
+          disabled={busy || !dirty}
+          className="rounded-lg bg-brand-600 text-white py-1.5 px-4 text-sm font-medium hover:bg-brand-700 disabled:opacity-40"
+        >
+          Save branding
+        </button>
+        {(org.brandAccent || org.brandLogoDocumentId) && (
+          <button
+            onClick={() => void save({ brandAccent: null, brandLogoDocumentId: null })}
+            disabled={busy}
+            className="rounded-lg border border-slate-300 text-slate-600 py-1.5 px-4 text-sm font-medium hover:bg-slate-50 disabled:opacity-40"
+          >
+            Clear branding
+          </button>
+        )}
+      </div>
+
+      {note && <p className="mt-3 text-sm text-emerald-700">{note}</p>}
+      {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+    </Card>
+  );
+}
+
+/**
  * The organization area: a PlatformAdmin provisions organizations and their
  * members; an OrgAdmin sees only their own org's roster. Every member minted
  * here gets a DID and a membership credential from the org's issuer DID.
@@ -292,6 +498,8 @@ export function Organizations(): JSX.Element {
       )}
 
       {selectedOrg && <OrgCapabilitiesCard key={selectedOrg.id} org={selectedOrg} onChanged={reload} />}
+
+      {selectedOrg && <OrgBrandingCard key={`brand-${selectedOrg.id}`} org={selectedOrg} onChanged={reload} />}
 
       {selectedOrg && <Members org={selectedOrg} />}
     </div>

@@ -19,6 +19,52 @@ diff. That file is generated, not written by hand; see the header of
 
 ---
 
+## Unreleased — an organization wears its own logo and colour (EN-E)
+
+An organization can now set a logo and one accent colour, and its members see
+both across the console. Everything here is additive: **an organization that
+sets nothing behaves exactly as it did**, and the platform look is unchanged.
+
+- **`Organization` gains `brandLogoDocumentId` and `brandAccent`**, both
+  nullable, on `GET /orgs/{id}` and `GET /orgs`. `brandAccent` is a six-digit
+  hex string (`#rrggbb`), normalized to lowercase on write.
+- **New: `PATCH /orgs/{id}/branding`** — a PlatformAdmin, or **this
+  organization's own OrgAdmin**. Send only what you are changing: an omitted key
+  leaves the column alone, an explicit `null` clears it. A malformed accent is
+  `400 INVALID_BRAND_ACCENT` rather than a silent correction.
+- **New: `POST /orgs/{id}/branding/logo`** — the organization's own upload door.
+  `POST /documents` requires the `issue` capability, which an OrgAdmin does not
+  have, so without this the feature would have been unusable by the exact role
+  it is for. `{contentType, dataBase64}` → `201 {id, sha256, size}`.
+- **New: `GET /orgs/{id}/branding/logo`** — the mark itself, readable by **any
+  member** of that organization (the whole roster renders it, not just admins).
+  The URL carries **no document id**: the route reads the organization's own
+  `brandLogoDocumentId`, so it cannot become a second way into the document
+  store.
+- **`GET /me`, `POST /auth/login` and the QR-login poll** now carry
+  `brandLogoDocumentId` and `brandAccent` on the session principal, so a branded
+  console paints correctly on first paint instead of after a follow-up fetch.
+
+**A logo must be PNG or JPEG, and must be a document your organization owns.**
+Both doors refuse anything else. `image/webp` is refused deliberately: it is a
+perfectly good image that the certificate renderer cannot draw, and accepting it
+would mean a mark that appears in the console and silently never on a
+certificate. A document another organization owns is refused with the same
+answer as one that does not exist — telling the two apart would make the route
+an existence oracle over the store.
+
+**Certificates.** A credential type that names its own `certificate.logoDocumentId`
+is unaffected. One that does not now prints the **issuing organization's** brand
+logo. Most-specific-wins: branding an organization never overrides a type that
+already chose. Artwork mode is untouched — a certificate rendered from your own
+artwork prints only your placements.
+
+**These are session-only routes.** All three refuse an API key with
+`403 MACHINE_PRINCIPAL`, whatever its scopes — including an empty scope list.
+Setting a brand is a console act; no scope grants it.
+
+---
+
 ## Unreleased — certificate artwork: place your own fields on your own design (EN-F)
 
 A credential type's certificate can now be YOUR artwork with the fields placed

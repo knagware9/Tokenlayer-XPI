@@ -77,3 +77,18 @@ export function brandRamp(accent: string): Record<BrandStop, string> {
     700: mix(0, 0.42),
   };
 }
+
+const HEX = /^#[0-9a-fA-F]{6}$/;
+
+/**
+ * The custom properties a branded shell sets, or `{}` for an unbranded session.
+ *
+ * Returns `{}` rather than throwing on a malformed accent: the API validates on
+ * save, so a bad value here means a stale session or a hand-edited store, and
+ * blanking somebody's palette over it would be the wrong failure.
+ */
+export function brandCssVars(accent: string | null | undefined): Record<string, string> {
+  if (!accent || !HEX.test(accent)) return {};
+  const ramp = brandRamp(accent);
+  return Object.fromEntries(BRAND_STOPS.map((s) => [`--brand-${s}`, ramp[s]]));
+}

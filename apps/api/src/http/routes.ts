@@ -1,14 +1,14 @@
 import { createHash, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { ApiKeyRecord, AssetRecord, CashflowRecord, CompanyProfile, CredentialRecord, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord, WebhookEndpointRecord } from "../persistence/types.js";
+import type { ApiKeyRecord, AssetRecord, BrandingPatch, CashflowRecord, CompanyProfile, CredentialRecord, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord, WebhookEndpointRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, certificatePageSize, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, isDocumentSha256, issueCredential, issuerBindingAllows, modeAllows, normalizeUseCaseDefinition, ORG_OPERATING_ROLES, orgDomainEnabled, orgRoleEnabled, PolicyError, presentCredential, presentCredentials, SANDBOX_CHAIN_ID, sandboxChainsValid, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateCertificatePlacements, validateCredentialUseCase, validateEventTypes, validateMetadata, scopeAllows, validateOrgCapabilities, validateScopes, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ApiScope, type CertificateFieldPlacement, type ChainEntry, type CredentialTypeSpec, type CredentialUseCaseDefinition, type LifecycleAction, type OrgDomain, type OrgOperatingRole, type OrgType, type ResourceMode, type Role, type UseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
+import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, certificatePageSize, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, issueCredential, issuerBindingAllows, modeAllows, normalizeUseCaseDefinition, ORG_OPERATING_ROLES, orgDomainEnabled, orgRoleEnabled, PolicyError, presentCredential, presentCredentials, SANDBOX_CHAIN_ID, sandboxChainsValid, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateBrandAccent, validateCertificatePlacements, validateCredentialUseCase, validateEventTypes, validateMetadata, scopeAllows, validateOrgCapabilities, validateScopes, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, isDocumentSha256, type Actor, type ApiScope, type ChainEntry, type CredentialTypeSpec, type CredentialUseCaseDefinition, type LifecycleAction, type OrgDomain, type OrgOperatingRole, type OrgType, type ResourceMode, type Role, type UseCaseDefinition, type UseCaseTemplate, type CertificateFieldPlacement } from "@tokenlayer/core";
 import qrcode from "qrcode";
 import type { AppDeps } from "../context.js";
 import { certificateStatusBanner, humanizeKey, renderCredentialCertificate } from "../certificate.js";
 import { artworkDimensions, certificateDrawList, drawCertificate } from "../certificate-artwork.js";
-import { resolveCertificateFields } from "../certificate-fields.js";
+import { certificateLogoDocumentId, resolveCertificateFields } from "../certificate-fields.js";
 import { isSupportedCurrency } from "../currencies.js";
 import { renderContractCode } from "../contract-code.js";
 import { deployAndCreateUseCase } from "../use-cases.js";
@@ -153,7 +153,7 @@ function devKeyFromSeed(seed: string) {
 
 // Public projection of an org — NEVER includes didSeedEncrypted.
 function orgView(o: OrganizationRecord) {
-  return { id: o.id, name: o.name, orgType: o.orgType, registrationId: o.registrationId, jurisdiction: o.jurisdiction, did: o.did, verified: o.verified, status: o.status, companyProfile: o.companyProfile, capabilities: o.capabilities, createdAt: o.createdAt };
+  return { id: o.id, name: o.name, orgType: o.orgType, registrationId: o.registrationId, jurisdiction: o.jurisdiction, did: o.did, verified: o.verified, status: o.status, companyProfile: o.companyProfile, capabilities: o.capabilities, brandLogoDocumentId: o.brandLogoDocumentId, brandAccent: o.brandAccent, createdAt: o.createdAt };
 }
 
 // EN-A: uniform 403 for an act outside an org's capability envelope. `missing`
@@ -543,7 +543,20 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     // The org's capability envelope rides the session (like useCaseDomain): the
     // web builds its SessionUser from login/qr-poll, never /me.
     const org = user.orgId ? await deps.organizations.get(user.orgId) : null;
-    return { token: app.jwt.sign(claims), user: { ...claims, walletAddress: wallet?.address ?? null, useCaseDomain, orgCapabilities: org?.capabilities ?? null } };
+    // EN-E, Task 6b: the BRAND rides it for the same reason, off the SAME org
+    // record already loaded above. Without this the shell painted the platform
+    // palette on every sign-in and every reload of a branded org until a
+    // follow-up /me landed — and /me's own comment ("the shell needs the brand
+    // on first paint") was describing a promise this route did not keep.
+    return {
+      token: app.jwt.sign(claims),
+      user: {
+        ...claims, walletAddress: wallet?.address ?? null, useCaseDomain,
+        orgCapabilities: org?.capabilities ?? null,
+        brandLogoDocumentId: org?.brandLogoDocumentId ?? null,
+        brandAccent: org?.brandAccent ?? null,
+      },
+    };
   });
 
   app.get("/me", { schema: S.me, ...auth }, async (request) => {
@@ -553,7 +566,14 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     const org = claims.orgId ? await deps.organizations.get(claims.orgId) : null;
     // useCaseKey mirrors the login response so a scoped desk operator's session
     // principal is self-describing (role + scope + domain) from /me alone.
-    return { ...base, useCaseKey: claims.useCaseKey ?? null, useCaseDomain, orgCapabilities: org?.capabilities ?? null };
+    // EN-E rides the SAME org record already loaded above: the shell needs the
+    // brand on first paint, and a second fetch would be a second round-trip
+    // before it could avoid a flash of the platform palette.
+    return {
+      ...base, useCaseKey: claims.useCaseKey ?? null, useCaseDomain, orgCapabilities: org?.capabilities ?? null,
+      brandLogoDocumentId: org?.brandLogoDocumentId ?? null,
+      brandAccent: org?.brandAccent ?? null,
+    };
   });
 
   app.get("/config", { schema: S.config, ...auth }, async () => ({ domains: deps.enabledDomains }));
@@ -612,7 +632,21 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
         const claims: TokenClaims | null = user ? claimsOf(user) : null;
         const useCaseDomain = user ? await resolveUseCaseDomain(user.useCaseKey) : null;
         const org = user?.orgId ? await deps.organizations.get(user.orgId) : null;
-        return { status: "authenticated", token: done.token, user: claims ? { ...claims, walletAddress: wallet?.address ?? null, useCaseDomain, orgCapabilities: org?.capabilities ?? null } : null };
+        // The brand rides here for the SAME reason it rides POST /auth/login
+        // (EN-E, Task 6b): this is the OTHER site the web builds a SessionUser
+        // from, and a QR sign-in must not paint a different shell than a
+        // password sign-in. Same org record already loaded for orgCapabilities.
+        return {
+          status: "authenticated", token: done.token,
+          user: claims
+            ? {
+              ...claims, walletAddress: wallet?.address ?? null, useCaseDomain,
+              orgCapabilities: org?.capabilities ?? null,
+              brandLogoDocumentId: org?.brandLogoDocumentId ?? null,
+              brandAccent: org?.brandAccent ?? null,
+            }
+            : null,
+        };
       }
     }
     return { status: sess.status };
@@ -3547,6 +3581,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       jurisdiction: "IN", did, didSeedEncrypted,
       status: "pending", verified: false, verifiedAt: null, companyProfile,
       capabilities, // the validated requested envelope — part of what the reviewer approves
+      brandLogoDocumentId: null, brandAccent: null, // EN-E: a new org starts on the platform look
     });
     try {
       await deps.users.create({
@@ -3631,6 +3666,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       name, orgType, registrationId: opts.registrationId ?? null, jurisdiction: opts.jurisdiction ?? null,
       did, didSeedEncrypted, status: "active", verified: true, verifiedAt: new Date().toISOString(), companyProfile: null,
       capabilities: null, // platform-created orgs stay unrestricted legacy until an envelope is set
+      brandLogoDocumentId: null, brandAccent: null, // EN-E: a new org starts on the platform look
     });
     // `didRegistered` is in the trail because "this org's DID is not on the
     // registry" is otherwise invisible: nothing on the record says so, and a
@@ -3837,6 +3873,180 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     const updated = await deps.organizations.setCapabilities(org.id, caps);
     await deps.audit.append({ actorId: claims.id, action: "org-capabilities-set" as LifecycleAction, payload: { orgId: org.id, capabilities: caps } });
     return orgView(updated);
+  });
+
+  // EN-E: an org's own logo and accent colour.
+  app.patch("/orgs/:id/branding", { schema: S.updateOrgBranding, ...auth }, async (request, reply) => {
+    // MEASURED, not assumed: without this line a key bound to any OrgAdmin or
+    // PlatformAdmin service user rewrote the brand with an EMPTY scope list —
+    // the role predicate below reads the bound user's role and cannot tell the
+    // two credentials apart. Omitting `authScoped` withholds a scope; it does
+    // not withhold the route. So the refusal has to be stated here, or both the
+    // OpenAPI description and the DELIBERATELY_UNSCOPED entry are false.
+    if (machinePrincipal(request)) {
+      return reply.code(403).send({ error: "MACHINE_PRINCIPAL", message: "an API key may not set an organization's branding" });
+    }
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    // AN EXPLICIT ROLE PREDICATE, and an org-ownership check beside it.
+    // `authScoped` would be no gate at all here: `requireScope` returns early
+    // for a human session, so a scope narrows API keys and nothing else. And
+    // without the ownership half, one organization could rebrand another —
+    // the cross-tenant shape this program's reviews keep finding.
+    const isOwnOrgAdmin = claims.role === "OrgAdmin" && !!claims.orgId && claims.orgId === id;
+    if (claims.role !== "PlatformAdmin" && !isOwnOrgAdmin) {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "only this organization's admin or a platform admin may set its branding" });
+    }
+    const org = await deps.organizations.get(id);
+    if (!org) return notFound(reply, "organization not found");
+
+    const b = request.body as { brandLogoDocumentId?: string | null; brandAccent?: string | null };
+    const patch: BrandingPatch = {};
+    if ("brandAccent" in b) {
+      // Throws INVALID_BRAND_ACCENT -> 400. Normalizes to lowercase.
+      patch.brandAccent = b.brandAccent === null ? null : validateBrandAccent(b.brandAccent);
+    }
+    if ("brandLogoDocumentId" in b) {
+      // `in` is the test, not truthiness — an omitted key leaves the column
+      // alone. `?? null` only narrows the type: JSON cannot deliver `undefined`
+      // for a key that is present, so the optional-ness is a TypeScript artefact.
+      const logoId: string | null = b.brandLogoDocumentId ?? null;
+      if (logoId === null) patch.brandLogoDocumentId = null;
+      else {
+        const doc = await deps.documents.get(logoId);
+        // THE ARTWORK REVIEW'S RULE, ON THIS DOOR TOO. Existence is not
+        // entitlement: `GET /orgs/:id/branding/logo` serves whatever this
+        // column names to every MEMBER of the org, so pinning a document
+        // another org owns would republish their mark to this org's roster.
+        //
+        // ONE ANSWER FOR "GONE" AND "NOT YOURS", matching
+        // `checkBackgroundDocument` — telling a caller which of the two it is
+        // makes this route an existence oracle over the whole document store.
+        //
+        // NO PLATFORM-ADMIN EXEMPTION, and the first draft's reasoning for one
+        // was wrong on both halves. It claimed the exemption was needed for the
+        // platform-uploads-on-an-org's-behalf path: it is not, because
+        // `POST /orgs/:id/branding/logo` stamps `ownerOrgId = id`, so a
+        // PlatformAdmin's own upload already passes this check. And it claimed
+        // refusing would forbid nothing since a PlatformAdmin may read every
+        // document anyway: reading bytes and GRANTING a different org's roster
+        // access to them are not the same power. `ownerOrgId === null` (a
+        // pre-org KYB upload, or a row written before the column existed) fails
+        // too — such a document is nobody's mark to publish.
+        if (!doc || !orgOwnsDocument(doc, id)) {
+          return reply.code(400).send({ error: "BRAND_LOGO_NOT_FOUND", message: "no such document" });
+        }
+        // Not "is it an image" — "can the renderer DRAW it". `image/webp` is a
+        // perfectly good image that pdfkit cannot read, and the certificate
+        // renderer swallows the throw, so an org that uploaded one would see
+        // its mark in the console and never on a certificate, with nothing
+        // saying why. Same predicate, same reason, as the artwork door.
+        if (!isRenderableArtwork(doc.contentType)) {
+          return reply.code(400).send({ error: "BRAND_LOGO_NOT_AN_IMAGE", message: `document is ${doc.contentType}; a brand logo must be image/png or image/jpeg — the renderer can draw nothing else` });
+        }
+        patch.brandLogoDocumentId = logoId;
+      }
+    }
+    const updated = await deps.organizations.setBranding(id, patch);
+    await deps.audit.append({ actorId: claims.id, action: "org-branding-set" as LifecycleAction, payload: { orgId: id, ...patch } });
+    return orgView(updated);
+  });
+
+  // EN-E, Task 3b: a dedicated upload door for an org's own logo. `POST
+  // /documents` gates on `rbac.can(role, "issue")` and MATRIX.OrgAdmin is
+  // ["read"] alone — an OrgAdmin gets 403 there, so without this route the
+  // brand editor would have no working upload path for the exact role it is
+  // built for. Widening the general store was rejected: it also serves KYB
+  // documents, certificate artwork and asset attachments, a much larger blast
+  // radius than a logo needs. Gated IDENTICALLY to PATCH /orgs/:id/branding —
+  // same machine-principal refusal, same PlatformAdmin-or-own-OrgAdmin check —
+  // because uploading the mark is the same console act as setting the colour.
+  app.post("/orgs/:id/branding/logo", { schema: S.uploadOrgBrandLogo, bodyLimit: DOC_UPLOAD_BODY_LIMIT, ...auth }, async (request, reply) => {
+    // See the identical comment on PATCH /orgs/:id/branding: omitting this
+    // withholds a scope, not the route, and a zero-scope key is the widest
+    // hole of all because scopes are never consulted for a route with no
+    // `authScoped(...)`.
+    if (machinePrincipal(request)) {
+      return reply.code(403).send({ error: "MACHINE_PRINCIPAL", message: "an API key may not upload an organization's brand logo" });
+    }
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    const isOwnOrgAdmin = claims.role === "OrgAdmin" && !!claims.orgId && claims.orgId === id;
+    if (claims.role !== "PlatformAdmin" && !isOwnOrgAdmin) {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "only this organization's admin or a platform admin may upload its brand logo" });
+    }
+    const org = await deps.organizations.get(id);
+    if (!org) return notFound(reply, "organization not found");
+
+    const b = request.body as { contentType: string; dataBase64: string };
+    // Narrower than the shared allowlist ON PURPOSE, and narrower still than
+    // "is it an image". This route exists so an OrgAdmin can upload a MARK, and
+    // the only thing that ever draws one is pdfkit, which reads PNG and JPEG.
+    // `image/webp` would store, display in the console, and then silently fail
+    // to appear on every certificate — the renderer's throw is swallowed. Refuse
+    // it here, where the person who picked the file is still on the screen.
+    if (!isRenderableArtwork(b.contentType)) {
+      return reply.code(415).send({ error: "UNSUPPORTED_DOCUMENT_TYPE", message: "a brand logo must be image/png or image/jpeg — the renderer can draw nothing else" });
+    }
+    // OWNED BY THE ORG BEING BRANDED, not by the caller. A PlatformAdmin
+    // uploading a mark on an org's behalf is acting for that org, and their own
+    // `claims.orgId` (the platform org, or none) would record the wrong owner —
+    // which the artwork review established is an authorization fact, not a
+    // label. `id` is already proven to be a real org two lines up.
+    const doc = await storeUploadedDocument(deps.documents, b, id);
+    return reply.code(201).send(doc);
+  });
+
+  // EN-E, Task 6b: THE READ HALF OF THE SAME DOOR. Task 3b opened the upload and
+  // nobody measured the way back: `GET /documents/:id` gates on
+  // `rbac.can(role, "issue") || role === "Auditor"`, so an OrgAdmin was refused
+  // the very bytes they had just successfully uploaded, and the sidebar mark was
+  // invisible to every non-desk member (Trader, Buyer, Holder, Verifier) too.
+  // Widening that route was rejected for the same reason as on the write side:
+  // the store also holds off-ledger invoice evidence and KYB certificates, so
+  // relaxing its read gate for a logo relaxes it for all of them.
+  //
+  // THE URL CARRIES NO DOCUMENT ID, and that is the containment. The route reads
+  // `org.brandLogoDocumentId` itself, so a member can fetch their own org's mark
+  // and nothing else — this cannot become a second way to enumerate the store.
+  app.get("/orgs/:id/branding/logo", { schema: S.getOrgBrandLogo, ...auth }, async (request, reply) => {
+    // See the identical comment on PATCH /orgs/:id/branding: omitting
+    // `authScoped` withholds a SCOPE, not the ROUTE, and a zero-scope key is the
+    // widest hole of all because scopes are never consulted for a route that
+    // declares none. Unless the refusal is stated here, both the OpenAPI
+    // description and the DELIBERATELY_UNSCOPED row are false.
+    if (machinePrincipal(request)) {
+      return reply.code(403).send({ error: "MACHINE_PRINCIPAL", message: "an API key may not read an organization's brand logo" });
+    }
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    // DELIBERATELY WIDER THAN ITS TWO SIBLINGS, and the difference is intended:
+    // SETTING the brand is an OrgAdmin act, but SEEING it is every member's
+    // shell — a Trader, Buyer, Holder or Verifier of this org renders the same
+    // sidebar. So the predicate is membership, not rank. A reader diffing this
+    // against the PATCH gate is looking at a decision, not a missing role check.
+    // The org-ownership half is unchanged, and it is what keeps a member of one
+    // tenant out of another's brand.
+    if (claims.role !== "PlatformAdmin" && (!claims.orgId || claims.orgId !== id)) {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to read that organization's brand logo" });
+    }
+    const org = await deps.organizations.get(id);
+    if (!org) return notFound(reply, "organization not found");
+    // An unbranded org and a brand whose document has since been deleted are the
+    // same answer to a caller drawing chrome: there is no mark. Distinguishing
+    // them would only tell the caller a document id once existed.
+    if (!org.brandLogoDocumentId) return notFound(reply, "organization has no brand logo");
+    const doc = await deps.documents.get(org.brandLogoDocumentId);
+    if (!doc) return notFound(reply, "organization has no brand logo");
+    // The SAME hardening as GET /documents/:id: pin the stored type, forbid
+    // sniffing, force download — never let the browser execute stored bytes as
+    // the API origin. The web fetches this into a Blob and makes an object URL,
+    // so `attachment` costs the caller nothing and keeps the two doors in parity.
+    return reply
+      .header("content-type", doc.contentType)
+      .header("x-content-type-options", "nosniff")
+      .header("content-disposition", `attachment; filename="brand-logo-${id}"`)
+      .send(doc.bytes);
   });
 
   // Org-requested capability change (EN-A): the org's own OrgAdmin proposes a
@@ -5089,7 +5299,11 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     if (!def || !spec) return notFound(reply, "no certificate for this credential");
     if (cred.acceptance !== "accepted") return notFound(reply, "no certificate for this credential");
 
-    const issuerName = (await deps.organizations.findByDid(cred.issuerDid))?.name ?? null;
+    // Loaded once and reused for both the printed issuer name AND the EN-E
+    // brand-logo fallback below — a second fetch here would be the same
+    // organization asked twice for one request.
+    const issuerOrg = await deps.organizations.findByDid(cred.issuerDid);
+    const issuerName = issuerOrg?.name ?? null;
     const statusUrl = `${deps.publicApiUrl}/credentials/${cred.id}/status`;
     let status = { revoked: cred.revoked, revokedAt: cred.revokedAt, revokedReason: cred.revokedReason };
     // EN-D2: a sandbox credential has no on-chain record, so asking a real chain
@@ -5140,7 +5354,13 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
 
     if (!pdf) {
       let logoBytes: Buffer | null = null;
-      if (spec.certificate?.logoDocumentId) { try { logoBytes = (await deps.documents.get(spec.certificate.logoDocumentId))?.bytes ?? null; } catch { logoBytes = null; } }
+      // EN-E: the type's own logo still wins (MOST-SPECIFIC-WINS); only a type
+      // with none of its own falls back to the issuing org's brand. The
+      // deleted-document catch below covers BOTH sources — it wraps the fetch,
+      // not either lookup individually, so an org's brand document going
+      // missing degrades the same way a type's own always has: no logo, not a 500.
+      const logoDocId = certificateLogoDocumentId(spec, issuerOrg);
+      if (logoDocId) { try { logoBytes = (await deps.documents.get(logoDocId))?.bytes ?? null; } catch { logoBytes = null; } }
       pdf = await renderCredentialCertificate({ credential: cred, spec, issuerName, statusUrl, status, logoBytes, nowMs });
     }
     const fname = `${(spec.name || "credential").replace(/[^a-zA-Z0-9._-]/g, "_")}-${cred.id}.pdf`;

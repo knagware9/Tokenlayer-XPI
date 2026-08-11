@@ -276,6 +276,8 @@ model Organization {
   verifiedAt       DateTime?
   companyProfile   String? // JSON-encoded CompanyProfile (India KYB details), self-registered corporates only
   capabilities     String? // EN-A: JSON OrgCapabilities envelope; null = unrestricted legacy
+  brandLogoDocumentId String? // EN-E: an image Document id; null = the platform's own look
+  brandAccent         String? // EN-E: #rrggbb; null = the platform's own palette
   createdAt        DateTime @default(now())
 
   @@index([status])

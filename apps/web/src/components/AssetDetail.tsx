@@ -4,7 +4,7 @@ import { useAuth } from "../auth.js";
 import { can } from "../rbac.js";
 import { CashflowPanel } from "./CashflowPanel.js";
 import type { AccountState, Asset, AuditEntry, ChainInfo, Listing, Role, TokenInfo, Trade, UseCase } from "../types.js";
-import { Pill as UIPill, Skeleton } from "./ui.js";
+import { EmptyState, Pill as UIPill, Skeleton } from "./ui.js";
 
 interface Props {
   assetId: string;
@@ -276,7 +276,9 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
               ))}
               {tokens.length === 0 && (
                 <tr>
-                  <td colSpan={3} className="px-4 py-4 text-center text-sm text-slate-400">No tokens minted yet.</td>
+                  <td colSpan={3}>
+                    <EmptyState title="No tokens minted yet." />
+                  </td>
                 </tr>
               )}
             </tbody>
@@ -345,6 +347,10 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
               <span className="text-[11px] text-slate-400">{new Date(e.createdAt).toLocaleTimeString()}</span>
             </li>
           ))}
+          {/* Stays a one-liner. `EmptyState` is a PANEL primitive — a 48px icon
+              and py-10 — and every other use of it fills a Card body, a section
+              or a table body. Inside this dense two-line-per-row feed it is
+              taller than the list it replaces. */}
           {audit.length === 0 && <li className="text-sm text-slate-400">No activity yet.</li>}
         </ol>
       </div>
@@ -596,6 +602,7 @@ function Market({
                   <span className="ml-auto text-[11px] text-slate-400">{new Date(t.at).toLocaleString()}</span>
                 </li>
               ))}
+              {/* One-liner for the same reason as the audit trail above. */}
               {trades.length === 0 && <li className="text-xs text-slate-400">No trades yet.</li>}
             </ol>
           </div>

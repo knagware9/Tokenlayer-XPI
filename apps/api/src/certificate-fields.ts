@@ -75,3 +75,34 @@ export function resolveCertificateFields(input: ResolveCertificateFieldsInput): 
 
   return out;
 }
+
+/**
+ * EN-E: which logo a certificate should print: the type's own, else the
+ * issuing org's brand, else none. MOST-SPECIFIC-WINS — a credential type that
+ * already names its own `logoDocumentId` is untouched by an org branding
+ * itself later, which is the whole point of "the org brand is a default, not
+ * an override".
+ *
+ * A SUCCESSFUL artwork render never reaches this function: the route skips the
+ * built-in logo lookup once `certificate.background` is set, and
+ * `certificateDrawList`'s input has no field a logo could travel through, so
+ * that much is enforced by the type checker rather than a runtime branch.
+ *
+ * A FAILED one does reach it, and should. When the artwork is deleted or
+ * undecodable the route logs, leaves the PDF null and falls back to the
+ * built-in layout — which is a layout with a logo slot, so it wants this
+ * answer. An earlier version of this comment claimed artwork mode "never
+ * reaches this function at all", which is the kind of invariant a later author
+ * would build on; it was never true of the fallback path.
+ *
+ * `||`, not `??`. `validateCredentialUseCase` accepts `logoDocumentId: ""`,
+ * and `"" ?? x` is `""` — an empty string would suppress the org fallback and
+ * print no logo at all, which is not what "a type that already NAMES its own
+ * logo" means. Blank is unset.
+ */
+export function certificateLogoDocumentId(
+  spec: { certificate?: { logoDocumentId?: string } },
+  issuerOrg: { brandLogoDocumentId: string | null } | null,
+): string | null {
+  return spec.certificate?.logoDocumentId?.trim() || issuerOrg?.brandLogoDocumentId || null;
+}

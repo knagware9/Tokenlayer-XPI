@@ -415,7 +415,21 @@ export interface OrganizationRecord {
   companyProfile: CompanyProfile | null;
   /** EN-A capability envelope; null = unrestricted legacy (predates EN-A or path didn't choose). */
   capabilities: OrgCapabilities | null;
+  /** EN-E: an image Document id used as this org's mark. null = unbranded. */
+  brandLogoDocumentId: string | null;
+  /** EN-E: lowercase #rrggbb accent. null = the platform palette. */
+  brandAccent: string | null;
   createdAt: string;
+}
+
+/**
+ * A partial update of the two branding columns. Optional-and-nullable is
+ * deliberate: an OMITTED key means "leave this alone", an explicit null means
+ * "clear this". "Change my colour but keep my logo" needs both to be sayable.
+ */
+export interface BrandingPatch {
+  brandLogoDocumentId?: string | null;
+  brandAccent?: string | null;
 }
 
 export interface OrganizationRepository {
@@ -429,6 +443,8 @@ export interface OrganizationRepository {
   setVerified(id: string, verified: boolean, verifiedAt: string | null): Promise<OrganizationRecord>;
   setStatus(id: string, status: OrgStatus): Promise<OrganizationRecord>;
   setCapabilities(id: string, caps: OrgCapabilities | null): Promise<OrganizationRecord>;
+  /** Patch branding. An OMITTED key is left alone; an explicit null clears it. */
+  setBranding(orgId: string, patch: BrandingPatch): Promise<OrganizationRecord>;
   remove(id: string): Promise<void>;
 }
 

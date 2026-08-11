@@ -23,8 +23,12 @@
 - **Never weaken or delete an existing assertion.** The suites are the back-compat oracle. The one exception is adding a justified row to a coverage allowlist (`DELIBERATELY_UNSCOPED`, `DOCUMENTATION_DEFERRED`, `MODE_EXEMPT`) — those tables' own failure messages instruct you to, and each has a staleness check. Say so in your report; never add one silently.
 - **THE PARITY RULE (Task 2 especially):** a new persisted field must land in the Prisma schema + record type + row type + mapper + create/update literals in **both** the memory and prisma repos + `prisma generate`, in ONE commit. Memory-harness tests cannot catch a prisma-side drop.
 - **THE ADDITIVITY RULE:** `fast-json-stringify` silently strips undeclared response fields. You may ADD `properties`; never remove `additionalProperties: true`; never narrow a schema. A field you forget to declare simply will not appear on the wire.
-- **`authScoped(...)` is NOT an authorization gate for humans.** `requireScope` short-circuits on `if (!key) return`. Any route that must be restricted needs an explicit role predicate as well.
+- **BOTH HALVES OF THE GATE, and each was learned the hard way.**
+  - `authScoped(...)` is NOT an authorization gate for HUMANS: `requireScope` short-circuits on `if (!key) return`, so a scope narrows API keys and nothing else. A route that must be restricted needs an explicit role predicate too. (EN-F's final review, proven with a Buyer.)
+  - Omitting `authScoped` does NOT withhold the route from MACHINES: a key authenticates through the same preHandler and then presents its bound user's role, which a role predicate cannot distinguish from a session. A **zero-scope** key is the widest hole of all, because scopes are never consulted. A route that is genuinely session-only must refuse `machinePrincipal(request)` **explicitly**. (Task 3 of this plan, measured: a PlatformAdmin service key with `scopes: []` rewrote an organization's brand.)
 - Comments explain WHY. Calibrate against `packages/core/src/modes.ts` and `apps/api/src/certificate-artwork.ts`. Do not restate the code.
+- **NO test directory in this monorepo is typechecked.** `apps/api/tsconfig.json` and `packages/core/tsconfig.json` both `"include": ["src"]`, and vitest runs no typecheck. So a test literal can carry an invalid enum value and stay green forever — Task 2's implementer found exactly that in this plan's own test (`orgType: "issuer"`, which is not an `OrgType`; the valid set is `bank | corporate | msme | government | verifier`). **When a type gains a required field, find the affected test literals by GREP, not by `tsc`** — the compiler will not tell you.
+- **Run `npx prisma generate` from `apps/api`, never from the repo root.** Root `npx` resolves a different prisma major and misses `apps/api/.env`, so `DATABASE_URL` does not resolve.
 
 **Baselines on `main`:** core 283 · api 760 · web 138.
 
@@ -558,6 +562,65 @@ git commit -m "feat(api): organization branding route, on /me and the org view"
 
 ---
 
+## Task 3b: API — an OrgAdmin can actually upload a logo
+
+**Files:**
+- Modify: `apps/api/src/http/routes.ts`, `apps/api/src/http/schemas.ts`
+- Test: `apps/api/test/org-branding-upload.test.ts`
+
+**Why this task exists.** Task 3's implementer measured it: `POST /documents` gates on `rbac.can(role, "issue")`, and `MATRIX.OrgAdmin` is `["read"]` alone (`packages/core/src/rbac.ts:12`). **An OrgAdmin gets 403 from the document store.** So the brand editor in Task 6 would have no working upload path for the exact role it is built for — which is EN-F's finding 7 repeating itself, and the reason that feature shipped unusable by its intended user.
+
+**The chosen fix, and why not the other two.** A dedicated upload route scoped to branding. Widening `POST /documents` for OrgAdmins would change the authorization of a route that also serves KYB documents, certificate artwork and asset attachments — a much larger blast radius for a logo. Having a PlatformAdmin upload on the org's behalf is exactly the unusable-feature outcome. There is precedent for a dedicated door: `POST /orgs/register/documents` exists because the general store was not reachable at signup either.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `apps/api/test/org-branding-upload.test.ts`. Reuse the `org()` helper shape from `apps/api/test/org-branding-route.test.ts` (read it — and note its organization literal uses a VALID `OrgType`). Assert:
+
+```ts
+// 1. An OrgAdmin of THIS org uploads a PNG -> 201 with a document id, and that
+//    id is immediately usable as brandLogoDocumentId on PATCH .../branding.
+// 2. An OrgAdmin of ANOTHER org -> 403. The cross-tenant check, again.
+// 3. A non-admin member of this org (Buyer) -> 403.
+// 4. A PlatformAdmin -> 201.
+// 5. A non-image contentType -> 415 UNSUPPORTED_DOCUMENT_TYPE (the shared
+//    storeUploadedDocument already answers this; assert it still does).
+// 6. A machine principal (any API key, any scopes, including []) -> 403
+//    MACHINE_PRINCIPAL, matching PATCH .../branding. Uploading brand assets is
+//    the same console act.
+```
+
+- [ ] **Step 2:** Run it → FAIL (404).
+
+- [ ] **Step 3: Implement**
+
+Add `POST /orgs/:id/branding/logo`, gated **identically to `PATCH /orgs/:id/branding`** — the same `machinePrincipal` refusal, the same PlatformAdmin-or-own-OrgAdmin predicate — with `bodyLimit: DOC_UPLOAD_BODY_LIMIT` and the body shape `{ contentType, dataBase64 }` that `storeUploadedDocument` already takes.
+
+Restrict the accepted types to images at this door, even though the shared helper's allowlist is wider:
+
+```ts
+    // Narrower than the shared allowlist ON PURPOSE. This route exists so an
+    // OrgAdmin can upload a MARK; a PDF or a text file stored through it would
+    // only ever fail later, at the point something tries to draw it.
+    if (!b.contentType.startsWith("image/")) {
+      return reply.code(415).send({ error: "UNSUPPORTED_DOCUMENT_TYPE", message: "a brand logo must be an image" });
+    }
+```
+
+Return `201 { id, sha256, size }`, matching `POST /orgs/register/documents`.
+
+Add the schema entry with `security: humanOnly`, a description that states the session-only reason, and the same `DELIBERATELY_UNSCOPED` treatment as the branding route (one row, quoted in your report).
+
+- [ ] **Step 4:** Run the new test, `scope-coverage`, `openapi-contract`, then regenerate and READ the openapi snapshot diff (one added path). Whole api suite + `npx tsc --noEmit -p apps/api`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add apps/api/src/http/ apps/api/openapi.snapshot.json apps/api/test/org-branding-upload.test.ts
+git commit -m "feat(api): an OrgAdmin can upload their own brand logo"
+```
+
+---
+
 ## Task 4: API — the certificate logo falls back to the org brand
 
 **Files:**
@@ -665,7 +728,16 @@ describe("contrastRatio", () => {
 
 describe("clampAccent", () => {
   it("leaves a colour that already passes AA against white text alone", () => {
-    const dark = "#0e8c75";
+    // CORRECTED DURING TASK 5. This fixture was `#0e8c75` (our own brand-600),
+    // asserted to already pass. It does not: measured 4.178:1, below the 4.5:1
+    // the module enforces. `#0a6f5d` (brand-700) is 6.096:1 and does.
+    //
+    // Worth knowing beyond the fixture: our DEFAULT brand-600 does not clear AA
+    // for white text either. That is pre-existing and untouched here, but it
+    // means an org that picks our own teal gets it darkened, so a branded shell
+    // can look slightly darker than the unbranded one. Not a bug — the clamp is
+    // stricter than the palette it replaces.
+    const dark = "#0a6f5d";
     expect(contrastRatio(dark, "#ffffff")).toBeGreaterThanOrEqual(4.5);
     expect(clampAccent(dark)).toBe(dark);
   });
@@ -961,6 +1033,29 @@ Show the contrast note when it applies:
 git add apps/web/src/
 git commit -m "feat(web): the shell wears an organization's brand, and an OrgAdmin can set it"
 ```
+
+---
+
+## Task 6b: API + Web — the READ half of the logo door, and the brand on the login wire
+
+**Files:**
+- Modify: `apps/api/src/http/routes.ts`, `apps/api/src/http/schemas.ts`, `apps/web/src/api.ts`, `apps/web/src/components/AppShell.tsx`
+- Allowlist rows: `apps/api/test/scope-coverage.test.ts`, `apps/api/test/openapi-contract.test.ts`
+- Test: `apps/api/test/org-branding-logo-read.test.ts`, `apps/web/test/org-logo-door.test.ts`
+
+**Why this task exists — ONE DOOR OF TWO, for the third time on this program.** Task 3b opened the UPLOAD door and nobody measured the way back. `GET /documents/:id` gates on `canReadDoc = rbac.can(role, "issue") || role === "Auditor"`, so an OrgAdmin got **403 reading back the logo they had just successfully uploaded**, and the sidebar mark was invisible to OrgAdmin, Trader, Buyer, Holder and Verifier — every role but a desk operator's and an Auditor's. Measured live in the browser before this task: `GET /api/v1/documents/cmsog… → 403`.
+
+Task 6's implementer also found that `POST /auth/login` and the QR poll did not carry `brandLogoDocumentId`/`brandAccent`, while the web builds its `SessionUser` from exactly those two routes and never from `/me`. `/me`'s own comment — "the shell needs the brand on first paint" — was describing a promise the login route did not keep, so a branded org painted the platform palette on every sign-in and reload until a follow-up fetch landed.
+
+- [x] **Part 1: `GET /orgs/:id/branding/logo`.** A dedicated read door, not a widening of `GET /documents/:id` — that store also holds off-ledger invoice evidence and KYB certificates, so relaxing its read gate for a logo relaxes it for all of them. **The URL carries NO document id:** the route reads `org.brandLogoDocumentId` itself, so a member can fetch their org's mark and nothing else, and it cannot become a way to enumerate the store. Gate: `machinePrincipal` refused outright (stated in the handler, because omitting `authScoped` withholds a scope and not the route — a zero-scope key is the widest hole of all); then PlatformAdmin, or any authenticated principal whose `claims.orgId === id`. That last predicate is **deliberately wider than its two siblings**: setting the brand is an OrgAdmin act, seeing it is every member's shell. 404 for a missing org, an unbranded org, and a dangling document alike. Response: the stored bytes with the same hardening the document read uses — pinned `content-type`, `nosniff`, `attachment`.
+
+- [x] **Part 2: the session payload carries the brand.** Both remaining build sites (`POST /auth/login`, the QR-poll authenticated branch) now return the two fields off the SAME org record they already load for `orgCapabilities`. The properties are named in both response schemas too.
+
+  **On the additivity rule.** The concern is real in general — `fast-json-stringify` drops response fields a schema does not admit — but MEASURED here it did not bite: both `user` objects already carried `additionalProperties: true`, which passes undeclared fields through, and `orgCapabilities` has been riding login undeclared all along. Removing `additionalProperties` was tried, and the whole `user` object serialized as `{}`. So the schema additions are documentation, and the guard against the strip is the test, which asserts on the **serialized HTTP body** rather than on the handler's return value.
+
+- [x] **Part 3: the web uses the new door.** `api.brandLogo(token, orgId)` returns a Blob (modelled on `downloadDocument`, not on `request`). `useOrgLogo` gained an optional `orgId`: given one it fetches the org door, without one it falls back to the document store — which the brand editor's preview still needs, because a logo that has been uploaded but not yet SAVED as the org's mark is not reachable through a route that reads `org.brandLogoDocumentId`. The object-URL lifecycle is untouched. `AppShell`'s `refreshSession()`-when-`brandAccent`-is-`undefined` fallback stays, now serving only `localStorage`-restored sessions minted before this task.
+
+**Known residual gap (reported, not fixed).** `OrgBrandingCard`'s preview thumbnail still fetches through `api.downloadDocument`, so for a non-desk OrgAdmin it 403s and shows "none" — for the saved logo as well as for a pending upload. The saved half could use the new door; the pending half cannot, and an id-addressed read door is exactly what this task declined to build. Left alone rather than made state-dependent.
 
 ---
 

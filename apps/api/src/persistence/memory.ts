@@ -8,6 +8,7 @@ import type {
   ApiKeyRepository,
   AssetFilter,
   AssetRecord,
+  BrandingPatch,
   AssetRepository,
   AuditAnchorRecord,
   AuditAnchorRepository,
@@ -530,6 +531,15 @@ export class MemoryOrganizationRepository implements OrganizationRepository {
     const rec = this.byId.get(orgId);
     if (!rec) throw new Error(`unknown org '${orgId}'`);
     rec.capabilities = caps;
+    return rec;
+  }
+  async setBranding(orgId: string, patch: BrandingPatch): Promise<OrganizationRecord> {
+    const rec = this.byId.get(orgId);
+    if (!rec) throw new Error(`unknown org '${orgId}'`);
+    // `in` rather than `!== undefined`: an explicit null must CLEAR, and
+    // `patch.brandAccent !== undefined` cannot tell "clear it" from "leave it".
+    if ("brandLogoDocumentId" in patch) rec.brandLogoDocumentId = patch.brandLogoDocumentId ?? null;
+    if ("brandAccent" in patch) rec.brandAccent = patch.brandAccent ?? null;
     return rec;
   }
   async remove(orgId: string): Promise<void> {

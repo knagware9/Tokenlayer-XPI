@@ -40,6 +40,7 @@ import type {
   EventAppendInput,
   EventRecord,
   EventRepository,
+  BrandingPatch,
   KycDetails,
   CompanyProfile,
   KycStatus,
@@ -797,13 +798,15 @@ export class PrismaCashRepository implements CashRepository {
 const toOrg = (r: {
   id: string; name: string; orgType: string; registrationId: string | null; jurisdiction: string | null;
   did: string; didSeedEncrypted: string; status: string; verified: boolean; verifiedAt: Date | null;
-  companyProfile: string | null; capabilities: string | null; createdAt: Date;
+  companyProfile: string | null; capabilities: string | null;
+  brandLogoDocumentId: string | null; brandAccent: string | null; createdAt: Date;
 }): OrganizationRecord => ({
   id: r.id, name: r.name, orgType: r.orgType as OrgType, registrationId: r.registrationId, jurisdiction: r.jurisdiction,
   did: r.did, didSeedEncrypted: r.didSeedEncrypted, status: r.status as OrgStatus, verified: r.verified,
   verifiedAt: r.verifiedAt ? r.verifiedAt.toISOString() : null,
   companyProfile: r.companyProfile ? (JSON.parse(r.companyProfile) as CompanyProfile) : null,
   capabilities: r.capabilities ? (JSON.parse(r.capabilities) as OrgCapabilities) : null,
+  brandLogoDocumentId: r.brandLogoDocumentId, brandAccent: r.brandAccent,
   createdAt: r.createdAt.toISOString(),
 });
 
@@ -845,6 +848,18 @@ export class PrismaOrganizationRepository implements OrganizationRepository {
   }
   async setCapabilities(id: string, caps: OrgCapabilities | null): Promise<OrganizationRecord> {
     return toOrg(await prisma.organization.update({ where: { id }, data: { capabilities: caps ? JSON.stringify(caps) : null } }));
+  }
+  async setBranding(orgId: string, patch: BrandingPatch): Promise<OrganizationRecord> {
+    // `in` rather than `!== undefined`: prisma treats an undefined column as
+    // "don't write", so spreading only the keys actually present is what makes
+    // an explicit null CLEAR while an omitted key is left alone.
+    return toOrg(await prisma.organization.update({
+      where: { id: orgId },
+      data: {
+        ...("brandLogoDocumentId" in patch ? { brandLogoDocumentId: patch.brandLogoDocumentId ?? null } : {}),
+        ...("brandAccent" in patch ? { brandAccent: patch.brandAccent ?? null } : {}),
+      },
+    }));
   }
   async remove(id: string): Promise<void> {
     await prisma.organization.delete({ where: { id } });

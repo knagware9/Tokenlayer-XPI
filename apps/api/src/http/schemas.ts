@@ -593,6 +593,8 @@ export const components: Record<string, unknown>[] = [
       status: { type: "string", enum: ["pending", "active", "rejected"] },
       companyProfile: { type: "object", additionalProperties: true, nullable: true, description: "KYB profile captured at self-registration; null for a platform-created org." },
       capabilities: { type: "object", additionalProperties: true, nullable: true, description: "The EN-A capability envelope. null = legacy, unrestricted." },
+      brandLogoDocumentId: { type: "string", nullable: true, description: "EN-E: an image Document id used as this organization's mark. null = unbranded." },
+      brandAccent: { type: "string", nullable: true, description: "EN-E: lowercase `#rrggbb` accent colour. null = the platform palette." },
       createdAt: { type: "string" },
       // Present on the two READ routes only (list/get); the capability PATCH
       // returns the bare org. Not required, so it is simply absent there.
@@ -842,7 +844,19 @@ export const S: Record<string, FastifySchema> = {
         type: "object",
         properties: {
           token: { type: "string" },
-          user: { type: "object", additionalProperties: true },
+          // `additionalProperties: true` stays — the session principal carries
+          // more than is named here (id, role, email, orgId, walletAddress,
+          // useCaseDomain, orgCapabilities), and fast-json-stringify would
+          // STRIP every undeclared field the moment it were dropped. The two
+          // EN-E fields are named because the shell reads them on first paint
+          // and an integrator reading this document should see them.
+          user: {
+            type: "object", additionalProperties: true,
+            properties: {
+              brandLogoDocumentId: { type: "string", nullable: true, description: "EN-E: the caller's org's logo Document id — fetch the bytes from `GET /orgs/{id}/branding/logo`. null for an org-less principal or an unbranded org." },
+              brandAccent: { type: "string", nullable: true, description: "EN-E: the caller's org's lowercase `#rrggbb` accent. null for an org-less principal or an unbranded org." },
+            },
+          },
         },
       },
       // 403 = SERVICE_ACCOUNT: a service user's key is its only way in.
@@ -865,6 +879,8 @@ export const S: Record<string, FastifySchema> = {
           useCaseKey: { type: "string", nullable: true, description: "The desk this principal is scoped to, or null for an unscoped one." },
           useCaseDomain: { type: "string", enum: ["tokenization", "identity"], nullable: true, description: "Which domain `useCaseKey` belongs to. null when there is no use case, or when the key resolves to neither." },
           orgCapabilities: { type: "object", additionalProperties: true, nullable: true, description: "The org's EN-A envelope. null both for an org-less principal AND for a legacy, unrestricted org — the two are indistinguishable here." },
+          brandLogoDocumentId: { type: "string", nullable: true, description: "EN-E: the caller's org's logo Document id. null for an org-less principal or an unbranded org." },
+          brandAccent: { type: "string", nullable: true, description: "EN-E: the caller's org's lowercase `#rrggbb` accent. null for an org-less principal or an unbranded org." },
         },
         required: ["id", "role"],
       },
@@ -960,7 +976,15 @@ export const S: Record<string, FastifySchema> = {
           token: { type: "string", description: "The session JWT. Present on the ONE poll that consumes the authenticated session, and never again." },
           user: {
             type: "object", additionalProperties: true, nullable: true,
-            description: "The signed-in principal — the same shape `POST /auth/login` returns, plus `walletAddress`, `useCaseDomain` and `orgCapabilities`. Accompanies `token` only.",
+            description: "The signed-in principal — the same shape `POST /auth/login` returns, plus `walletAddress`, `useCaseDomain`, `orgCapabilities` and the EN-E brand fields. Accompanies `token` only.",
+            // Named for the same reason as on `login`: this is the OTHER site
+            // the console builds a session from, and the two must agree.
+            // `additionalProperties: true` stays — dropping it would make
+            // fast-json-stringify strip every field not listed here.
+            properties: {
+              brandLogoDocumentId: { type: "string", nullable: true, description: "EN-E: the caller's org's logo Document id. null for an org-less principal or an unbranded org." },
+              brandAccent: { type: "string", nullable: true, description: "EN-E: the caller's org's lowercase `#rrggbb` accent. null for an org-less principal or an unbranded org." },
+            },
           },
         },
         required: ["status"],
@@ -2047,6 +2071,69 @@ export const S: Record<string, FastifySchema> = {
     // The updated org. `credentials` is absent here — this route returns the bare
     // record, not the read routes' held-credentials view.
     response: { 200: { $ref: "Organization#" }, ...errs(400, 401, 403, 404) },
+  },
+  updateOrgBranding: {
+    tags: ["Organizations"], summary: "Set an organization's logo and accent colour", security: humanOnly,
+    description:
+      "Session-only, and restricted to an OrgAdmin of THIS organization or a Platform Admin. An API key is refused " +
+      "with **403 `MACHINE_PRINCIPAL`**. Deliberately carries no API-key scope: branding is a console act by a " +
+      "person, and a scope for it would let an unattended key rewrite an organization's identity.\n\n" +
+      "An omitted field is left unchanged; an explicit `null` clears it. So `{}` is a no-op, and " +
+      "`{\"brandAccent\": null}` keeps the logo while dropping the colour.",
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    body: {
+      type: "object", additionalProperties: false,
+      properties: {
+        brandLogoDocumentId: { type: "string", nullable: true, description: "An image Document id. null clears it." },
+        brandAccent: { type: "string", nullable: true, description: "#rrggbb, normalized to lowercase. null clears it." },
+      },
+    },
+    response: { 200: { $ref: "Organization#" }, ...errs(400, 401, 403, 404) },
+  },
+  uploadOrgBrandLogo: {
+    tags: ["Organizations"], summary: "Upload an organization's brand logo (image)", security: humanOnly,
+    description:
+      "Session-only, gated identically to `PATCH /orgs/:id/branding`: restricted to an OrgAdmin of THIS " +
+      "organization or a Platform Admin, and an API key is refused with **403 `MACHINE_PRINCIPAL`** whatever its " +
+      "scopes. A dedicated door rather than `POST /documents`, because that route gates on the `issue` capability " +
+      "and an OrgAdmin does not hold it — widening it would change the authorization of a route that also serves " +
+      "KYB documents, certificate artwork and asset attachments, for the sake of a logo. Images only, even though " +
+      "`POST /documents` accepts a wider allowlist: this door exists so an OrgAdmin can upload a MARK. Returns the " +
+      "document id, ready to hand straight to `PATCH /orgs/:id/branding` as `brandLogoDocumentId`.",
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    body: {
+      type: "object",
+      required: ["contentType", "dataBase64"],
+      properties: { contentType: { type: "string" }, dataBase64: { type: "string" } },
+    },
+    response: {
+      201: {
+        type: "object", additionalProperties: true,
+        properties: { id: { type: "string" }, sha256: { type: "string" }, size: { type: "integer" } },
+        required: ["id", "sha256", "size"],
+      },
+      ...errs(400, 401, 403, 404, 413, 415),
+    },
+  },
+  getOrgBrandLogo: {
+    tags: ["Organizations"], summary: "Fetch an organization's brand logo (image bytes)", security: humanOnly,
+    description:
+      "Session-only. An API key is refused with **403 `MACHINE_PRINCIPAL`** whatever its scopes — a key draws no " +
+      "chrome, and the console shell this serves is a human surface.\n\n" +
+      "**The URL carries no document id.** The route reads the organization's own `brandLogoDocumentId`, so a " +
+      "member can fetch their org's mark and nothing else; it is not a second way into the document store.\n\n" +
+      "Deliberately WIDER than `PATCH /orgs/:id/branding`: any authenticated member of THIS organization may read " +
+      "the mark (a Platform Admin may read any), because setting the brand is an admin act while seeing it is " +
+      "every member's sidebar. `GET /documents/{id}` cannot serve this — it requires the `issue` capability or the " +
+      "Auditor role, so the very OrgAdmin who uploaded the logo is refused it there.\n\n" +
+      "**404** covers both an unbranded organization and a brand whose document has since been removed: to a " +
+      "caller drawing chrome they are the same answer.\n\n" +
+      "Responds with the stored image bytes, served `nosniff` and `content-disposition: attachment`.",
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    // No 2xx node, exactly like `getDocument`: the body is opaque image bytes,
+    // and declaring a JSON shape here would be a false statement about it — not
+    // a more complete one. See DOCUMENTATION_DEFERRED in openapi-contract.test.ts.
+    response: { ...errs(401, 403, 404) },
   },
   requestOrgCapabilities: {
     tags: ["Organizations"], summary: "Request a capability-envelope change (OrgAdmin; PlatformAdmin approval applies it)", security: humanOnly,
