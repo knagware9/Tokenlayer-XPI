@@ -121,6 +121,7 @@ const DELIBERATELY_UNSCOPED: Record<string, string> = {
   // --- gated by something a static scope cannot express --------------------
   "GET /proposals": "filtered per-kind for key principals — a key sees only proposals it could DECIDE (see decidableByPrincipal); payloads are redacted for everyone",
   "GET /orgs/:id/api-keys": "403 MACHINE_PRINCIPAL: a key may not enumerate keys",
+  "GET /orgs/:id/branding/logo": "403 MACHINE_PRINCIPAL: session-only, like the two branding routes it completes — a key draws no chrome. Deliberately WIDER than those two on ROLE (any member of THIS org, not just its admin, because seeing the mark is every member's sidebar) and no wider at all on TENANCY: org-ownership is checked in the handler, and the URL carries no document id, so the route reads only the org's own brandLogoDocumentId and cannot be turned into a way to enumerate the document store.",
 };
 
 describe("API-key scope coverage (EN-B)", () => {

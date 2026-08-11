@@ -517,7 +517,20 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     // The org's capability envelope rides the session (like useCaseDomain): the
     // web builds its SessionUser from login/qr-poll, never /me.
     const org = user.orgId ? await deps.organizations.get(user.orgId) : null;
-    return { token: app.jwt.sign(claims), user: { ...claims, walletAddress: wallet?.address ?? null, useCaseDomain, orgCapabilities: org?.capabilities ?? null } };
+    // EN-E, Task 6b: the BRAND rides it for the same reason, off the SAME org
+    // record already loaded above. Without this the shell painted the platform
+    // palette on every sign-in and every reload of a branded org until a
+    // follow-up /me landed — and /me's own comment ("the shell needs the brand
+    // on first paint") was describing a promise this route did not keep.
+    return {
+      token: app.jwt.sign(claims),
+      user: {
+        ...claims, walletAddress: wallet?.address ?? null, useCaseDomain,
+        orgCapabilities: org?.capabilities ?? null,
+        brandLogoDocumentId: org?.brandLogoDocumentId ?? null,
+        brandAccent: org?.brandAccent ?? null,
+      },
+    };
   });
 
   app.get("/me", { schema: S.me, ...auth }, async (request) => {
@@ -593,7 +606,21 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
         const claims: TokenClaims | null = user ? claimsOf(user) : null;
         const useCaseDomain = user ? await resolveUseCaseDomain(user.useCaseKey) : null;
         const org = user?.orgId ? await deps.organizations.get(user.orgId) : null;
-        return { status: "authenticated", token: done.token, user: claims ? { ...claims, walletAddress: wallet?.address ?? null, useCaseDomain, orgCapabilities: org?.capabilities ?? null } : null };
+        // The brand rides here for the SAME reason it rides POST /auth/login
+        // (EN-E, Task 6b): this is the OTHER site the web builds a SessionUser
+        // from, and a QR sign-in must not paint a different shell than a
+        // password sign-in. Same org record already loaded for orgCapabilities.
+        return {
+          status: "authenticated", token: done.token,
+          user: claims
+            ? {
+              ...claims, walletAddress: wallet?.address ?? null, useCaseDomain,
+              orgCapabilities: org?.capabilities ?? null,
+              brandLogoDocumentId: org?.brandLogoDocumentId ?? null,
+              brandAccent: org?.brandAccent ?? null,
+            }
+            : null,
+        };
       }
     }
     return { status: sess.status };
@@ -3520,6 +3547,58 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     }
     const doc = await storeUploadedDocument(deps.documents, b);
     return reply.code(201).send(doc);
+  });
+
+  // EN-E, Task 6b: THE READ HALF OF THE SAME DOOR. Task 3b opened the upload and
+  // nobody measured the way back: `GET /documents/:id` gates on
+  // `rbac.can(role, "issue") || role === "Auditor"`, so an OrgAdmin was refused
+  // the very bytes they had just successfully uploaded, and the sidebar mark was
+  // invisible to every non-desk member (Trader, Buyer, Holder, Verifier) too.
+  // Widening that route was rejected for the same reason as on the write side:
+  // the store also holds off-ledger invoice evidence and KYB certificates, so
+  // relaxing its read gate for a logo relaxes it for all of them.
+  //
+  // THE URL CARRIES NO DOCUMENT ID, and that is the containment. The route reads
+  // `org.brandLogoDocumentId` itself, so a member can fetch their own org's mark
+  // and nothing else — this cannot become a second way to enumerate the store.
+  app.get("/orgs/:id/branding/logo", { schema: S.getOrgBrandLogo, ...auth }, async (request, reply) => {
+    // See the identical comment on PATCH /orgs/:id/branding: omitting
+    // `authScoped` withholds a SCOPE, not the ROUTE, and a zero-scope key is the
+    // widest hole of all because scopes are never consulted for a route that
+    // declares none. Unless the refusal is stated here, both the OpenAPI
+    // description and the DELIBERATELY_UNSCOPED row are false.
+    if (machinePrincipal(request)) {
+      return reply.code(403).send({ error: "MACHINE_PRINCIPAL", message: "an API key may not read an organization's brand logo" });
+    }
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    // DELIBERATELY WIDER THAN ITS TWO SIBLINGS, and the difference is intended:
+    // SETTING the brand is an OrgAdmin act, but SEEING it is every member's
+    // shell — a Trader, Buyer, Holder or Verifier of this org renders the same
+    // sidebar. So the predicate is membership, not rank. A reader diffing this
+    // against the PATCH gate is looking at a decision, not a missing role check.
+    // The org-ownership half is unchanged, and it is what keeps a member of one
+    // tenant out of another's brand.
+    if (claims.role !== "PlatformAdmin" && (!claims.orgId || claims.orgId !== id)) {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to read that organization's brand logo" });
+    }
+    const org = await deps.organizations.get(id);
+    if (!org) return notFound(reply, "organization not found");
+    // An unbranded org and a brand whose document has since been deleted are the
+    // same answer to a caller drawing chrome: there is no mark. Distinguishing
+    // them would only tell the caller a document id once existed.
+    if (!org.brandLogoDocumentId) return notFound(reply, "organization has no brand logo");
+    const doc = await deps.documents.get(org.brandLogoDocumentId);
+    if (!doc) return notFound(reply, "organization has no brand logo");
+    // The SAME hardening as GET /documents/:id: pin the stored type, forbid
+    // sniffing, force download — never let the browser execute stored bytes as
+    // the API origin. The web fetches this into a Blob and makes an object URL,
+    // so `attachment` costs the caller nothing and keeps the two doors in parity.
+    return reply
+      .header("content-type", doc.contentType)
+      .header("x-content-type-options", "nosniff")
+      .header("content-disposition", `attachment; filename="brand-logo-${id}"`)
+      .send(doc.bytes);
   });
 
   // Org-requested capability change (EN-A): the org's own OrgAdmin proposes a

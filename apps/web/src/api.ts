@@ -272,6 +272,27 @@ export const api = {
   // a 403 there. This dedicated door is gated like the branding PATCH itself.
   uploadBrandLogo: (token: string, orgId: string, contentType: string, dataBase64: string) =>
     request<{ id: string; sha256: string; size: number }>(`/orgs/${encodeURIComponent(orgId)}/branding/logo`, token, { method: "POST", body: JSON.stringify({ contentType, dataBase64 }) }),
+  /**
+   * The org's mark, as raw bytes. NOT `downloadDocument`: `GET /documents/:id`
+   * requires the `issue` capability or the Auditor role, so it 403s for the
+   * OrgAdmin who uploaded the logo AND for every member whose sidebar draws it
+   * (Trader, Buyer, Holder, Verifier). This is the read half of the dedicated
+   * door `uploadBrandLogo` writes through.
+   *
+   * NO DOCUMENT ID IN THE URL — the server reads the org's own
+   * `brandLogoDocumentId`. Returns a Blob, so it cannot go through `request`.
+   * 404 is the ordinary answer for an unbranded org; the caller swallows it.
+   */
+  brandLogo: async (token: string, orgId: string): Promise<Blob> => {
+    const res = await fetch(`${BASE}/orgs/${encodeURIComponent(orgId)}/branding/logo`, { headers: { authorization: `Bearer ${token}` } });
+    if (!res.ok) {
+      const text = await res.text();
+      let body: { message?: string; error?: string } | null = null;
+      try { body = text ? (JSON.parse(text) as { message?: string; error?: string }) : null; } catch { /* non-JSON error body */ }
+      throw new ApiError(body?.message ?? body?.error ?? res.statusText, res.status, body?.error);
+    }
+    return res.blob();
+  },
   orgMembers: (token: string, id: string) => request<OrgMember[]>(`/orgs/${encodeURIComponent(id)}/members`, token),
   createMember: (token: string, id: string, body: { email: string; password: string; role: string; useCaseKey?: string; walletAddress?: string }) =>
     request<{ id: string; did: string; membershipVc: boolean }>(`/orgs/${encodeURIComponent(id)}/users`, token, { method: "POST", body: JSON.stringify(body) }),

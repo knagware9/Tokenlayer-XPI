@@ -1027,6 +1027,29 @@ git commit -m "feat(web): the shell wears an organization's brand, and an OrgAdm
 
 ---
 
+## Task 6b: API + Web — the READ half of the logo door, and the brand on the login wire
+
+**Files:**
+- Modify: `apps/api/src/http/routes.ts`, `apps/api/src/http/schemas.ts`, `apps/web/src/api.ts`, `apps/web/src/components/AppShell.tsx`
+- Allowlist rows: `apps/api/test/scope-coverage.test.ts`, `apps/api/test/openapi-contract.test.ts`
+- Test: `apps/api/test/org-branding-logo-read.test.ts`, `apps/web/test/org-logo-door.test.ts`
+
+**Why this task exists — ONE DOOR OF TWO, for the third time on this program.** Task 3b opened the UPLOAD door and nobody measured the way back. `GET /documents/:id` gates on `canReadDoc = rbac.can(role, "issue") || role === "Auditor"`, so an OrgAdmin got **403 reading back the logo they had just successfully uploaded**, and the sidebar mark was invisible to OrgAdmin, Trader, Buyer, Holder and Verifier — every role but a desk operator's and an Auditor's. Measured live in the browser before this task: `GET /api/v1/documents/cmsog… → 403`.
+
+Task 6's implementer also found that `POST /auth/login` and the QR poll did not carry `brandLogoDocumentId`/`brandAccent`, while the web builds its `SessionUser` from exactly those two routes and never from `/me`. `/me`'s own comment — "the shell needs the brand on first paint" — was describing a promise the login route did not keep, so a branded org painted the platform palette on every sign-in and reload until a follow-up fetch landed.
+
+- [x] **Part 1: `GET /orgs/:id/branding/logo`.** A dedicated read door, not a widening of `GET /documents/:id` — that store also holds off-ledger invoice evidence and KYB certificates, so relaxing its read gate for a logo relaxes it for all of them. **The URL carries NO document id:** the route reads `org.brandLogoDocumentId` itself, so a member can fetch their org's mark and nothing else, and it cannot become a way to enumerate the store. Gate: `machinePrincipal` refused outright (stated in the handler, because omitting `authScoped` withholds a scope and not the route — a zero-scope key is the widest hole of all); then PlatformAdmin, or any authenticated principal whose `claims.orgId === id`. That last predicate is **deliberately wider than its two siblings**: setting the brand is an OrgAdmin act, seeing it is every member's shell. 404 for a missing org, an unbranded org, and a dangling document alike. Response: the stored bytes with the same hardening the document read uses — pinned `content-type`, `nosniff`, `attachment`.
+
+- [x] **Part 2: the session payload carries the brand.** Both remaining build sites (`POST /auth/login`, the QR-poll authenticated branch) now return the two fields off the SAME org record they already load for `orgCapabilities`. The properties are named in both response schemas too.
+
+  **On the additivity rule.** The concern is real in general — `fast-json-stringify` drops response fields a schema does not admit — but MEASURED here it did not bite: both `user` objects already carried `additionalProperties: true`, which passes undeclared fields through, and `orgCapabilities` has been riding login undeclared all along. Removing `additionalProperties` was tried, and the whole `user` object serialized as `{}`. So the schema additions are documentation, and the guard against the strip is the test, which asserts on the **serialized HTTP body** rather than on the handler's return value.
+
+- [x] **Part 3: the web uses the new door.** `api.brandLogo(token, orgId)` returns a Blob (modelled on `downloadDocument`, not on `request`). `useOrgLogo` gained an optional `orgId`: given one it fetches the org door, without one it falls back to the document store — which the brand editor's preview still needs, because a logo that has been uploaded but not yet SAVED as the org's mark is not reachable through a route that reads `org.brandLogoDocumentId`. The object-URL lifecycle is untouched. `AppShell`'s `refreshSession()`-when-`brandAccent`-is-`undefined` fallback stays, now serving only `localStorage`-restored sessions minted before this task.
+
+**Known residual gap (reported, not fixed).** `OrgBrandingCard`'s preview thumbnail still fetches through `api.downloadDocument`, so for a non-desk OrgAdmin it 403s and shows "none" — for the saved logo as well as for a pending upload. The saved half could use the new door; the pending half cannot, and an id-addressed read door is exactly what this task declined to build. Left alone rather than made state-dependent.
+
+---
+
 ## Task 7: Web — the eight remaining hand-rolled empty states
 
 **Files:** the components the grep below names.

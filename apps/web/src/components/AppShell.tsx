@@ -11,12 +11,24 @@ export type NavItem = { id: string; label: string; icon: IconName; pinned?: bool
 /**
  * EN-E: the org's mark as an object URL, or null.
  *
- * `GET /documents/:id` requires a bearer token and an `<img src>` sends none,
- * so the bytes have to be fetched and wrapped. Every URL created here is
- * revoked when the id changes and when the shell unmounts — otherwise each
- * logo change would strand a blob for the life of the tab.
+ * The bytes need a bearer token and an `<img src>` sends none, so they have to
+ * be fetched and wrapped. Every URL created here is revoked when the id changes
+ * and when the shell unmounts — otherwise each logo change would strand a blob
+ * for the life of the tab.
+ *
+ * TWO DOORS, because the two callers are asking different questions (Task 6b).
+ * Pass `orgId` and it fetches `GET /orgs/:id/branding/logo` — the org's SAVED
+ * mark, readable by every member of that org. That is what the shell needs, and
+ * `GET /documents/:id` cannot serve it: that route requires the `issue`
+ * capability or the Auditor role, so it 403s for an OrgAdmin, a Trader, a
+ * Buyer, a Holder and a Verifier — every role but a desk operator's.
+ * Omit `orgId` and it falls back to the document store, which is the only way
+ * to render a logo that has been UPLOADED but not yet saved as the org's mark.
+ *
+ * `documentId` stays the trigger either way: it is what changes when the brand
+ * changes, and a falsy one means "unbranded", so no request is made at all.
  */
-export function useOrgLogo(documentId: string | null | undefined, token: string | null): string | null {
+export function useOrgLogo(documentId: string | null | undefined, token: string | null, orgId?: string | null): string | null {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     if (!documentId || !token) { setUrl(null); return; }
@@ -24,7 +36,7 @@ export function useOrgLogo(documentId: string | null | undefined, token: string 
     // A slow fetch that resolves after the id changed must not install its blob
     // over the newer one — and its URL is revoked in this effect's own cleanup.
     let cancelled = false;
-    void api.downloadDocument(token, documentId)
+    void (orgId ? api.brandLogo(token, orgId) : api.downloadDocument(token, documentId))
       .then((blob) => {
         if (cancelled) return;
         objectUrl = URL.createObjectURL(blob);
@@ -38,7 +50,8 @@ export function useOrgLogo(documentId: string | null | undefined, token: string 
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       setUrl(null);
     };
-  }, [documentId, token]);
+    // Unchanged lifecycle, one more string in the dependency list.
+  }, [documentId, token, orgId]);
   return url;
 }
 
@@ -65,13 +78,19 @@ export function AppShell({
   onDomainChange?: (d: DomainKey) => void;
 }): JSX.Element {
   const { user, token, refreshSession } = useAuth();
-  const orgLogo = useOrgLogo(user?.brandLogoDocumentId, token);
+  // Through the org's own door, not the document store: every role that renders
+  // this shell is refused by `GET /documents/:id`, which is why the sidebar mark
+  // was invisible to all of them before Task 6b.
+  const orgLogo = useOrgLogo(user?.brandLogoDocumentId, token, user?.orgId);
 
-  // `POST /auth/login` does not carry the brand — only `GET /me` does — so a
-  // freshly signed-in (or localStorage-restored) session arrives with the two
-  // fields ABSENT and would paint the platform palette at a branded org. One
-  // refresh fills them in; `null` is a real answer, so this cannot loop. The
-  // ref stops a failed request from retrying on every render.
+  // ONLY FOR SESSIONS THAT PREDATE TASK 6b. `POST /auth/login` and the QR poll
+  // now carry the brand, so a session created from either arrives with both
+  // fields present (`null` for an unbranded org) and this never fires. What it
+  // still covers is a SessionUser restored from localStorage that was minted
+  // before those routes carried the fields: `undefined` there means "not yet
+  // fetched", and without one refresh such a session would paint the platform
+  // palette at a branded org forever. `null` is a real answer, so this cannot
+  // loop. The ref stops a failed request from retrying on every render.
   const brandKnown = user?.brandAccent !== undefined;
   const asked = useRef(false);
   useEffect(() => {

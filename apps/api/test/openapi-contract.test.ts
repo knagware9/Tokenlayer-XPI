@@ -415,6 +415,12 @@ const DOCUMENTATION_DEFERRED: Record<string, string> = {
   // coerce it. The route's `description` documents the map and its value shape
   // instead; that is the honest form of this particular answer.
   "GET /credential-templates": "a map keyed by credential-type name — data-shaped keys, not enumerable properties",
+  // EN-E Task 6b's brand-logo read. Same answer as the two PDF routes above:
+  // the 200 is the stored image's raw bytes. `GET /documents/:id` returns the
+  // same kind of body and escapes this check only because "Documents" is not an
+  // integration-surface tag — this route is filed under "Organizations" beside
+  // the two branding routes it completes, which is where a reader looks for it.
+  "GET /orgs/:id/branding/logo": "returns opaque image bytes, not a JSON object",
 };
 
 type ResponseSchema = { response?: Record<string, unknown>; tags?: string[]; description?: string };

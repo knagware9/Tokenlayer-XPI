@@ -844,7 +844,19 @@ export const S: Record<string, FastifySchema> = {
         type: "object",
         properties: {
           token: { type: "string" },
-          user: { type: "object", additionalProperties: true },
+          // `additionalProperties: true` stays — the session principal carries
+          // more than is named here (id, role, email, orgId, walletAddress,
+          // useCaseDomain, orgCapabilities), and fast-json-stringify would
+          // STRIP every undeclared field the moment it were dropped. The two
+          // EN-E fields are named because the shell reads them on first paint
+          // and an integrator reading this document should see them.
+          user: {
+            type: "object", additionalProperties: true,
+            properties: {
+              brandLogoDocumentId: { type: "string", nullable: true, description: "EN-E: the caller's org's logo Document id — fetch the bytes from `GET /orgs/{id}/branding/logo`. null for an org-less principal or an unbranded org." },
+              brandAccent: { type: "string", nullable: true, description: "EN-E: the caller's org's lowercase `#rrggbb` accent. null for an org-less principal or an unbranded org." },
+            },
+          },
         },
       },
       // 403 = SERVICE_ACCOUNT: a service user's key is its only way in.
@@ -964,7 +976,15 @@ export const S: Record<string, FastifySchema> = {
           token: { type: "string", description: "The session JWT. Present on the ONE poll that consumes the authenticated session, and never again." },
           user: {
             type: "object", additionalProperties: true, nullable: true,
-            description: "The signed-in principal — the same shape `POST /auth/login` returns, plus `walletAddress`, `useCaseDomain` and `orgCapabilities`. Accompanies `token` only.",
+            description: "The signed-in principal — the same shape `POST /auth/login` returns, plus `walletAddress`, `useCaseDomain`, `orgCapabilities` and the EN-E brand fields. Accompanies `token` only.",
+            // Named for the same reason as on `login`: this is the OTHER site
+            // the console builds a session from, and the two must agree.
+            // `additionalProperties: true` stays — dropping it would make
+            // fast-json-stringify strip every field not listed here.
+            properties: {
+              brandLogoDocumentId: { type: "string", nullable: true, description: "EN-E: the caller's org's logo Document id. null for an org-less principal or an unbranded org." },
+              brandAccent: { type: "string", nullable: true, description: "EN-E: the caller's org's lowercase `#rrggbb` accent. null for an org-less principal or an unbranded org." },
+            },
           },
         },
         required: ["status"],
@@ -2004,6 +2024,26 @@ export const S: Record<string, FastifySchema> = {
       },
       ...errs(400, 401, 403, 404, 413, 415),
     },
+  },
+  getOrgBrandLogo: {
+    tags: ["Organizations"], summary: "Fetch an organization's brand logo (image bytes)", security: humanOnly,
+    description:
+      "Session-only. An API key is refused with **403 `MACHINE_PRINCIPAL`** whatever its scopes — a key draws no " +
+      "chrome, and the console shell this serves is a human surface.\n\n" +
+      "**The URL carries no document id.** The route reads the organization's own `brandLogoDocumentId`, so a " +
+      "member can fetch their org's mark and nothing else; it is not a second way into the document store.\n\n" +
+      "Deliberately WIDER than `PATCH /orgs/:id/branding`: any authenticated member of THIS organization may read " +
+      "the mark (a Platform Admin may read any), because setting the brand is an admin act while seeing it is " +
+      "every member's sidebar. `GET /documents/{id}` cannot serve this — it requires the `issue` capability or the " +
+      "Auditor role, so the very OrgAdmin who uploaded the logo is refused it there.\n\n" +
+      "**404** covers both an unbranded organization and a brand whose document has since been removed: to a " +
+      "caller drawing chrome they are the same answer.\n\n" +
+      "Responds with the stored image bytes, served `nosniff` and `content-disposition: attachment`.",
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    // No 2xx node, exactly like `getDocument`: the body is opaque image bytes,
+    // and declaring a JSON shape here would be a false statement about it — not
+    // a more complete one. See DOCUMENTATION_DEFERRED in openapi-contract.test.ts.
+    response: { ...errs(401, 403, 404) },
   },
   requestOrgCapabilities: {
     tags: ["Organizations"], summary: "Request a capability-envelope change (OrgAdmin; PlatformAdmin approval applies it)", security: humanOnly,
