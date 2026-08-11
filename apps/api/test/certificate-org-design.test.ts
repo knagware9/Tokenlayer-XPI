@@ -55,7 +55,7 @@ async function world(opts: { ownerOrgId?: string | null } = {}): Promise<World> 
 /** Store a document DIRECTLY through the repository — the point of several tests
  *  below is that the HTTP document store refuses an OrgAdmin. */
 async function storeDoc(h: TestAppHandle, contentType: string, b64: string, ownerOrgId: string | null = null): Promise<{ id: string; sha256: string }> {
-  const d = await h.deps.documents.create({ contentType, bytes: Buffer.from(b64, "base64"), ownerOrgId });
+  const d = await h.deps.documents.create({ contentType, bytes: Buffer.from(b64, "base64"), ownerOrgId, purpose: null });
   return { id: d.id, sha256: d.sha256 };
 }
 

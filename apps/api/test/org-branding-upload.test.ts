@@ -234,7 +234,7 @@ describe("final review", () => {
 
     // The store's own allowlist DOES admit webp, so the second door has to
     // refuse it independently — a webp can reach the store another way.
-    const doc = await h.deps.documents.create({ contentType: "image/webp", bytes: Buffer.from(PNG_B64, "base64"), ownerOrgId: a.id });
+    const doc = await h.deps.documents.create({ contentType: "image/webp", bytes: Buffer.from(PNG_B64, "base64"), ownerOrgId: a.id, purpose: null });
     const pinned = await patchBranding(h, a.id, a.token, { brandLogoDocumentId: doc.id });
     expect(pinned.statusCode).toBe(400);
     expect(pinned.json().error).toBe("BRAND_LOGO_NOT_AN_IMAGE");

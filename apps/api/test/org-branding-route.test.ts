@@ -42,7 +42,7 @@ async function org(h: TestAppHandle, label: string) {
  * upload path is `org-branding-upload.test.ts`'s subject, not theirs.
  */
 async function upload(h: TestAppHandle, contentType: string, dataBase64: string, ownerOrgId: string): Promise<string> {
-  const doc = await h.deps.documents.create({ contentType, bytes: Buffer.from(dataBase64, "base64"), ownerOrgId });
+  const doc = await h.deps.documents.create({ contentType, bytes: Buffer.from(dataBase64, "base64"), ownerOrgId, purpose: null });
   return doc.id;
 }
 

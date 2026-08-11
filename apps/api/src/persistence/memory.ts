@@ -20,8 +20,10 @@ import type {
   CashRepository,
   CredentialRecord,
   CredentialRepository,
+  DocumentPurpose,
   DocumentRecord,
   DocumentRepository,
+  DocumentSummary,
   EventAppendInput,
   EventRecord,
   EventRepository,
@@ -448,14 +450,24 @@ export class MemoryProposalRepository implements ProposalRepository {
 
 export class MemoryDocumentRepository implements DocumentRepository {
   private readonly docs = new Map<string, DocumentRecord>();
-  async create({ contentType, bytes, ownerOrgId }: { contentType: string; bytes: Buffer; ownerOrgId: string | null }) {
+  async create({ contentType, bytes, ownerOrgId, purpose }: { contentType: string; bytes: Buffer; ownerOrgId: string | null; purpose: DocumentPurpose | null }) {
     const docId = randomUUID();
     const sha256 = "0x" + createHash("sha256").update(bytes).digest("hex");
-    this.docs.set(docId, { id: docId, contentType, sha256, size: bytes.length, bytes, createdAt: now(), ownerOrgId });
+    this.docs.set(docId, { id: docId, contentType, sha256, size: bytes.length, bytes, createdAt: now(), ownerOrgId, purpose });
     return { id: docId, sha256, size: bytes.length };
   }
   async get(docId: string): Promise<DocumentRecord | null> {
     return this.docs.get(docId) ?? null;
+  }
+  async listByOwnerPurpose(ownerOrgId: string, purpose: DocumentPurpose): Promise<DocumentSummary[]> {
+    // Projected to a summary, mirroring the Prisma `select` — a test that passed
+    // here while the real repository loaded every buffer would prove nothing.
+    return [...this.docs.values()]
+      .filter((d) => d.ownerOrgId === ownerOrgId && d.purpose === purpose)
+      .map((d) => ({ id: d.id, size: d.size, createdAt: d.createdAt }));
+  }
+  async remove(docId: string): Promise<void> {
+    this.docs.delete(docId); // `Map.delete` on an absent key is already a no-op
   }
 }
 

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { ApiKeyRecord, AssetRecord, BrandingPatch, CashflowRecord, CompanyProfile, CredentialRecord, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord, WebhookEndpointRecord } from "../persistence/types.js";
+import type { ApiKeyRecord, AssetRecord, BrandingPatch, CashflowRecord, CompanyProfile, CredentialRecord, DocumentPurpose, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord, WebhookEndpointRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
 import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, certificatePageSize, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, issueCredential, issuerBindingAllows, modeAllows, normalizeUseCaseDefinition, ORG_OPERATING_ROLES, orgDomainEnabled, orgRoleEnabled, PolicyError, presentCredential, presentCredentials, SANDBOX_CHAIN_ID, sandboxChainsValid, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateBrandAccent, validateCertificatePlacements, validateCredentialUseCase, validateEventTypes, validateMetadata, scopeAllows, validateOrgCapabilities, validateScopes, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, isDocumentSha256, type Actor, type ApiScope, type ChainEntry, type CredentialTypeSpec, type CredentialUseCaseDefinition, type LifecycleAction, type OrgDomain, type OrgOperatingRole, type OrgType, type ResourceMode, type Role, type UseCaseDefinition, type UseCaseTemplate, type CertificateFieldPlacement } from "@tokenlayer/core";
 import qrcode from "qrcode";
@@ -96,6 +96,7 @@ async function storeUploadedDocument(
   documents: AppDeps["documents"],
   body: { contentType: string; dataBase64: string },
   ownerOrgId: string | null,
+  purpose: DocumentPurpose | null,
 ): Promise<{ id: string; sha256: string; size: number }> {
   if (!ALLOWED_DOC_TYPES.has(body.contentType)) {
     throw coded(415, "UNSUPPORTED_DOCUMENT_TYPE", `contentType must be one of: ${[...ALLOWED_DOC_TYPES].join(", ")}`);
@@ -103,7 +104,7 @@ async function storeUploadedDocument(
   const bytes = Buffer.from(body.dataBase64, "base64");
   if (bytes.length === 0) throw coded(400, "BAD_DOCUMENT", "empty document");
   if (bytes.length > MAX_DOC_BYTES) throw coded(413, "DOCUMENT_TOO_LARGE", `max ${MAX_DOC_BYTES} bytes`);
-  return documents.create({ contentType: body.contentType, bytes, ownerOrgId });
+  return documents.create({ contentType: body.contentType, bytes, ownerOrgId, purpose });
 }
 
 /**
@@ -1732,7 +1733,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     // OWNED BY THE PROGRAMME'S ORG, not by the uploader: a PlatformAdmin
     // uploading artwork for a tenant is acting for that tenant, and the design
     // route checks the same org, so the two agree by construction.
-    const doc = await storeUploadedDocument(deps.documents, b, existing.ownerOrgId ?? null);
+    const doc = await storeUploadedDocument(deps.documents, b, existing.ownerOrgId ?? null, null);
     return reply.code(201).send({ documentId: doc.id, sha256: doc.sha256, size: doc.size });
   });
 
@@ -3528,7 +3529,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     // Unowned by definition: this runs BEFORE the organization exists. Nothing
     // can later claim these bytes on ownership grounds, which is right — a KYB
     // certificate is reviewed by the platform, never re-served to a tenant.
-    const doc = await storeUploadedDocument(deps.documents, request.body as { contentType: string; dataBase64: string }, null);
+    const doc = await storeUploadedDocument(deps.documents, request.body as { contentType: string; dataBase64: string }, null, null);
     return reply.code(201).send({ id: doc.id, sha256: doc.sha256, size: doc.size });
   });
 
@@ -3993,7 +3994,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     // `claims.orgId` (the platform org, or none) would record the wrong owner —
     // which the artwork review established is an authorization fact, not a
     // label. `id` is already proven to be a real org two lines up.
-    const doc = await storeUploadedDocument(deps.documents, b, id);
+    const doc = await storeUploadedDocument(deps.documents, b, id, "brand-logo");
     return reply.code(201).send(doc);
   });
 
@@ -6256,7 +6257,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     // The uploader's own org, or null for a desk operator who belongs to none.
     // Null here is not a loophole: every ownership gate requires a non-null
     // match, so an unowned document is referenceable only by a PlatformAdmin.
-    const doc = await storeUploadedDocument(deps.documents, request.body as { contentType: string; dataBase64: string }, (request.user as TokenClaims).orgId ?? null);
+    const doc = await storeUploadedDocument(deps.documents, request.body as { contentType: string; dataBase64: string }, (request.user as TokenClaims).orgId ?? null, null);
     return reply.code(201).send({ id: doc.id, url: `/api/v1/documents/${doc.id}`, sha256: doc.sha256, size: doc.size });
   });
   app.get("/documents/:id", { schema: S.getDocument, ...authScoped("assets:read") }, async (request, reply) => {

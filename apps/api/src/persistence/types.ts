@@ -252,6 +252,12 @@ export interface CashBalanceRecord {
   amount: string;
 }
 
+/**
+ * What a stored document was uploaded FOR. A closed union rather than a free
+ * string so a typo cannot invent a third purpose that no gate knows about.
+ */
+export type DocumentPurpose = "brand-logo";
+
 /** An uploaded document (bytes + content-type), referenced from asset metadata. */
 export interface DocumentRecord {
   id: string;
@@ -267,14 +273,36 @@ export interface DocumentRecord {
    * referenceable by a PlatformAdmin and by no one else.
    */
   ownerOrgId: string | null;
+  /**
+   * What the upload was for, or null for an ordinary document. Only
+   * `POST /orgs/{id}/branding/logo` writes a non-null value today.
+   */
+  purpose: DocumentPurpose | null;
+}
+
+/**
+ * A document row WITHOUT its bytes. The prune decides what to delete from this
+ * shape alone — loading 5MB buffers to compare ids would be absurd.
+ */
+export interface DocumentSummary {
+  id: string;
+  size: number;
+  createdAt: string;
 }
 
 export interface DocumentRepository {
-  /** `ownerOrgId` is REQUIRED, not optional: an upload site that forgets who
-   *  owns the bytes writes a document nobody can later be refused access to on
-   *  ownership grounds, and an optional parameter is how that gets forgotten. */
-  create(input: { contentType: string; bytes: Buffer; ownerOrgId: string | null }): Promise<{ id: string; sha256: string; size: number }>;
+  /** `ownerOrgId` and `purpose` are both REQUIRED, not optional: an upload site
+   *  that forgets who owns the bytes writes a document nobody can later be
+   *  refused access to on ownership grounds, and one that forgets the purpose
+   *  writes a mark the prune cannot see. An optional parameter is how both get
+   *  forgotten. */
+  create(input: { contentType: string; bytes: Buffer; ownerOrgId: string | null; purpose: DocumentPurpose | null }): Promise<{ id: string; sha256: string; size: number }>;
   get(id: string): Promise<DocumentRecord | null>;
+  /** Every document this org owns with this purpose, WITHOUT bytes. */
+  listByOwnerPurpose(ownerOrgId: string, purpose: DocumentPurpose): Promise<DocumentSummary[]>;
+  /** Delete one document. IDEMPOTENT — an absent id is not an error, because
+   *  the prune is best-effort and may race another prune of the same row. */
+  remove(id: string): Promise<void>;
 }
 
 /**

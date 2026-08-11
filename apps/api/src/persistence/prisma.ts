@@ -35,8 +35,10 @@ import type {
   CashRepository,
   CredentialRecord,
   CredentialRepository,
+  DocumentPurpose,
   DocumentRecord,
   DocumentRepository,
+  DocumentSummary,
   EventAppendInput,
   EventRecord,
   EventRepository,
@@ -292,16 +294,30 @@ function toAuditRecord(r: {
 }
 
 export class PrismaDocumentRepository implements DocumentRepository {
-  async create({ contentType, bytes, ownerOrgId }: { contentType: string; bytes: Buffer; ownerOrgId: string | null }): Promise<{ id: string; sha256: string; size: number }> {
+  async create({ contentType, bytes, ownerOrgId, purpose }: { contentType: string; bytes: Buffer; ownerOrgId: string | null; purpose: DocumentPurpose | null }): Promise<{ id: string; sha256: string; size: number }> {
     const sha256 = "0x" + createHash("sha256").update(bytes).digest("hex");
-    const row = await prisma.document.create({ data: { contentType, sha256, size: bytes.length, bytes, ownerOrgId } });
+    const row = await prisma.document.create({ data: { contentType, sha256, size: bytes.length, bytes, ownerOrgId, purpose } });
     return { id: row.id, sha256, size: bytes.length };
   }
   async get(id: string): Promise<DocumentRecord | null> {
     const r = await prisma.document.findUnique({ where: { id } });
     return r
-      ? { id: r.id, contentType: r.contentType, sha256: r.sha256, size: r.size, bytes: Buffer.from(r.bytes), createdAt: r.createdAt.toISOString(), ownerOrgId: r.ownerOrgId ?? null }
+      ? { id: r.id, contentType: r.contentType, sha256: r.sha256, size: r.size, bytes: Buffer.from(r.bytes), createdAt: r.createdAt.toISOString(), ownerOrgId: r.ownerOrgId ?? null, purpose: (r.purpose as DocumentPurpose | null) ?? null }
       : null;
+  }
+  async listByOwnerPurpose(ownerOrgId: string, purpose: DocumentPurpose): Promise<DocumentSummary[]> {
+    // `select` WITHOUT `bytes`, deliberately: this runs on every logo upload and
+    // must not pull megabytes out of the database to compare identifiers.
+    const rows = await prisma.document.findMany({
+      where: { ownerOrgId, purpose },
+      select: { id: true, size: true, createdAt: true },
+    });
+    return rows.map((r) => ({ id: r.id, size: r.size, createdAt: r.createdAt.toISOString() }));
+  }
+  async remove(id: string): Promise<void> {
+    // `deleteMany`, not `delete`: `delete` throws P2025 when the row is already
+    // gone, and this must be idempotent for a best-effort, racing prune.
+    await prisma.document.deleteMany({ where: { id } });
   }
 }
 
