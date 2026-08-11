@@ -1167,10 +1167,11 @@ export const S: Record<string, FastifySchema> = {
       "Requires the `usecases:provision` scope — the same scope as its tokenization counterpart, because " +
       "configuring who may issue a credential is the same kind of authority as configuring who may mint a token. " +
       "Pass `sandbox: true` for a TEST-MODE programme; the flag is fixed at creation. An Org Admin cannot use this " +
-      "route at all — `POST /credential-use-cases/provision` is theirs, and it takes the same flag. A credential " +
-      "type's `certificate.logoDocumentId` may not name a document uploaded through " +
-      "`POST /orgs/{id}/branding/logo` — **400** `CERTIFICATE_LOGO_IS_BRAND_LOGO` — because the issuing " +
-      "organization's brand logo is already used automatically as the fallback when a type names none of its own.",
+      "route at all — `POST /credential-use-cases/provision` is theirs, and it takes the same flag. Neither a " +
+      "credential type's `certificate.background` nor its `certificate.logoDocumentId` may name a document " +
+      "uploaded through `POST /orgs/{id}/branding/logo` — that organization's mark is not certificate artwork, " +
+      "and it is already used automatically as the logo fallback when a type names none of its own — answering " +
+      "**400** `BACKGROUND_IS_BRAND_LOGO` or `CERTIFICATE_LOGO_IS_BRAND_LOGO` respectively.",
     body: { type: "object", additionalProperties: true, required: ["key", "name", "credentialTypes", "issuer", "holderPolicy", "verifier"] },
     response: { 201: { $ref: "CredentialUseCase#" }, ...errs(400, 401, 403, 409) },
   },
@@ -1178,9 +1179,9 @@ export const S: Record<string, FastifySchema> = {
     tags: ["Credential Use Cases"], summary: "Update a credential use case (PlatformAdmin)", security: eitherCredential,
     description:
       "Requires the `usecases:provision` scope. Patches a credential use case's configuration: its credential " +
-      "types, holder policy, and verifier. Same `certificate.logoDocumentId` restriction as " +
-      "`POST /credential-use-cases`: naming an organization's brand-logo document answers **400** " +
-      "`CERTIFICATE_LOGO_IS_BRAND_LOGO`.",
+      "types, holder policy, and verifier. Same `certificate.background`/`certificate.logoDocumentId` restriction " +
+      "as `POST /credential-use-cases`: naming an organization's brand-logo document answers **400** " +
+      "`BACKGROUND_IS_BRAND_LOGO` or `CERTIFICATE_LOGO_IS_BRAND_LOGO`.",
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     body: { type: "object", additionalProperties: true },
     response: { 200: { $ref: "CredentialUseCase#" }, ...errs(400, 401, 403, 404) },
@@ -1194,7 +1195,13 @@ export const S: Record<string, FastifySchema> = {
       "certificate design into a new LIVE credential use case; copies NO credentials, holders or verification " +
       "requests. There are no chains to choose here. The new key defaults to `<source key>-live`. An API key of " +
       "either mode is refused with **403 `WRONG_MODE`** (the act spans both environments); a source that is not " +
-      "sandbox answers **400 `NOT_SANDBOX`**.",
+      "sandbox answers **400 `NOT_SANDBOX`**.\n\n" +
+      "The copied certificate design is REVALIDATED, not copied blind — the same check " +
+      "`POST /credential-use-cases` runs, so a source authored before that validation existed can now fail to " +
+      "clone where it previously succeeded: **400** `BACKGROUND_IS_BRAND_LOGO` / `CERTIFICATE_LOGO_IS_BRAND_LOGO` " +
+      "(an org's brand-logo document named as artwork or as a type's own logo) or `BACKGROUND_PIN_MALFORMED` / " +
+      "`BACKGROUND_DOCUMENT_MISMATCH` / `BACKGROUND_NOT_AN_IMAGE` (a background that no longer matches its digest " +
+      "or was never a PNG/JPEG).",
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     body: {
       type: "object", additionalProperties: false,
@@ -1280,7 +1287,9 @@ export const S: Record<string, FastifySchema> = {
       "credential type — you are designing before the use case is saved, so nothing is read from storage except the " +
       "background artwork it names. The rendered PDF is stamped **SAMPLE — NOT A CREDENTIAL** on the diagonal, " +
       "always: it renders arbitrary caller-supplied claims through the same code that renders real certificates, " +
-      "and without the stamp it would be a certificate generator for made-up facts.",
+      "and without the stamp it would be a certificate generator for made-up facts. A `background` naming an " +
+      "organization's brand-logo document answers **400** `BACKGROUND_IS_BRAND_LOGO` — that is not artwork, even " +
+      "in a draft.",
     body: {
       type: "object", additionalProperties: false, required: ["credentialType"],
       properties: {

@@ -510,3 +510,58 @@ describe("a brand logo is not a credential type's background either, at the whol
     expect(patched.json().error).toBe("BACKGROUND_IS_BRAND_LOGO");
   });
 });
+
+/**
+ * THE ONE CALLER FOR WHICH `checkDefinitionBackgrounds` INSIDE
+ * `createCredentialUseCaseFromDef` IS LOAD-BEARING. Provision's own create
+ * branch is already refused earlier, at its own explicit call — this guard
+ * exists for `POST /credential-use-cases/:key/clone-to-live`, which reaches
+ * `createCredentialUseCaseFromDef` with no check of its own. The source use
+ * case is seeded straight through the repository, bypassing every write-time
+ * door, because that is the only way a sandbox use case can carry a
+ * brand-logo `logoDocumentId` today — every door that writes one now refuses
+ * it, which is exactly what makes this the one place left to prove.
+ */
+describe("a brand logo may not ride a clone to live either", () => {
+  it("POST /credential-use-cases/:key/clone-to-live refuses a source carrying a brand-logo logoDocumentId", async () => {
+    const h = await buildTestAppWithRepos();
+    const a = await org(h, "Acme");
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const logo = (await upload(h, a.id, a.token)).json();
+    const tag = Math.random().toString(36).slice(2, 8);
+    const key = `clone-src-${tag}`;
+
+    await h.deps.credentialUseCases.create({
+      key, name: "Clone Source Programme", sandbox: true,
+      credentialTypes: [courseCompletionType({ logoDocumentId: logo.id })],
+      issuer: { kind: "platform" }, holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
+    } as never);
+
+    const res = await h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/${key}/clone-to-live`, headers: auth(admin), payload: {},
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("CERTIFICATE_LOGO_IS_BRAND_LOGO");
+    // And no live clone was left behind by the refused attempt.
+    expect(await h.deps.credentialUseCases.get(`${key}-live`)).toBeNull();
+  });
+
+  it("still clones a source with an ordinary logoDocumentId", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const art = await h.deps.documents.create({ contentType: "image/png", bytes: Buffer.from(PNG_B64, "base64"), ownerOrgId: null, purpose: null });
+    const tag = Math.random().toString(36).slice(2, 8);
+    const key = `clone-src-ok-${tag}`;
+
+    await h.deps.credentialUseCases.create({
+      key, name: "Clone Source Programme", sandbox: true,
+      credentialTypes: [courseCompletionType({ logoDocumentId: art.id })],
+      issuer: { kind: "platform" }, holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
+    } as never);
+
+    const res = await h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/${key}/clone-to-live`, headers: auth(admin), payload: {},
+    });
+    expect(res.statusCode).toBe(201);
+  });
+});

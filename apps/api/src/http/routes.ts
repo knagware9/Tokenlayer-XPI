@@ -1113,19 +1113,28 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
    * id that is later handed to `deps.documents.get` — i.e. actually
    * dereferenced into bytes or an authoritative "this document IS the X"
    * binding — rather than stored as an inert opaque string nothing ever reads
-   * back as a document id. (The `PropertySchema.type === "document"` claim/
-   * metadata fields and `KycDetails.documentRef` are the negative case: they
-   * hold a URL-shaped string, but no server code ever calls
-   * `deps.documents.get` on that value, so deleting the row they happen to
-   * point at breaks nothing this system provides — the same as any other
-   * stale external link.) Re-run that question, not this list, before adding
+   * back as a document id. Re-run that question, not this list, before adding
    * a new write site.
    *
+   * TWO FIELDS CHECKED AND RULED OUT, for different reasons. `PropertySchema.
+   * type === "document"` (`Asset.metadata`, `Credential.subjectClaims`) is a
+   * same-origin reference into real bytes, not an inert string — `POST
+   * /documents` returns `url: "/api/v1/documents/{id}"`, and `IssuePanel.tsx`
+   * writes exactly that value in. It is safe for narrower reasons instead: the
+   * upload button always mints a fresh `purpose: null` row, nothing in
+   * `apps/web` renders the value as a followable link (`AssetDetail.tsx`
+   * prints it as text; `InvestorPortal.tsx` links only `http`-prefixed
+   * values), and the route behind it requires a bearer token regardless.
+   * `KycDetails.documentRef` is the genuinely inert one: free text with no
+   * upload path and no render site anywhere in `apps/web`.
+   *
    * The doors that call this today: `certificate.background` (the artwork
-   * pin, below), `certificate.logoDocumentId` (every definition-writing door,
-   * via `checkCertificateLogoDocument`), a staged invoice's `documentId`, and
-   * `company.documents.{cinCertificate,gstinCertificate}` at `POST
-   * /orgs/register`.
+   * pin, below), `certificate.logoDocumentId` (every door that can SET it —
+   * not the same list as every door that WRITES a definition, since
+   * `PATCH /credential-use-cases/{key}/certificate` writes one without
+   * touching this field at all, via `checkCertificateLogoDocument`), a staged
+   * invoice's `documentId`, and `company.documents.{cinCertificate,
+   * gstinCertificate}` at `POST /orgs/register`.
    *
    * Refusing costs LITTLE legitimate use, not nothing. A certificate whose
    * bound issuer is an ORG (`issuer: { kind: "org" }`) gets the org's mark for
@@ -1194,16 +1203,14 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     if (opts.requirePin && !pin) {
       return { error: "BACKGROUND_PIN_REQUIRED", message: `certificate background must carry the artwork's sha256 alongside documentId '${documentId}'` };
     }
-    // NO `.catch(() => null)`, and the distinction it used to blur is the point.
-    // `DocumentRepository.get` already resolves "no such row" to `null` without
-    // throwing, in both implementations — so the only thing a catch here could
-    // swallow is a REAL repository failure, and swallowing that makes an
-    // UNREADABLE document indistinguishable from an ABSENT one. On the
-    // `checkDefinitionBackgrounds` path, where neither `owner` nor `requirePin`
-    // is set, absent means ALLOWED (the line below), so a transient blip would
-    // write a brand-logo background into a definition permanently with nothing
-    // left to revalidate it. Absent is a documented pass; unreadable is a
-    // different fact and must not borrow its answer. Let it propagate.
+    // NO `.catch(() => null)` — `DocumentRepository.get` resolves "no such
+    // row" to `null` without throwing in both implementations, so a catch here
+    // could only swallow a REAL repository failure, making an UNREADABLE
+    // document indistinguishable from an ABSENT one. On the
+    // `checkDefinitionBackgrounds` path (no `owner`, no `requirePin`), absent
+    // means ALLOWED, so a swallowed failure would write a brand-logo
+    // background into a definition permanently. Absent is a documented pass;
+    // unreadable must not borrow its answer — let it propagate.
     const doc = await deps.documents.get(documentId);
     if (!doc) {
       if (!opts.requirePin && !opts.owner) return null; // the render-time fallback is the guard on those doors
@@ -1222,35 +1229,27 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       return { error: "BACKGROUND_DOCUMENT_NOT_FOUND", message: `certificate background document '${documentId}' not found` };
     }
     // A MARK IS NOT ARTWORK — see `brandLogoRefusal` above for why this rule
-    // exists and what it costs. This is the certificate ARTWORK door — the
-    // one `certificate.background` names.
+    // exists and what it costs. This is the certificate ARTWORK door.
     //
-    // AFTER the ownership check, but that check is CONDITIONAL —
-    // `if (opts.owner && !opts.owner.bypass && ...)` — so "a caller who
-    // already owns these bytes" is not quite what reaches this line. Two
-    // shapes do: (a) `opts.owner` is set and the caller passed the ownership
-    // check, or is a PlatformAdmin whose `bypass` skips it on purpose; (b)
-    // `opts.owner` is absent entirely, which is how `checkDefinitionBackgrounds`
-    // calls in — from `POST`/`PATCH /credential-use-cases`, from
-    // `POST /credential-use-cases/provision`, and from
-    // `createCredentialUseCaseFromDef` (clone-to-live, and provision's own
-    // create branch a second time). Each is harmless for its OWN reason, not
-    // one shared reason: `POST`, `PATCH` and clone-to-live restrict the ROLE to
-    // PlatformAdmin before ever reaching here. Provisioning admits an OrgAdmin
-    // too, and is safe by SHAPE instead — it builds its definition through
-    // `instantiateTemplate`, which constructs `certificate` with no
-    // `background` key at all (deliberately — a letterhead is not the reusable
-    // part of a template), so `background` is structurally absent and this
-    // function returns at the `typeof documentId !== "string"` guard long
-    // before reaching here. Whichever reason applies, the caller who reaches
-    // this line is always either the document's own org or a PlatformAdmin,
-    // never an arbitrary unauthorized one, and this discloses nothing such a
-    // caller could use — the same reasoning that puts `BACKGROUND_NOT_AN_IMAGE`
-    // below the ownership check rather than above it.
+    // AFTER the ownership check, but that check is CONDITIONAL
+    // (`if (opts.owner && !opts.owner.bypass && ...)`), so two shapes reach
+    // this line without a per-caller ownership match: (a) `opts.owner` is set
+    // and either passed or bypassed by a PlatformAdmin; (b) `opts.owner` is
+    // absent, which is how `checkDefinitionBackgrounds` calls in — from
+    // `POST`/`PATCH /credential-use-cases`, `POST /credential-use-cases/provision`,
+    // and `createCredentialUseCaseFromDef` (clone-to-live, and provision's
+    // create branch a second time). Each is harmless for its OWN reason:
+    // `POST`, `PATCH` and clone-to-live restrict the ROLE to PlatformAdmin;
+    // provisioning admits an OrgAdmin too but is safe by SHAPE —
+    // `instantiateTemplate` builds `certificate` with no `background` key at
+    // all, so this function returns at the `typeof documentId !== "string"`
+    // guard long before reaching here. Either way, the caller here is always
+    // the document's own org or a PlatformAdmin, never arbitrary — the same
+    // reasoning that puts `BACKGROUND_NOT_AN_IMAGE` below the ownership check
+    // rather than above it.
     //
-    // The cost is that an org whose mark IS its letterhead uploads the file
-    // twice, once at each door. The doors are already separate; a provable
-    // invariant is worth two uploads.
+    // The cost: an org whose mark IS its letterhead uploads the file twice,
+    // once at each door — cheap, for a provable invariant.
     const brandLogo = brandLogoRefusal(doc, "BACKGROUND_IS_BRAND_LOGO",
       `document '${documentId}' was uploaded as an organization brand logo and cannot be used as certificate artwork; upload it through POST /credential-use-cases/{key}/certificate/artwork instead`);
     if (brandLogo) return brandLogo;
@@ -1286,19 +1285,12 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
    * `checkBackgroundDocument` does, would be strictly better and belongs with
    * the rest of the pre-existing gap when someone closes it.
    */
-  async function checkCertificateLogoDocument(logoDocumentId: unknown): Promise<{ error: string; message: string } | null> {
+  async function checkCertificateLogoDocument(logoDocumentId: unknown): Promise<{ error: BrandLogoErrorCode; message: string } | null> {
     if (typeof logoDocumentId !== "string" || !logoDocumentId.trim()) return null;
-    // NO `.catch(() => null)` HERE. `DocumentRepository.get` already resolves a
-    // genuinely absent row to `null` without throwing (see the memory and
-    // Prisma implementations) — "an absent document is allowed" is the
-    // deliberate, documented choice `checkBackgroundDocument`'s comment makes
-    // for THAT reason. A THROW out of `get` means something else: the
-    // repository itself failed to answer. Swallowing that here would turn "I
-    // could not check whether this is a brand logo" into "it is not, allow
-    // it" — and unlike a rendering path, where a stale document degrades to a
-    // built-in layout, this is a WRITE: a brand-logo id let through during an
-    // outage is persisted into a definition nothing later revalidates. Let it
-    // propagate and fail the request instead.
+    // NO `.catch(() => null)` here either — same reasoning as
+    // `checkBackgroundDocument`'s comment above: an unreadable document must
+    // not be treated as an absent one, especially on a WRITE nothing later
+    // revalidates. Let it propagate.
     const doc = await deps.documents.get(logoDocumentId);
     return brandLogoRefusal(doc, "CERTIFICATE_LOGO_IS_BRAND_LOGO",
       `document '${logoDocumentId}' was uploaded as an organization brand logo and cannot be set as certificate.logoDocumentId — the issuing organization's brand logo is already used automatically as the fallback when a credential type names none of its own`);
