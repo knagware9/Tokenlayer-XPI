@@ -91,22 +91,58 @@ Schema change ships via `prisma db push`; this repo keeps no migration files.
 ### 2. The invariant that makes deletion safe
 
 `brandLogoDocumentId` becomes the **only** reference that can exist to a
-`purpose = "brand-logo"` row. Two facts hold it up:
+`purpose = "brand-logo"` row. Two facts hold it up — plus a third this section
+originally missed, and a corrective note on why.
 
 1. Only the owning org can pin one. PATCH `/orgs/:id/branding` requires
    `orgOwnsDocument(doc, id)` (`routes.ts:3936`), so "is this pinned" is a
    single-org field read, not a store-wide scan.
-2. `checkBackgroundDocument` gains a refusal: a brand-logo-purpose document may
-   not be pinned as certificate artwork. New error `BACKGROUND_IS_BRAND_LOGO`,
-   with a message pointing at the artwork door.
+2. **Every caller-supplied document-id door refuses a brand-logo document.**
+   This section originally named exactly one such door —
+   `checkBackgroundDocument`'s refusal of `certificate.background` — on the
+   reasoning that it was the sole place a certificate references stored bytes.
+   That reasoning was wrong: it conflated "the place I found while writing
+   this design" with "every place a reference can be written," and code review
+   after the first implementation found three more caller-supplied
+   document-id doors that the same reference-visibility problem applies to:
 
-The refusal is placed **after** the ownership check and **before** the
-content-type check, preserving the ordering that block's comment is built
-around — only a caller who already owns the bytes learns anything from it, so it
-does not become an oracle over the document store.
+   - `certificate.logoDocumentId` — the same `CredentialUseCase.credentialTypes`
+     JSON, a different field, one `checkBackgroundDocument` never inspected.
+     It is live: `certificateLogoDocumentId` (`certificate-fields.ts`) resolves
+     it and the renderer draws it whenever a type carries no `background`.
+   - The credential-use-case **template** door
+     (`POST /credential-use-case-templates`) and, belt-and-suspenders, the
+     **provision** path (`POST /credential-use-cases/provision`) — a template
+     can carry `logoDocumentId` (unlike `background`, which
+     `instantiateTemplate` always strips), and a template saved before a
+     given refusal existed reaches `provision` with no revalidation.
+   - `StagedInvoice.documentId`, written by `POST /use-cases/:key/invoices`,
+     which checked only that the id existed — no ownership, no purpose.
+
+   All four now share one predicate (`brandLogoRefusal` in `routes.ts`): does
+   the resolved document carry `purpose = "brand-logo"`. Distinct error codes
+   per door (`BACKGROUND_IS_BRAND_LOGO`, `CERTIFICATE_LOGO_IS_BRAND_LOGO`,
+   `INVOICE_DOCUMENT_IS_BRAND_LOGO`) so each door's message names the right
+   field, but the rule itself is stated once.
+
+The refusal in `checkBackgroundDocument` is placed **after** the ownership
+check and **before** the content-type check, preserving the ordering that
+block's comment is built around — only a caller who already owns the bytes (or
+a PlatformAdmin, on the doors where ownership is skipped by design) learns
+anything from it, so it does not become an oracle over the document store.
+
+**The lesson, stated plainly: "the reference set is closed by construction"
+was a claim about the code, not a claim about one field the author happened to
+be looking at.** Upload *sites* — where a document gets a `purpose` stamped on
+it — are four, unchanged, and enumerated in §1. Reference *sites* — where a
+caller can hand back a document id and have it stored somewhere the prune
+cannot see — are a **different list**, discovered by asking "where does a
+caller-supplied document id get persisted," not "where does the artwork
+pipeline read from." Conflating the two lists is exactly how the second and
+third doors above were missed the first time.
 
 Together these turn "I scanned everywhere I could think of" into "there is one
-column, and I checked it."
+column, and every door that writes a caller-supplied document id checks it."
 
 This does constrain a legitimate case: an org whose mark is also its certificate
 letterhead must upload the file twice, once at each door. That is cheap, the two

@@ -1094,6 +1094,39 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     RENDERABLE_ARTWORK_TYPES.has(contentType.toLowerCase().trim());
 
   /**
+   * A BRAND LOGO IS AN ORGANIZATION'S MARK, AND NOTHING ELSE MAY POINT AT ONE.
+   *
+   * `POST /orgs/{id}/branding/logo` stamps `purpose = "brand-logo"`, and the
+   * prune deletes such a row once a newer upload supersedes it. That is sound
+   * only while `Organization.brandLogoDocumentId` is the ONLY reference that
+   * can exist to one. So every door that accepts a caller-supplied document id
+   * has to refuse these bytes — not just the artwork door, which was the first
+   * one found. The doors that call this: `certificate.background` (the
+   * artwork pin, below), `certificate.logoDocumentId` (both whole-definition
+   * doors, the template-save door and the provision path, via
+   * `checkCertificateLogoDocument`), and a staged invoice's `documentId`.
+   *
+   * Refusing costs nothing legitimate. A certificate that should carry the
+   * org's mark already gets it for free: `certificateLogoDocumentId` (see
+   * certificate-fields.ts) falls back to `issuerOrg.brandLogoDocumentId`,
+   * which is the PINNED document and the one the prune always spares. Naming
+   * a brand-logo id explicitly is therefore redundant at best, and a dangling
+   * reference the moment the org re-brands.
+   *
+   * Takes the already-resolved document — `null` when there is none — rather
+   * than an id, so it composes with whatever existence/ownership handling
+   * each door already does instead of repeating it.
+   */
+  function brandLogoRefusal(
+    doc: { purpose: string | null } | null,
+    errorCode: string,
+    message: string,
+  ): { error: string; message: string } | null {
+    if (doc?.purpose !== "brand-logo") return null;
+    return { error: errorCode, message };
+  }
+
+  /**
    * What a `certificate.background` may name, checked at the WRITE.
    *
    * `documentId` was bound to nothing: validation asked only for a non-empty
@@ -1149,30 +1182,30 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     if (opts.owner && !opts.owner.bypass && !orgOwnsDocument(doc, opts.owner.orgId)) {
       return { error: "BACKGROUND_DOCUMENT_NOT_FOUND", message: `certificate background document '${documentId}' not found` };
     }
-    // A MARK IS NOT ARTWORK, and this refusal is what makes the brand-logo prune
-    // safe rather than merely plausible.
+    // A MARK IS NOT ARTWORK — see `brandLogoRefusal` above for why this rule
+    // exists and why it costs nothing legitimate. This is the certificate
+    // ARTWORK door — the one `certificate.background` names.
     //
-    // `POST /orgs/{id}/branding/logo` stamps `purpose = "brand-logo"`, and the
-    // prune deletes such a row once a newer upload supersedes it. That is sound
-    // only while `Organization.brandLogoDocumentId` is the ONLY reference that
-    // can exist to one. A certificate background is stored inside
-    // `CredentialUseCase.credentialTypes` JSON, so a pin here would be invisible
-    // to the prune's "is it still pinned" test and it would delete bytes a
-    // certificate still draws. Closing the reference set by construction beats
-    // scanning JSON for references, which is a completeness claim that rots the
-    // next time someone adds a reference site.
-    //
-    // AFTER the ownership check, deliberately. Only a caller who already owns
-    // these bytes reaches this line, so it discloses nothing an unauthorized
-    // caller could use — the same reasoning that puts `BACKGROUND_NOT_AN_IMAGE`
-    // below the ownership check rather than above it.
+    // AFTER the ownership check, but note that check is CONDITIONAL —
+    // `if (opts.owner && !opts.owner.bypass && ...)` — so "a caller who
+    // already owns these bytes" is not quite what reaches this line. Two
+    // shapes do: (a) `opts.owner` is set and the caller passed the ownership
+    // check, or is a PlatformAdmin whose `bypass` skips it on purpose; (b)
+    // `opts.owner` is absent entirely — `checkDefinitionBackgrounds`'s call
+    // never passes one — but both routes that reach this function that way
+    // (`POST`/`PATCH /credential-use-cases`) are PlatformAdmin-only already,
+    // checked before either ever calls in here. So the caller is always
+    // either the document's own org or a PlatformAdmin, never an arbitrary
+    // unauthorized one, and this discloses nothing such a caller could use —
+    // the same reasoning that puts `BACKGROUND_NOT_AN_IMAGE` below the
+    // ownership check rather than above it.
     //
     // The cost is that an org whose mark IS its letterhead uploads the file
     // twice, once at each door. The doors are already separate; a provable
     // invariant is worth two uploads.
-    if (doc.purpose === "brand-logo") {
-      return { error: "BACKGROUND_IS_BRAND_LOGO", message: `document '${documentId}' was uploaded as an organization brand logo and cannot be used as certificate artwork; upload it through POST /credential-use-cases/{key}/certificate/artwork instead` };
-    }
+    const brandLogo = brandLogoRefusal(doc, "BACKGROUND_IS_BRAND_LOGO",
+      `document '${documentId}' was uploaded as an organization brand logo and cannot be used as certificate artwork; upload it through POST /credential-use-cases/{key}/certificate/artwork instead`);
+    if (brandLogo) return brandLogo;
     if (!isRenderableArtwork(doc.contentType)) {
       return { error: "BACKGROUND_NOT_AN_IMAGE", message: `certificate background document '${documentId}' is ${doc.contentType}; artwork must be image/png or image/jpeg — the renderer can draw nothing else` };
     }
@@ -1182,13 +1215,35 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     return null;
   }
 
-  /** `checkBackgroundDocument` across every credential type of a definition. */
+  /**
+   * What `certificate.logoDocumentId` may name — a narrower check than
+   * `checkBackgroundDocument`, built on the same `brandLogoRefusal` predicate.
+   *
+   * `logoDocumentId` is the same kind of caller-supplied document reference as
+   * `background` — a different field of the same JSON blob — but it carries no
+   * pin and no ownership check today, and never has: `validateCredentialUseCase`
+   * (packages/core) asks only that it be a string. This checks the ONE thing
+   * that matters for the prune — is the named document a brand logo — and
+   * leaves the rest of that pre-existing gap exactly as it was; widening it
+   * further is a separate task, not this one.
+   */
+  async function checkCertificateLogoDocument(logoDocumentId: unknown): Promise<{ error: string; message: string } | null> {
+    if (typeof logoDocumentId !== "string" || !logoDocumentId.trim()) return null;
+    const doc = await deps.documents.get(logoDocumentId).catch(() => null);
+    return brandLogoRefusal(doc, "CERTIFICATE_LOGO_IS_BRAND_LOGO",
+      `document '${logoDocumentId}' was uploaded as an organization brand logo and cannot be set as certificate.logoDocumentId — the issuing organization's brand logo is already used automatically as the fallback when a credential type names none of its own`);
+  }
+
+  /** `checkBackgroundDocument` and `checkCertificateLogoDocument` across every
+   *  credential type of a definition. */
   async function checkDefinitionBackgrounds(
-    def: { credentialTypes?: Array<{ certificate?: { background?: { documentId?: unknown; sha256?: unknown } | null } }> },
+    def: { credentialTypes?: Array<{ certificate?: { background?: { documentId?: unknown; sha256?: unknown } | null; logoDocumentId?: unknown } }> },
   ): Promise<{ error: string; message: string } | null> {
     for (const ct of def.credentialTypes ?? []) {
       const problem = await checkBackgroundDocument(ct.certificate?.background, { requirePin: false });
       if (problem) return problem;
+      const logoProblem = await checkCertificateLogoDocument(ct.certificate?.logoDocumentId);
+      if (logoProblem) return logoProblem;
     }
     return null;
   }
@@ -1401,7 +1456,18 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     // templates since ID-I, `instantiate()` still copies it onto the definition,
     // and changing that is a behaviour change to a shipped feature rather than
     // part of EN-F. Recorded as a known inconsistency, not fixed by stealth.
+    //
+    // It IS refused when it names a brand logo — REFUSED, not stripped, unlike
+    // `background` above. The reasoning that makes silent stripping right for
+    // `background` (a working design legitimately has artwork; failing the save
+    // would be the wrong lesson) does not apply here: a template naming its
+    // own org's brand-logo document gains nothing by it (the fallback in
+    // `certificateLogoDocumentId` already applies the org's mark for free), so
+    // there is no legitimate case to protect — only a caller who reaches for
+    // the wrong id, still on screen to fix it.
     for (const ct of t.body?.credentialTypes ?? []) {
+      const logoProblem = await checkCertificateLogoDocument(ct.certificate?.logoDocumentId);
+      if (logoProblem) return reply.code(400).send(logoProblem);
       if (ct.certificate?.background !== undefined) delete ct.certificate.background;
     }
     const created = await deps.credentialTemplates.create(t);
@@ -1946,6 +2012,18 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     // `allowedChainIds`, and a credential use case names no chains) — the same
     // reason `POST /credential-use-cases` applies only the mode gate.
     def = { ...def, sandbox };
+
+    // THE TEMPLATE DOOR REFUSES a brand-logo `logoDocumentId` at save time now,
+    // but a template saved BEFORE that refusal existed can still carry one —
+    // this route reads templates straight from storage, with no revalidation —
+    // and `instantiateTemplate` copies `logoDocumentId` verbatim onto `def`
+    // (unlike `background`, which it always strips; see the comment there).
+    // So the template door alone does not close this path; checked here too,
+    // and checked BEFORE any org is created or use case persisted, so a
+    // refused provision leaves nothing behind — the same reasoning the
+    // `createDeskUsers` + machine-principal refusal above already applies.
+    const badBackground = await checkDefinitionBackgrounds(def);
+    if (badBackground) return reply.code(400).send(badBackground);
 
     // 3. Ensure the issuer org, then REBIND the definition's issuer to it.
     const orgName = prov.issuerOrgName ?? (params.issuerOrgName as string | undefined);
@@ -2496,6 +2574,14 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     if (documentId) {
       const d = await deps.documents.get(documentId);
       if (!d) return reply.code(400).send({ error: "DOCUMENT_NOT_FOUND", message: "document upload not found" });
+      // ANOTHER DOOR `brandLogoRefusal` closes: this route checks existence
+      // only — no ownership, no purpose — so an org that uploaded its own
+      // brand logo and never pinned it could otherwise attach those same bytes
+      // as invoice evidence, a reference `Organization.brandLogoDocumentId`
+      // cannot see and the prune would delete out from under.
+      const brandLogo = brandLogoRefusal(d, "INVOICE_DOCUMENT_IS_BRAND_LOGO",
+        `document '${documentId}' was uploaded as an organization brand logo and cannot be attached as invoice evidence`);
+      if (brandLogo) return reply.code(400).send(brandLogo);
       doc = { id: d.id, sha256: d.sha256 };
     }
     const r = await stageInvoice(deps, gate.useCase, gate.actorId, "manual", metadata, doc);

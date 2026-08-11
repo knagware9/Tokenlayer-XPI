@@ -31,6 +31,21 @@ const upload = (h: TestAppHandle, orgId: string, token: string) =>
 const patchBranding = (h: TestAppHandle, orgId: string, token: string, body: unknown) =>
   h.app.inject({ method: "PATCH", url: `${V1}/orgs/${orgId}/branding`, headers: auth(token), payload: body });
 
+/** An ordinary (non-brand-logo) document, via the artwork upload door — the
+ *  real door a caller would use, not a repository shortcut. Needs an org that
+ *  owns a credential use case; the caller supplies both. */
+const uploadArtwork = (h: TestAppHandle, useCaseKey: string, token: string) =>
+  h.app.inject({
+    method: "POST", url: `${V1}/credential-use-cases/${useCaseKey}/certificate/artwork`, headers: auth(token),
+    payload: { contentType: "image/png", dataBase64: PNG_B64 },
+  });
+
+const courseCompletionType = (extra?: { logoDocumentId?: string }) => ({
+  name: "CourseCompletion", title: "Course Completion", validityDays: 365, requiredApprovals: 1,
+  claimSchema: { type: "object", required: ["fullName"], properties: { fullName: { type: "string" } } },
+  certificate: { enabled: true, ...extra },
+});
+
 /**
  * THE REFUSAL THAT MAKES THE PRUNE SOUND, tested here rather than beside the
  * other certificate tests because it exists for this feature and nothing else.
@@ -51,11 +66,7 @@ describe("a brand logo is not certificate artwork", () => {
     const key = `prune-${tag}`;
     await h.deps.credentialUseCases.create({
       key, name: "Prune Programme",
-      credentialTypes: [{
-        name: "CourseCompletion", title: "Course Completion", validityDays: 365, requiredApprovals: 1,
-        claimSchema: { type: "object", required: ["fullName"], properties: { fullName: { type: "string" } } },
-        certificate: { enabled: true },
-      }],
+      credentialTypes: [courseCompletionType()],
       issuer: { kind: "org", orgId: a.id },
       holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
       ownerOrgId: a.id,
@@ -75,28 +86,298 @@ describe("a brand logo is not certificate artwork", () => {
 
   it("still accepts artwork uploaded through the artwork door", async () => {
     // The refusal must bite brand logos and nothing else — artwork uploaded the
-    // ordinary way carries `purpose: null` and is unaffected.
+    // ordinary way carries `purpose: null` and is unaffected. Uploaded through
+    // the real artwork door (not fabricated via the repository) so this proves
+    // the HTTP path, not just the repository shape.
     const h = await buildTestAppWithRepos();
     const a = await org(h, "Acme");
     const tag = Math.random().toString(36).slice(2, 8);
     const key = `prune-ok-${tag}`;
     await h.deps.credentialUseCases.create({
       key, name: "Prune Programme",
-      credentialTypes: [{
-        name: "CourseCompletion", title: "Course Completion", validityDays: 365, requiredApprovals: 1,
-        claimSchema: { type: "object", required: ["fullName"], properties: { fullName: { type: "string" } } },
-        certificate: { enabled: true },
-      }],
+      credentialTypes: [courseCompletionType()],
       issuer: { kind: "org", orgId: a.id },
       holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
       ownerOrgId: a.id,
     } as never);
 
-    const art = await h.deps.documents.create({ contentType: "image/png", bytes: Buffer.from(PNG_B64, "base64"), ownerOrgId: a.id, purpose: null });
+    const art = await uploadArtwork(h, key, a.token);
+    expect(art.statusCode).toBe(201);
+    const artwork = art.json();
     const pinned = await h.app.inject({
       method: "PATCH", url: `${V1}/credential-use-cases/${key}/certificate`, headers: auth(a.token),
-      payload: { credentialType: "CourseCompletion", background: { documentId: art.id, sha256: art.sha256 } },
+      payload: { credentialType: "CourseCompletion", background: { documentId: artwork.documentId, sha256: artwork.sha256 } },
     });
     expect(pinned.statusCode).toBe(200);
+  });
+});
+
+/**
+ * THE SECOND DOOR THE FIRST REVIEW MISSED: `certificate.logoDocumentId` is the
+ * same kind of caller-supplied document reference as `certificate.background`
+ * — a different field of the same JSON blob — and it is just as invisible to
+ * any "is this document still pinned" query. `checkDefinitionBackgrounds` now
+ * checks both, so both whole-definition doors (`POST`/`PATCH
+ * /credential-use-cases`) refuse a brand logo named as a type's own logo, not
+ * just as its background.
+ */
+describe("a brand logo is not a credential type's own logo either", () => {
+  it("POST /credential-use-cases refuses certificate.logoDocumentId naming a brand-logo document", async () => {
+    const h = await buildTestAppWithRepos();
+    const a = await org(h, "Acme");
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const logo = (await upload(h, a.id, a.token)).json();
+    const tag = Math.random().toString(36).slice(2, 8);
+
+    const res = await h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases`, headers: auth(admin),
+      payload: {
+        key: `logo-post-${tag}`, name: "Logo Programme",
+        credentialTypes: [courseCompletionType({ logoDocumentId: logo.id })],
+        issuer: { kind: "platform" }, holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("CERTIFICATE_LOGO_IS_BRAND_LOGO");
+  });
+
+  it("POST /credential-use-cases still accepts an ordinary document as logoDocumentId", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const art = await h.deps.documents.create({ contentType: "image/png", bytes: Buffer.from(PNG_B64, "base64"), ownerOrgId: null, purpose: null });
+    const tag = Math.random().toString(36).slice(2, 8);
+
+    const res = await h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases`, headers: auth(admin),
+      payload: {
+        key: `logo-post-ok-${tag}`, name: "Logo Programme",
+        credentialTypes: [courseCompletionType({ logoDocumentId: art.id })],
+        issuer: { kind: "platform" }, holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
+      },
+    });
+    expect(res.statusCode).toBe(201);
+  });
+
+  it("PATCH /credential-use-cases/:key refuses the same", async () => {
+    const h = await buildTestAppWithRepos();
+    const a = await org(h, "Acme");
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const logo = (await upload(h, a.id, a.token)).json();
+    const tag = Math.random().toString(36).slice(2, 8);
+    const key = `logo-patch-${tag}`;
+    const created = await h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases`, headers: auth(admin),
+      payload: {
+        key, name: "Logo Programme", credentialTypes: [courseCompletionType()],
+        issuer: { kind: "platform" }, holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
+      },
+    });
+    expect(created.statusCode).toBe(201);
+
+    const patched = await h.app.inject({
+      method: "PATCH", url: `${V1}/credential-use-cases/${key}`, headers: auth(admin),
+      payload: {
+        name: "Logo Programme", credentialTypes: [courseCompletionType({ logoDocumentId: logo.id })],
+        issuer: { kind: "platform" }, holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
+      },
+    });
+    expect(patched.statusCode).toBe(400);
+    expect(patched.json().error).toBe("CERTIFICATE_LOGO_IS_BRAND_LOGO");
+  });
+
+  it("PATCH /credential-use-cases/:key still accepts an ordinary document as logoDocumentId", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const art = await h.deps.documents.create({ contentType: "image/png", bytes: Buffer.from(PNG_B64, "base64"), ownerOrgId: null, purpose: null });
+    const tag = Math.random().toString(36).slice(2, 8);
+    const key = `logo-patch-ok-${tag}`;
+    const created = await h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases`, headers: auth(admin),
+      payload: {
+        key, name: "Logo Programme", credentialTypes: [courseCompletionType()],
+        issuer: { kind: "platform" }, holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
+      },
+    });
+    expect(created.statusCode).toBe(201);
+
+    const patched = await h.app.inject({
+      method: "PATCH", url: `${V1}/credential-use-cases/${key}`, headers: auth(admin),
+      payload: {
+        name: "Logo Programme", credentialTypes: [courseCompletionType({ logoDocumentId: art.id })],
+        issuer: { kind: "platform" }, holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
+      },
+    });
+    expect(patched.statusCode).toBe(200);
+  });
+});
+
+/**
+ * THE TEMPLATE-SAVE DOOR: `instantiateTemplate` copies `logoDocumentId`
+ * verbatim onto the definitions it produces (unlike `background`, which it
+ * always strips), so a saved template naming a brand logo would smuggle the
+ * same invisible reference through every use case provisioned from it.
+ * Refused at save, not stripped — there is no legitimate case to protect: the
+ * fallback in `certificateLogoDocumentId` already applies the org's own brand
+ * for free.
+ */
+describe("a brand logo is not a template's logo either", () => {
+  it("POST /credential-use-case-templates refuses a template naming a brand-logo document", async () => {
+    const h = await buildTestAppWithRepos();
+    const a = await org(h, "Acme");
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const logo = (await upload(h, a.id, a.token)).json();
+    const tag = Math.random().toString(36).slice(2, 8);
+
+    const res = await h.app.inject({
+      method: "POST", url: `${V1}/credential-use-case-templates`, headers: auth(admin),
+      payload: {
+        key: `tpl-logo-${tag}`, name: "Templated Programme", category: "custom", parameters: [],
+        body: {
+          keyTemplate: `tpl-logo-uc-${tag}`, nameTemplate: "Templated UC",
+          holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
+          credentialTypes: [{
+            name: "ThingCredential", title: "Thing", validityDays: 365, requiredApprovals: 1,
+            required: ["label"], properties: { label: { type: "string" } },
+            certificate: { enabled: true, logoDocumentId: logo.id },
+          }],
+        },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("CERTIFICATE_LOGO_IS_BRAND_LOGO");
+  });
+
+  it("POST /credential-use-case-templates still accepts an ordinary document as logoDocumentId", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const art = await h.deps.documents.create({ contentType: "image/png", bytes: Buffer.from(PNG_B64, "base64"), ownerOrgId: null, purpose: null });
+    const tag = Math.random().toString(36).slice(2, 8);
+
+    const res = await h.app.inject({
+      method: "POST", url: `${V1}/credential-use-case-templates`, headers: auth(admin),
+      payload: {
+        key: `tpl-logo-ok-${tag}`, name: "Templated Programme", category: "custom", parameters: [],
+        body: {
+          keyTemplate: `tpl-logo-ok-uc-${tag}`, nameTemplate: "Templated UC",
+          holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
+          credentialTypes: [{
+            name: "ThingCredential", title: "Thing", validityDays: 365, requiredApprovals: 1,
+            required: ["label"], properties: { label: { type: "string" } },
+            certificate: { enabled: true, logoDocumentId: art.id },
+          }],
+        },
+      },
+    });
+    expect(res.statusCode).toBe(201);
+  });
+});
+
+/**
+ * THE PROVISION PATH: the template door refuses a brand-logo `logoDocumentId`
+ * going forward, but a template saved BEFORE that refusal existed — simulated
+ * here by writing straight to the template repository, bypassing the HTTP
+ * save door entirely — can still carry one, and `POST
+ * /credential-use-cases/provision` reads templates from storage with no
+ * revalidation. This proves the belt-and-suspenders check on the provision
+ * route itself, not just the template door, is what closes the gap: without
+ * it, this exact template would provision successfully.
+ */
+describe("a brand logo cannot reach persistence through provisioning either", () => {
+  it("POST /credential-use-cases/provision refuses a pre-existing template that names a brand-logo document", async () => {
+    const h = await buildTestAppWithRepos();
+    const a = await org(h, "Acme");
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const logo = (await upload(h, a.id, a.token)).json();
+    const tag = Math.random().toString(36).slice(2, 8);
+    const templateKey = `legacy-tpl-${tag}`;
+
+    // Bypasses `POST /credential-use-case-templates` (and its refusal)
+    // entirely — this is what a template saved before this change looks like.
+    await h.deps.credentialTemplates.create({
+      key: templateKey, name: "Legacy Programme", category: "custom", parameters: [],
+      body: {
+        keyTemplate: `legacy-uc-${tag}`, nameTemplate: "Legacy UC",
+        holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
+        credentialTypes: [{
+          name: "ThingCredential", title: "Thing", validityDays: 365, requiredApprovals: 1,
+          required: ["label"], properties: { label: { type: "string" } },
+          certificate: { enabled: true, logoDocumentId: logo.id },
+        }],
+      },
+    } as never);
+
+    const res = await h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/provision`, headers: auth(admin),
+      payload: { templateKey, params: {}, provisioning: { issuerOrgName: `Provisioned Acme ${tag}` } },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("CERTIFICATE_LOGO_IS_BRAND_LOGO");
+    // And nothing was left behind by the refused attempt.
+    expect(await h.deps.credentialUseCases.get(`legacy-uc-${tag}`)).toBeNull();
+  });
+
+  it("POST /credential-use-cases/provision still provisions an ordinary template", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const art = await h.deps.documents.create({ contentType: "image/png", bytes: Buffer.from(PNG_B64, "base64"), ownerOrgId: null, purpose: null });
+    const tag = Math.random().toString(36).slice(2, 8);
+    const templateKey = `ok-tpl-${tag}`;
+
+    await h.deps.credentialTemplates.create({
+      key: templateKey, name: "OK Programme", category: "custom", parameters: [],
+      body: {
+        keyTemplate: `ok-uc-${tag}`, nameTemplate: "OK UC",
+        holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
+        credentialTypes: [{
+          name: "ThingCredential", title: "Thing", validityDays: 365, requiredApprovals: 1,
+          required: ["label"], properties: { label: { type: "string" } },
+          certificate: { enabled: true, logoDocumentId: art.id },
+        }],
+      },
+    } as never);
+
+    const res = await h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/provision`, headers: auth(admin),
+      payload: { templateKey, params: {}, provisioning: { issuerOrgName: `Provisioned OK ${tag}` } },
+    });
+    expect(res.statusCode).toBe(201);
+  });
+});
+
+/**
+ * THE FOURTH DOOR: `POST /use-cases/:key/invoices` accepts a caller-supplied
+ * `documentId` and checks only that it exists — no ownership, no purpose — so
+ * an org's own unpinned brand-logo upload could otherwise be attached as
+ * invoice evidence, a reference just as invisible to the prune as the other
+ * three.
+ */
+describe("a brand logo is not invoice evidence", () => {
+  const KEY = "invoice-tokenization";
+  const row = { invoiceNumber: "PRUNE-1", invoiceDate: "2026-07-05", buyerName: "JSW Steel", currency: "INR", amount: 1800000, dueDate: "2026-10-15" };
+
+  it("POST /use-cases/:key/invoices refuses a documentId naming a brand-logo document", async () => {
+    const h = await buildTestAppWithRepos();
+    const a = await org(h, "Acme");
+    const issuer = await loginAs(h.app, "m1.issuer@tokenlayer.dev", "m1issuer123");
+    const logo = (await upload(h, a.id, a.token)).json();
+
+    const res = await h.app.inject({
+      method: "POST", url: `${V1}/use-cases/${KEY}/invoices`, headers: auth(issuer),
+      payload: { metadata: row, documentId: logo.id },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("INVOICE_DOCUMENT_IS_BRAND_LOGO");
+  });
+
+  it("POST /use-cases/:key/invoices still accepts an ordinary document as evidence", async () => {
+    const h = await buildTestAppWithRepos();
+    const issuer = await loginAs(h.app, "m1.issuer@tokenlayer.dev", "m1issuer123");
+    const art = await h.deps.documents.create({ contentType: "image/png", bytes: Buffer.from(PNG_B64, "base64"), ownerOrgId: null, purpose: null });
+
+    const res = await h.app.inject({
+      method: "POST", url: `${V1}/use-cases/${KEY}/invoices`, headers: auth(issuer),
+      payload: { metadata: row, documentId: art.id },
+    });
+    expect(res.statusCode).toBe(201);
   });
 });

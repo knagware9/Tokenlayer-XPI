@@ -1167,7 +1167,10 @@ export const S: Record<string, FastifySchema> = {
       "Requires the `usecases:provision` scope — the same scope as its tokenization counterpart, because " +
       "configuring who may issue a credential is the same kind of authority as configuring who may mint a token. " +
       "Pass `sandbox: true` for a TEST-MODE programme; the flag is fixed at creation. An Org Admin cannot use this " +
-      "route at all — `POST /credential-use-cases/provision` is theirs, and it takes the same flag.",
+      "route at all — `POST /credential-use-cases/provision` is theirs, and it takes the same flag. A credential " +
+      "type's `certificate.logoDocumentId` may not name a document uploaded through " +
+      "`POST /orgs/{id}/branding/logo` — **400** `CERTIFICATE_LOGO_IS_BRAND_LOGO` — because the issuing " +
+      "organization's brand logo is already used automatically as the fallback when a type names none of its own.",
     body: { type: "object", additionalProperties: true, required: ["key", "name", "credentialTypes", "issuer", "holderPolicy", "verifier"] },
     response: { 201: { $ref: "CredentialUseCase#" }, ...errs(400, 401, 403, 409) },
   },
@@ -1175,7 +1178,9 @@ export const S: Record<string, FastifySchema> = {
     tags: ["Credential Use Cases"], summary: "Update a credential use case (PlatformAdmin)", security: eitherCredential,
     description:
       "Requires the `usecases:provision` scope. Patches a credential use case's configuration: its credential " +
-      "types, holder policy, and verifier.",
+      "types, holder policy, and verifier. Same `certificate.logoDocumentId` restriction as " +
+      "`POST /credential-use-cases`: naming an organization's brand-logo document answers **400** " +
+      "`CERTIFICATE_LOGO_IS_BRAND_LOGO`.",
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     body: { type: "object", additionalProperties: true },
     response: { 200: { $ref: "CredentialUseCase#" }, ...errs(400, 401, 403, 404) },
@@ -1231,7 +1236,10 @@ export const S: Record<string, FastifySchema> = {
       "Requires the `usecases:provision` scope. Saves a reusable credential-use-case template. A template is " +
       "authoring input and confers nothing until it is instantiated. It may NOT carry `sandbox` " +
       "(**400 `SANDBOX_NOT_ON_TEMPLATE`**): the environment is chosen when the template is provisioned, so one " +
-      "template serves both.",
+      "template serves both. A credential type's `certificate.background` is silently stripped before storage — " +
+      "artwork does not travel with a template — but `certificate.logoDocumentId` does, and naming an " +
+      "organization's brand-logo document (one uploaded through `POST /orgs/{id}/branding/logo`) is refused rather " +
+      "than stripped: **400** `CERTIFICATE_LOGO_IS_BRAND_LOGO`.",
     body: { type: "object", additionalProperties: true, required: ["key", "name", "category", "parameters", "body"] },
     // The stored template. `builtIn` comes back FALSE whatever you sent — the
     // route forces it, so a saved template can never impersonate a catalog one.
@@ -1385,7 +1393,10 @@ export const S: Record<string, FastifySchema> = {
       "in **this response only** and are never retrievable again. Pass `sandbox: true` (at the TOP LEVEL, beside " +
       "`templateKey`) to stand the programme up in TEST MODE — this is the way to create a sandbox credential " +
       "programme, and the only one available to an Org Admin. The same template serves both environments, so " +
-      "`sandbox` is never written into the template itself.",
+      "`sandbox` is never written into the template itself. If the template's `certificate.logoDocumentId` names an " +
+      "organization's brand-logo document (checked again here, not just at template-save time, so a template saved " +
+      "before that check existed cannot smuggle one through), the call answers **400** " +
+      "`CERTIFICATE_LOGO_IS_BRAND_LOGO` before anything is created.",
     body: {
       type: "object", additionalProperties: true, required: ["templateKey", "params"],
       properties: {
@@ -3234,7 +3245,11 @@ export const S: Record<string, FastifySchema> = {
   },
   addInvoice: {
     tags: ["Invoice Register"], summary: "Stage a single manually-keyed invoice", security: eitherCredential,
-    description: "Requires the `assets:issue` scope. Stages one manually-keyed invoice in the register.",
+    description:
+      "Requires the `assets:issue` scope. Stages one manually-keyed invoice in the register. `documentId`, when " +
+      "given, must name a document this door may attach as evidence: an unknown id answers **400** " +
+      "`DOCUMENT_NOT_FOUND`, and a document uploaded through `POST /orgs/{id}/branding/logo` — an organization's " +
+      "brand logo, not invoice evidence — answers **400** `INVOICE_DOCUMENT_IS_BRAND_LOGO`.",
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     body: {
       type: "object", required: ["metadata"],

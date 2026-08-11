@@ -330,6 +330,22 @@ referenced from inside `CredentialUseCase.credentialTypes` JSON, where no
 "is it pinned" query can see it, and the prune would delete bytes a
 certificate still draws.
 
+> **Amended after code review.** The steps below, as originally written,
+> closed exactly one door: `certificate.background` inside
+> `checkBackgroundDocument`. Code review found the reference set is wider:
+> `certificate.logoDocumentId` (a different field of the same JSON, which
+> `checkDefinitionBackgrounds` never inspected), the credential-use-case
+> template save door and the provision path (a template carries
+> `logoDocumentId` where it strips `background`), and `StagedInvoice.documentId`
+> at `POST /use-cases/:key/invoices` (existence-checked only, no ownership, no
+> purpose). All four now share one predicate, `brandLogoRefusal` in
+> `routes.ts`, with a distinct error code per door. See the design doc's
+> "The invariant that makes deletion safe" for the corrected enumeration and
+> the reasoning error that produced the first, incomplete one: upload *sites*
+> (four, in Task 1) are a different list from reference *sites* (now five),
+> and treating the first list as though it answered the second is what missed
+> three of them.
+
 **Files:**
 - Modify: `apps/api/src/http/routes.ts:1147-1152` (inside `checkBackgroundDocument`)
 - Modify: `apps/api/src/http/schemas.ts:1298-1299`
@@ -635,12 +651,19 @@ import type { DocumentRepository } from "./persistence/types.js";
  *   1. Only the owning org can pin one. `PATCH /orgs/{id}/branding` requires
  *      `orgOwnsDocument(doc, id)`, so "is it pinned" is one organization's field,
  *      not a store-wide scan.
- *   2. `checkBackgroundDocument` refuses a brand-logo document as certificate
- *      artwork. Without that, a pin inside `CredentialUseCase.credentialTypes`
- *      JSON would be invisible here and this function would delete bytes a
- *      certificate still draws.
+ *   2. Every caller-supplied document-id door refuses a brand-logo document,
+ *      via the shared `brandLogoRefusal` predicate in `routes.ts`: the
+ *      certificate-artwork pin (`checkBackgroundDocument`), a credential
+ *      type's own `logoDocumentId` (both whole-definition doors, the
+ *      template-save door and the provision path), and a staged invoice's
+ *      `documentId`. Without ALL of these, a brand-logo id smuggled into any
+ *      one of them would be invisible here and this function would delete
+ *      bytes something else still draws or attaches. (Task 2 shipped only the
+ *      first of these; code review after that commit found the other three —
+ *      see the design doc's "The invariant that makes deletion safe" for the
+ *      full list and why the first pass missed them.)
  *
- * Change either and this function becomes unsafe.
+ * Change any of these and this function becomes unsafe.
  *
  * BEST-EFFORT BY DESIGN. The upload has already succeeded when this runs; the
  * caller's bytes are stored and their intent is served. A repository failure
