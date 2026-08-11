@@ -219,7 +219,15 @@ credential type, opening a panel that reuses `CertificateDesigner` unchanged.
   shows the uploaded `File` through a local object URL; reopening a saved design
   fetches `api.certificateArtwork(token, key, credentialType)`.
 - **Save:** a new `api.updateCertificateDesign(token, key, body)` onto the new
-  route.
+  route. It sends `background` **only when the user actually touched the
+  artwork**, because the route's omit/null/clear contract is the only thing
+  standing between a legacy record and silent data loss: a background written by
+  the old wizard carries no `sha256`, the read route serves it happily (it needs
+  no pin), so the canvas shows artwork the panel cannot re-pin — and a panel that
+  always sent `background` would send `null` and delete it on an unrelated
+  placement nudge. An untouched legacy design can therefore be kept or removed
+  but not edited in place, and the panel says so rather than letting the user
+  find out through a 400.
 - **Preview:** unchanged — `preview-certificate` already admits OrgAdmin, and
   the draft it posts now carries `sha256` alongside `documentId`.
 - **Mirror:** `apps/web/src/types.ts` gains `sha256?: string` on `background`.
