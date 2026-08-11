@@ -42,6 +42,17 @@ Run one API test file:
 
 ### Task 1: `purpose` on the document row
 
+> **Amended after code review.** The code as shipped differs from the blocks
+> below in six ways, all tightenings: `remove(id)` became
+> `removeByOwnerPurpose(id, ownerOrgId, purpose)` so the only delete path on
+> `Document` structurally cannot reach a KYB certificate; the schema gained
+> `@@index([ownerOrgId, purpose])`; the Prisma `create` binds its `data` to a
+> type that makes `purpose` required, because Prisma's generated input has it
+> optional and omitting it would have compiled; `listByOwnerPurpose` is ordered
+> oldest-first on both sides; the Prisma read narrows `purpose` instead of
+> casting it; and two comments were corrected. Task 3 below already reflects the
+> new delete signature.
+
 **Files:**
 - Modify: `apps/api/prisma/schema.prisma:224-238`
 - Modify: `apps/api/src/persistence/types.ts:256-278`
@@ -572,10 +583,10 @@ describe("pruneSupersededBrandLogos", () => {
     const other = await docs.create({ contentType: "image/png", bytes: PNG, ownerOrgId: "org_a", purpose: "brand-logo" });
     const fresh = await docs.create({ contentType: "image/png", bytes: PNG, ownerOrgId: "org_a", purpose: "brand-logo" });
 
-    const realRemove = docs.remove.bind(docs);
-    docs.remove = async (id: string) => {
+    const realRemove = docs.removeByOwnerPurpose.bind(docs);
+    docs.removeByOwnerPurpose = async (id: string, ownerOrgId: string, purpose: "brand-logo") => {
       if (id === doomed.id) throw new Error("database is on fire");
-      await realRemove(id);
+      await realRemove(id, ownerOrgId, purpose);
     };
 
     const removed = await pruneSupersededBrandLogos(docs, "org_a", { justUploaded: fresh.id, pinned: null });
@@ -650,7 +661,10 @@ export async function pruneSupersededBrandLogos(
     for (const row of await documents.listByOwnerPurpose(orgId, "brand-logo")) {
       if (row.id === keep.justUploaded || row.id === keep.pinned) continue;
       try {
-        await documents.remove(row.id);
+        // The owner and purpose are passed again on the DELETE, not just the id:
+        // the repository refuses a row that does not match both, so a bug here
+        // cannot reach a KYB certificate or an invoice PDF.
+        await documents.removeByOwnerPurpose(row.id, orgId, "brand-logo");
         removed.push(row.id);
       } catch {
         // One row that will not delete is not worth failing an upload over, and

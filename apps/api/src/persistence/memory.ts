@@ -462,12 +462,15 @@ export class MemoryDocumentRepository implements DocumentRepository {
   async listByOwnerPurpose(ownerOrgId: string, purpose: DocumentPurpose): Promise<DocumentSummary[]> {
     // Projected to a summary, mirroring the Prisma `select` — a test that passed
     // here while the real repository loaded every buffer would prove nothing.
+    // Map insertion order is creation order, so this is oldest-first for free;
+    // Prisma gets there with an explicit `orderBy`.
     return [...this.docs.values()]
       .filter((d) => d.ownerOrgId === ownerOrgId && d.purpose === purpose)
       .map((d) => ({ id: d.id, size: d.size, createdAt: d.createdAt }));
   }
-  async remove(docId: string): Promise<void> {
-    this.docs.delete(docId); // `Map.delete` on an absent key is already a no-op
+  async removeByOwnerPurpose(docId: string, ownerOrgId: string, purpose: DocumentPurpose): Promise<void> {
+    const row = this.docs.get(docId);
+    if (row && row.ownerOrgId === ownerOrgId && row.purpose === purpose) this.docs.delete(docId);
   }
 }
 

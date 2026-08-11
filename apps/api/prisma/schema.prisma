@@ -240,10 +240,16 @@ model Document {
   // written before this column existed. It is not decoration: it is the only
   // thing that distinguishes an organization's mark from its certificate
   // artwork, its KYB certificates and its invoice evidence, all of which are
-  // also org-owned PNGs. `brand-logo` rows are the ONLY ones the prune in
-  // `brand-logo-prune.ts` may delete, and a null row is therefore never swept —
-  // there is no honest way to guess what a legacy row was for.
+  // also org-owned PNGs. Only `brand-logo` rows are ever swept by the prune;
+  // a null row never is — there is no honest way to guess what a legacy row
+  // was for.
   purpose     String?
+
+  // The prune's own query: every row a given org owns for a given purpose.
+  // The table carries up to 5 MB of inline `bytes` per row, so a scan here
+  // (rather than an index seek) would be the first document read to actually
+  // hurt — matching the fifteen other `@@index` declarations in this schema.
+  @@index([ownerOrgId, purpose])
 }
 
 // A maker-checker proposal: a gated operation captured pending approval. The

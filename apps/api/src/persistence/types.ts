@@ -298,11 +298,17 @@ export interface DocumentRepository {
    *  forgotten. */
   create(input: { contentType: string; bytes: Buffer; ownerOrgId: string | null; purpose: DocumentPurpose | null }): Promise<{ id: string; sha256: string; size: number }>;
   get(id: string): Promise<DocumentRecord | null>;
-  /** Every document this org owns with this purpose, WITHOUT bytes. */
+  /** Every document this org owns with this purpose, WITHOUT bytes. OLDEST
+   *  FIRST (`createdAt` ascending) — the memory repository's Map insertion
+   *  order and Prisma's unordered query would otherwise agree by accident. */
   listByOwnerPurpose(ownerOrgId: string, purpose: DocumentPurpose): Promise<DocumentSummary[]>;
-  /** Delete one document. IDEMPOTENT — an absent id is not an error, because
-   *  the prune is best-effort and may race another prune of the same row. */
-  remove(id: string): Promise<void>;
+  /** Delete one document, but ONLY if it matches this owner and purpose.
+   *  IDEMPOTENT — a row that is absent, or that belongs to another org, or that
+   *  was uploaded for something else, is silently not deleted rather than an
+   *  error. The narrow signature is the point: this is the only delete path on
+   *  `Document`, and it structurally cannot reach a KYB certificate or an
+   *  invoice PDF even if a caller passes the wrong id. */
+  removeByOwnerPurpose(id: string, ownerOrgId: string, purpose: DocumentPurpose): Promise<void>;
 }
 
 /**

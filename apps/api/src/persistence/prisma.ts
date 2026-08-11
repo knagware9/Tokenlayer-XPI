@@ -293,16 +293,28 @@ function toAuditRecord(r: {
   };
 }
 
+/**
+ * `Prisma.DocumentUncheckedCreateInput` declares `purpose` as optional
+ * (`purpose?: string | null`), so a `data` object typed directly against it
+ * would let a future edit silently drop `purpose` and compile clean — every
+ * test passes against the memory repository regardless, and production would
+ * quietly write NULL for every brand logo, making the prune a permanent
+ * no-op. Binding to this narrower, locally-declared shape instead makes
+ * `purpose` required, so omitting it is a compile error here specifically.
+ */
+type DocumentCreateData = { contentType: string; sha256: string; size: number; bytes: Buffer; ownerOrgId: string | null; purpose: DocumentPurpose | null };
+
 export class PrismaDocumentRepository implements DocumentRepository {
   async create({ contentType, bytes, ownerOrgId, purpose }: { contentType: string; bytes: Buffer; ownerOrgId: string | null; purpose: DocumentPurpose | null }): Promise<{ id: string; sha256: string; size: number }> {
     const sha256 = "0x" + createHash("sha256").update(bytes).digest("hex");
-    const row = await prisma.document.create({ data: { contentType, sha256, size: bytes.length, bytes, ownerOrgId, purpose } });
+    const data: DocumentCreateData = { contentType, sha256, size: bytes.length, bytes, ownerOrgId, purpose };
+    const row = await prisma.document.create({ data });
     return { id: row.id, sha256, size: bytes.length };
   }
   async get(id: string): Promise<DocumentRecord | null> {
     const r = await prisma.document.findUnique({ where: { id } });
     return r
-      ? { id: r.id, contentType: r.contentType, sha256: r.sha256, size: r.size, bytes: Buffer.from(r.bytes), createdAt: r.createdAt.toISOString(), ownerOrgId: r.ownerOrgId ?? null, purpose: (r.purpose as DocumentPurpose | null) ?? null }
+      ? { id: r.id, contentType: r.contentType, sha256: r.sha256, size: r.size, bytes: Buffer.from(r.bytes), createdAt: r.createdAt.toISOString(), ownerOrgId: r.ownerOrgId ?? null, purpose: r.purpose === "brand-logo" ? "brand-logo" : null }
       : null;
   }
   async listByOwnerPurpose(ownerOrgId: string, purpose: DocumentPurpose): Promise<DocumentSummary[]> {
@@ -311,13 +323,16 @@ export class PrismaDocumentRepository implements DocumentRepository {
     const rows = await prisma.document.findMany({
       where: { ownerOrgId, purpose },
       select: { id: true, size: true, createdAt: true },
+      orderBy: { createdAt: "asc" },
     });
     return rows.map((r) => ({ id: r.id, size: r.size, createdAt: r.createdAt.toISOString() }));
   }
-  async remove(id: string): Promise<void> {
+  async removeByOwnerPurpose(id: string, ownerOrgId: string, purpose: DocumentPurpose): Promise<void> {
     // `deleteMany`, not `delete`: `delete` throws P2025 when the row is already
-    // gone, and this must be idempotent for a best-effort, racing prune.
-    await prisma.document.deleteMany({ where: { id } });
+    // gone (or already doesn't match), and this must be idempotent for a
+    // best-effort, racing prune. A row belonging to another org or uploaded
+    // for something else simply matches zero rows and is left alone.
+    await prisma.document.deleteMany({ where: { id, ownerOrgId, purpose } });
   }
 }
 

@@ -88,9 +88,10 @@ const DOC_UPLOAD_BODY_LIMIT = 8 * 1024 * 1024;
 const ALLOWED_DOC_TYPES = new Set(["application/pdf", "image/png", "image/jpeg", "image/webp", "text/plain"]);
 
 /**
- * Validate and store one base64 document upload. Shared by the authenticated
- * store and the public KYB route so their error surface cannot drift. Throws
- * coded 415/400/413 (mapped by the global error handler).
+ * Validate and store one base64 document upload. Shared by all four upload
+ * doors (the general document store, certificate artwork, brand logo, and
+ * the public KYB route) so their error surface cannot drift. Throws coded
+ * 415/400/413 (mapped by the global error handler).
  */
 async function storeUploadedDocument(
   documents: AppDeps["documents"],

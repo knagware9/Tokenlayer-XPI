@@ -24,16 +24,31 @@ describe("MemoryDocumentRepository — purpose", () => {
 
     const rows = await docs.listByOwnerPurpose("org_a", "brand-logo");
     expect(rows.map((r) => r.id)).toEqual([mine.id]);
-    // Deciding what to delete must not drag 5MB buffers into memory.
+    // This only proves the SUMMARY SHAPE returned to the caller has no `bytes`
+    // property — it would still pass if the underlying query fetched the blob
+    // and the mapping simply dropped it. That the SQL itself never reads the
+    // column is enforced by the `select` clause in prisma.ts, not by this test.
     expect(rows[0]).not.toHaveProperty("bytes");
     expect(rows[0]).toMatchObject({ id: mine.id, size: PNG.length, createdAt: expect.any(String) });
   });
 
-  it("remove deletes the row, and removing an absent id is not an error", async () => {
+  it("removeByOwnerPurpose deletes only a row that matches BOTH owner and purpose", async () => {
     const docs = new MemoryDocumentRepository();
-    const made = await docs.create({ contentType: "image/png", bytes: PNG, ownerOrgId: "org_a", purpose: "brand-logo" });
-    await docs.remove(made.id);
-    expect(await docs.get(made.id)).toBeNull();
-    await expect(docs.remove("doc_never_existed")).resolves.toBeUndefined();
+    const mine = await docs.create({ contentType: "image/png", bytes: PNG, ownerOrgId: "org_a", purpose: "brand-logo" });
+    const wrongOrg = await docs.create({ contentType: "image/png", bytes: PNG, ownerOrgId: "org_b", purpose: "brand-logo" });
+    const wrongPurpose = await docs.create({ contentType: "image/png", bytes: PNG, ownerOrgId: "org_a", purpose: null });
+
+    // The guard bites: neither a foreign-org row nor a different-purpose row
+    // is deleted, even though the id is otherwise valid.
+    await docs.removeByOwnerPurpose(wrongOrg.id, "org_a", "brand-logo");
+    expect(await docs.get(wrongOrg.id)).not.toBeNull();
+    await docs.removeByOwnerPurpose(wrongPurpose.id, "org_a", "brand-logo");
+    expect(await docs.get(wrongPurpose.id)).not.toBeNull();
+
+    await docs.removeByOwnerPurpose(mine.id, "org_a", "brand-logo");
+    expect(await docs.get(mine.id)).toBeNull();
+
+    // Idempotent: an absent id, under the same owner/purpose, is not an error.
+    await expect(docs.removeByOwnerPurpose("doc_never_existed", "org_a", "brand-logo")).resolves.toBeUndefined();
   });
 });
