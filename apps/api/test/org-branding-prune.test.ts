@@ -113,10 +113,10 @@ describe("a brand logo is not certificate artwork", () => {
 });
 
 /**
- * THE SECOND DOOR THE FIRST REVIEW MISSED: `certificate.logoDocumentId` is the
- * same kind of caller-supplied document reference as `certificate.background`
- * — a different field of the same JSON blob — and it is just as invisible to
- * any "is this document still pinned" query. `checkDefinitionBackgrounds` now
+ * A DOOR THE FIRST REVIEW MISSED: `certificate.logoDocumentId` is the same
+ * kind of caller-supplied document reference as `certificate.background` — a
+ * different field of the same JSON blob — and it is just as invisible to any
+ * "is this document still pinned" query. `checkDefinitionBackgrounds` now
  * checks both, so both whole-definition doors (`POST`/`PATCH
  * /credential-use-cases`) refuse a brand logo named as a type's own logo, not
  * just as its background.
@@ -345,11 +345,10 @@ describe("a brand logo cannot reach persistence through provisioning either", ()
 });
 
 /**
- * THE FOURTH DOOR: `POST /use-cases/:key/invoices` accepts a caller-supplied
+ * ANOTHER DOOR: `POST /use-cases/:key/invoices` accepts a caller-supplied
  * `documentId` and checks only that it exists — no ownership, no purpose — so
  * an org's own unpinned brand-logo upload could otherwise be attached as
- * invoice evidence, a reference just as invisible to the prune as the other
- * three.
+ * invoice evidence, a reference just as invisible to the prune as any other.
  */
 describe("a brand logo is not invoice evidence", () => {
   const KEY = "invoice-tokenization";
@@ -379,5 +378,135 @@ describe("a brand logo is not invoice evidence", () => {
       payload: { metadata: row, documentId: art.id },
     });
     expect(res.statusCode).toBe(201);
+  });
+});
+
+/**
+ * THE DOOR THE FIRST TWO REVIEWS BOTH MISSED: `POST /orgs/register` takes
+ * caller-supplied document ids for `company.documents.{cinCertificate,
+ * gstinCertificate}`, checks only that each exists, and persists
+ * `{id, sha256}` into `Organization.companyProfile` JSON — the same shape as
+ * `StagedInvoice.documentId`. Reachable by execution: upload a logo, pass its
+ * id as the CIN certificate, get a 202. Unlike the other doors this one is
+ * PUBLIC (registration runs before any org — and so any ownership check —
+ * exists), which is exactly why it was easy to miss tracing the artwork
+ * pipeline forward: KYB registration has nothing to do with certificates.
+ */
+describe("a brand logo is not a KYB certificate", () => {
+  const registerBody = (tag: string, documents: { cinCertificate: { id: string }; gstinCertificate?: { id: string } }) => ({
+    company: {
+      name: `Regco ${tag}`, orgType: "corporate" as const, cin: `CIN${tag}`, pan: `PAN${tag}`,
+      state: "Maharashtra", pincode: "400001", dateOfIncorporation: "2020-01-01",
+      category: "private-limited" as const, companyStatus: "active" as const,
+      documents,
+    },
+    admin: { name: "Reg Admin", email: `reg-admin-${tag}@brandprune.dev`, password: "reg-secret-1" },
+  });
+  const uploadKybDoc = (h: TestAppHandle) =>
+    h.app.inject({ method: "POST", url: `${V1}/orgs/register/documents`, payload: { contentType: "image/png", dataBase64: PNG_B64 } });
+
+  it("refuses a brand-logo document as the CIN certificate", async () => {
+    const h = await buildTestAppWithRepos();
+    const a = await org(h, "Acme");
+    const logo = (await upload(h, a.id, a.token)).json();
+    const tag = Math.random().toString(36).slice(2, 8);
+
+    const res = await h.app.inject({
+      method: "POST", url: `${V1}/orgs/register`,
+      payload: registerBody(tag, { cinCertificate: { id: logo.id } }),
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("KYB_DOCUMENT_IS_BRAND_LOGO");
+  });
+
+  it("refuses a brand-logo document as the GSTIN certificate", async () => {
+    const h = await buildTestAppWithRepos();
+    const a = await org(h, "Acme");
+    const logo = (await upload(h, a.id, a.token)).json();
+    const cin = (await uploadKybDoc(h)).json();
+    const tag = Math.random().toString(36).slice(2, 8);
+
+    const res = await h.app.inject({
+      method: "POST", url: `${V1}/orgs/register`,
+      payload: registerBody(tag, { cinCertificate: { id: cin.id }, gstinCertificate: { id: logo.id } }),
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("KYB_DOCUMENT_IS_BRAND_LOGO");
+  });
+
+  it("still accepts an ordinary KYB upload", async () => {
+    const h = await buildTestAppWithRepos();
+    const cin = (await uploadKybDoc(h)).json();
+    const tag = Math.random().toString(36).slice(2, 8);
+
+    const res = await h.app.inject({
+      method: "POST", url: `${V1}/orgs/register`,
+      payload: registerBody(tag, { cinCertificate: { id: cin.id } }),
+    });
+    expect(res.statusCode).toBe(202);
+  });
+});
+
+/**
+ * COVERAGE GAP CLOSED: `certificate.background` naming a brand logo was
+ * proven at the org-scoped design door (the very first test in this file) but
+ * never at the whole-definition doors that call `checkDefinitionBackgrounds`
+ * directly — only `logoDocumentId` was tested there. Same predicate, same
+ * field, the other door.
+ */
+describe("a brand logo is not a credential type's background either, at the whole-definition doors", () => {
+  it("POST /credential-use-cases refuses certificate.background naming a brand-logo document", async () => {
+    const h = await buildTestAppWithRepos();
+    const a = await org(h, "Acme");
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const logo = (await upload(h, a.id, a.token)).json();
+    const tag = Math.random().toString(36).slice(2, 8);
+
+    const res = await h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases`, headers: auth(admin),
+      payload: {
+        key: `bg-post-${tag}`, name: "Background Programme",
+        credentialTypes: [{
+          name: "CourseCompletion", title: "Course Completion", validityDays: 365, requiredApprovals: 1,
+          claimSchema: { type: "object", required: ["fullName"], properties: { fullName: { type: "string" } } },
+          certificate: { enabled: true, background: { documentId: logo.id, sha256: logo.sha256 } },
+        }],
+        issuer: { kind: "platform" }, holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("BACKGROUND_IS_BRAND_LOGO");
+  });
+
+  it("PATCH /credential-use-cases/:key refuses the same", async () => {
+    const h = await buildTestAppWithRepos();
+    const a = await org(h, "Acme");
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const logo = (await upload(h, a.id, a.token)).json();
+    const tag = Math.random().toString(36).slice(2, 8);
+    const key = `bg-patch-${tag}`;
+    const created = await h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases`, headers: auth(admin),
+      payload: {
+        key, name: "Background Programme", credentialTypes: [courseCompletionType()],
+        issuer: { kind: "platform" }, holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
+      },
+    });
+    expect(created.statusCode).toBe(201);
+
+    const patched = await h.app.inject({
+      method: "PATCH", url: `${V1}/credential-use-cases/${key}`, headers: auth(admin),
+      payload: {
+        name: "Background Programme",
+        credentialTypes: [{
+          name: "CourseCompletion", title: "Course Completion", validityDays: 365, requiredApprovals: 1,
+          claimSchema: { type: "object", required: ["fullName"], properties: { fullName: { type: "string" } } },
+          certificate: { enabled: true, background: { documentId: logo.id, sha256: logo.sha256 } },
+        }],
+        issuer: { kind: "platform" }, holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
+      },
+    });
+    expect(patched.statusCode).toBe(400);
+    expect(patched.json().error).toBe("BACKGROUND_IS_BRAND_LOGO");
   });
 });

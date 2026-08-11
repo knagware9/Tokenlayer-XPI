@@ -1099,29 +1099,58 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
    * `POST /orgs/{id}/branding/logo` stamps `purpose = "brand-logo"`, and the
    * prune deletes such a row once a newer upload supersedes it. That is sound
    * only while `Organization.brandLogoDocumentId` is the ONLY reference that
-   * can exist to one. So every door that accepts a caller-supplied document id
-   * has to refuse these bytes — not just the artwork door, which was the first
-   * one found. The doors that call this: `certificate.background` (the
-   * artwork pin, below), `certificate.logoDocumentId` (both whole-definition
-   * doors, the template-save door and the provision path, via
-   * `checkCertificateLogoDocument`), and a staged invoice's `documentId`.
+   * can exist to one, which means every OTHER site that persists a
+   * caller-supplied document id has to refuse these bytes.
    *
-   * Refusing costs nothing legitimate. A certificate that should carry the
-   * org's mark already gets it for free: `certificateLogoDocumentId` (see
-   * certificate-fields.ts) falls back to `issuerOrg.brandLogoDocumentId`,
-   * which is the PINNED document and the one the prune always spares. Naming
-   * a brand-logo id explicitly is therefore redundant at best, and a dangling
-   * reference the moment the org re-brands.
+   * THE METHOD, WRITTEN DOWN SO IT CAN BE RE-RUN RATHER THAN TRUSTED. Building
+   * this list by tracing the artwork pipeline forward finds every door THAT
+   * feature reaches and no other — a narrower question than the one that
+   * actually closes the set, asked in its place. The question that closes it
+   * is the reverse one: for every Prisma model and every JSON blob column
+   * (`companyProfile`, `credentialTypes`, `body`, `payload`, `metadata`,
+   * `subjectClaims`, `kyc`, …) across `apps/api/prisma/schema.prisma`,
+   * `apps/api/src` and `packages/core`, does ANY field hold a caller-supplied
+   * id that is later handed to `deps.documents.get` — i.e. actually
+   * dereferenced into bytes or an authoritative "this document IS the X"
+   * binding — rather than stored as an inert opaque string nothing ever reads
+   * back as a document id. (The `PropertySchema.type === "document"` claim/
+   * metadata fields and `KycDetails.documentRef` are the negative case: they
+   * hold a URL-shaped string, but no server code ever calls
+   * `deps.documents.get` on that value, so deleting the row they happen to
+   * point at breaks nothing this system provides — the same as any other
+   * stale external link.) Re-run that question, not this list, before adding
+   * a new write site.
+   *
+   * The doors that call this today: `certificate.background` (the artwork
+   * pin, below), `certificate.logoDocumentId` (every definition-writing door,
+   * via `checkCertificateLogoDocument`), a staged invoice's `documentId`, and
+   * `company.documents.{cinCertificate,gstinCertificate}` at `POST
+   * /orgs/register`.
+   *
+   * Refusing costs LITTLE legitimate use, not nothing. A certificate whose
+   * bound issuer is an ORG (`issuer: { kind: "org" }`) gets the org's mark for
+   * free regardless: `certificateLogoDocumentId` (see certificate-fields.ts)
+   * falls back to `issuerOrg.brandLogoDocumentId`, the PINNED document the
+   * prune always spares. A PLATFORM-issued type (`issuer: { kind: "platform"
+   * }`) has no such org to fall back to, so one that genuinely wants a
+   * specific tenant's mark must re-upload it through the general store
+   * instead of naming the branding upload directly — the two-upload cost the
+   * artwork door already accepts, paid here too.
    *
    * Takes the already-resolved document — `null` when there is none — rather
    * than an id, so it composes with whatever existence/ownership handling
    * each door already does instead of repeating it.
    */
+  type BrandLogoErrorCode =
+    | "BACKGROUND_IS_BRAND_LOGO"
+    | "CERTIFICATE_LOGO_IS_BRAND_LOGO"
+    | "INVOICE_DOCUMENT_IS_BRAND_LOGO"
+    | "KYB_DOCUMENT_IS_BRAND_LOGO";
   function brandLogoRefusal(
-    doc: { purpose: string | null } | null,
-    errorCode: string,
+    doc: { purpose: DocumentPurpose | null } | null,
+    errorCode: BrandLogoErrorCode,
     message: string,
-  ): { error: string; message: string } | null {
+  ): { error: BrandLogoErrorCode; message: string } | null {
     if (doc?.purpose !== "brand-logo") return null;
     return { error: errorCode, message };
   }
@@ -1183,33 +1212,31 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       return { error: "BACKGROUND_DOCUMENT_NOT_FOUND", message: `certificate background document '${documentId}' not found` };
     }
     // A MARK IS NOT ARTWORK — see `brandLogoRefusal` above for why this rule
-    // exists and why it costs nothing legitimate. This is the certificate
-    // ARTWORK door — the one `certificate.background` names.
+    // exists and what it costs. This is the certificate ARTWORK door — the
+    // one `certificate.background` names.
     //
-    // AFTER the ownership check, but note that check is CONDITIONAL —
+    // AFTER the ownership check, but that check is CONDITIONAL —
     // `if (opts.owner && !opts.owner.bypass && ...)` — so "a caller who
     // already owns these bytes" is not quite what reaches this line. Two
     // shapes do: (a) `opts.owner` is set and the caller passed the ownership
     // check, or is a PlatformAdmin whose `bypass` skips it on purpose; (b)
     // `opts.owner` is absent entirely, which is how `checkDefinitionBackgrounds`
-    // calls in.
-    //
-    // THREE routes reach it that way, and they are NOT all PlatformAdmin-only —
-    // an earlier draft of this comment named two and called them both platform
-    // routes, which was simply wrong. `POST` and `PATCH /credential-use-cases`
-    // are PlatformAdmin-only; `POST /credential-use-cases/provision` admits an
-    // OrgAdmin too. What keeps that third door harmless is not rank but SHAPE:
-    // it builds its definition through `instantiateTemplate`, which constructs
-    // `certificate` with no `background` key at all (deliberately — a letterhead
-    // is not the reusable part of a template), so `background` is structurally
-    // absent and this function returns at the `typeof documentId !== "string"`
-    // guard long before reaching here. An OrgAdmin cannot steer a document id
-    // into this branch.
-    //
-    // So the caller here is always either the document's own org or a
-    // PlatformAdmin, never an arbitrary unauthorized one, and this discloses
-    // nothing such a caller could use — the same reasoning that puts
-    // `BACKGROUND_NOT_AN_IMAGE` below the ownership check rather than above it.
+    // calls in — from `POST`/`PATCH /credential-use-cases`, from
+    // `POST /credential-use-cases/provision`, and from
+    // `createCredentialUseCaseFromDef` (clone-to-live, and provision's own
+    // create branch a second time). Each is harmless for its OWN reason, not
+    // one shared reason: `POST`, `PATCH` and clone-to-live restrict the ROLE to
+    // PlatformAdmin before ever reaching here. Provisioning admits an OrgAdmin
+    // too, and is safe by SHAPE instead — it builds its definition through
+    // `instantiateTemplate`, which constructs `certificate` with no
+    // `background` key at all (deliberately — a letterhead is not the reusable
+    // part of a template), so `background` is structurally absent and this
+    // function returns at the `typeof documentId !== "string"` guard long
+    // before reaching here. Whichever reason applies, the caller who reaches
+    // this line is always either the document's own org or a PlatformAdmin,
+    // never an arbitrary unauthorized one, and this discloses nothing such a
+    // caller could use — the same reasoning that puts `BACKGROUND_NOT_AN_IMAGE`
+    // below the ownership check rather than above it.
     //
     // The cost is that an org whose mark IS its letterhead uploads the file
     // twice, once at each door. The doors are already separate; a provable
@@ -1251,7 +1278,18 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
    */
   async function checkCertificateLogoDocument(logoDocumentId: unknown): Promise<{ error: string; message: string } | null> {
     if (typeof logoDocumentId !== "string" || !logoDocumentId.trim()) return null;
-    const doc = await deps.documents.get(logoDocumentId).catch(() => null);
+    // NO `.catch(() => null)` HERE. `DocumentRepository.get` already resolves a
+    // genuinely absent row to `null` without throwing (see the memory and
+    // Prisma implementations) — "an absent document is allowed" is the
+    // deliberate, documented choice `checkBackgroundDocument`'s comment makes
+    // for THAT reason. A THROW out of `get` means something else: the
+    // repository itself failed to answer. Swallowing that here would turn "I
+    // could not check whether this is a brand logo" into "it is not, allow
+    // it" — and unlike a rendering path, where a stale document degrades to a
+    // built-in layout, this is a WRITE: a brand-logo id let through during an
+    // outage is persisted into a definition nothing later revalidates. Let it
+    // propagate and fail the request instead.
+    const doc = await deps.documents.get(logoDocumentId);
     return brandLogoRefusal(doc, "CERTIFICATE_LOGO_IS_BRAND_LOGO",
       `document '${logoDocumentId}' was uploaded as an organization brand logo and cannot be set as certificate.logoDocumentId — the issuing organization's brand logo is already used automatically as the fallback when a credential type names none of its own`);
   }
@@ -1887,7 +1925,11 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
 
   // Validate + create a credential use case from a fully-bound definition, reusing
   // the SAME checks as POST /credential-use-cases (referenced-org existence,
-  // cross-type KEY_TAKEN guard). Throws coded errors the provisioner maps to HTTP.
+  // cross-type KEY_TAKEN guard, and — same order as that route —
+  // `checkDefinitionBackgrounds`). Throws coded errors the provisioner maps to
+  // HTTP. This is what makes clone-to-live's own comment true rather than
+  // aspirational: the check belongs here, once, rather than repeated at every
+  // caller that reaches this function.
   async function createCredentialUseCaseFromDef(def: CredentialUseCaseDefinition, ownerOrgId: string | null, actorId: string) {
     if (await deps.credentialUseCases.has(def.key) || await deps.useCases.has(def.key)) {
       throw coded(409, "KEY_TAKEN", `use-case key '${def.key}' already exists`);
@@ -1898,6 +1940,8 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     } catch (err) {
       throw coded(400, "INVALID_CREDENTIAL_USECASE", (err as Error).message);
     }
+    const badBackground = await checkDefinitionBackgrounds(def);
+    if (badBackground) throw coded(400, badBackground.error, badBackground.message);
     const violation = await credentialUseCaseCapabilityViolation({ ...def, ownerOrgId }, known);
     if (violation) throw coded(403, "ORG_CAPABILITY_MISSING", `organization '${violation.org.name}' (${violation.org.id}) does not have the '${violation.missing}' capability`);
     const created = await deps.credentialUseCases.create({ ...def, ownerOrgId });
@@ -3692,10 +3736,27 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     // stored record, never from the client's claim.
     const cinDoc = await deps.documents.get(b.company.documents.cinCertificate.id);
     if (!cinDoc) return reply.code(400).send({ error: "DOCUMENT_NOT_FOUND", message: "CIN certificate upload not found" });
+    // ANOTHER DOOR `brandLogoRefusal` closes (see its comment for the question
+    // that finds these). `companyProfile.documents` is a caller-supplied
+    // document reference persisted into `Organization.companyProfile` JSON at
+    // create below, exactly the same shape as `StagedInvoice.documentId`: this
+    // route checks only that the id exists, no ownership (there is no owning
+    // org yet — registration is what creates one), no purpose. Reachable by
+    // execution: upload a logo through `POST /orgs/{id}/branding/logo`, pass
+    // its id as `company.documents.cinCertificate.id` here, and it is stored as
+    // the statutory certificate — a reference no "is this still pinned" query
+    // can see, and the reviewer's `DocLink` has no re-upload path once the
+    // registration is submitted.
+    const cinBrandLogo = brandLogoRefusal(cinDoc, "KYB_DOCUMENT_IS_BRAND_LOGO",
+      `document '${b.company.documents.cinCertificate.id}' was uploaded as an organization brand logo and cannot be used as a KYB certificate`);
+    if (cinBrandLogo) return reply.code(400).send(cinBrandLogo);
     let gstinRef: KybDocumentRef | null = null;
     if (b.company.documents.gstinCertificate) {
       const g = await deps.documents.get(b.company.documents.gstinCertificate.id);
       if (!g) return reply.code(400).send({ error: "DOCUMENT_NOT_FOUND", message: "GSTIN certificate upload not found" });
+      const gstinBrandLogo = brandLogoRefusal(g, "KYB_DOCUMENT_IS_BRAND_LOGO",
+        `document '${b.company.documents.gstinCertificate.id}' was uploaded as an organization brand logo and cannot be used as a KYB certificate`);
+      if (gstinBrandLogo) return reply.code(400).send(gstinBrandLogo);
       gstinRef = { id: g.id, sha256: g.sha256 };
     }
 

@@ -330,21 +330,26 @@ referenced from inside `CredentialUseCase.credentialTypes` JSON, where no
 "is it pinned" query can see it, and the prune would delete bytes a
 certificate still draws.
 
-> **Amended after code review.** The steps below, as originally written,
-> closed exactly one door: `certificate.background` inside
-> `checkBackgroundDocument`. Code review found the reference set is wider:
-> `certificate.logoDocumentId` (a different field of the same JSON, which
-> `checkDefinitionBackgrounds` never inspected), the credential-use-case
-> template save door and the provision path (a template carries
-> `logoDocumentId` where it strips `background`), and `StagedInvoice.documentId`
-> at `POST /use-cases/:key/invoices` (existence-checked only, no ownership, no
-> purpose). All four now share one predicate, `brandLogoRefusal` in
-> `routes.ts`, with a distinct error code per door. See the design doc's
-> "The invariant that makes deletion safe" for the corrected enumeration and
-> the reasoning error that produced the first, incomplete one: upload *sites*
-> (four, in Task 1) are a different list from reference *sites* (now five),
-> and treating the first list as though it answered the second is what missed
-> three of them.
+> **Amended after two rounds of code review.** The steps below, as originally
+> written, closed exactly one door: `certificate.background` inside
+> `checkBackgroundDocument`. Review found the reference set wider, twice:
+> first `certificate.logoDocumentId` (a different field of the same JSON,
+> which `checkDefinitionBackgrounds` never inspected), the credential-use-case
+> template save door, the provision path and `createCredentialUseCaseFromDef`
+> (a template carries `logoDocumentId` where it strips `background`), and
+> `StagedInvoice.documentId` at `POST /use-cases/:key/invoices`
+> (existence-checked only, no ownership, no purpose); then
+> `Organization.companyProfile.documents.{cinCertificate,gstinCertificate}` at
+> the public `POST /orgs/register` — same shape as the invoice door, and
+> reachable by execution. All of these share one predicate, `brandLogoRefusal`
+> in `routes.ts`, with a distinct error code per door. See the design doc's
+> "The invariant that makes deletion safe" for the corrected enumeration,
+> stated there (and in the code comment on `brandLogoRefusal`) as a
+> re-runnable question rather than a count, because the count has been wrong
+> twice: upload *sites* (enumerated once, in Task 1, and unchanged since) are
+> a different list from reference *sites*, and treating the first list as
+> though it answered the second is what missed every door found after the
+> first pass.
 
 **Files:**
 - Modify: `apps/api/src/http/routes.ts:1147-1152` (inside `checkBackgroundDocument`)
@@ -651,17 +656,22 @@ import type { DocumentRepository } from "./persistence/types.js";
  *   1. Only the owning org can pin one. `PATCH /orgs/{id}/branding` requires
  *      `orgOwnsDocument(doc, id)`, so "is it pinned" is one organization's field,
  *      not a store-wide scan.
- *   2. Every caller-supplied document-id door refuses a brand-logo document,
- *      via the shared `brandLogoRefusal` predicate in `routes.ts`: the
+ *   2. EVERY caller-supplied document-id door refuses a brand-logo document,
+ *      via the shared `brandLogoRefusal` predicate in `routes.ts` — not a
+ *      fixed list to check off, but a question to re-ask: does any Prisma
+ *      model or JSON blob hold a caller-supplied id that server code later
+ *      hands to `deps.documents.get`. Known doors today: the
  *      certificate-artwork pin (`checkBackgroundDocument`), a credential
- *      type's own `logoDocumentId` (both whole-definition doors, the
- *      template-save door and the provision path), and a staged invoice's
- *      `documentId`. Without ALL of these, a brand-logo id smuggled into any
- *      one of them would be invisible here and this function would delete
- *      bytes something else still draws or attaches. (Task 2 shipped only the
- *      first of these; code review after that commit found the other three —
- *      see the design doc's "The invariant that makes deletion safe" for the
- *      full list and why the first pass missed them.)
+ *      type's own `logoDocumentId` (every definition-writing door), a staged
+ *      invoice's `documentId`, and the KYB certificate ids at
+ *      `POST /orgs/register`. Without ALL of these, a brand-logo id smuggled
+ *      into any one of them would be invisible here and this function would
+ *      delete bytes something else still draws or attaches. (Task 2 shipped
+ *      only the first; two rounds of code review since found the rest — see
+ *      the design doc's "The invariant that makes deletion safe" for why the
+ *      pipeline-tracing method that produced the first list undercounts, and
+ *      re-run its question — not this comment — before trusting the list is
+ *      still complete.)
  *
  * Change any of these and this function becomes unsafe.
  *

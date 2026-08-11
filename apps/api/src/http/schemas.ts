@@ -1967,7 +1967,11 @@ export const S: Record<string, FastifySchema> = {
       "**This 202 is NOT a maker-checker proposal** — unlike almost every other 202 in this API, no `proposal` is " +
       "created and there is nothing to poll under `/proposals`. The organization row exists immediately; what is " +
       "pending is its ADMISSION. Nobody can log in until approval, which is also when the DID is anchored on-chain " +
-      "and the platform-signed `OrganizationCredential` is issued.",
+      "and the platform-signed `OrganizationCredential` is issued.\n\n" +
+      "`company.documents.cinCertificate.id` and `.gstinCertificate.id` name documents uploaded through " +
+      "`POST /orgs/register/documents`; an unknown id answers **400** `DOCUMENT_NOT_FOUND`, and a document uploaded " +
+      "through `POST /orgs/{id}/branding/logo` — an organization's mark, not a statutory certificate — answers " +
+      "**400** `KYB_DOCUMENT_IS_BRAND_LOGO`.",
     body: {
       type: "object", additionalProperties: false, required: ["company", "admin"],
       properties: {

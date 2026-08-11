@@ -91,39 +91,54 @@ Schema change ships via `prisma db push`; this repo keeps no migration files.
 ### 2. The invariant that makes deletion safe
 
 `brandLogoDocumentId` becomes the **only** reference that can exist to a
-`purpose = "brand-logo"` row. Two facts hold it up — plus a third this section
-originally missed, and a corrective note on why.
+`purpose = "brand-logo"` row. Two kinds of fact hold it up.
 
 1. Only the owning org can pin one. PATCH `/orgs/:id/branding` requires
-   `orgOwnsDocument(doc, id)` (`routes.ts:3936`), so "is this pinned" is a
-   single-org field read, not a store-wide scan.
+   `orgOwnsDocument(doc, id)` (`routes.ts`, inside the branding-patch handler),
+   so "is this pinned" is a single-org field read, not a store-wide scan.
 2. **Every caller-supplied document-id door refuses a brand-logo document.**
    This section originally named exactly one such door —
    `checkBackgroundDocument`'s refusal of `certificate.background` — on the
    reasoning that it was the sole place a certificate references stored bytes.
-   That reasoning was wrong: it conflated "the place I found while writing
-   this design" with "every place a reference can be written," and code review
-   after the first implementation found three more caller-supplied
-   document-id doors that the same reference-visibility problem applies to:
+   That reasoning conflates "the place I found while tracing the artwork
+   pipeline" with "every place a caller-supplied document id gets persisted."
+   Those are different questions. The pipeline trace finds every door THAT
+   feature reaches; the question that actually closes the set is the reverse
+   one — for every Prisma model and every JSON blob column, does any field
+   hold a caller-supplied id that server code later hands to
+   `deps.documents.get`, as opposed to storing it as an inert
+   opaque string nothing ever dereferences. (A `PropertySchema.type ===
+   "document"` claim/metadata field and `KycDetails.documentRef` both hold
+   URL-shaped strings that fit that inert case: no server code resolves them
+   against the document store, so they are not reference sites.) Asking the
+   narrower question in place of the broader one is what left doors open, and
+   it will again if the list below is trusted instead of re-derived.
 
-   - `certificate.logoDocumentId` — the same `CredentialUseCase.credentialTypes`
-     JSON, a different field, one `checkBackgroundDocument` never inspected.
-     It is live: `certificateLogoDocumentId` (`certificate-fields.ts`) resolves
-     it and the renderer draws it whenever a type carries no `background`.
-   - The credential-use-case **template** door
-     (`POST /credential-use-case-templates`) and, belt-and-suspenders, the
-     **provision** path (`POST /credential-use-cases/provision`) — a template
-     can carry `logoDocumentId` (unlike `background`, which
-     `instantiateTemplate` always strips), and a template saved before a
-     given refusal existed reaches `provision` with no revalidation.
-   - `StagedInvoice.documentId`, written by `POST /use-cases/:key/invoices`,
-     which checked only that the id existed — no ownership, no purpose.
+   The doors closed today, found by that broader question rather than by the
+   pipeline trace: `certificate.logoDocumentId` (a different field of the same
+   `CredentialUseCase.credentialTypes` JSON than `background`, live via
+   `certificateLogoDocumentId` in `certificate-fields.ts`, which resolves it
+   and the renderer draws it whenever a type carries no `background`); the
+   credential-use-case **template** door
+   (`POST /credential-use-case-templates`) and, belt-and-suspenders, the
+   **provision** path (`POST /credential-use-cases/provision`) and
+   `createCredentialUseCaseFromDef` (clone-to-live) — a template can carry
+   `logoDocumentId` where `instantiateTemplate` always strips `background`,
+   and a template saved before a given refusal existed reaches persistence
+   with no revalidation; `StagedInvoice.documentId`, written by
+   `POST /use-cases/:key/invoices`, checked only that the id existed; and
+   `Organization.companyProfile.documents.{cinCertificate,gstinCertificate}`,
+   written by the public `POST /orgs/register`, same shape as the invoice
+   door and reachable by execution — upload a logo, pass its id as the CIN
+   certificate, get a 202.
 
-   All four now share one predicate (`brandLogoRefusal` in `routes.ts`): does
-   the resolved document carry `purpose = "brand-logo"`. Distinct error codes
+   All of these share one predicate (`brandLogoRefusal` in `routes.ts`): does
+   the resolved document carry `purpose = "brand-logo"`. A distinct error code
    per door (`BACKGROUND_IS_BRAND_LOGO`, `CERTIFICATE_LOGO_IS_BRAND_LOGO`,
-   `INVOICE_DOCUMENT_IS_BRAND_LOGO`) so each door's message names the right
-   field, but the rule itself is stated once.
+   `INVOICE_DOCUMENT_IS_BRAND_LOGO`, `KYB_DOCUMENT_IS_BRAND_LOGO`) so each
+   door's message names the right field, but the rule itself is stated once —
+   and the code comment on `brandLogoRefusal` carries the re-runnable
+   question, not a number, for exactly the reason this paragraph does now.
 
 The refusal in `checkBackgroundDocument` is placed **after** the ownership
 check and **before** the content-type check, preserving the ordering that
@@ -134,19 +149,23 @@ anything from it, so it does not become an oracle over the document store.
 **The lesson, stated plainly: "the reference set is closed by construction"
 was a claim about the code, not a claim about one field the author happened to
 be looking at.** Upload *sites* — where a document gets a `purpose` stamped on
-it — are four, unchanged, and enumerated in §1. Reference *sites* — where a
-caller can hand back a document id and have it stored somewhere the prune
-cannot see — are a **different list**, discovered by asking "where does a
-caller-supplied document id get persisted," not "where does the artwork
-pipeline read from." Conflating the two lists is exactly how the second and
-third doors above were missed the first time.
+it — are enumerated in §1 and unchanged by any of this. Reference *sites* —
+where a caller can hand back a document id and have it stored somewhere the
+prune cannot see — are a **different list**, discovered by asking "where does
+a caller-supplied document id get persisted," not "where does the artwork
+pipeline read from." Conflating the two lists is exactly how the doors above
+were missed.
 
 Together these turn "I scanned everywhere I could think of" into "there is one
 column, and every door that writes a caller-supplied document id checks it."
 
-This does constrain a legitimate case: an org whose mark is also its certificate
-letterhead must upload the file twice, once at each door. That is cheap, the two
-doors are already separate, and it buys a provable invariant.
+This does constrain a legitimate case, and a smaller one than it first costs:
+a certificate bound to an ORG issuer gets that org's mark for free regardless
+(`certificateLogoDocumentId` already falls back to the pinned
+`brandLogoDocumentId`), so only a PLATFORM-issued type that wants a specific
+tenant's mark, or an org whose mark is also its KYB letterhead, must upload
+the same file twice, once at each door. That is cheap, the doors are already
+separate, and it buys a provable invariant.
 
 ### 3. The prune
 
