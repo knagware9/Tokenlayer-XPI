@@ -95,6 +95,7 @@ const ALLOWED_DOC_TYPES = new Set(["application/pdf", "image/png", "image/jpeg",
 async function storeUploadedDocument(
   documents: AppDeps["documents"],
   body: { contentType: string; dataBase64: string },
+  ownerOrgId: string | null,
 ): Promise<{ id: string; sha256: string; size: number }> {
   if (!ALLOWED_DOC_TYPES.has(body.contentType)) {
     throw coded(415, "UNSUPPORTED_DOCUMENT_TYPE", `contentType must be one of: ${[...ALLOWED_DOC_TYPES].join(", ")}`);
@@ -102,7 +103,32 @@ async function storeUploadedDocument(
   const bytes = Buffer.from(body.dataBase64, "base64");
   if (bytes.length === 0) throw coded(400, "BAD_DOCUMENT", "empty document");
   if (bytes.length > MAX_DOC_BYTES) throw coded(413, "DOCUMENT_TOO_LARGE", `max ${MAX_DOC_BYTES} bytes`);
-  return documents.create({ contentType: body.contentType, bytes });
+  return documents.create({ contentType: body.contentType, bytes, ownerOrgId });
+}
+
+/**
+ * MAY THIS ORGANIZATION REFERENCE THESE BYTES?
+ *
+ * The rule the certificate-artwork review had to invent, because the branch it
+ * reviewed had none. Its predecessor was "the caller must supply the document's
+ * sha256, which proves they have seen the file" — and that was false the moment
+ * the digest was stored, because `GET /credential-use-cases` is open to any
+ * authenticated user and serialises the whole certificate block. Org B read org
+ * A's `{documentId, sha256}` off that route, pinned it onto a use case B owned,
+ * and fetched A's letterhead byte for byte.
+ *
+ * A DIGEST IS AN INTEGRITY CHECK, NOT A CAPABILITY. It answers "are these the
+ * bytes I meant", never "am I allowed to have them". Ownership has to be
+ * recorded, so it is — on the row.
+ *
+ * `null` on either side fails. A null-owned document (platform upload, pre-org
+ * KYB registration, or a row written before the column existed) is referenceable
+ * only by a PlatformAdmin, who bypasses this check at the call sites because
+ * they may already read every document through `GET /documents/:id`.
+ */
+function orgOwnsDocument(doc: { ownerOrgId: string | null }, orgId: string | null | undefined): boolean {
+  const mine = typeof orgId === "string" ? orgId.trim() : "";
+  return mine !== "" && doc.ownerOrgId === mine;
 }
 
 // Extract the inner VC's `jti` (credential id) from a VP-JWT, or null on any
@@ -953,14 +979,53 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
   app.get("/credential-templates", { schema: S.credentialTemplates, ...auth }, async () => CREDENTIAL_TEMPLATES);
 
   // Same D2-6 narrowing as the tokenization catalog above, and for the same reason.
+  /**
+   * A credential use case as a NON-OWNER may see it: the same record with every
+   * DOCUMENT REFERENCE removed from its certificate design.
+   *
+   * These two routes are `...auth` — any authenticated principal of any role in
+   * any organization, which is deliberate, because the catalog is what a holder
+   * or verifier consults to know what a programme issues. What is NOT part of
+   * that answer is which stored bytes render its certificate.
+   *
+   * This was proved, not theorised. The artwork branch added `background.sha256`
+   * to the stored config as a capability — "you must have seen the file" — and
+   * this route published it to everyone, `credentialTypes: { type: "array" }`
+   * having no item schema to strip it. Org B read org A's `{documentId,
+   * sha256}` here, pinned it onto a use case B owned, and fetched A's letterhead
+   * byte for byte. `logoDocumentId` rode the same route with no pin at all and
+   * still feeds the preview renderer.
+   *
+   * Ownership on the document row (see `orgOwnsDocument`) is what actually
+   * closes that; this is the other half — do not hand out the identifiers in
+   * the first place. Owners and PlatformAdmins see the design in full, because
+   * the designer has to load it.
+   */
+  function certificateDesignVisible(request: FastifyRequest, cuc: CredentialUseCaseDefinition): CredentialUseCaseDefinition {
+    const claims = request.user as TokenClaims;
+    const orgId = typeof claims.orgId === "string" ? claims.orgId.trim() : "";
+    if (claims.role === "PlatformAdmin") return cuc;
+    if (orgId !== "" && cuc.ownerOrgId === orgId) return cuc;
+    if (!cuc.credentialTypes?.some((t) => t.certificate?.background || t.certificate?.logoDocumentId)) return cuc;
+    return {
+      ...cuc,
+      credentialTypes: cuc.credentialTypes.map((t) => {
+        if (!t.certificate) return t;
+        const { background, logoDocumentId, ...rest } = t.certificate;
+        void background; void logoDocumentId;
+        return { ...t, certificate: rest };
+      }),
+    };
+  }
+
   app.get("/credential-use-cases", { schema: S.listCredentialUseCases, ...auth }, async (request) =>
-    (await deps.credentialUseCases.list()).filter(modeFilter(request, true)));
+    (await deps.credentialUseCases.list()).filter(modeFilter(request, true)).map((c) => certificateDesignVisible(request, c)));
 
   app.get("/credential-use-cases/:key", { schema: S.getCredentialUseCase, ...auth }, async (request, reply) => {
     const cuc = await deps.credentialUseCases.get((request.params as { key: string }).key);
     if (!cuc) return notFound(reply, "credential use case not found");
     if (!modeGate(request, reply, cuc)) return reply;
-    return cuc;
+    return certificateDesignVisible(request, cuc);
   });
 
   // Load every org a credential-use-case definition references (bound issuer,
@@ -1016,7 +1081,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
    */
   async function checkBackgroundDocument(
     background: { documentId?: unknown; sha256?: unknown } | null | undefined,
-    opts: { requirePin: boolean },
+    opts: { requirePin: boolean; owner?: { orgId: string | null | undefined; bypass: boolean } },
   ): Promise<{ error: string; message: string } | null> {
     if (!background || typeof background.documentId !== "string") return null;
     const documentId = background.documentId;
@@ -1033,7 +1098,19 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     }
     const doc = await deps.documents.get(documentId).catch(() => null);
     if (!doc) {
-      if (!opts.requirePin) return null; // the render-time fallback is the guard on these doors
+      if (!opts.requirePin && !opts.owner) return null; // the render-time fallback is the guard on those doors
+      return { error: "BACKGROUND_DOCUMENT_NOT_FOUND", message: `certificate background document '${documentId}' not found` };
+    }
+    // OWNERSHIP BEFORE ANY OTHER FACT ABOUT THE DOCUMENT, and answering exactly
+    // as if it did not exist.
+    //
+    // The three refusals below are an oracle over the whole document store if
+    // they run first: "not found" / "is application/pdf" / "wrong digest" tell
+    // an unauthorised caller whether an id exists and what type it is, from a
+    // principal `canReadDoc` refuses outright — and the content type was in the
+    // message. A caller who may not use these bytes learns nothing about them
+    // beyond the id they already had.
+    if (opts.owner && !opts.owner.bypass && !orgOwnsDocument(doc, opts.owner.orgId)) {
       return { error: "BACKGROUND_DOCUMENT_NOT_FOUND", message: `certificate background document '${documentId}' not found` };
     }
     if (!isRenderableArtwork(doc.contentType)) {
@@ -1330,8 +1407,32 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     // Validate the DRAFT exactly as saving would, so a design that previews
     // cannot fail to save. Throws INVALID_CERTIFICATE_PLACEMENT → 400.
     validateCertificatePlacements(spec.certificate?.placements, Object.keys(spec.claimSchema.properties), spec.name || "credential type");
-    const badBackground = await checkBackgroundDocument(spec.certificate?.background, { requirePin: false });
-    if (badBackground) return reply.code(400).send(badBackground);
+    // THE OWNERSHIP CHECK BELONGS HERE MOST OF ALL. This route renders whatever
+    // document the draft names into a PDF it hands back — so without it, any
+    // OrgAdmin reads any stored PNG or JPEG in the system, while
+    // `GET /documents/:id` answers 403 for the same session. EN-F's review
+    // closed that for a tokenization Buyer with the role gate above and left it
+    // open for every OrgAdmin; a pin does not close it either, because this
+    // door never required one.
+    const badBackground = await checkBackgroundDocument(spec.certificate?.background, {
+      requirePin: false,
+      owner: { orgId: actor.orgId, bypass: actor.role === "PlatformAdmin" },
+    });
+    // ARTWORK YOU MAY NOT USE IS TREATED EXACTLY AS ARTWORK THAT IS NOT THERE.
+    //
+    // Two properties have to hold at once here, and refusing outright breaks the
+    // second. EN-F pinned that a background naming a missing document FALLS BACK
+    // to the built-in layout rather than erroring, because the editor must not
+    // 400 mid-keystroke over a file the designer just deleted. But if a foreign
+    // document 400'd while a nonexistent one rendered, the difference between
+    // the two answers would itself disclose which ids exist — the oracle this
+    // change exists to remove. So both produce the same preview: our layout,
+    // none of those bytes, no statement about whether the id is real.
+    if (badBackground?.error === "BACKGROUND_DOCUMENT_NOT_FOUND") {
+      if (spec.certificate) spec.certificate = { ...spec.certificate, background: undefined };
+    } else if (badBackground) {
+      return reply.code(400).send(badBackground);
+    }
 
     // A fabricated credential: every value is visibly sample data, and the id is
     // not a real one, so the QR resolves to a status route that answers 404.
@@ -1497,15 +1598,37 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       }
     }
     if (b.background) {
-      const problem = await checkBackgroundDocument(b.background, { requirePin: true });
+      // Owned by THE USE CASE'S org, not by the caller's — a PlatformAdmin
+      // acting for an org has no `orgId` of their own, and the artwork belongs
+      // to the programme either way. `bypass` is theirs because they can
+      // already read every document through `GET /documents/:id`.
+      const problem = await checkBackgroundDocument(b.background, {
+        requirePin: true,
+        owner: { orgId: existing.ownerOrgId, bypass: (request.user as TokenClaims).role === "PlatformAdmin" },
+      });
       if (problem) return reply.code(400).send(problem);
     }
 
-    // `enabled` is preserved when a block exists and never toggled here. With
-    // NO block, one is created enabled: the render route requires
-    // `enabled === true`, an OrgAdmin cannot set it any other way, and refusing
-    // would rebuild the dead end this route exists to remove.
+    // `enabled` is preserved when a block exists and is NEVER toggled here.
+    //
+    // With no block at all, one is created only when the caller ASKS, with
+    // `enabled: true`. The first version created one implicitly, on the
+    // reasoning that an OrgAdmin has no other way to switch certificates on and
+    // refusing would rebuild the dead end this route exists to remove. What that
+    // reasoning missed is the OTHER end: `GET /credentials/{id}/certificate.pdf`
+    // is PUBLIC and UNAUTHENTICATED, and it answers 404 until
+    // `certificate.enabled` is true. So designing a layout for a type that had
+    // no certificate block silently turned every already-issued credential of
+    // that type into a downloadable PDF of its subject's claims — proved by
+    // execution: 404 before, 200 with the claims after, no one having asked for
+    // publication. Switching that on is a decision, so it must be written down.
     const current = type.certificate;
+    if (!current && (request.body as { enabled?: unknown }).enabled !== true) {
+      return reply.code(400).send({
+        error: "CERTIFICATE_NOT_ENABLED",
+        message: `credential type '${type.name}' has no certificate configured, and enabling one publishes a PUBLIC, unauthenticated PDF of every already-issued credential's claims at /credentials/{id}/certificate.pdf. Send 'enabled: true' to confirm that is intended.`,
+      });
+    }
     const certificate = {
       ...(current ?? { enabled: true }),
       ...(b.background === undefined ? {} : b.background === null ? { background: undefined } : { background: b.background }),
@@ -1571,7 +1694,11 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     }
     // Reuses the shared storer, so size caps, the empty-body refusal and the
     // store's own allowlist cannot drift from the general upload route.
-    const doc = await storeUploadedDocument(deps.documents, b);
+    //
+    // OWNED BY THE PROGRAMME'S ORG, not by the uploader: a PlatformAdmin
+    // uploading artwork for a tenant is acting for that tenant, and the design
+    // route checks the same org, so the two agree by construction.
+    const doc = await storeUploadedDocument(deps.documents, b, existing.ownerOrgId ?? null);
     return reply.code(201).send({ documentId: doc.id, sha256: doc.sha256, size: doc.size });
   });
 
@@ -3364,7 +3491,10 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
   // cannot read the document back — only authenticated reviewers can.
   app.post("/orgs/register/documents", { schema: S.uploadKybDocument, bodyLimit: DOC_UPLOAD_BODY_LIMIT }, async (request, reply) => {
     if (loginThrottled(request.ip)) return reply.code(429).send({ error: "TOO_MANY_REQUESTS", message: "too many attempts; try again later" });
-    const doc = await storeUploadedDocument(deps.documents, request.body as { contentType: string; dataBase64: string });
+    // Unowned by definition: this runs BEFORE the organization exists. Nothing
+    // can later claim these bytes on ownership grounds, which is right — a KYB
+    // certificate is reviewed by the platform, never re-served to a tenant.
+    const doc = await storeUploadedDocument(deps.documents, request.body as { contentType: string; dataBase64: string }, null);
     return reply.code(201).send({ id: doc.id, sha256: doc.sha256, size: doc.size });
   });
 
@@ -5903,7 +6033,10 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
   app.post("/documents", { schema: S.uploadDocument, bodyLimit: DOC_UPLOAD_BODY_LIMIT, ...auth }, async (request, reply) => {
     const actor = actorOf(request);
     if (!deps.rbac.can(actor.role, "issue")) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to upload documents" });
-    const doc = await storeUploadedDocument(deps.documents, request.body as { contentType: string; dataBase64: string });
+    // The uploader's own org, or null for a desk operator who belongs to none.
+    // Null here is not a loophole: every ownership gate requires a non-null
+    // match, so an unowned document is referenceable only by a PlatformAdmin.
+    const doc = await storeUploadedDocument(deps.documents, request.body as { contentType: string; dataBase64: string }, (request.user as TokenClaims).orgId ?? null);
     return reply.code(201).send({ id: doc.id, url: `/api/v1/documents/${doc.id}`, sha256: doc.sha256, size: doc.size });
   });
   app.get("/documents/:id", { schema: S.getDocument, ...authScoped("assets:read") }, async (request, reply) => {
