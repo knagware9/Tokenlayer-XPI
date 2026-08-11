@@ -1191,14 +1191,25 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     // already owns these bytes" is not quite what reaches this line. Two
     // shapes do: (a) `opts.owner` is set and the caller passed the ownership
     // check, or is a PlatformAdmin whose `bypass` skips it on purpose; (b)
-    // `opts.owner` is absent entirely — `checkDefinitionBackgrounds`'s call
-    // never passes one — but both routes that reach this function that way
-    // (`POST`/`PATCH /credential-use-cases`) are PlatformAdmin-only already,
-    // checked before either ever calls in here. So the caller is always
-    // either the document's own org or a PlatformAdmin, never an arbitrary
-    // unauthorized one, and this discloses nothing such a caller could use —
-    // the same reasoning that puts `BACKGROUND_NOT_AN_IMAGE` below the
-    // ownership check rather than above it.
+    // `opts.owner` is absent entirely, which is how `checkDefinitionBackgrounds`
+    // calls in.
+    //
+    // THREE routes reach it that way, and they are NOT all PlatformAdmin-only —
+    // an earlier draft of this comment named two and called them both platform
+    // routes, which was simply wrong. `POST` and `PATCH /credential-use-cases`
+    // are PlatformAdmin-only; `POST /credential-use-cases/provision` admits an
+    // OrgAdmin too. What keeps that third door harmless is not rank but SHAPE:
+    // it builds its definition through `instantiateTemplate`, which constructs
+    // `certificate` with no `background` key at all (deliberately — a letterhead
+    // is not the reusable part of a template), so `background` is structurally
+    // absent and this function returns at the `typeof documentId !== "string"`
+    // guard long before reaching here. An OrgAdmin cannot steer a document id
+    // into this branch.
+    //
+    // So the caller here is always either the document's own org or a
+    // PlatformAdmin, never an arbitrary unauthorized one, and this discloses
+    // nothing such a caller could use — the same reasoning that puts
+    // `BACKGROUND_NOT_AN_IMAGE` below the ownership check rather than above it.
     //
     // The cost is that an org whose mark IS its letterhead uploads the file
     // twice, once at each door. The doors are already separate; a provable
@@ -1226,6 +1237,17 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
    * that matters for the prune — is the named document a brand logo — and
    * leaves the rest of that pre-existing gap exactly as it was; widening it
    * further is a separate task, not this one.
+   *
+   * WHAT THAT COSTS, STATED RATHER THAN GLOSSED. Because there is no ownership
+   * check to sit behind, this refusal is a one-bit oracle: naming an id here
+   * and getting `CERTIFICATE_LOGO_IS_BRAND_LOGO` back tells the caller that id
+   * is some organization's mark, and an OrgAdmin can reach this door. That is
+   * accepted, not overlooked. Document ids are cuids, so the oracle answers
+   * only for ids a caller already holds, and the one bit it yields — "this is a
+   * brand logo" — is strictly less than the bytes `GET /documents/:id` already
+   * refuses them. Ordering it behind an ownership check, as
+   * `checkBackgroundDocument` does, would be strictly better and belongs with
+   * the rest of the pre-existing gap when someone closes it.
    */
   async function checkCertificateLogoDocument(logoDocumentId: unknown): Promise<{ error: string; message: string } | null> {
     if (typeof logoDocumentId !== "string" || !logoDocumentId.trim()) return null;
