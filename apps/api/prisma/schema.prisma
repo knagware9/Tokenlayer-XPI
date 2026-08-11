@@ -248,7 +248,7 @@ model Document {
   // The prune's own query: every row a given org owns for a given purpose.
   // The table carries up to 5 MB of inline `bytes` per row, so a scan here
   // (rather than an index seek) would be the first document read to actually
-  // hurt — matching the fifteen other `@@index` declarations in this schema.
+  // hurt — matching the other `@@index` declarations throughout this schema.
   @@index([ownerOrgId, purpose])
 }
 
