@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api.js";
 import { useAuth } from "../auth.js";
+import { canDesignCertificate } from "../lib/certificate-access.js";
 import { modeLabel, modeOf, modeTone } from "../lib/modes.js";
 import type { CredentialUseCase, Organization } from "../types.js";
+import { CertificateDesignPanel } from "./CertificateDesignPanel.js";
 import { CredentialUseCaseBuilder } from "./CredentialUseCaseBuilder.js";
 import { IssueUsecaseCredential } from "./IssueUsecaseCredential.js";
 import { ProvisionFromTemplate } from "./ProvisionFromTemplate.js";
@@ -28,6 +30,9 @@ export function IdentityHome(): JSX.Element {
   const [showBuilder, setShowBuilder] = useState(false);
   const [showProvision, setShowProvision] = useState(false);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  // The designer needs the full width, so it replaces the list the way the
+  // builder and the provisioner do rather than expanding inside a card.
+  const [designing, setDesigning] = useState<{ key: string; typeName: string } | null>(null);
   const isPlatformAdmin = user?.role === "PlatformAdmin";
   // The provisioning API allows an OrgAdmin to stand up a use case for their own
   // org as well as a PlatformAdmin acting platform-wide.
@@ -48,6 +53,18 @@ export function IdentityHome(): JSX.Element {
   }, [token]);
 
   useEffect(() => reload(), [reload]);
+
+  const designingUseCase = designing ? useCases?.find((u) => u.key === designing.key) : undefined;
+  if (designing && designingUseCase) {
+    return (
+      <CertificateDesignPanel
+        useCase={designingUseCase}
+        credentialTypeName={designing.typeName}
+        onSaved={reload}
+        onClose={() => setDesigning(null)}
+      />
+    );
+  }
 
   if (showBuilder) {
     return (
@@ -159,9 +176,23 @@ export function IdentityHome(): JSX.Element {
                 </p>
               )}
               {u.description && <p className="text-xs text-slate-500 mt-2 line-clamp-3">{u.description}</p>}
-              <div className="flex flex-wrap gap-1 mt-3">
+              <div className="flex flex-wrap items-center gap-1 mt-3">
                 {u.credentialTypes.map((ct) => (
-                  <Pill key={ct.name} tone="info">{ct.name}</Pill>
+                  <span key={ct.name} className="inline-flex items-center gap-1">
+                    <Pill tone="info">{ct.name}</Pill>
+                    {/* EN-F follow-up: artwork is the ORG's to set on a use case
+                        the org owns. Mirrors the server's ownership gate — see
+                        `canDesignCertificate`. */}
+                    {canDesignCertificate(user, u) && (
+                      <button
+                        onClick={() => setDesigning({ key: u.key, typeName: ct.name })}
+                        title={`Design the ${ct.name} certificate`}
+                        className="rounded border border-slate-200 px-1.5 py-0.5 text-[10px] font-medium text-slate-500 hover:border-brand-400 hover:text-brand-700"
+                      >
+                        Design certificate
+                      </button>
+                    )}
+                  </span>
                 ))}
               </div>
               <div className="mt-3 pt-3 border-t border-slate-100 text-[11px] text-slate-500">{bindingSummary(u, orgNames)}</div>
