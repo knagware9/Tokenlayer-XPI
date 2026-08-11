@@ -1336,7 +1336,12 @@ export const S: Record<string, FastifySchema> = {
     },
     // The 200 is opaque image bytes, so there is no field to name — the same
     // deferral `credentialCertificate` and `previewCertificate` already record.
-    response: { ...errs(401, 403, 404) },
+    //
+    // 400 is declared because `credentialType` is a REQUIRED querystring param:
+    // omitting it is answered by the schema layer with VALIDATION_ERROR, before
+    // the handler runs. A response an integrator can actually receive belongs in
+    // the contract whether or not this file's own code produces it.
+    response: { ...errs(400, 401, 403, 404) },
   },
   provisionUseCase: {
     tags: ["Credential Use Cases"], summary: "One-step enterprise provisioning from a template: ensure the issuer org, instantiate the bound credential use case, and optionally create scoped desk users (PlatformAdmin; OrgAdmin scoped to their own org)", security: eitherCredential,
