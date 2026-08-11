@@ -263,6 +263,15 @@ export const api = {
     request<Organization>(`/orgs/${encodeURIComponent(id)}/capabilities`, token, { method: "PATCH", body: JSON.stringify({ capabilities }) }),
   requestOrgCapabilities: (token: string, id: string, capabilities: OrgCapabilities) =>
     request<{ proposal: Proposal }>(`/orgs/${encodeURIComponent(id)}/capabilities/request`, token, { method: "POST", body: JSON.stringify({ capabilities }) }),
+  // EN-E branding. An OMITTED key leaves that column alone; an explicit `null`
+  // clears it — so build the body by presence, never by truthiness.
+  updateBranding: (token: string, orgId: string, body: { brandLogoDocumentId?: string | null; brandAccent?: string | null }) =>
+    request<Organization>(`/orgs/${encodeURIComponent(orgId)}/branding`, token, { method: "PATCH", body: JSON.stringify(body) }),
+  // NOT `uploadDocument`: `POST /documents` gates on the `issue` capability and
+  // an OrgAdmin does not hold it, so the role this editor exists for would get
+  // a 403 there. This dedicated door is gated like the branding PATCH itself.
+  uploadBrandLogo: (token: string, orgId: string, contentType: string, dataBase64: string) =>
+    request<{ id: string; sha256: string; size: number }>(`/orgs/${encodeURIComponent(orgId)}/branding/logo`, token, { method: "POST", body: JSON.stringify({ contentType, dataBase64 }) }),
   orgMembers: (token: string, id: string) => request<OrgMember[]>(`/orgs/${encodeURIComponent(id)}/members`, token),
   createMember: (token: string, id: string, body: { email: string; password: string; role: string; useCaseKey?: string; walletAddress?: string }) =>
     request<{ id: string; did: string; membershipVc: boolean }>(`/orgs/${encodeURIComponent(id)}/users`, token, { method: "POST", body: JSON.stringify(body) }),

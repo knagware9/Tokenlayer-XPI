@@ -1,9 +1,46 @@
+import { useEffect, useRef, useState } from "react";
+import { api } from "../api.js";
 import { useAuth } from "../auth.js";
 import type { DomainDef, DomainKey } from "../domains.js";
+import { brandCssVars } from "../lib/branding.js";
 import { Logo } from "./Logo.js";
 import { Icon, type IconName } from "./ui.js";
 
 export type NavItem = { id: string; label: string; icon: IconName; pinned?: boolean };
+
+/**
+ * EN-E: the org's mark as an object URL, or null.
+ *
+ * `GET /documents/:id` requires a bearer token and an `<img src>` sends none,
+ * so the bytes have to be fetched and wrapped. Every URL created here is
+ * revoked when the id changes and when the shell unmounts — otherwise each
+ * logo change would strand a blob for the life of the tab.
+ */
+export function useOrgLogo(documentId: string | null | undefined, token: string | null): string | null {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!documentId || !token) { setUrl(null); return; }
+    let objectUrl: string | null = null;
+    // A slow fetch that resolves after the id changed must not install its blob
+    // over the newer one — and its URL is revoked in this effect's own cleanup.
+    let cancelled = false;
+    void api.downloadDocument(token, documentId)
+      .then((blob) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setUrl(objectUrl);
+      })
+      // A missing or unreadable logo is not worth an error surface in the
+      // chrome: the platform mark beside it is already the identity.
+      .catch(() => { if (!cancelled) setUrl(null); });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      setUrl(null);
+    };
+  }, [documentId, token]);
+  return url;
+}
 
 /**
  * The single left-sidebar console shell shared by every authenticated role.
@@ -27,7 +64,21 @@ export function AppShell({
   activeDomain?: DomainKey;
   onDomainChange?: (d: DomainKey) => void;
 }): JSX.Element {
-  const { user } = useAuth();
+  const { user, token, refreshSession } = useAuth();
+  const orgLogo = useOrgLogo(user?.brandLogoDocumentId, token);
+
+  // `POST /auth/login` does not carry the brand — only `GET /me` does — so a
+  // freshly signed-in (or localStorage-restored) session arrives with the two
+  // fields ABSENT and would paint the platform palette at a branded org. One
+  // refresh fills them in; `null` is a real answer, so this cannot loop. The
+  // ref stops a failed request from retrying on every render.
+  const brandKnown = user?.brandAccent !== undefined;
+  const asked = useRef(false);
+  useEffect(() => {
+    if (!user || brandKnown || asked.current) return;
+    asked.current = true;
+    void refreshSession().catch(() => undefined);
+  }, [user, brandKnown, refreshSession]);
 
   const main = items.filter((i) => !i.pinned);
   const pinned = items.filter((i) => i.pinned);
@@ -49,11 +100,22 @@ export function AppShell({
   };
 
   return (
-    <div className="flex min-h-screen">
+    // EN-E: six custom properties and the whole app follows, because every
+    // `brand-*` class reads them. A member of an unbranded org gets `{}`, which
+    // sets nothing and leaves the :root defaults standing.
+    <div className="flex min-h-screen" style={brandCssVars(user?.brandAccent) as React.CSSProperties}>
       {/* Fixed, always-visible left navigation — static on every screen size. */}
       <aside className="w-64 shrink-0 bg-ink border-r border-ink-700 flex flex-col sticky top-0 h-screen">
-        <div className="px-5 h-16 flex items-center shrink-0">
-          <Logo onDark size={30} />
+        <div className="px-4 h-16 flex items-center gap-3 shrink-0 min-w-0">
+          <Logo onDark size={orgLogo ? 26 : 30} />
+          {orgLogo && (
+            <>
+              {/* The platform mark stays: this is XI Tokenize operated FOR the
+                  org, not white-label, and the two marks say exactly that. */}
+              <span className="w-px h-6 bg-white/20 shrink-0" aria-hidden="true" />
+              <img src={orgLogo} alt="" className="h-7 max-w-[5.5rem] object-contain shrink-0" />
+            </>
+          )}
         </div>
         {domains && domains.length > 1 && activeDomain && onDomainChange && (
           <div className="px-3 pt-1 pb-2">
