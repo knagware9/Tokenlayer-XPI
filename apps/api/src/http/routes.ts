@@ -1194,7 +1194,17 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     if (opts.requirePin && !pin) {
       return { error: "BACKGROUND_PIN_REQUIRED", message: `certificate background must carry the artwork's sha256 alongside documentId '${documentId}'` };
     }
-    const doc = await deps.documents.get(documentId).catch(() => null);
+    // NO `.catch(() => null)`, and the distinction it used to blur is the point.
+    // `DocumentRepository.get` already resolves "no such row" to `null` without
+    // throwing, in both implementations — so the only thing a catch here could
+    // swallow is a REAL repository failure, and swallowing that makes an
+    // UNREADABLE document indistinguishable from an ABSENT one. On the
+    // `checkDefinitionBackgrounds` path, where neither `owner` nor `requirePin`
+    // is set, absent means ALLOWED (the line below), so a transient blip would
+    // write a brand-logo background into a definition permanently with nothing
+    // left to revalidate it. Absent is a documented pass; unreadable is a
+    // different fact and must not borrow its answer. Let it propagate.
+    const doc = await deps.documents.get(documentId);
     if (!doc) {
       if (!opts.requirePin && !opts.owner) return null; // the render-time fallback is the guard on those doors
       return { error: "BACKGROUND_DOCUMENT_NOT_FOUND", message: `certificate background document '${documentId}' not found` };
