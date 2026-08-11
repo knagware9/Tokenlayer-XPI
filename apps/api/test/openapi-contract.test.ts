@@ -415,6 +415,11 @@ const DOCUMENTATION_DEFERRED: Record<string, string> = {
   // coerce it. The route's `description` documents the map and its value shape
   // instead; that is the honest form of this particular answer.
   "GET /credential-templates": "a map keyed by credential-type name — data-shaped keys, not enumerable properties",
+  // The org's own artwork, served back to the designer canvas. The 200 is the
+  // stored image itself, so there is no field to name; declaring a JSON 2xx
+  // would let fast-json-stringify take an interest in bytes it must pass
+  // through untouched.
+  "GET /credential-use-cases/:key/certificate/artwork": "returns opaque image bytes, not a JSON object",
 };
 
 type ResponseSchema = { response?: Record<string, unknown>; tags?: string[]; description?: string };

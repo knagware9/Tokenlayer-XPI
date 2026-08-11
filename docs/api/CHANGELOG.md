@@ -64,10 +64,48 @@ stripped when it is stored — templates are readable by any authenticated user,
 and one tenant's letterhead must not become another's. The instantiating
 organization uploads their own.
 
-**Today this is configured BY THE PLATFORM OPERATOR.** `background` is writable
-only through `POST`/`PATCH /credential-use-cases`, which are PlatformAdmin-only;
-the org self-service path (`provision`) goes through template instantiation and
-therefore carries no artwork. Organization-owned artwork upload is a follow-up.
+**New: `PATCH /credential-use-cases/{key}/certificate`** — `usecases:provision`
+plus a PlatformAdmin, or an OrgAdmin whose organization **owns** the use case
+(`ownerOrgId`). This is how an organization sets its own artwork. It writes
+`certificate.background` and `certificate.placements` on ONE named credential
+type and nothing else: every other field of the definition is read from storage,
+so sending `issuer`, `sandbox`, `ownerOrgId` or `key` alongside changes none of
+them. Omit a field to leave it unchanged; `background: null` drops the artwork
+(reverting to the built-in layout) and `placements: []` clears the layout.
+Editing the rest of a credential use case remains PlatformAdmin-only.
+
+**New: `POST` / `GET /credential-use-cases/{key}/certificate/artwork`** — same
+scope, same ownership rule. `POST` stores the artwork and returns
+`{documentId, sha256}`; `GET ?credentialType=<name>` returns the bytes that
+type's design currently uses, and takes **no document id** — the use case you
+own is the capability, so a stored document no design references is not
+reachable through it. These exist because `POST /documents` and
+`GET /documents/{id}` are restricted to issue-capable roles, which an Org Admin
+is not: the general document store holds off-ledger invoice evidence, so the
+capability is bounded by the use case you own rather than granted over the
+store.
+
+**Artwork must be `image/png` or `image/jpeg`** — **415** otherwise. This is
+narrower than `image/*` on purpose: the renderer is pdfkit's `openImage`, which
+draws nothing else, so a `image/webp` background would have stored with a 201,
+looked right in the designer, and then silently printed the built-in layout on
+every certificate.
+
+**`background` now takes an optional `sha256`** — the digest the document store
+recorded for those exact bytes, `0x`-prefixed. The org route above **requires**
+it and refuses a document that does not exist, does not hash to it, or is not
+renderable artwork. The three older doors (`POST`/`PATCH /credential-use-cases`
+and `preview-certificate`) verify a `sha256` you supply and refuse a
+non-renderable one, but still accept a bare `documentId`, including one naming a
+document that has since been deleted: that case degrades to the built-in layout
+at render time, and that behaviour is unchanged.
+
+**ACTION REQUIRED only if you wrote `background` before this release and want to
+edit it through the new org route.** A stored background with no `sha256` can be
+kept or removed, but not edited in place — the org route will not accept a
+pinless background, and nothing can honestly produce a digest for bytes the
+caller did not upload. Re-upload the artwork to pin it. Existing certificates
+render exactly as before either way.
 
 ---
 

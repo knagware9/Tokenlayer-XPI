@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ApiKeyRecord, AssetRecord, CashflowRecord, CompanyProfile, CredentialRecord, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord, WebhookEndpointRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
-import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, certificatePageSize, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, issueCredential, issuerBindingAllows, modeAllows, normalizeUseCaseDefinition, ORG_OPERATING_ROLES, orgDomainEnabled, orgRoleEnabled, PolicyError, presentCredential, presentCredentials, SANDBOX_CHAIN_ID, sandboxChainsValid, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateCertificatePlacements, validateCredentialUseCase, validateEventTypes, validateMetadata, scopeAllows, validateOrgCapabilities, validateScopes, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ApiScope, type ChainEntry, type CredentialTypeSpec, type CredentialUseCaseDefinition, type LifecycleAction, type OrgDomain, type OrgOperatingRole, type OrgType, type ResourceMode, type Role, type UseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
+import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, certificatePageSize, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, isDocumentSha256, issueCredential, issuerBindingAllows, modeAllows, normalizeUseCaseDefinition, ORG_OPERATING_ROLES, orgDomainEnabled, orgRoleEnabled, PolicyError, presentCredential, presentCredentials, SANDBOX_CHAIN_ID, sandboxChainsValid, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateCertificatePlacements, validateCredentialUseCase, validateEventTypes, validateMetadata, scopeAllows, validateOrgCapabilities, validateScopes, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, type Actor, type ApiScope, type CertificateFieldPlacement, type ChainEntry, type CredentialTypeSpec, type CredentialUseCaseDefinition, type LifecycleAction, type OrgDomain, type OrgOperatingRole, type OrgType, type ResourceMode, type Role, type UseCaseDefinition, type UseCaseTemplate } from "@tokenlayer/core";
 import qrcode from "qrcode";
 import type { AppDeps } from "../context.js";
 import { certificateStatusBanner, humanizeKey, renderCredentialCertificate } from "../certificate.js";
@@ -979,6 +979,83 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     return out;
   }
 
+  /**
+   * The artwork formats the renderer can actually DRAW, which is narrower than
+   * "an image": `openArtwork` is pdfkit's `openImage`, and that reads PNG and
+   * JPEG and nothing else. An `image/webp` background passes an `image/*` check,
+   * stores with a 201, renders on the browser canvas — and then degrades to the
+   * built-in layout on every real certificate, with nothing telling the customer
+   * why their design vanished. The designer's file input offered webp, so this
+   * was reachable by accident rather than by attack.
+   */
+  const RENDERABLE_ARTWORK_TYPES = new Set(["image/png", "image/jpeg"]);
+  const isRenderableArtwork = (contentType: string): boolean =>
+    RENDERABLE_ARTWORK_TYPES.has(contentType.toLowerCase().trim());
+
+  /**
+   * What a `certificate.background` may name, checked at the WRITE.
+   *
+   * `documentId` was bound to nothing: validation asked only for a non-empty
+   * string, and both renderers read whatever id they were handed with no
+   * content-type check. This is the write-time half of that; the render keeps
+   * its fallback, because a document can be deleted long after a config was
+   * written and a missing one must not turn every certificate of that type into
+   * an error.
+   *
+   * `requirePin` is the difference between the two kinds of door. The
+   * org-scoped design route sets it: `documentId` alone is a guessable
+   * reference, and a pin is what proves the caller has actually seen the file.
+   * The three pre-existing PlatformAdmin doors leave it false, so a bare
+   * documentId — including one naming nothing — keeps working exactly as it did
+   * before, which is what `certificate-artwork.test.ts` pins.
+   *
+   * Returns null when there is nothing to refuse; otherwise the coded 400 the
+   * caller sends. Never replies itself: three of its four call sites are inside
+   * loops over credential types, where a helper that had already answered would
+   * be a second reply on the same request.
+   */
+  async function checkBackgroundDocument(
+    background: { documentId?: unknown; sha256?: unknown } | null | undefined,
+    opts: { requirePin: boolean },
+  ): Promise<{ error: string; message: string } | null> {
+    if (!background || typeof background.documentId !== "string") return null;
+    const documentId = background.documentId;
+    // A pin in the wrong SHAPE is a caller error, not an absent pin. Answering
+    // "you must supply a pin" to someone who just did sends them looking in the
+    // wrong place — and on the preview door, where no definition validator runs
+    // first, a malformed pin would otherwise skip verification entirely.
+    if (background.sha256 !== undefined && !isDocumentSha256(background.sha256)) {
+      return { error: "BACKGROUND_PIN_MALFORMED", message: `certificate background sha256 must be a 0x-prefixed 64-character lowercase hex digest, as POST /credential-use-cases/{key}/certificate/artwork returns it` };
+    }
+    const pin = isDocumentSha256(background.sha256) ? background.sha256 : null;
+    if (opts.requirePin && !pin) {
+      return { error: "BACKGROUND_PIN_REQUIRED", message: `certificate background must carry the artwork's sha256 alongside documentId '${documentId}'` };
+    }
+    const doc = await deps.documents.get(documentId).catch(() => null);
+    if (!doc) {
+      if (!opts.requirePin) return null; // the render-time fallback is the guard on these doors
+      return { error: "BACKGROUND_DOCUMENT_NOT_FOUND", message: `certificate background document '${documentId}' not found` };
+    }
+    if (!isRenderableArtwork(doc.contentType)) {
+      return { error: "BACKGROUND_NOT_AN_IMAGE", message: `certificate background document '${documentId}' is ${doc.contentType}; artwork must be image/png or image/jpeg — the renderer can draw nothing else` };
+    }
+    if (pin && pin !== doc.sha256) {
+      return { error: "BACKGROUND_DOCUMENT_MISMATCH", message: `certificate background document '${documentId}' does not match the supplied sha256` };
+    }
+    return null;
+  }
+
+  /** `checkBackgroundDocument` across every credential type of a definition. */
+  async function checkDefinitionBackgrounds(
+    def: { credentialTypes?: Array<{ certificate?: { background?: { documentId?: unknown; sha256?: unknown } | null } }> },
+  ): Promise<{ error: string; message: string } | null> {
+    for (const ct of def.credentialTypes ?? []) {
+      const problem = await checkBackgroundDocument(ct.certificate?.background, { requirePin: false });
+      if (problem) return problem;
+    }
+    return null;
+  }
+
   // EN-A config-time envelope gates for a credential-use-case definition: a
   // bound issuer org must be an identity-domain Issuer, every LISTED verifier
   // org a Verifier, and an owner org identity-domained. Null envelopes (legacy
@@ -1027,6 +1104,8 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     } catch (err) {
       return reply.code(400).send({ error: "INVALID_CREDENTIAL_USECASE", message: (err as Error).message });
     }
+    const badBackground = await checkDefinitionBackgrounds(def);
+    if (badBackground) return reply.code(400).send(badBackground);
     const violation = await credentialUseCaseCapabilityViolation(def, known);
     if (violation) return orgCapabilityMissing(reply, violation.org, violation.missing);
     const created = await deps.credentialUseCases.create({ ...def, ownerOrgId: def.ownerOrgId ?? null });
@@ -1053,6 +1132,8 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     } catch (err) {
       return reply.code(400).send({ error: "INVALID_CREDENTIAL_USECASE", message: (err as Error).message });
     }
+    const badBackground = await checkDefinitionBackgrounds(def);
+    if (badBackground) return reply.code(400).send(badBackground);
     const ownerOrgId = def.ownerOrgId ?? existing.ownerOrgId ?? null;
     const violation = await credentialUseCaseCapabilityViolation({ ...def, ownerOrgId }, known);
     if (violation) return orgCapabilityMissing(reply, violation.org, violation.missing);
@@ -1249,6 +1330,8 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     // Validate the DRAFT exactly as saving would, so a design that previews
     // cannot fail to save. Throws INVALID_CERTIFICATE_PLACEMENT → 400.
     validateCertificatePlacements(spec.certificate?.placements, Object.keys(spec.claimSchema.properties), spec.name || "credential type");
+    const badBackground = await checkBackgroundDocument(spec.certificate?.background, { requirePin: false });
+    if (badBackground) return reply.code(400).send(badBackground);
 
     // A fabricated credential: every value is visibly sample data, and the id is
     // not a real one, so the QR resolves to a status route that answers 404.
@@ -1322,6 +1405,209 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       .header("x-content-type-options", "nosniff")
       .header("content-disposition", 'inline; filename="certificate-preview.pdf"')
       .send(pdf);
+  });
+
+  /**
+   * The credential use case a caller may DESIGN CERTIFICATES for, or null when
+   * it has already been refused (this helper replies, so a caller that forgets
+   * to act on the null cannot leak a second reply).
+   *
+   * THREE CHECKS, AND EACH ONE HAS BEEN THE MISSING ONE SOMEWHERE IN THIS FILE.
+   *
+   * 1. THE ROLE. `authScoped` composes `requireScope`, which short-circuits on
+   *    `if (!key) return` — scopes are a property of API KEYS, so a human JWT
+   *    session passes it unconditionally. Without an explicit role predicate
+   *    these routes would be open to every authenticated user, which is exactly
+   *    what the EN-F final review proved on `preview-certificate` by walking a
+   *    seeded tokenization Buyer through it.
+   *
+   * 2. THE MODE. `modeGate` against the STORED record, so a `tl_test_` key
+   *    cannot edit a live programme's certificates and vice versa.
+   *
+   * 3. THE OWNER, guarded on `claims.orgId` FIRST. A legacy or platform-owned
+   *    record carries `ownerOrgId: null` and a caller without an org carries
+   *    `orgId: undefined`/`null`; written as a bare `===` those two answer
+   *    "owned by me" for a use case nobody owns. Null-as-allow is the shape
+   *    EN-B, EN-D2 and EN-F each produced once, so the emptiness check comes
+   *    before the comparison rather than being implied by it.
+   */
+  async function ownedCredentialUseCase(
+    request: FastifyRequest, reply: FastifyReply, key: string,
+  ): Promise<CredentialUseCaseDefinition | null> {
+    const claims = request.user as TokenClaims;
+    if (claims.role !== "PlatformAdmin" && claims.role !== "OrgAdmin") {
+      await reply.code(403).send({ error: "FORBIDDEN", message: "only a platform admin or org admin may design certificates" });
+      return null;
+    }
+    const existing = await deps.credentialUseCases.get(key);
+    if (!existing) { notFound(reply, "credential use case not found"); return null; }
+    if (!modeGate(request, reply, existing)) return null;
+    if (claims.role !== "PlatformAdmin") {
+      const orgId = typeof claims.orgId === "string" ? claims.orgId.trim() : "";
+      if (!orgId || existing.ownerOrgId !== orgId) {
+        await reply.code(403).send({ error: "FORBIDDEN", message: `credential use case '${key}' is owned by another organization` });
+        return null;
+      }
+    }
+    return existing;
+  }
+
+  /**
+   * EN-F follow-up: THE ORG'S OWN DOOR ONTO ITS OWN CERTIFICATE DESIGN.
+   *
+   * EN-F shipped the designer and left `background` writable only through
+   * `POST`/`PATCH /credential-use-cases`, both PlatformAdmin-only — while the
+   * org self-service path (`provision`) instantiates a template, which drops
+   * artwork on purpose. So "let an issuing organization upload their own
+   * certificate artwork" was delivered as "the platform operator does it for
+   * them". This is the missing door, and it is deliberately NOT the definition
+   * PATCH opened up: issuer binding, holder policy and claim schemas stay
+   * platform-governed.
+   *
+   * THE DEFINITION WRITTEN IS THE STORED ONE. Only
+   * `credentialTypes[i].certificate.{background,placements}` is taken from the
+   * body; `key`, `sandbox`, `ownerOrgId` and every binding are read back from
+   * storage, so an extra field in the request is inert rather than trusted.
+   *
+   * Absent means UNCHANGED and explicit means CLEAR — `background: null` drops
+   * the artwork (reverting to the built-in layout) and `placements: []` empties
+   * the layout. Without the distinction there is no way to remove artwork here,
+   * and reverting is a thing an org legitimately wants.
+   */
+  app.patch("/credential-use-cases/:key/certificate", { schema: S.updateCertificateDesign, ...authScoped("usecases:provision") }, async (request, reply) => {
+    const key = (request.params as { key: string }).key;
+    const existing = await ownedCredentialUseCase(request, reply, key);
+    if (!existing) return reply;
+    const b = request.body as {
+      credentialType: string;
+      background?: { documentId: string; sha256?: string } | null;
+      placements?: unknown;
+    };
+    const index = existing.credentialTypes.findIndex((t) => t.name === b.credentialType);
+    if (index < 0) return notFound(reply, `unknown credential type '${b.credentialType}' in use case '${key}'`);
+    const type = existing.credentialTypes[index] as CredentialTypeSpec;
+
+    if (b.placements !== undefined) {
+      // The same validator both existing doors call, so a design that saves
+      // here cannot be one the definition PATCH would have refused.
+      try {
+        validateCertificatePlacements(b.placements, Object.keys(type.claimSchema.properties ?? {}), type.name);
+      } catch (err) {
+        return reply.code(400).send({ error: "INVALID_CERTIFICATE_PLACEMENT", message: (err as Error).message });
+      }
+    }
+    if (b.background) {
+      const problem = await checkBackgroundDocument(b.background, { requirePin: true });
+      if (problem) return reply.code(400).send(problem);
+    }
+
+    // `enabled` is preserved when a block exists and never toggled here. With
+    // NO block, one is created enabled: the render route requires
+    // `enabled === true`, an OrgAdmin cannot set it any other way, and refusing
+    // would rebuild the dead end this route exists to remove.
+    const current = type.certificate;
+    const certificate = {
+      ...(current ?? { enabled: true }),
+      ...(b.background === undefined ? {} : b.background === null ? { background: undefined } : { background: b.background }),
+      ...(b.placements === undefined ? {} : { placements: b.placements as CertificateFieldPlacement[] }),
+    };
+    if (certificate.background === undefined) delete (certificate as { background?: unknown }).background;
+
+    const credentialTypes = existing.credentialTypes.map((t, i) => (i === index ? { ...t, certificate } : t));
+    const def: CredentialUseCaseDefinition = { ...existing, credentialTypes };
+    // The second door, unchanged: a narrow route that skipped the whole-
+    // definition validator would be a cheaper way into the store than the front
+    // one. Defence in depth today — everything this route can change is already
+    // checked above — so no test pins it, and that is deliberate rather than a
+    // coverage gap. It earns its place the first time a stored definition is
+    // legacy-shaped.
+    const known = await referencedOrgs(def);
+    try {
+      validateCredentialUseCase(def, { orgExists: (id) => known.has(id) });
+    } catch (err) {
+      return reply.code(400).send({ error: "INVALID_CREDENTIAL_USECASE", message: (err as Error).message });
+    }
+    // No capability check: that gate exists for BINDINGS (issuer, verifier,
+    // owner domain), and this route changes none of them. The envelope was
+    // already satisfied when the use case was created.
+    const updated = await deps.credentialUseCases.update(key, def);
+    await deps.audit.append({
+      actorId: (request.user as TokenClaims).id,
+      action: "credential-usecase-updated" as LifecycleAction,
+      payload: { key, credentialType: type.name, certificateDesign: true },
+    });
+    return reply.code(200).send(updated);
+  });
+
+  /**
+   * ARTWORK UPLOAD, SCOPED BY THE USE CASE IT IS FOR.
+   *
+   * `RbacPolicy` grants `OrgAdmin` exactly one action — `read` — so
+   * `POST /documents` (gated on `issue`) and `GET /documents/:id` (gated on
+   * `canReadDoc`) are both closed to the very role this feature is for.
+   * Organizations reach the store today only through
+   * `POST /orgs/register/documents`, which is public because it runs before the
+   * org exists.
+   *
+   * WIDENING `canReadDoc` WAS THE WRONG FIX: it is what keeps stored off-ledger
+   * invoice evidence away from tenants. So the capability is bounded by the use
+   * case instead — you may upload artwork for a programme you own, and the
+   * upload allowlist here is narrower than the store's (images only), because
+   * this door exists for artwork and nothing else.
+   */
+  app.post("/credential-use-cases/:key/certificate/artwork", {
+    schema: S.uploadCertificateArtwork,
+    bodyLimit: DOC_UPLOAD_BODY_LIMIT,
+    ...authScoped("usecases:provision"),
+  }, async (request, reply) => {
+    const key = (request.params as { key: string }).key;
+    const existing = await ownedCredentialUseCase(request, reply, key);
+    if (!existing) return reply;
+    const b = request.body as { contentType: string; dataBase64: string };
+    // The RENDERABLE set, not `image/*`: pdfkit draws PNG and JPEG only, and
+    // accepting a webp here would store artwork that silently never prints.
+    if (!b?.contentType || !isRenderableArtwork(b.contentType)) {
+      return reply.code(415).send({ error: "UNSUPPORTED_DOCUMENT_TYPE", message: "certificate artwork must be image/png or image/jpeg" });
+    }
+    // Reuses the shared storer, so size caps, the empty-body refusal and the
+    // store's own allowlist cannot drift from the general upload route.
+    const doc = await storeUploadedDocument(deps.documents, b);
+    return reply.code(201).send({ documentId: doc.id, sha256: doc.sha256, size: doc.size });
+  });
+
+  /**
+   * The artwork back, for the designer canvas when a saved design is reopened.
+   *
+   * IT ACCEPTS NO DOCUMENT ID. The caller names a credential type, and what is
+   * served is whatever that type's `background` currently points at — so the
+   * use case you own is the whole capability, and a stored document that no
+   * design references is unreachable through this route. Handing it an id
+   * instead would rebuild, behind an ownership check, the same
+   * "any id, no ownership" read that made `background.documentId` worth pinning.
+   *
+   * A just-uploaded file needs no round trip: the browser still holds the
+   * `File` and can render it from a local object URL.
+   */
+  app.get("/credential-use-cases/:key/certificate/artwork", { schema: S.getCertificateArtwork, ...authScoped("usecases:provision") }, async (request, reply) => {
+    const key = (request.params as { key: string }).key;
+    const existing = await ownedCredentialUseCase(request, reply, key);
+    if (!existing) return reply;
+    const typeName = (request.query as { credentialType?: string }).credentialType ?? "";
+    const type = existing.credentialTypes.find((t) => t.name === typeName);
+    if (!type) return notFound(reply, `unknown credential type '${typeName}' in use case '${key}'`);
+    const documentId = type.certificate?.background?.documentId;
+    if (!documentId) return notFound(reply, `credential type '${typeName}' has no certificate artwork`);
+    const doc = await deps.documents.get(documentId).catch(() => null);
+    if (!doc) return notFound(reply, "certificate artwork document not found");
+    // Same headers `GET /documents/:id` sends: pin the stored (allowlisted)
+    // type and forbid sniffing, so stored bytes can never execute as the API
+    // origin. Served INLINE rather than as an attachment — this one is meant to
+    // be rendered into an <img>.
+    return reply
+      .header("content-type", doc.contentType)
+      .header("x-content-type-options", "nosniff")
+      .header("content-disposition", `inline; filename="artwork-${documentId}"`)
+      .send(doc.bytes);
   });
 
   // Validate + create a credential use case from a fully-bound definition, reusing

@@ -29,6 +29,7 @@ interface CredTypeDraft {
   /** EN-F. Full-page artwork; its presence replaces the built-in layout, so the
    *  placements below are inert without it. */
   certBackgroundDocumentId: string;
+  certBackgroundSha256: string;
   certPlacements: CertificateFieldPlacement[];
 }
 
@@ -67,7 +68,7 @@ function templateToFields(spec: CredentialTypeSpec): FieldRow[] {
 const emptyCredType = (): CredTypeDraft => ({
   name: "", title: "", validityDays: 365, requiredApprovals: 1, fields: [], templateKey: "",
   certEnabled: false, certHeading: "", certSubheading: "", certClaimKeys: [], certLogoDocumentId: "",
-  certBackgroundDocumentId: "", certPlacements: [],
+  certBackgroundDocumentId: "", certBackgroundSha256: "", certPlacements: [],
 });
 
 /** Guided 4-step wizard that authors a CredentialUseCase (POST /credential-use-cases). */
@@ -218,6 +219,7 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
       certClaimKeys: cert?.claimOrder ?? [],
       certLogoDocumentId: cert?.logoDocumentId ?? "",
       certBackgroundDocumentId: cert?.background?.documentId ?? "",
+      certBackgroundSha256: cert?.background?.sha256 ?? "",
       certPlacements: cert?.placements ?? [],
     });
   }
@@ -231,7 +233,7 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
     for (let n = 0; n < bytes.length; n++) bin += String.fromCharCode(bytes[n] as number);
     try {
       const r = await api.uploadDocument(token, file.type, btoa(bin));
-      patchCredType(i, { certBackgroundDocumentId: r.id });
+      patchCredType(i, { certBackgroundDocumentId: r.id, certBackgroundSha256: r.sha256 });
     } catch {
       setError("artwork upload failed");
     }
@@ -257,7 +259,9 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
             subheading: c.certSubheading.trim() || undefined,
             claimOrder: c.certClaimKeys.length ? c.certClaimKeys : undefined,
             logoDocumentId: c.certLogoDocumentId || undefined,
-            ...(c.certBackgroundDocumentId ? { background: { documentId: c.certBackgroundDocumentId } } : {}),
+            ...(c.certBackgroundDocumentId
+              ? { background: { documentId: c.certBackgroundDocumentId, ...(c.certBackgroundSha256 ? { sha256: c.certBackgroundSha256 } : {}) } }
+              : {}),
             ...(placements.length ? { placements } : {}),
           },
         },
@@ -306,7 +310,9 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
               subheading: c.certSubheading.trim() || undefined,
               claimOrder: c.certClaimKeys.length ? c.certClaimKeys : undefined,
               logoDocumentId: c.certLogoDocumentId || undefined,
-              ...(c.certBackgroundDocumentId ? { background: { documentId: c.certBackgroundDocumentId } } : {}),
+              ...(c.certBackgroundDocumentId
+                ? { background: { documentId: c.certBackgroundDocumentId, ...(c.certBackgroundSha256 ? { sha256: c.certBackgroundSha256 } : {}) } }
+                : {}),
               ...(placements.length ? { placements } : {}),
             } } : {}),
           };
@@ -572,7 +578,7 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
                           </div>
                           <label className="block text-[11px] text-slate-500">
                             Logo / seal (optional):
-                            <input type="file" accept="image/png,image/jpeg,image/webp" className="mt-1 block text-[11px]"
+                            <input type="file" accept="image/png,image/jpeg" className="mt-1 block text-[11px]"
                               onChange={async (e) => {
                                 const file = e.target.files?.[0]; if (!file || !token) return;
                                 const bytes = new Uint8Array(await file.arrayBuffer());

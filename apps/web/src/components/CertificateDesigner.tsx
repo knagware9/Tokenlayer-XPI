@@ -55,7 +55,7 @@ export function CertificateDesigner(props: CertificateDesignerProps): JSX.Elemen
       <div className="flex items-center gap-3">
         <label className="text-[11px] text-slate-600">
           Artwork:
-          <input type="file" accept="image/png,image/jpeg,image/webp" className="ml-2 text-[11px]"
+          <input type="file" accept="image/png,image/jpeg" className="ml-2 text-[11px]"
             onChange={(e) => { const f = e.target.files?.[0]; if (f) props.onUploadArtwork(f); }} />
         </label>
         {props.backgroundDocumentId && <span className="text-[11px] text-emerald-600">✓ uploaded</span>}
