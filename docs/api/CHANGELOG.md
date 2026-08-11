@@ -100,6 +100,43 @@ non-renderable one, but still accept a bare `documentId`, including one naming a
 document that has since been deleted: that case degrades to the built-in layout
 at render time, and that behaviour is unchanged.
 
+### Follow-up: a digest was never a capability
+
+An adversarial review of the above found that the pin did not do the job claimed
+for it, and these are the corrections. **ACTION REQUIRED if you reference
+documents across organizations.**
+
+- **A certificate background must now name a document YOUR ORGANIZATION
+  UPLOADED.** Documents carry an owner (`Document.ownerOrgId`), set from the
+  uploader — for `POST /credential-use-cases/{key}/certificate/artwork`, from the
+  organization that owns the use case. A background naming a document owned by
+  anyone else is refused **exactly as if the document did not exist**, so the
+  refusal discloses nothing about ids you do not own. Rows written before this
+  release have no owner and can be referenced only by a PlatformAdmin: re-upload
+  the artwork through the artwork route to make it yours.
+  *Why:* `GET /credential-use-cases` is open to any authenticated user and
+  serialised the whole certificate block, digest included. Reading another
+  tenant's `{documentId, sha256}` there, pinning it onto a use case you do own,
+  and fetching your own artwork returned their file byte for byte. A digest
+  answers "are these the bytes I meant", never "may I have them".
+- **`POST /credential-use-cases/preview-certificate` will not render a document
+  your organization does not own.** It previews the built-in layout instead —
+  the same answer as a background naming nothing, deliberately, so the two are
+  indistinguishable. This door never required a pin, so it was open to every
+  OrgAdmin.
+- **`GET /credential-use-cases` and `GET /credential-use-cases/{key}` no longer
+  include `certificate.background` or `certificate.logoDocumentId`** for callers
+  who are neither a PlatformAdmin nor the owning organization. Every other field
+  is unchanged, and owners see their design in full.
+- **Creating a certificate on a type that has none now requires `enabled:
+  true`** in the body of `PATCH /credential-use-cases/{key}/certificate`;
+  otherwise **400 `CERTIFICATE_NOT_ENABLED`**. Designing a layout used to create
+  the block implicitly — and because `GET /credentials/{id}/certificate.pdf` is
+  public and unauthenticated, that turned every already-issued credential of
+  that type into a downloadable PDF of its subject's claims. Publishing is a
+  decision, so it is now stated. This route still never switches an existing
+  certificate off.
+
 **ACTION REQUIRED only if you wrote `background` before this release and want to
 edit it through the new org route.** A stored background with no `sha256` can be
 kept or removed, but not edited in place — the org route will not accept a

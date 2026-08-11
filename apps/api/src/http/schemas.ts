@@ -1293,6 +1293,14 @@ export const S: Record<string, FastifySchema> = {
           description: "The stored artwork document and its digest. `sha256` is required — a bare `documentId` answers `BACKGROUND_PIN_REQUIRED`. `null` clears the artwork.",
         },
         placements: { type: "array", items: { type: "object", additionalProperties: true }, description: "Where each field prints, in 0–1 fractions of the page." },
+        enabled: {
+          type: "boolean",
+          description:
+            "Only meaningful when the credential type has NO certificate configured yet, where `true` is REQUIRED to " +
+            "create one — enabling a certificate publishes a public, unauthenticated PDF of every already-issued " +
+            "credential's claims, so it is confirmed rather than inferred (**400 `CERTIFICATE_NOT_ENABLED`** " +
+            "otherwise). It never toggles an existing block: this route cannot switch a certificate off.",
+        },
       },
     },
     response: { 200: { $ref: "CredentialUseCase#" }, ...errs(400, 401, 403, 404) },

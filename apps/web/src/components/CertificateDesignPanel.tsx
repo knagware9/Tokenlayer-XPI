@@ -145,6 +145,12 @@ export function CertificateDesignPanel(props: CertificateDesignPanelProps): JSX.
         // then cleared artwork the panel cannot re-pin — it never uploaded those
         // bytes, and the PATCH door refuses a background without a digest.
         ...(artworkTouched ? { background } : {}),
+        // Only when this type has NO certificate yet. The server refuses to
+        // create one implicitly, because enabling a certificate publishes a
+        // PUBLIC, unauthenticated PDF of every already-issued credential's
+        // claims — so the confirmation is explicit on the wire, and the notice
+        // above the Save button says what the click actually does.
+        ...(cert ? {} : { enabled: true }),
         // A placement whose claim was renamed or deleted after it was placed
         // would make the server refuse the whole design; it could not print
         // anything either way. The designer warns about these, so dropping them
@@ -192,6 +198,17 @@ export function CertificateDesignPanel(props: CertificateDesignPanelProps): JSX.
           onUploadArtwork={(file) => { void uploadArtwork(file); }}
           onPreview={() => { void preview(); }}
         />
+        {/* This type has no certificate yet, so saving TURNS ONE ON — and the
+            render route is public and unauthenticated, so that publishes a PDF
+            of every already-issued credential's claims. Say so before the click,
+            not in the 400 that would otherwise follow it. */}
+        {!cert && (
+          <p className="mt-4 rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-800">
+            This credential type has no certificate yet. Saving turns one on — and certificate PDFs are downloadable
+            from a <strong>public link</strong> by anyone holding the credential&rsquo;s id, including for credentials
+            already issued under this type.
+          </p>
+        )}
         <div className="mt-4 flex items-center gap-3 border-t border-slate-100 pt-3">
           <button
             type="button"
@@ -199,7 +216,7 @@ export function CertificateDesignPanel(props: CertificateDesignPanelProps): JSX.
             onClick={() => { void save(); }}
             className="rounded-lg bg-brand-600 text-white px-3.5 py-1.5 text-xs font-semibold hover:bg-brand-700 disabled:opacity-50"
           >
-            {busy ? "Saving…" : "Save design"}
+            {busy ? "Saving…" : cert ? "Save design" : "Turn on certificates & save"}
           </button>
           {/* Gated on what is VISIBLE, not on the pinned state: a legacy record
               shows its artwork on the canvas while `background` is null, and

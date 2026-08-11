@@ -54,8 +54,8 @@ async function world(opts: { ownerOrgId?: string | null } = {}): Promise<World> 
 
 /** Store a document DIRECTLY through the repository — the point of several tests
  *  below is that the HTTP document store refuses an OrgAdmin. */
-async function storeDoc(h: TestAppHandle, contentType: string, b64: string): Promise<{ id: string; sha256: string }> {
-  const d = await h.deps.documents.create({ contentType, bytes: Buffer.from(b64, "base64") });
+async function storeDoc(h: TestAppHandle, contentType: string, b64: string, ownerOrgId: string | null = null): Promise<{ id: string; sha256: string }> {
+  const d = await h.deps.documents.create({ contentType, bytes: Buffer.from(b64, "base64"), ownerOrgId });
   return { id: d.id, sha256: d.sha256 };
 }
 
@@ -219,7 +219,7 @@ const readBack = async (w: World) => {
 describe("PATCH /credential-use-cases/:key/certificate", () => {
   it("an owner OrgAdmin sets artwork and placements on their own use case", async () => {
     const w = await world();
-    const doc = await storeDoc(w.h, "image/png", PNG_2x1_B64);
+    const doc = await storeDoc(w.h, "image/png", PNG_2x1_B64, w.orgId);
     const res = await design(w, w.orgAdmin, {
       credentialType: "CourseCompletion",
       background: { documentId: doc.id, sha256: doc.sha256 },
@@ -271,8 +271,16 @@ describe("PATCH /credential-use-cases/:key/certificate", () => {
     // bare `existing.ownerOrgId !== claims.orgId` would pass it. THIS is the
     // pairing that makes null-as-allow bite — `orgId: null` on the caller and
     // `ownerOrgId: null` on the record, where `null !== null` is false and the
-    // route answers 200 for a use case nobody owns. Verified by mutation: drop
-    // the `!orgId` half and this test, and only this test, turns green at 200.
+    // route answers 200 for a use case nobody owns.
+    //
+    // THE COMMENT HERE USED TO CLAIM THIS TEST KILLED THE `!orgId` MUTATION. It
+    // does not, and a later review proved it: the handler normalises a missing
+    // `orgId` to `""` before comparing, so `null !== ""` refuses on the bare
+    // comparison and the guard is never reached. The case that DOES reach it is
+    // an empty-string owner, pinned in the test below. Left standing because it
+    // is a real refusal worth keeping — but a comment asserting an experiment
+    // that was never run is worse than no comment, since it tells the next
+    // reader not to bother.
     const w = await world({ ownerOrgId: null });
     const tag = Math.random().toString(36).slice(2, 10);
     await w.h.users.create({
@@ -282,6 +290,26 @@ describe("PATCH /credential-use-cases/:key/certificate", () => {
     });
     const orgless = await loginAs(w.h.app, `orgless-${tag}@tokenlayer.dev`, `orgless-${tag}`);
     const res = await design(w, orgless, { credentialType: "CourseCompletion", placements: [] });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("FORBIDDEN");
+  });
+
+  it("an ORG-LESS OrgAdmin is refused a use case owned by the EMPTY STRING — the case that kills the `!orgId` guard", async () => {
+    // This is the mutation the test above was wrongly credited with killing.
+    // `claims.orgId` normalises to `""`, and nothing in core refuses a blank
+    // `ownerOrgId`, so a record can genuinely hold `""` — at which point a bare
+    // `existing.ownerOrgId !== orgId` compares `"" !== ""` and answers 200 for a
+    // use case belonging to nobody. Delete `!orgId ||` from the handler and only
+    // this test goes green.
+    const w = await world({ ownerOrgId: "" });
+    const tag = Math.random().toString(36).slice(2, 10);
+    await w.h.users.create({
+      email: `blank-${tag}@tokenlayer.dev`, passwordHash: bcrypt.hashSync(`blank-${tag}`, TEST_ROUNDS),
+      role: "OrgAdmin", useCaseKey: null, accountId: null, active: true, kycStatus: "approved",
+      kyc: null, orgId: null, kind: "human",
+    });
+    const blank = await loginAs(w.h.app, `blank-${tag}@tokenlayer.dev`, `blank-${tag}`);
+    const res = await design(w, blank, { credentialType: "CourseCompletion", placements: [] });
     expect(res.statusCode).toBe(403);
     expect(res.json().error).toBe("FORBIDDEN");
   });
@@ -353,8 +381,8 @@ describe("PATCH /credential-use-cases/:key/certificate", () => {
 
   it("requires the pin, and refuses a mismatch, a missing document and a non-image", async () => {
     const w = await world();
-    const doc = await storeDoc(w.h, "image/png", PNG_2x1_B64);
-    const text = await storeDoc(w.h, "text/plain", Buffer.from("nope").toString("base64"));
+    const doc = await storeDoc(w.h, "image/png", PNG_2x1_B64, w.orgId);
+    const text = await storeDoc(w.h, "text/plain", Buffer.from("nope").toString("base64"), w.orgId);
 
     const noPin = await design(w, w.orgAdmin, { credentialType: "CourseCompletion", background: { documentId: doc.id } });
     expect(noPin.statusCode).toBe(400);
@@ -372,7 +400,7 @@ describe("PATCH /credential-use-cases/:key/certificate", () => {
 
   it("omitting a field leaves it alone; null background clears the artwork; [] clears placements", async () => {
     const w = await world();
-    const doc = await storeDoc(w.h, "image/png", PNG_2x1_B64);
+    const doc = await storeDoc(w.h, "image/png", PNG_2x1_B64, w.orgId);
     await design(w, w.orgAdmin, {
       credentialType: "CourseCompletion",
       background: { documentId: doc.id, sha256: doc.sha256 },
@@ -422,16 +450,41 @@ describe("PATCH /credential-use-cases/:key/certificate", () => {
     await design(w, w.orgAdmin, { credentialType: "CourseCompletion", placements: [{ field: "claim:fullName", x: 0.1, y: 0.1 }] });
     expect(((await readBack(w)).credentialTypes[0].certificate as { enabled: boolean }).enabled).toBe(false);
 
-    // And with no block at all, designing creates one that is enabled —
-    // otherwise the org has produced dead config it cannot turn on.
+    // And with NO block at all, designing does not quietly create one.
     const bare = (await readBack(w)) as unknown as Record<string, unknown>;
     const stripped = (bare.credentialTypes as Array<Record<string, unknown>>).map(({ certificate, ...rest }) => { void certificate; return rest; });
     expect((await w.h.app.inject({
       method: "PATCH", url: `${V1}/credential-use-cases/${w.key}`, headers: auth(w.platform),
       payload: { ...bare, credentialTypes: stripped },
     })).statusCode).toBe(200);
-    await design(w, w.orgAdmin, { credentialType: "CourseCompletion", placements: [{ field: "claim:fullName", x: 0.1, y: 0.1 }] });
+    const implicit = await design(w, w.orgAdmin, { credentialType: "CourseCompletion", placements: [{ field: "claim:fullName", x: 0.1, y: 0.1 }] });
+    expect(implicit.statusCode).toBe(400);
+    expect(implicit.json().error).toBe("CERTIFICATE_NOT_ENABLED");
+    expect((await readBack(w)).credentialTypes[0].certificate).toBeUndefined();
+
+    // Asked for explicitly, it is created and enabled.
+    const explicit = await design(w, w.orgAdmin, { credentialType: "CourseCompletion", enabled: true, placements: [{ field: "claim:fullName", x: 0.1, y: 0.1 }] });
+    expect(explicit.statusCode).toBe(200);
     expect(((await readBack(w)).credentialTypes[0].certificate as { enabled: boolean }).enabled).toBe(true);
+  });
+
+  it("enabling a certificate is what publishes a PUBLIC PDF, so it is never a side effect of designing", async () => {
+    // THE REVIEW FINDING THIS PINS. `GET /credentials/{id}/certificate.pdf` is
+    // public and unauthenticated, and answers 404 until `certificate.enabled`.
+    // Creating the block implicitly therefore turned every already-issued
+    // credential of that type into a downloadable PDF of its subject's claims,
+    // with no one having asked to publish anything.
+    const w = await world();
+    const bare = (await readBack(w)) as unknown as Record<string, unknown>;
+    const stripped = (bare.credentialTypes as Array<Record<string, unknown>>).map(({ certificate, ...rest }) => { void certificate; return rest; });
+    expect((await w.h.app.inject({
+      method: "PATCH", url: `${V1}/credential-use-cases/${w.key}`, headers: auth(w.platform),
+      payload: { ...bare, credentialTypes: stripped },
+    })).statusCode).toBe(200);
+
+    const res = await design(w, w.orgAdmin, { credentialType: "CourseCompletion", placements: [] });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toContain("certificate.pdf");
   });
 });
 
@@ -581,5 +634,153 @@ describe("GET /credential-use-cases/:key/certificate/artwork", () => {
     });
     const foreign = await loginAs(w.h.app, `foreign-g-${tag}@tokenlayer.dev`, `foreign-g-${tag}`);
     expect((await fetchArt(w, foreign, "CourseCompletion")).statusCode).toBe(403);
+  });
+});
+
+/**
+ * THE FINAL REVIEW'S FINDINGS, each pinned by the exploit it was proved with.
+ *
+ * The branch shipped with a stated security model — "`documentId` alone is a
+ * guessable reference, and a pin is what proves the caller has actually seen the
+ * file" — and then published the pin. A digest is an INTEGRITY check; it says
+ * "are these the bytes I meant", never "am I allowed to have them". Ownership
+ * has to be recorded on the row, and now is.
+ */
+describe("EN-F finding 7 review — a digest is not a capability", () => {
+  /** A second org in the SAME app, with its own OrgAdmin and its own use case. */
+  async function neighbour(w: World): Promise<{ orgId: string; admin: string; key: string }> {
+    const tag = Math.random().toString(36).slice(2, 10);
+    const org = await w.h.organizations.create({
+      name: `Neighbour ${tag}`, orgType: "issuer", registrationId: null, jurisdiction: null,
+      did: `did:key:zNB${tag}`, didSeedEncrypted: "enc", status: "active", verified: true,
+      verifiedAt: new Date().toISOString(), companyProfile: null, capabilities: null,
+    });
+    await w.h.users.create({
+      email: `nb-${tag}@tokenlayer.dev`, passwordHash: bcrypt.hashSync(`nb-${tag}`, TEST_ROUNDS),
+      role: "OrgAdmin", useCaseKey: null, accountId: null, active: true, kycStatus: "approved",
+      kyc: null, orgId: org.id, kind: "human",
+    });
+    const key = `nb-${tag}`;
+    await w.h.deps.credentialUseCases.create({
+      key, name: "Neighbour Programme",
+      credentialTypes: [{
+        name: "CourseCompletion", title: "Course Completion", validityDays: 365, requiredApprovals: 1,
+        claimSchema: { type: "object", required: ["fullName"], properties: { fullName: { type: "string" } } },
+        certificate: { enabled: true },
+      }],
+      issuer: { kind: "org", orgId: org.id },
+      holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
+      ownerOrgId: org.id,
+    } as never);
+    return { orgId: org.id, admin: await loginAs(w.h.app, `nb-${tag}@tokenlayer.dev`, `nb-${tag}`), key };
+  }
+
+  it("org B cannot pin org A's artwork onto its OWN use case and read the bytes back", async () => {
+    // THE PROVEN CHAIN, step by step: read A's {documentId, sha256} off the open
+    // catalog → PATCH it onto a use case B legitimately owns (ownership was
+    // checked on the USE CASE, never on the DOCUMENT) → GET B's own artwork →
+    // A's letterhead, byte for byte.
+    const w = await world();
+    const b = await neighbour(w);
+
+    const up = await w.h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/${w.key}/certificate/artwork`,
+      headers: auth(w.orgAdmin), payload: { contentType: "image/png", dataBase64: PNG_2x1_B64 },
+    });
+    expect(up.statusCode).toBe(201);
+    const { documentId, sha256 } = up.json() as { documentId: string; sha256: string };
+    expect((await design(w, w.orgAdmin, { credentialType: "CourseCompletion", background: { documentId, sha256 } })).statusCode).toBe(200);
+
+    // Step 1 — the catalog no longer hands B the identifiers at all.
+    const catalog = await w.h.app.inject({ method: "GET", url: `${V1}/credential-use-cases`, headers: auth(b.admin) });
+    expect(catalog.statusCode).toBe(200);
+    expect(catalog.payload).not.toContain(documentId);
+    expect(catalog.payload).not.toContain(sha256);
+    const single = await w.h.app.inject({ method: "GET", url: `${V1}/credential-use-cases/${w.key}`, headers: auth(b.admin) });
+    expect(single.payload).not.toContain(documentId);
+
+    // Step 2 — and even holding both, B cannot mount them on its own use case.
+    const mounted = await w.h.app.inject({
+      method: "PATCH", url: `${V1}/credential-use-cases/${b.key}/certificate`,
+      headers: auth(b.admin), payload: { credentialType: "CourseCompletion", background: { documentId, sha256 } },
+    });
+    expect(mounted.statusCode).toBe(400);
+    // Indistinguishable from an id that does not exist — no existence oracle.
+    expect(mounted.json().error).toBe("BACKGROUND_DOCUMENT_NOT_FOUND");
+
+    // Step 3 — so B's own artwork route has nothing of A's to serve.
+    const served = await w.h.app.inject({
+      method: "GET", url: `${V1}/credential-use-cases/${b.key}/certificate/artwork?credentialType=CourseCompletion`,
+      headers: auth(b.admin),
+    });
+    expect(served.statusCode).toBe(404);
+
+    // CONTROL: A's own admin still sees the design and the bytes.
+    const mine = await w.h.app.inject({ method: "GET", url: `${V1}/credential-use-cases/${w.key}`, headers: auth(w.orgAdmin) });
+    expect(mine.payload).toContain(documentId);
+    expect((await w.h.app.inject({
+      method: "GET", url: `${V1}/credential-use-cases/${w.key}/certificate/artwork?credentialType=CourseCompletion`,
+      headers: auth(w.orgAdmin),
+    })).statusCode).toBe(200);
+  });
+
+  it("preview-certificate will not render a document the caller's org does not own", async () => {
+    // This door never required a pin, so the pin could not have closed it: any
+    // OrgAdmin named any stored image and got those bytes drawn full-bleed into
+    // a PDF, while GET /documents/:id answered 403 for the same session.
+    const w = await world();
+    const b = await neighbour(w);
+    const up = await w.h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/${w.key}/certificate/artwork`,
+      headers: auth(w.orgAdmin), payload: { contentType: "image/png", dataBase64: PNG_2x1_B64 },
+    });
+    const { documentId } = up.json() as { documentId: string };
+
+    const draft = (bg: unknown) => ({
+      credentialType: {
+        name: "CourseCompletion", title: "C", validityDays: 365, requiredApprovals: 1,
+        claimSchema: { type: "object", required: ["fullName"], properties: { fullName: { type: "string" } } },
+        certificate: { enabled: true, background: bg, placements: [] },
+      },
+    });
+
+    // A4 portrait is the BUILT-IN layout; the artwork is 2×1, so the page size
+    // is how this tells the two renderers apart without parsing images.
+    const foreign = await w.h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/preview-certificate`,
+      headers: auth(b.admin), payload: draft({ documentId }),
+    });
+    expect(foreign.statusCode).toBe(200);
+    expect(/MediaBox \[0 0 595.28 841.89\]/.test(foreign.rawPayload.toString("latin1"))).toBe(true);
+
+    // CONTROL: the owning org gets the artwork's own page.
+    const owner = await w.h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/preview-certificate`,
+      headers: auth(w.orgAdmin), payload: draft({ documentId }),
+    });
+    expect(owner.statusCode).toBe(200);
+    expect(/MediaBox \[0 0 841.89 420.9[45]\d*\]/.test(owner.rawPayload.toString("latin1"))).toBe(true);
+  });
+
+  it("refuses a foreign document with the SAME answer as one that does not exist", async () => {
+    // Three distinguishable codes over an arbitrary id — not-found, "is
+    // application/pdf" (naming the type), wrong-digest — was a confirmation
+    // oracle over the whole document store, from a principal canReadDoc refuses.
+    const w = await world();
+    const b = await neighbour(w);
+    const secret = await storeDoc(w.h, "application/pdf", Buffer.from("%PDF-1.4 kyb").toString("base64"), w.orgId);
+
+    const foreign = await w.h.app.inject({
+      method: "PATCH", url: `${V1}/credential-use-cases/${b.key}/certificate`,
+      headers: auth(b.admin), payload: { credentialType: "CourseCompletion", background: { documentId: secret.id, sha256: secret.sha256 } },
+    });
+    const ghost = await w.h.app.inject({
+      method: "PATCH", url: `${V1}/credential-use-cases/${b.key}/certificate`,
+      headers: auth(b.admin), payload: { credentialType: "CourseCompletion", background: { documentId: "doc_no_such_thing", sha256: "0x" + "a".repeat(64) } },
+    });
+    expect(foreign.statusCode).toBe(ghost.statusCode);
+    expect(foreign.json().error).toBe(ghost.json().error);
+    // And nothing leaks the content type of a document the caller may not read.
+    expect(foreign.payload).not.toContain("application/pdf");
   });
 });

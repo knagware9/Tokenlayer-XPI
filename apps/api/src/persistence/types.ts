@@ -260,10 +260,20 @@ export interface DocumentRecord {
   size: number;
   bytes: Buffer;
   createdAt: string;
+  /**
+   * The organization these bytes belong to, or null when nobody owns them (a
+   * platform upload, a pre-org KYB registration, a pre-column row). NULL IS NOT
+   * "SHARED": every gate requires a non-null match, so a null-owned document is
+   * referenceable by a PlatformAdmin and by no one else.
+   */
+  ownerOrgId: string | null;
 }
 
 export interface DocumentRepository {
-  create(input: { contentType: string; bytes: Buffer }): Promise<{ id: string; sha256: string; size: number }>;
+  /** `ownerOrgId` is REQUIRED, not optional: an upload site that forgets who
+   *  owns the bytes writes a document nobody can later be refused access to on
+   *  ownership grounds, and an optional parameter is how that gets forgotten. */
+  create(input: { contentType: string; bytes: Buffer; ownerOrgId: string | null }): Promise<{ id: string; sha256: string; size: number }>;
   get(id: string): Promise<DocumentRecord | null>;
 }
 

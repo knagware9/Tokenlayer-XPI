@@ -112,7 +112,7 @@ const DELIBERATELY_UNSCOPED: Record<string, string> = {
   "GET /use-cases": "use-case config the caller is already scoped to; no principal or holding data",
   "GET /use-cases/:key": "one use-case config; scoped by the existing tenancy check",
   "GET /use-cases/:key/code": "the use case's own contract source; configuration, not data",
-  "GET /credential-use-cases": "credential use-case config; no principal data",
+  "GET /credential-use-cases": "credential use-case config; no principal data. The certificate design's DOCUMENT REFERENCES are stripped for non-owners (certificateDesignVisible) — they were not, and org B lifted org A's artwork id + digest straight off this route.",
   "GET /credential-use-cases/:key": "one credential use-case config",
   "GET /dids/:did/document": "the same public key material the unauthenticated /dids/:did/resolve returns",
 
