@@ -58,8 +58,26 @@ describe("the org logo goes through GET /orgs/:id/branding/logo", () => {
     // ...and the pending one from the File itself, never re-fetched by id.
     expect(card).toContain("URL.createObjectURL(file)");
     expect(card).not.toContain("downloadDocument");
-    // One object URL alive at a time: the previous is revoked before replacing.
-    expect(card).toContain("URL.revokeObjectURL(prev)");
+    // One object URL alive at a time, tracked in a REF rather than read out of
+    // a `setState` updater. `<StrictMode>` double-invokes updaters, so the
+    // create/revoke-inside-the-updater shape this replaced leaked one blob per
+    // pick, and React promises nothing about an updater running on unmount.
+    expect(card).toContain("URL.revokeObjectURL(pendingUrl.current)");
+    expect(card).toContain("pendingUrl.current = file ? URL.createObjectURL(file) : null");
+  });
+
+  it("the editor saves only what CHANGED, so a logo-only save cannot pin the platform's own colour", () => {
+    const orgs = read("../src/components/Organizations.tsx");
+    const card = orgs.slice(orgs.indexOf("function OrgBrandingCard"), orgs.indexOf("export function Organizations"));
+    // Sending both keys made an OrgAdmin who only uploaded a logo persist
+    // DEFAULT_ACCENT — the platform's teal — as their org's accent, which then
+    // ran through clampAccent and repainted the console a colour nobody chose.
+    // The omitted-key semantics exist end to end; this is the caller using them.
+    expect(card).toContain("void save(changedBranding())");
+    expect(card).toContain("if (accent !== (org.brandAccent ?? DEFAULT_ACCENT)) patch.brandAccent = accent;");
+    expect(card).toContain("if (logoId !== (org.brandLogoDocumentId ?? null)) patch.brandLogoDocumentId = logoId;");
+    // Clear still sends both, explicitly null — that is a different act.
+    expect(card).toContain("void save({ brandAccent: null, brandLogoDocumentId: null })");
   });
 
   it("the object-URL lifecycle is intact — a leaked blob outlives the tab", () => {

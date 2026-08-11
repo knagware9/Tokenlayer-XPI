@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ApiError, api } from "../api.js";
 import { useAuth } from "../auth.js";
 import { clampAccent } from "../lib/branding.js";
@@ -248,13 +248,17 @@ function OrgBrandingCard({ org, onChanged }: { org: Organization; onChanged: () 
   const [pendingPreview, setPendingPreview] = useState<string | null>(null);
   // The pending preview wins while it exists: it is the newer choice.
   const preview = pendingPreview ?? savedPreview;
-  // One object URL alive at a time, and none after unmount.
-  const showPending = (file: File | null): void =>
-    setPendingPreview((prev) => {
-      if (prev) URL.revokeObjectURL(prev);
-      return file ? URL.createObjectURL(file) : null;
-    });
-  useEffect(() => () => setPendingPreview((prev) => { if (prev) URL.revokeObjectURL(prev); return null; }), []);
+  // One object URL alive at a time, and none after unmount. The live URL is
+  // tracked in a REF, not read out of the state updater: `<StrictMode>`
+  // double-invokes updaters, so creating and revoking inside one leaked a blob
+  // per pick, and React makes no promise an updater runs at all on unmount.
+  const pendingUrl = useRef<string | null>(null);
+  const showPending = (file: File | null): void => {
+    if (pendingUrl.current) URL.revokeObjectURL(pendingUrl.current);
+    pendingUrl.current = file ? URL.createObjectURL(file) : null;
+    setPendingPreview(pendingUrl.current);
+  };
+  useEffect(() => () => { if (pendingUrl.current) URL.revokeObjectURL(pendingUrl.current); pendingUrl.current = null; }, []);
 
   if (!canEdit) return null;
 
@@ -265,12 +269,37 @@ function OrgBrandingCard({ org, onChanged }: { org: Organization; onChanged: () 
   // otherwise open with a contrast warning about a colour nobody chose. Only
   // warn once the accent on screen is one this org owns or its admin just set.
   const accentChosen = org.brandAccent != null || accent !== DEFAULT_ACCENT;
+
+  /**
+   * THE PATCH IS BUILT BY PRESENCE, never by sending both keys.
+   *
+   * Sending both meant an OrgAdmin who uploaded a logo and never opened the
+   * colour picker persisted `DEFAULT_ACCENT` — the PLATFORM's teal — as their
+   * organization's own accent. It is not the same as leaving it unset: the
+   * stored value runs through `clampAccent`, which darkens it (our default is
+   * 2.6:1 against white), so the whole console shifted colour for an org that
+   * chose nothing. It also made `accentChosen` true, pinning the "Darkened for
+   * legibility" note permanently — about a colour nobody picked, which is the
+   * exact thing that guard exists to prevent.
+   *
+   * The API, both repositories and the client were built for this: an omitted
+   * key leaves the column alone, an explicit null clears it. This is the caller
+   * that has to use it.
+   */
+  function changedBranding(): { brandAccent?: string | null; brandLogoDocumentId?: string | null } {
+    const patch: { brandAccent?: string | null; brandLogoDocumentId?: string | null } = {};
+    if (accent !== (org.brandAccent ?? DEFAULT_ACCENT)) patch.brandAccent = accent;
+    if (logoId !== (org.brandLogoDocumentId ?? null)) patch.brandLogoDocumentId = logoId;
+    return patch;
+  }
   const darkened = accentChosen && clampAccent(accent) !== accent.toLowerCase();
 
   async function upload(file: File): Promise<void> {
     if (!token) return;
     setError(null); setNote(null);
-    if (!file.type.startsWith("image/")) { setError("A brand logo must be an image (PNG or SVG works best)"); return; }
+    // PNG or JPEG, matching the server — pdfkit draws nothing else, and the old
+    // copy recommended SVG, which the document store has never accepted.
+    if (!/^image\/(png|jpeg)$/.test(file.type)) { setError("A brand logo must be a PNG or a JPEG"); return; }
     if (file.size > 2 * 1024 * 1024) { setError("Logo too large (max 2 MB)"); return; }
     setBusy(true);
     try {
@@ -343,7 +372,7 @@ function OrgBrandingCard({ org, onChanged }: { org: Organization; onChanged: () 
                 : <span className="text-[11px] text-slate-400">none</span>}
             </div>
             <input
-              type="file" accept="image/*" disabled={busy}
+              type="file" accept="image/png,image/jpeg" disabled={busy}
               onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void upload(f); }}
               className="block w-full text-xs text-slate-600 file:mr-3 file:rounded file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-slate-700 hover:file:bg-slate-200"
             />
@@ -353,7 +382,7 @@ function OrgBrandingCard({ org, onChanged }: { org: Organization; onChanged: () 
 
       <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
         <button
-          onClick={() => void save({ brandAccent: accent, brandLogoDocumentId: logoId })}
+          onClick={() => void save(changedBranding())}
           disabled={busy || !dirty}
           className="rounded-lg bg-brand-600 text-white py-1.5 px-4 text-sm font-medium hover:bg-brand-700 disabled:opacity-40"
         >

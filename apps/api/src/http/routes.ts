@@ -3914,24 +3914,35 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       if (logoId === null) patch.brandLogoDocumentId = null;
       else {
         const doc = await deps.documents.get(logoId);
-        if (!doc) return reply.code(400).send({ error: "BRAND_LOGO_NOT_FOUND", message: "no such document" });
-        // THE ARTWORK REVIEW'S RULE, ON THIS DOOR TOO. `orgView` publishes
-        // `brandLogoDocumentId`, so org B can read org A's logo id off the org
-        // list; without this, B pins A's mark as its own and `GET
-        // /orgs/B/branding/logo` then serves A's letterhead to B's members —
-        // the same shape, on a different column, as the certificate-artwork
-        // finding. Existence is not entitlement.
+        // THE ARTWORK REVIEW'S RULE, ON THIS DOOR TOO. Existence is not
+        // entitlement: `GET /orgs/:id/branding/logo` serves whatever this
+        // column names to every MEMBER of the org, so pinning a document
+        // another org owns would republish their mark to this org's roster.
         //
-        // A PlatformAdmin is exempt, matching the artwork call sites: they may
-        // already read every document, so refusing them here would forbid
-        // nothing while breaking the platform-uploads-on-an-org's-behalf path.
-        if (claims.role !== "PlatformAdmin" && !orgOwnsDocument(doc, id)) {
-          return reply.code(403).send({ error: "DOCUMENT_NOT_OWNED", message: "that document does not belong to this organization" });
+        // ONE ANSWER FOR "GONE" AND "NOT YOURS", matching
+        // `checkBackgroundDocument` — telling a caller which of the two it is
+        // makes this route an existence oracle over the whole document store.
+        //
+        // NO PLATFORM-ADMIN EXEMPTION, and the first draft's reasoning for one
+        // was wrong on both halves. It claimed the exemption was needed for the
+        // platform-uploads-on-an-org's-behalf path: it is not, because
+        // `POST /orgs/:id/branding/logo` stamps `ownerOrgId = id`, so a
+        // PlatformAdmin's own upload already passes this check. And it claimed
+        // refusing would forbid nothing since a PlatformAdmin may read every
+        // document anyway: reading bytes and GRANTING a different org's roster
+        // access to them are not the same power. `ownerOrgId === null` (a
+        // pre-org KYB upload, or a row written before the column existed) fails
+        // too — such a document is nobody's mark to publish.
+        if (!doc || !orgOwnsDocument(doc, id)) {
+          return reply.code(400).send({ error: "BRAND_LOGO_NOT_FOUND", message: "no such document" });
         }
-        // The renderer only cares about bytes, so the upload allowlist is not
-        // what gates it — check the stored type at the door an OrgAdmin reaches.
-        if (!doc.contentType.startsWith("image/")) {
-          return reply.code(400).send({ error: "BRAND_LOGO_NOT_AN_IMAGE", message: `document is ${doc.contentType}, not an image` });
+        // Not "is it an image" — "can the renderer DRAW it". `image/webp` is a
+        // perfectly good image that pdfkit cannot read, and the certificate
+        // renderer swallows the throw, so an org that uploaded one would see
+        // its mark in the console and never on a certificate, with nothing
+        // saying why. Same predicate, same reason, as the artwork door.
+        if (!isRenderableArtwork(doc.contentType)) {
+          return reply.code(400).send({ error: "BRAND_LOGO_NOT_AN_IMAGE", message: `document is ${doc.contentType}; a brand logo must be image/png or image/jpeg — the renderer can draw nothing else` });
         }
         patch.brandLogoDocumentId = logoId;
       }
@@ -3968,11 +3979,14 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     if (!org) return notFound(reply, "organization not found");
 
     const b = request.body as { contentType: string; dataBase64: string };
-    // Narrower than the shared allowlist ON PURPOSE. This route exists so an
-    // OrgAdmin can upload a MARK; a PDF or a text file stored through it would
-    // only ever fail later, at the point something tries to draw it.
-    if (!b.contentType.startsWith("image/")) {
-      return reply.code(415).send({ error: "UNSUPPORTED_DOCUMENT_TYPE", message: "a brand logo must be an image" });
+    // Narrower than the shared allowlist ON PURPOSE, and narrower still than
+    // "is it an image". This route exists so an OrgAdmin can upload a MARK, and
+    // the only thing that ever draws one is pdfkit, which reads PNG and JPEG.
+    // `image/webp` would store, display in the console, and then silently fail
+    // to appear on every certificate — the renderer's throw is swallowed. Refuse
+    // it here, where the person who picked the file is still on the screen.
+    if (!isRenderableArtwork(b.contentType)) {
+      return reply.code(415).send({ error: "UNSUPPORTED_DOCUMENT_TYPE", message: "a brand logo must be image/png or image/jpeg — the renderer can draw nothing else" });
     }
     // OWNED BY THE ORG BEING BRANDED, not by the caller. A PlatformAdmin
     // uploading a mark on an org's behalf is acting for that org, and their own
