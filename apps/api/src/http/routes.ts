@@ -1149,6 +1149,30 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     if (opts.owner && !opts.owner.bypass && !orgOwnsDocument(doc, opts.owner.orgId)) {
       return { error: "BACKGROUND_DOCUMENT_NOT_FOUND", message: `certificate background document '${documentId}' not found` };
     }
+    // A MARK IS NOT ARTWORK, and this refusal is what makes the brand-logo prune
+    // safe rather than merely plausible.
+    //
+    // `POST /orgs/{id}/branding/logo` stamps `purpose = "brand-logo"`, and the
+    // prune deletes such a row once a newer upload supersedes it. That is sound
+    // only while `Organization.brandLogoDocumentId` is the ONLY reference that
+    // can exist to one. A certificate background is stored inside
+    // `CredentialUseCase.credentialTypes` JSON, so a pin here would be invisible
+    // to the prune's "is it still pinned" test and it would delete bytes a
+    // certificate still draws. Closing the reference set by construction beats
+    // scanning JSON for references, which is a completeness claim that rots the
+    // next time someone adds a reference site.
+    //
+    // AFTER the ownership check, deliberately. Only a caller who already owns
+    // these bytes reaches this line, so it discloses nothing an unauthorized
+    // caller could use — the same reasoning that puts `BACKGROUND_NOT_AN_IMAGE`
+    // below the ownership check rather than above it.
+    //
+    // The cost is that an org whose mark IS its letterhead uploads the file
+    // twice, once at each door. The doors are already separate; a provable
+    // invariant is worth two uploads.
+    if (doc.purpose === "brand-logo") {
+      return { error: "BACKGROUND_IS_BRAND_LOGO", message: `document '${documentId}' was uploaded as an organization brand logo and cannot be used as certificate artwork; upload it through POST /credential-use-cases/{key}/certificate/artwork instead` };
+    }
     if (!isRenderableArtwork(doc.contentType)) {
       return { error: "BACKGROUND_NOT_AN_IMAGE", message: `certificate background document '${documentId}' is ${doc.contentType}; artwork must be image/png or image/jpeg — the renderer can draw nothing else` };
     }

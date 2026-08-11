@@ -1296,7 +1296,9 @@ export const S: Record<string, FastifySchema> = {
       "or `placements: []` to clear the layout. `background` must carry the artwork's `sha256` — the digest the " +
       "document store recorded for those exact bytes — and the document must be a PNG or JPEG: a `documentId` " +
       "alone is a guessable reference. Answers **400** `BACKGROUND_PIN_REQUIRED`, `BACKGROUND_DOCUMENT_NOT_FOUND`, " +
-      "`BACKGROUND_DOCUMENT_MISMATCH`, `BACKGROUND_NOT_AN_IMAGE` or `INVALID_CERTIFICATE_PLACEMENT` (which names the " +
+      "`BACKGROUND_DOCUMENT_MISMATCH`, `BACKGROUND_NOT_AN_IMAGE`, `BACKGROUND_IS_BRAND_LOGO` (a document uploaded " +
+      "through `POST /orgs/{id}/branding/logo` is an organization's mark, not artwork — upload it again through the " +
+      "artwork door) or `INVALID_CERTIFICATE_PLACEMENT` (which names the " +
       "offending placement index). Upload the artwork through " +
       "`POST /credential-use-cases/{key}/certificate/artwork`, which returns the `documentId` and the `sha256` to " +
       "send here — the general document store is closed to an Org Admin.",
