@@ -93,10 +93,32 @@ const dup = await call("POST", "/assets", { useCaseKey: "gold-egr", name: "dupe"
 ok(dup.status === 409, `duplicate deposit (same receiptId) blocked → ${dup.json?.error}`, dup.json);
 // Allowlist the vault + KYC parties, then mint 1000 g to the vault treasury.
 for (const w of [VAULT, JEWEL, INVEST, USBUY]) await call("POST", `/assets/${assetId}/actions/allow`, { account: w }, uca);
+const balOf = async (w) => (((await call("GET", `/assets/${assetId}/accounts`, null, uca)).json ?? []).find((a) => a.address === w)?.balance) ?? "0";
+
+// BASELINE, taken before this run mints anything.
+//
+// Every run issues a fresh receipt (`receiptId` is time-stamped, and the dedup
+// check above depends on that), but a use case deploys ONE contract per chain
+// and every asset under it shares those balances. So `balOf` does NOT start at
+// zero on a re-used database — it starts wherever the last run left it, and the
+// absolute assertions below ("vault holds 1,000") passed only on a virgin DB.
+// Run this script three times and it reported three failures that were entirely
+// its own arithmetic: vault 2800 where it wanted 1000.
+//
+// What these steps actually mean is MOVEMENT — this run minted 1,000 g, this
+// buyer took 100 of them — so assert the movement. Holds on the first run and
+// the fiftieth, and still fails for the reasons it should.
+const WALLETS = [VAULT, JEWEL, INVEST, USBUY];
+// `addr()` left-pads, so every one of these starts `0x000000…` — name them, or
+// a two-wallet diagnostic prints the same key twice and reports one of them.
+const NAME = { [VAULT]: "vault", [JEWEL]: "jeweller", [INVEST]: "investor", [USBUY]: "usBuyer" };
+const base = Object.fromEntries(await Promise.all(WALLETS.map(async (w) => [w, BigInt(await balOf(w))])));
+const moved = async (w) => (BigInt(await balOf(w)) - base[w]).toString();
+const seen = async (...ws) => Object.fromEntries(await Promise.all(ws.map(async (w) => [NAME[w] ?? w, { base: base[w].toString(), now: await balOf(w), moved: await moved(w) }])));
+
 const mint = await call("POST", `/assets/${assetId}/actions/mint`, { to: VAULT, amount: "1000" }, uca);
 ok(mint.status === 200, "mint 1,000 EGR (= 1,000 g fine gold) to the vault treasury", mint.json);
-const balOf = async (w) => (((await call("GET", `/assets/${assetId}/accounts`, null, uca)).json ?? []).find((a) => a.address === w)?.balance) ?? "0";
-ok((await balOf(VAULT)) === "1000", "vault treasury holds 1,000 EGR");
+ok((await moved(VAULT)) === "1000", "vault treasury gained 1,000 EGR", await seen(VAULT));
 
 console.log("\n== 4) Primary DvP sale — jeweller buys 100 g (0.25% exchange fee) ==");
 const feeBal = async (acct) => ((await call("GET", `/cash/balances?address=${acct}`, null, platform)).json ?? []).find((b) => b.currency === CUR)?.amount ?? "0";
@@ -119,19 +141,19 @@ const feeAfter = BigInt(await feeBal(FEE_ACCT));
 // by this) — and it was the address that was wrong.
 ok(feeAfter - feeBefore === 1750n, `platform fee account ${FEE_ACCT.slice(0, 10)}… credited 1,750`,
   { account: FEE_ACCT, before: feeBefore.toString(), after: feeAfter.toString() });
-ok((await balOf(JEWEL)) === "100" && (await balOf(VAULT)) === "900", "balances: jeweller 100, vault 900");
+ok((await moved(JEWEL)) === "100" && (await moved(VAULT)) === "900", "balances moved: jeweller +100, vault +900", await seen(JEWEL, VAULT));
 
 console.log("\n== 5) Fail-closed compliance — non-IN buyer is rejected ==");
 const usBuy = await call("POST", `/assets/${assetId}/buy`, { quantity: "1" }, usbuyer);
 ok(usBuy.status >= 400 && /JURISDICTION/.test(JSON.stringify(usBuy.json)), `US buyer blocked → ${usBuy.json?.error}`, usBuy.json);
-ok((await balOf(USBUY)) === "0", "US buyer received no gold (compliance held)");
+ok((await moved(USBUY)) === "0", "US buyer received no gold (compliance held)", await seen(USBUY));
 
 console.log("\n== 6) Secondary market — jeweller lists 40 g, investor takes ==");
 const list = await call("POST", `/assets/${assetId}/listings`, { quantity: "40", unitPrice: "7200", currency: CUR }, jewel);
 ok(list.status === 201, "jeweller lists 40 EGR @ ₹7,200 (escrowed)", list.json);
 const take = await call("POST", `/listings/${list.json?.id}/take`, { quantity: "40" }, invest);
 ok(take.status === 200, `investor takes 40 EGR (fee ${take.json?.fee?.amount ?? "?"} ${CUR})`, take.json);
-ok((await balOf(JEWEL)) === "60" && (await balOf(INVEST)) === "40", "balances: jeweller 60, investor 40");
+ok((await moved(JEWEL)) === "60" && (await moved(INVEST)) === "40", "balances moved: jeweller +60, investor +40", await seen(JEWEL, INVEST));
 
 console.log("\n== 7) Compliance freeze hold ==");
 await call("POST", `/assets/${assetId}/actions/freeze`, { account: JEWEL }, uca);
@@ -144,12 +166,12 @@ console.log("\n== 8) Physical withdrawal — MAKER-CHECKER gated burn ==");
 // Desk submits the withdrawal on the holder's behalf; it is captured pending, NOT executed.
 const propose = await call("POST", `/assets/${assetId}/actions/burn`, { from: INVEST, amount: "40" }, uca);
 ok(propose.status === 202 && propose.json?.proposal?.id, "withdrawal captured as a pending proposal (202, not executed)", propose.json);
-ok((await balOf(INVEST)) === "40", "gold still in the vault — burn deferred to approval");
+ok((await moved(INVEST)) === "40", "gold still in the vault — burn deferred to approval", await seen(INVEST));
 const selfApprove = await call("POST", `/proposals/${propose.json?.proposal?.id}/approve`, {}, uca);
 ok(selfApprove.status === 403, `proposer cannot self-approve → ${selfApprove.json?.error} (separation of duties)`, selfApprove.json);
 const approve = await call("POST", `/proposals/${propose.json?.proposal?.id}/approve`, {}, platform);
 ok(approve.status === 200 && approve.json?.proposal?.status === "executed", "second approver (PlatformAdmin) releases the gold — burn executed", approve.json?.proposal);
-ok((await balOf(INVEST)) === "0", "40 EGR burned — physical gold delivered, tokens retired");
+ok((await moved(INVEST)) === "0", "40 EGR burned — physical gold delivered, tokens retired", await seen(INVEST));
 
 console.log("\n== 9) Tamper-evident audit — verify + anchor on-ledger ==");
 const summary = (await call("GET", "/audit/verify", null, uca)).json;
