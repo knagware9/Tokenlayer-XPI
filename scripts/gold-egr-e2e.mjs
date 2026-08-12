@@ -100,12 +100,25 @@ ok((await balOf(VAULT)) === "1000", "vault treasury holds 1,000 EGR");
 
 console.log("\n== 4) Primary DvP sale — jeweller buys 100 g (0.25% exchange fee) ==");
 const feeBal = async (acct) => ((await call("GET", `/cash/balances?address=${acct}`, null, platform)).json ?? []).find((b) => b.currency === CUR)?.amount ?? "0";
-const FEE_ACCT = "0x000000000000000000000000000000000000FEE5";
+// No read route exposes the platform fee account, so this harness has to know it
+// out of band — which is exactly how it drifted. This constant used to read
+// `0x…FEE5`, an address that has never held anything, so the check below went
+// red on every run while the fee was in fact being charged and routed correctly
+// (the `fee.amount` assertion above passed throughout). A check that answers the
+// wrong question confidently is worse than no check. Mirror the API's own
+// resolution — `apps/api/src/env.ts`: PLATFORM_FEE_ACCOUNT, else the seeded demo
+// account — and name that file so the next drift is one grep away.
+const FEE_ACCT = process.env.PLATFORM_FEE_ACCOUNT ?? "0xdF3e18d64BC6A983f673Ab319CCaE4f1a57C7097";
 const feeBefore = BigInt(await feeBal(FEE_ACCT));
 const buy = await call("POST", `/assets/${assetId}/buy`, { quantity: "100" }, jewel);
 ok(buy.status === 200 && buy.json?.delivered?.amount === "100", `jeweller receives 100 EGR for ${buy.json?.paid?.amount} ${CUR}`, buy.json);
 ok(buy.json?.fee?.amount === "1750", `exchange fee = 1,750 ${CUR} (100×7000×25bps) routed to platform`, buy.json?.fee);
-ok(BigInt(await feeBal(FEE_ACCT)) - feeBefore === 1750n, "platform fee account credited 1,750");
+const feeAfter = BigInt(await feeBal(FEE_ACCT));
+// Report the numbers on failure: "credited 1,750" alone cannot tell a wrong
+// ADDRESS (both readings zero) from a wrong AMOUNT (the balance moved, but not
+// by this) — and it was the address that was wrong.
+ok(feeAfter - feeBefore === 1750n, `platform fee account ${FEE_ACCT.slice(0, 10)}… credited 1,750`,
+  { account: FEE_ACCT, before: feeBefore.toString(), after: feeAfter.toString() });
 ok((await balOf(JEWEL)) === "100" && (await balOf(VAULT)) === "900", "balances: jeweller 100, vault 900");
 
 console.log("\n== 5) Fail-closed compliance — non-IN buyer is rejected ==");
