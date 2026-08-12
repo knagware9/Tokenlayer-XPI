@@ -24,22 +24,74 @@ import { TrexManager, type TrexSuiteRefs } from "./trex/trex-manager.js";
 import type { CredentialAnchor, DidRegistration, OnChainCredentialStatus } from "./credential-anchor.js";
 
 /**
- * A signer that assigns operator nonces from a local counter, fetched once and
- * advanced **only after a transaction is successfully broadcast**. This avoids
- * three ethers footguns at once: stale `getTransactionCount` reads under
- * auto-mining (no per-tx re-fetch), contract-method override nonces that ethers
- * silently drops (the nonce is set at the sendTransaction level), and the
- * optimistic over-increment of the built-in NonceManager on a compliance revert
- * (which broadcasts nothing, so the counter simply isn't advanced).
+ * Headroom added to an estimated gas limit. **An estimate is a lower bound, not
+ * a budget**, and ethers v6 uses it verbatim — it adds no margin of its own.
+ *
+ * Measured, not guessed. Booting against live Besu, the only ERC-3643 use case
+ * failed to deploy every time while every ERC-20/721 one succeeded. The failing
+ * call was `bindIdentityRegistry` on a T-REX proxy, and replayed at the exact
+ * parent block Besu contradicted itself: `eth_estimateGas` said 110_159, and
+ * `eth_call` at 110_159 reverted, while the true minimum was 113_520.
+ *
+ * A proxy call is a nested CALL + DELEGATECALL, and EIP-150 lets a frame forward
+ * only 63/64 of what it holds — so the caller must RESERVE gas it never spends.
+ * A consumption-based estimator cannot see a reserve that is never consumed, so
+ * it under-reports precisely for the pattern ERC-3643 is built on.
+ *
+ * 25% covers the 3.1% observed with room for deeper proxy chains. Unused gas is
+ * refunded, so the margin costs nothing at settlement; it only has to stay small
+ * enough that the limit clears the sender's balance check and the block limit.
  */
-class SerialNonceSigner extends NonceManager {
+export const GAS_MARGIN_PERCENT = 25n;
+
+/** An estimated limit plus `GAS_MARGIN_PERCENT`. Never below the estimate. */
+export function withGasMargin(estimate: bigint): bigint {
+  return (estimate * (100n + GAS_MARGIN_PERCENT)) / 100n;
+}
+
+/**
+ * A signer that assigns operator nonces from a local counter, fetched once and
+ * advanced **only after a transaction is successfully broadcast**, and that
+ * never sends a bare estimate as a gas limit.
+ *
+ * This is where ethers' footguns are neutralised for this adapter, and there are
+ * four: stale `getTransactionCount` reads under auto-mining (no per-tx
+ * re-fetch), contract-method override nonces that ethers silently drops (the
+ * nonce is set at the sendTransaction level), the optimistic over-increment of
+ * the built-in NonceManager on a compliance revert (which broadcasts nothing, so
+ * the counter simply isn't advanced), and the zero-margin gas limit that made
+ * every ERC-3643 deploy fail on Besu (see `GAS_MARGIN_PERCENT`).
+ *
+ * Estimating here rather than letting ethers populate is what makes the margin
+ * reachable at all — by the time ethers has populated the transaction the
+ * estimate has already become the limit.
+ */
+export class SerialNonceSigner extends NonceManager {
   private next: number | null = null;
 
   async sendTransaction(tx: Parameters<NonceManager["sendTransaction"]>[0]): ReturnType<NonceManager["sendTransaction"]> {
     if (this.next === null) {
       this.next = await this.signer.getNonce("latest");
     }
-    const response = await this.signer.sendTransaction({ ...tx, nonce: this.next });
+    // ESTIMATE THE TRANSACTION WE WILL ACTUALLY SEND — nonce included.
+    //
+    // Not cosmetic. `AbstractProvider` memoises `estimateGas` for ~250ms keyed
+    // by the request payload, so two identical calls inside that window share
+    // one answer — including a REJECTION. The allowlist flow issues exactly
+    // that shape: mint to a blocked account (refused), allow the account, mint
+    // again (must succeed). Estimating a nonce-less payload makes both requests
+    // identical, and the second is served the first's cached refusal.
+    //
+    // The nonce differs per transaction, so carrying it keeps every estimate on
+    // its own cache entry. Letting ethers populate used to do this by accident;
+    // doing it here makes it deliberate.
+    //
+    // An explicit limit is the caller's decision — only fill in what is absent.
+    // Estimation still runs BEFORE the counter advances, so a call a contract
+    // genuinely refuses throws without burning a nonce.
+    const request = { ...tx, nonce: this.next };
+    const gasLimit = request.gasLimit ?? withGasMargin(await this.signer.estimateGas(request));
+    const response = await this.signer.sendTransaction({ ...request, gasLimit });
     this.next += 1;
     return response;
   }
