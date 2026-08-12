@@ -239,6 +239,41 @@ describe("scoped verifier", () => {
     });
     expect([403, 404]).toContain(denied.statusCode);
   });
+
+  it("a scoped Verifier's outbound list holds its own use case's requests and no other desk's", async () => {
+    const anchor = new FakeAnchor();
+    const app = await buildTestApp({ registry: fakeRegistry(anchor) });
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const admin2 = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    const keyA = await createCredUC(app, admin, "verif-uc-a3");
+    const keyB = await createCredUC(app, admin, "verif-uc-b3");
+
+    await onboardUser(app, admin, admin2, { email: "list.a@x.dev", password: "secret1", role: "Verifier", useCaseKey: keyA });
+    await onboardUser(app, admin, admin2, { email: "list.b@x.dev", password: "secret1", role: "Verifier", useCaseKey: keyB });
+    const deskA = await loginAs(app, "list.a@x.dev", "secret1");
+    const deskB = await loginAs(app, "list.b@x.dev", "secret1");
+
+    const created = await app.inject({
+      method: "POST", url: `${V1}/verification-requests`, headers: auth(deskA),
+      payload: { holderDid: "did:key:zHolder", requestedTypes: ["T"], purpose: "desk list", credentialUseCaseKey: keyA },
+    });
+    expect(created.statusCode).toBe(201);
+    const requestId = created.json().id as string;
+    // An org-less desk stores verifierOrgId "" — the case that would collide if
+    // the list were scoped by org id rather than by the use case binding.
+    expect(created.json().verifierOrgId).toBe("");
+
+    const list = (token: string) => app.inject({ method: "GET", url: `${V1}/verification-requests`, headers: auth(token) });
+    // A fresh session, i.e. the desk operator has closed the tab and come back.
+    const reloaded = await loginAs(app, "list.a@x.dev", "secret1");
+    const mine = (await list(reloaded)).json() as { id: string; credentialUseCaseKey: string }[];
+    expect(mine.some((r) => r.id === requestId)).toBe(true);
+    expect(mine.every((r) => r.credentialUseCaseKey === keyA)).toBe(true);
+
+    // The neighbouring desk sees nothing of it, in the list or per-id.
+    expect(((await list(deskB)).json() as { id: string }[]).some((r) => r.id === requestId)).toBe(false);
+    expect((await app.inject({ method: "GET", url: `${V1}/verification-requests/${requestId}`, headers: auth(deskB) })).statusCode).toBe(404);
+  });
 });
 
 describe("scoped desk issuance", () => {

@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { ApiError, api } from "../api.js";
 import { useAuth } from "../auth.js";
-import type { ChainInfo, CredentialTypeInfo, CredentialUseCase, VerificationResult } from "../types.js";
+import type { ChainInfo, CredentialTypeInfo, CredentialUseCase, VerificationRequest, VerificationResult } from "../types.js";
 import { TxHashRow } from "./CredentialCard.js";
-import { Card, Pill } from "./ui.js";
+import { Card, EmptyState, Pill } from "./ui.js";
 
 function errMessage(err: unknown, fallback: string): string {
   return err instanceof ApiError ? err.message : fallback;
@@ -35,6 +35,10 @@ export function VerificationRequests(): JSX.Element {
   const [result, setResult] = useState<VerificationResult | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // The outbound list. Before it existed, `reqId` above was the ONLY record of a
+  // request the verifier had raised, so a reload orphaned it — the request stayed
+  // open and consentable with no way back to it.
+  const [outbox, setOutbox] = useState<VerificationRequest[]>([]);
 
   useEffect(() => { if (token) void api.credentialTypes(token).then(setTypes).catch(() => setTypes([])); }, [token]);
   useEffect(() => { if (token) void api.credentialUseCases(token).then(setUseCases).catch(() => setUseCases([])); }, [token]);
@@ -42,6 +46,12 @@ export function VerificationRequests(): JSX.Element {
   // Chain catalog for explorer links on tx-hash rows; failure just omits the links.
   const [chains, setChains] = useState<ChainInfo[]>();
   useEffect(() => { if (token) void api.chains(token).then(setChains).catch(() => setChains([])); }, [token]);
+
+  // A caller with no verifier scope gets [] rather than an error, so a failure
+  // here is a genuine failure and shows as an empty list either way.
+  const refreshOutbox = (t: string): Promise<void> =>
+    api.verificationRequests(t).then(setOutbox).catch(() => setOutbox([]));
+  useEffect(() => { if (token) void refreshOutbox(token); }, [token]);
 
   const selectedUseCase = useCases.find((u) => u.key === selectedKey);
   // The requestable types come from the selected use case, or the closed catalog when none.
@@ -58,13 +68,17 @@ export function VerificationRequests(): JSX.Element {
         ...(selectedKey ? { credentialUseCaseKey: selectedKey } : {}),
       });
       setReqId(r.id); setMsg(`Requested — waiting for the holder to consent (request ${r.id.slice(0, 8)}…).`);
+      await refreshOutbox(token);
     } catch (e) { setErr(errMessage(e, "Request failed")); }
   }
-  async function runVerify(): Promise<void> {
-    if (!token || !reqId) return;
-    setErr(null);
-    try { setResult(await api.verifyVerification(token, reqId)); }
-    catch (e) { setErr(errMessage(e, "Verification failed")); }
+  async function runVerify(id: string | null = reqId): Promise<void> {
+    if (!token || !id) return;
+    setErr(null); setReqId(id);
+    try {
+      setResult(await api.verifyVerification(token, id));
+      // Verifying stamps `verifiedAt` on the row — reload so the list says so.
+      await refreshOutbox(token);
+    } catch (e) { setResult(null); setErr(errMessage(e, "Verification failed")); }
   }
 
   const check = (ok: boolean | "unknown"): JSX.Element => (
@@ -101,6 +115,38 @@ export function VerificationRequests(): JSX.Element {
           <button className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white" onClick={() => void submit()}>Request</button>
           {reqId && <button className="rounded-lg border border-slate-200 px-4 py-2 text-sm" onClick={() => void runVerify()}>Run verification</button>}
         </div>
+      </Card>
+
+      <Card title="Your requests" description="Every presentation you have asked for, newest first. Pick one up here after leaving the page.">
+        {outbox.length === 0 ? (
+          <EmptyState icon="shield" title="No requests yet" hint="Ask a holder for a presentation above; it will appear here until you verify it." />
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {outbox.map((r) => (
+              <li key={r.id} className={`py-3 flex items-start justify-between gap-4 ${r.id === reqId ? "bg-brand-50/40 -mx-2 px-2 rounded-lg" : ""}`}>
+                <div className="min-w-0">
+                  <div className="text-sm font-medium truncate">{r.purpose}</div>
+                  <div className="text-xs text-slate-500 truncate">
+                    {r.requestedTypes.join(", ")} · holder {r.holderDid.slice(0, 20)}…
+                  </div>
+                  <div className="text-[11px] text-slate-400">
+                    {new Date(r.createdAt).toLocaleString()}
+                    {r.verifiedAt && ` · verified ${new Date(r.verifiedAt).toLocaleString()}`}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Pill tone={r.status === "consented" ? "ok" : r.status === "pending" ? "muted" : "danger"}>{r.status}</Pill>
+                  {/* Offered only once the holder has released a presentation:
+                      before that the API answers "nothing to verify", and a
+                      button whose only outcome is that message is a trap. */}
+                  {r.status === "consented" && (
+                    <button className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs" onClick={() => void runVerify(r.id)}>Run verification</button>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
       </Card>
 
       {result && (

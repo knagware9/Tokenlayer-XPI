@@ -430,6 +430,9 @@ export const api = {
   createVerificationRequest: (token: string, body: { holderDid: string; requestedTypes: string[]; purpose: string; credentialUseCaseKey?: string }) =>
     request<VerificationRequest>("/verification-requests", token, { method: "POST", body: JSON.stringify(body) }),
   myVerificationRequests: (token: string) => request<VerificationRequest[]>("/me/verification-requests", token),
+  // The verifier's OUTBOUND list — the mirror of the holder inbox above, and the
+  // only way back to a request whose id the page no longer holds.
+  verificationRequests: (token: string) => request<VerificationRequest[]>("/verification-requests", token),
   consentVerification: (token: string, id: string, credentialIds: string[]) =>
     request<VerificationRequest>(`/verification-requests/${encodeURIComponent(id)}/consent`, token, { method: "POST", body: JSON.stringify({ credentialIds }) }),
   rejectVerification: (token: string, id: string) =>

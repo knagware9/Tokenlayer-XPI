@@ -327,6 +327,10 @@ describe("mode-gate coverage (EN-D2)", () => {
       "POST /verification-requests/:id/reject",
       "GET /verification-requests/:id/verify",
       "GET /me/verification-requests",
+      // The verifier's own outbound list. Added when it was: an unfiltered
+      // listing is how a sandbox key learns a LIVE request's id, which is the
+      // webhook finding above wearing different clothes.
+      "GET /verification-requests",
     ]) {
       const body = at(k);
       expect(body, `${k} has gone missing`).not.toBeNull();

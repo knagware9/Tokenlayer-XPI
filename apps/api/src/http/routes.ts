@@ -5803,6 +5803,50 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     }));
   });
 
+  /**
+   * THE VERIFIER'S SIDE OF `GET /me/verification-requests`.
+   *
+   * The holder has had an inbox since VP-3; the verifier never did, and the id
+   * of a request lived only in the browser tab that created it. Reload the desk
+   * and a pending request became unreachable — still open, still consentable by
+   * the holder, but with no way back to `/verify`. This is that list.
+   *
+   * The scoping is `verifierScoped` itself, applied as a FILTER rather than
+   * re-derived as a query. Re-deriving it is how a list and its detail route
+   * drift apart into two different answers to the same question; here they
+   * cannot, because there is only one predicate. The cheap query below is a
+   * pre-narrowing, never the authorization:
+   *
+   *   · OrgAdmin  → their org's rows (the filter is then a no-op, by construction)
+   *   · Verifier desk (org-less, verifierOrgId "") → matched on credentialUseCaseKey
+   *   · PlatformAdmin → everything, exactly as `orgScoped` already grants per-id
+   *   · anyone else → the empty list, not a 403: nothing exists FOR THEM.
+   *
+   * Machine principals are admitted deliberately, on the same
+   * `verifications:read` scope as the holder inbox: polling one's own
+   * outstanding requests is the unattended half of this flow, and a key inherits
+   * its service user's role and org, so nothing widens. `vreqModeAllows` then
+   * narrows a `tl_test_` key to sandbox rows rather than refusing — the listing
+   * being unfiltered is precisely how a sandbox key learned a live id in the
+   * EN-D2 webhook finding.
+   *
+   * `vreqView` is shared with every other verification route, which is what
+   * keeps `verifierResult` out of this response: reading the verdict still costs
+   * `verifications:verify`.
+   */
+  app.get("/verification-requests", { schema: S.listVerificationRequests, ...authScoped("verifications:read") }, async (request) => {
+    const claims = request.user as TokenClaims;
+    const candidates = claims.role === "OrgAdmin" && claims.orgId
+      ? await deps.verificationRequests.listByVerifierOrg(claims.orgId)
+      : await deps.verificationRequests.list();
+    const scoped = candidates.filter((r) => verifierScoped(claims, r));
+    const allowed = await Promise.all(scoped.map((r) => vreqModeAllows(request, r)));
+    return scoped
+      .filter((_, i) => allowed[i])
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map(vreqView);
+  });
+
   app.get("/verification-requests/:id", { schema: S.getVerificationRequest, ...authScoped("verifications:read") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const { id } = request.params as { id: string };
