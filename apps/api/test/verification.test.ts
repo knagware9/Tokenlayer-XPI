@@ -306,3 +306,96 @@ describe("independence of the verify result", () => {
     expect(payload.sub).toBe(subject.did);
   });
 });
+
+describe("the verifier's outbound list", () => {
+  // The gap this closes: before it, `POST /verification-requests` returned an id
+  // that existed ONLY in the caller's memory. Nothing on the server would give it
+  // back, so a verifier who reloaded lost a request the holder could still
+  // consent to. These tests pin the list to the SAME scope as the per-id route,
+  // because a list that answered a slightly different question would be the bug
+  // one level up.
+  function outbox(token: string) {
+    return app.inject({ method: "GET", url: `${V1}/verification-requests`, headers: auth(token) });
+  }
+  interface Row { id: string; holderDid: string; purpose: string; status: string; createdAt: string }
+
+  it("returns the requests this verifier raised, so a lost id is recoverable", async () => {
+    const { subject, credentialId } = await issueKyc("Outbox");
+    const { admin: vAdmin } = await verifierWithAdmin("Outbox Verifier");
+    const requestId = (await createRequest(vAdmin.token, {
+      holderDid: subject.did, requestedTypes: ["KycCredential"], purpose: "outbox check",
+    })).json().id as string;
+
+    // A fresh session — the browser-reload case, with nothing carried over.
+    const reloaded = await loginAs(app, vAdmin.email, "secret1");
+    const rows = (await outbox(reloaded)).json() as Row[];
+    const row = rows.find((r) => r.id === requestId)!;
+    expect(row).toBeDefined();
+    expect(row.status).toBe("pending");
+    expect(row.purpose).toBe("outbox check");
+    expect(row.holderDid).toBe(subject.did);
+
+    // And the id it hands back really does drive the rest of the flow.
+    expect((await consent(subject.token, row.id, [credentialId])).statusCode).toBe(200);
+    expect((await outbox(reloaded)).json().find((r: Row) => r.id === requestId).status).toBe("consented");
+    expect((await verify(reloaded, row.id)).json().valid).toBe(true);
+  });
+
+  it("a rival verifier org sees none of it — and the per-id route agrees", async () => {
+    const { subject } = await issueKyc("Rival");
+    const { admin: mine } = await verifierWithAdmin("Rival Mine");
+    const { admin: theirs } = await verifierWithAdmin("Rival Theirs");
+    const requestId = (await createRequest(mine.token, {
+      holderDid: subject.did, requestedTypes: ["KycCredential"], purpose: "rival check",
+    })).json().id as string;
+
+    const rows = (await outbox(theirs.token)).json() as Row[];
+    expect(rows.some((r) => r.id === requestId)).toBe(false);
+    // The list must not become a softer door than the one beside it.
+    const byId = await app.inject({ method: "GET", url: `${V1}/verification-requests/${requestId}`, headers: auth(theirs.token) });
+    expect(byId.statusCode).toBe(404);
+  });
+
+  it("someone with no verifier scope gets an empty list, not a 403 and not a leak", async () => {
+    const { subject } = await issueKyc("Bystander");
+    const { admin: vAdmin } = await verifierWithAdmin("Bystander Verifier");
+    const requestId = (await createRequest(vAdmin.token, {
+      holderDid: subject.did, requestedTypes: ["KycCredential"], purpose: "bystander check",
+    })).json().id as string;
+
+    // The HOLDER of the credential is the sharpest case: they can see this very
+    // request in their own inbox, and must still not see it as a verifier's.
+    const res = await outbox(subject.token);
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as Row[]).some((r) => r.id === requestId)).toBe(false);
+    expect((await inbox(subject.token)).json().some((r: Row) => r.id === requestId)).toBe(true);
+  });
+
+  it("carries no verdict and no holder-only fields, and lists newest first", async () => {
+    const { subject, credentialId } = await issueKyc("Shape");
+    const { admin: vAdmin } = await verifierWithAdmin("Shape Verifier");
+    const first = (await createRequest(vAdmin.token, {
+      holderDid: subject.did, requestedTypes: ["KycCredential"], purpose: "first",
+    })).json().id as string;
+    const second = (await createRequest(vAdmin.token, {
+      holderDid: subject.did, requestedTypes: ["KycCredential"], purpose: "second",
+    })).json().id as string;
+    // Drive one to a verdict so there IS a verifierResult that could leak.
+    expect((await consent(subject.token, first, [credentialId])).statusCode).toBe(200);
+    expect((await verify(vAdmin.token, first)).json().valid).toBe(true);
+
+    const rows = (await outbox(vAdmin.token)).json() as Row[];
+    const mine = rows.filter((r) => r.id === first || r.id === second);
+    expect(mine).toHaveLength(2);
+    for (const r of mine) {
+      expect(r).not.toHaveProperty("verifierResult");
+      expect(r).not.toHaveProperty("presentationVpJwt");
+      expect(r).not.toHaveProperty("challenge");
+      // `eligibleCredentials` is the holder inbox's enrichment, not this one's.
+      expect(r).not.toHaveProperty("eligibleCredentials");
+    }
+    // Newest first — the pending one a verifier is chasing is at the top.
+    const ordered = rows.map((r) => r.id);
+    expect(ordered.indexOf(second)).toBeLessThan(ordered.indexOf(first));
+  });
+});

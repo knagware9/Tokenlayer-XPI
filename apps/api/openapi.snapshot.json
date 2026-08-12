@@ -3454,6 +3454,28 @@
       }
     },
     "/api/v1/verification-requests": {
+      "get": {
+        "tags": [
+          "Verification"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "verifications:read"
+        ],
+        "parameters": [],
+        "requestBody": false,
+        "responses": {
+          "200": "[#VerificationRequest]",
+          "401": "#Error"
+        }
+      },
       "post": {
         "tags": [
           "Verification"

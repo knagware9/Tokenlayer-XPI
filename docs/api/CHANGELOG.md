@@ -19,6 +19,34 @@ diff. That file is generated, not written by hand; see the header of
 
 ---
 
+## Unreleased — a verifier can list the requests it raised
+
+Purely additive; no existing route, response or scope changed.
+
+- **New: `GET /verification-requests`** — the requests **you raised**, newest
+  first. It is the mirror of `GET /me/verification-requests`, which returns the
+  requests addressed **to** you. Same `verifications:read` scope, same
+  `VerificationRequest` shape.
+
+  Until now the id returned by `POST /verification-requests` was the only handle
+  on a request, and nothing gave it back: an integration that lost it (a crashed
+  process, a restarted worker, an operator who closed the tab) could not reach
+  `/consent`'s outcome or `/verify`, while the request itself stayed open. If
+  you have been persisting request ids purely to work around that, you no longer
+  have to.
+
+  Scoped exactly as `GET /verification-requests/{id}` is — an organization admin
+  sees their organization's, a use-case-scoped Verifier desk sees its own use
+  case's, a platform admin sees all. A caller with no verifier scope gets `200`
+  with an empty array rather than `403`. A `tl_test_` key sees sandbox rows only,
+  the same narrowing every other list applies.
+
+  It does **not** carry the verifier's verdict — that still needs
+  `verifications:verify` via `GET /verification-requests/{id}/verify` — and
+  `eligibleCredentials` remains the holder inbox's field alone.
+
+---
+
 ## Unreleased — an organization wears its own logo and colour (EN-E)
 
 An organization can now set a logo and one accent colour, and its members see

@@ -2902,6 +2902,17 @@ export const S: Record<string, FastifySchema> = {
       "requested type — which is what you pass as `credentialIds` when consenting. A caller with no DID gets an " +
       "empty array rather than an error.",
     response: { 200: { type: "array", items: { $ref: "VerificationRequest#" } }, ...errs(401) } },
+  listVerificationRequests: { tags: ["Verification"], summary: "The caller's OUTBOUND verification requests", security: eitherCredential,
+    description:
+      "Requires the `verifications:read` scope. The mirror of `GET /me/verification-requests`: that one returns the " +
+      "requests addressed TO you, this one the requests you RAISED — newest first, so a verifier can pick up a " +
+      "pending request after leaving the page.\n\n" +
+      "Scoped exactly as `GET /verification-requests/{id}` is: an organization admin sees their organization's " +
+      "requests, a use-case-scoped Verifier desk sees its own use case's, a platform admin sees all. Anyone else " +
+      "gets an empty array rather than a 403 — nothing exists for them to be refused.\n\n" +
+      "Never carries the verifier's RESULT, which needs `verifications:verify`; and `eligibleCredentials` is the " +
+      "holder view's field alone and is absent here.",
+    response: { 200: { type: "array", items: { $ref: "VerificationRequest#" } }, ...errs(401) } },
   getVerificationRequest: {
     tags: ["Verification"], summary: "One verification request (holder or verifier org)", security: eitherCredential,
     description:
