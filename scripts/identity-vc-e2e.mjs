@@ -3,7 +3,7 @@
 // issuer; the desk verifies it → the investor's KYC flips to approved with the
 // credential's country → and the investor can now SUBSCRIBE in the portal
 // (jurisdiction passes). Before verification the same investor is blocked.
-const API = "http://localhost:4000/api/v1";
+const API = process.env.API ?? "http://localhost:4000/api/v1";
 const TRUSTED_ISSUER = "did:key:z6MkmBbFP8p1GRsRWPBctZ9PcseXoojmFnyxuj5u9rMGa4uU";
 
 async function call(method, path, body, token) {

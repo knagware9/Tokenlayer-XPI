@@ -119,7 +119,13 @@ if (uc.status === 404) {
 const contracts = uc.json?.contracts ?? {};
 const chainId = contracts.besu ? "besu" : Object.keys(contracts)[0];
 const contractRef = contracts[chainId];
-const contractAddr = typeof contractRef === "string" ? contractRef : (contractRef?.address ?? contractRef?.contractId ?? contractRef?.id);
+// `contractRef` FIRST — that is the key the API actually returns today
+// (`{contractRef, deployTxHash}`). Without it this resolved to undefined and
+// the eth_getCode proof below threw on `code.length`, so the one step that
+// independently confirms bytecode on Besu never ran.
+const contractAddr = typeof contractRef === "string"
+  ? contractRef
+  : (contractRef?.contractRef ?? contractRef?.address ?? contractRef?.contractId ?? contractRef?.id);
 ok(uc.json?.symbol === "GEN" && !!chainId, `ERC-20 deployed on '${chainId}'${contractAddr ? ` at ${contractAddr}` : ""}`, contracts);
 if (chainId === "besu") {
   const code = await rpc("eth_getCode", [contractAddr, "latest"]);

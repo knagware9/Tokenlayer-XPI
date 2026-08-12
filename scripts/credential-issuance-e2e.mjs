@@ -31,8 +31,17 @@ const t1 = await login(a1, "orgadmin1"), t2 = await login(a2, "orgadmin2");
 ok(org?.did && subject?.did && t1 && t2, `verifier org ${org?.did?.slice(0, 22)}… with 2 admins + a subject`, { org: org?.did });
 
 const catalog = (await call("GET", "/credential-types", null, t1)).json ?? [];
-ok(catalog.length === 3 && catalog.find((c) => c.type === "AuthorizedSignatory")?.requiredApprovals === 2,
-  `catalog: ${catalog.map((c) => `${c.type}(${c.requiredApprovals})`).join(", ")}`, catalog);
+// Named, not counted. This asserted `length === 3` and went red the day
+// OrganizationCredential joined the catalog with the KYB work — a stale count
+// that failed for a reason having nothing to do with issuance, which is how a
+// harness teaches people to ignore it. Naming what must be there keeps the
+// anti-drift value (a REMOVED type still fails) without breaking every time
+// the catalog legitimately grows.
+const expected = ["KycCredential", "AccreditedInvestor", "AuthorizedSignatory", "OrganizationCredential"];
+const missing = expected.filter((t) => !catalog.some((c) => c.type === t));
+ok(missing.length === 0 && catalog.find((c) => c.type === "AuthorizedSignatory")?.requiredApprovals === 2,
+  `catalog: ${catalog.map((c) => `${c.type}(${c.requiredApprovals})`).join(", ")}`,
+  missing.length ? { missing } : catalog);
 
 console.log("\n== 2) Request a KycCredential (maker) ==");
 const req = await call("POST", "/credentials/requests", { type: "KycCredential", subjectUserId: subject.id, claims: { legalName: "Priya Raman", country: "IN" } }, t1);
