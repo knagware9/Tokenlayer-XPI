@@ -133,6 +133,16 @@ export interface AppDeps {
   marketEscrowAccount?: string;
   /** The on-chain identity registry. ABSENT when no chain hosts one — consumers must handle that explicitly. */
   registry?: IdentityRegistry;
+  /**
+   * Minimum age (ms) a `purpose = "brand-logo"` document must have before
+   * `POST /orgs/{id}/branding/logo`'s prune will delete it — see
+   * `BRAND_LOGO_PRUNE_GRACE_MS` in `brand-logo-prune.ts` for why a plain
+   * timestamp/listing-order comparison isn't enough and this is the actual
+   * concurrency guard. Absent ⇒ that production default (60s). Tests
+   * override this to a small value so an ordinary, non-concurrent test's
+   * second upload still prunes the first immediately.
+   */
+  brandLogoPruneGraceMs?: number;
 }
 
 /**

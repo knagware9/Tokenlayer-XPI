@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { ApiKeyRecord, AssetRecord, BrandingPatch, CashflowRecord, CompanyProfile, CredentialRecord, DocumentPurpose, DocumentSummary, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord, WebhookEndpointRecord } from "../persistence/types.js";
+import type { ApiKeyRecord, AssetRecord, BrandingPatch, CashflowRecord, CompanyProfile, CredentialRecord, DocumentPurpose, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord, WebhookEndpointRecord } from "../persistence/types.js";
 import { ListingConflictError } from "../persistence/types.js";
 import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, certificatePageSize, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, issueCredential, issuerBindingAllows, modeAllows, normalizeUseCaseDefinition, ORG_OPERATING_ROLES, orgDomainEnabled, orgRoleEnabled, PolicyError, presentCredential, presentCredentials, SANDBOX_CHAIN_ID, sandboxChainsValid, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateBrandAccent, validateCertificatePlacements, validateCredentialUseCase, validateEventTypes, validateMetadata, scopeAllows, validateOrgCapabilities, validateScopes, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, isDocumentSha256, type Actor, type ApiScope, type ChainEntry, type CredentialTypeSpec, type CredentialUseCaseDefinition, type LifecycleAction, type OrgDomain, type OrgOperatingRole, type OrgType, type ResourceMode, type Role, type UseCaseDefinition, type UseCaseTemplate, type CertificateFieldPlacement } from "@tokenlayer/core";
 import qrcode from "qrcode";
@@ -26,7 +26,7 @@ import type { OnboardUserPayload } from "../user-kinds.js";
 import { resolveDid } from "../did-resolver.js";
 import { checkUrl } from "../webhooks/url-guard.js";
 import { API_KEY_BCRYPT_ROUNDS, invalidateVerifiedPrefix, mintSecret } from "../api-keys.js";
-import { pruneSupersededBrandLogos } from "../brand-logo-prune.js";
+import { BRAND_LOGO_PRUNE_GRACE_MS, pruneSupersededBrandLogos } from "../brand-logo-prune.js";
 import { S } from "./schemas.js";
 import { actorOf, claimsOf, contextOf, isPositiveIntString, machinePrincipal, notFound, requirePrincipal, requireScope, scopedToCaller, type TokenClaims } from "./support.js";
 
@@ -4186,24 +4186,6 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     if (!isRenderableArtwork(b.contentType)) {
       return reply.code(415).send({ error: "UNSUPPORTED_DOCUMENT_TYPE", message: "a brand logo must be image/png or image/jpeg — the renderer can draw nothing else" });
     }
-    // SNAPSHOT BEFORE STORING, NOT AFTER. This is what actually stops two
-    // concurrent uploads from deleting each other (see the long comment in
-    // `brand-logo-prune.ts` — an earlier attempt compared `createdAt`
-    // timestamps instead, and empirically that made ORDINARY sequential
-    // uploads flaky, because millisecond-resolution clocks tie constantly
-    // against an in-process store with no real I/O). Everything in this list
-    // demonstrably existed before this request wrote its own bytes; a row
-    // created by a genuinely concurrent request after this call cannot appear
-    // in it and so can never be touched by this request, no matter what
-    // happens afterward. Best-effort: if this listing fails, nothing is
-    // pruned this time, not that the upload fails.
-    let candidates: DocumentSummary[] = [];
-    try {
-      candidates = await deps.documents.listByOwnerPurpose(id, "brand-logo");
-    } catch (err) {
-      request.log.error({ err, orgId: id }, "brand-logo-prune: pre-upload listing failed — nothing will be pruned for this upload");
-    }
-
     // OWNED BY THE ORG BEING BRANDED, not by the caller. A PlatformAdmin
     // uploading a mark on an org's behalf is acting for that org, and their own
     // `claims.orgId` (the platform org, or none) would record the wrong owner —
@@ -4236,7 +4218,16 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       return fresh.brandLogoDocumentId;
     };
 
-    const { removed, lostPinnedId } = await pruneSupersededBrandLogos(deps.documents, id, { candidates, getPinned }, request.log);
+    // THE ACTUAL CONCURRENCY GUARD IS THE AGE FLOOR, NOT LISTING ORDER. A
+    // pre-store snapshot was tried and found insufficient — reproduced on a
+    // real server over real TCP against real SQLite: it only takes ONE side
+    // of two concurrent uploads to list AFTER the other's store lands, and
+    // that side deletes the other's row. `graceMs` sidesteps the ordering
+    // question entirely by asking a different one ("how old is this row?"),
+    // which is what actually tells a concurrent sibling apart from an
+    // abandoned pick. See the long comment in `brand-logo-prune.ts`.
+    const graceMs = deps.brandLogoPruneGraceMs ?? BRAND_LOGO_PRUNE_GRACE_MS;
+    const { removed, lostPinnedId } = await pruneSupersededBrandLogos(deps.documents, id, { justUploaded: doc.id, getPinned, graceMs }, request.log);
 
     // Only when something actually went, so the log records deletions rather
     // than every upload. `audit.append` itself is NOT best-effort here — it

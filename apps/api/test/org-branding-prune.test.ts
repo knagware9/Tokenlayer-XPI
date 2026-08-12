@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import { describe, expect, it } from "vitest";
 import { auth, buildTestAppWithRepos, loginAs, V1, type TestAppHandle } from "./helpers.js";
 import { PLATFORM_ORG_NAME } from "../src/platform-org.js";
+import { BRAND_LOGO_PRUNE_GRACE_MS } from "../src/brand-logo-prune.js";
 
 const ROUNDS = 4;
 const PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAAFElEQVR4nGP8z8Dwn4GBgYGJAQIABiAB/8s3lOgAAAAASUVORK5CYII=";
@@ -645,65 +646,58 @@ describe("POST /orgs/:id/branding/logo prunes superseded uploads", () => {
   });
 
   /**
-   * A NOTE ON HOW THESE TWO TESTS ARE BUILT.
+   * A NOTE ON WHY THIS ISN'T A `Promise.all` OF TWO INJECTS.
    *
    * `Promise.all` of two plain `app.inject()` calls does NOT create genuine
    * concurrent execution in this harness — verified empirically by tracing:
    * `MemoryDocumentRepository` has no real I/O latency, so the first
-   * request's entire handler chain (list → store → prune) resolves purely
-   * through microtasks and runs to completion before the second request's
-   * handler is even dispatched, every single time. This held even across two
-   * separate Fastify instances sharing the same `deps`, and even over a real
-   * TCP loopback connection with `fetch()` — there is simply no forced yield
-   * point anywhere in the handler when nothing it calls does real I/O. A
-   * naive `Promise.all` test here would therefore either always fail (for
-   * "two uploads", since the second deterministically supersedes the first —
-   * which is exactly the intended, non-buggy feature behaviour for two
-   * requests with no real overlap) or always pass for the wrong reason (for
-   * "racing a PATCH", since the PATCH would simply finish first) — confirmed
-   * by literally reverting each fix and watching a naive version of these
-   * tests keep passing regardless.
+   * request's entire handler chain (store → prune) resolves purely through
+   * microtasks and runs to completion before the second request's handler is
+   * even dispatched, every single time. This held even across two separate
+   * Fastify instances sharing the same `deps`, and even over a real TCP
+   * loopback connection with `fetch()`.
    *
-   * In production this doesn't apply: a real Prisma call against Postgres or
-   * SQLite is real network/disk I/O, which is exactly the kind of operation
-   * that lets two requests' handlers genuinely interleave — which is the
-   * condition these two fixes exist for. `tick()` below simulates that one
-   * property (a real repository call yields to the event loop) so the test
-   * can exercise it — it does not fake any outcome; `documents.create` and
-   * `documents.listByOwnerPurpose` still do exactly what they always do,
-   * just after yielding once, the way a real database driver would.
+   * That is exactly why a snapshot-based first attempt at this fix (list the
+   * org's existing rows before storing this call's own upload, and only ever
+   * consider that pre-store list) looked correct against every test in this
+   * file and was still wrong: this harness cannot exhibit the interleaving
+   * the bug needs, so no test built on top of `app.inject()` timing could
+   * ever have caught it. It was caught by a separate end-to-end harness that
+   * runs the real server over real TCP against real SQLite, driven by
+   * separate OS processes doing real disk I/O — the one thing that can
+   * actually force two requests' handlers to interleave. See the long
+   * module comment in `brand-logo-prune.ts` for the exact interleaving that
+   * broke the snapshot approach, and why an AGE FLOOR — a row must be at
+   * least `graceMs` old to be a deletion candidate — fixes it without
+   * depending on interleaving at all: a genuinely concurrent sibling is only
+   * ever milliseconds old, full stop, regardless of which request listed or
+   * stored first.
+   *
+   * Because the fix no longer depends on interleaving, it doesn't need
+   * genuine interleaving to test either — building an app with the
+   * PRODUCTION grace period and proving a freshly-created row survives a
+   * sweep is a direct, deterministic test of the actual mechanism, not a
+   * best-effort simulation of a race this harness cannot really produce.
    */
-  const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
-
-  /**
-   * CRITICAL 1 (quality review): the earlier version listed rows AFTER
-   * storing this call's own upload and pruned anything that wasn't its own
-   * row or the pinned mark, with no regard for timing — two overlapping
-   * uploads would each see the OTHER as an abandoned pick and delete it.
-   */
-  it("two concurrent uploads to the same org do not delete each other", async () => {
-    const h = await buildTestAppWithRepos();
+  it("PRODUCTION DEFAULT: a freshly-uploaded sibling is spared by the grace period", async () => {
+    const h = await buildTestAppWithRepos({ brandLogoPruneGraceMs: BRAND_LOGO_PRUNE_GRACE_MS });
     const a = await org(h, "Acme");
 
-    const realList = h.deps.documents.listByOwnerPurpose.bind(h.deps.documents);
-    const realCreate = h.deps.documents.create.bind(h.deps.documents);
-    h.deps.documents.listByOwnerPurpose = async (...args: Parameters<typeof realList>) => { await tick(); return realList(...args); };
-    h.deps.documents.create = async (...args: Parameters<typeof realCreate>) => { await tick(); return realCreate(...args); };
-    let r1, r2;
-    try {
-      [r1, r2] = await Promise.all([upload(h, a.id, a.token), upload(h, a.id, a.token)]);
-    } finally {
-      h.deps.documents.listByOwnerPurpose = realList;
-      h.deps.documents.create = realCreate;
-    }
+    const first = (await upload(h, a.id, a.token)).json();
+    // `first` is only milliseconds old when this fires — exactly what a
+    // genuinely concurrent sibling's row looks like at the moment another
+    // request's sweep runs.
+    const second = (await upload(h, a.id, a.token)).json();
 
-    expect(r1.statusCode).toBe(201);
-    expect(r2.statusCode).toBe(201);
-    const doc1 = r1.json();
-    const doc2 = r2.json();
+    expect(await getDoc(h, first.id)).not.toBeNull(); // too young to prune — spared
+    expect(await getDoc(h, second.id)).not.toBeNull();
 
-    expect(await getDoc(h, doc1.id)).not.toBeNull();
-    expect(await getDoc(h, doc2.id)).not.toBeNull();
+    // And both bytes are actually servable — not just "not yet garbage
+    // collected" but genuinely intact and readable.
+    const pin = await patchBranding(h, a.id, a.token, { brandLogoDocumentId: first.id });
+    expect(pin.statusCode).toBe(200);
+    const served = await h.app.inject({ method: "GET", url: `${V1}/orgs/${a.id}/branding/logo`, headers: auth(a.token) });
+    expect(served.statusCode).toBe(200);
   });
 
   /**
@@ -714,7 +708,10 @@ describe("POST /orgs/:id/branding/logo prunes superseded uploads", () => {
    * is triggered by the FIRST row's own delete completing, so it lands
    * strictly BETWEEN that moment and the SECOND row's own fresh pin check —
    * a window the old "read once, up front" code could not see into no
-   * matter when the PATCH landed, and the new per-row read does.
+   * matter when the PATCH landed, and the new per-row read does. Unrelated
+   * to the age floor above, so this app uses the test default (grace 0):
+   * both setup rows must be immediately prunable for the race to be worth
+   * anything.
    */
   it("an upload racing a PATCH that pins an older mark spares the newly pinned bytes", async () => {
     const h = await buildTestAppWithRepos();

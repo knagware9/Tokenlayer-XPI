@@ -44,7 +44,7 @@ export const TEST_MARKET_ESCROW = "0xcd3B766CCDd6AE721141F452C550Ca635964ce71";
 /** A second seeded PlatformAdmin (test-only) — the SoD checker for null-scope / brand-new-use-case onboarding proposals the sole admin proposes. */
 export const PLATFORM_ADMIN_2 = { email: "admin2@tokenlayer.dev", password: "admin123" } as const;
 
-export interface TestAppOptions { loginRateLimitMax?: number; apiKeyRateLimitMax?: number; apiKeyFailedAttemptMax?: number; apiKeyReserveIntervalMs?: number; platformFeeAccount?: string; marketEscrowAccount?: string; trustedKycIssuers?: string[]; devIssuerSeed?: string; isProduction?: boolean; didMasterConfigured?: boolean; registry?: IdentityRegistry; enabledDomains?: string[] }
+export interface TestAppOptions { loginRateLimitMax?: number; apiKeyRateLimitMax?: number; apiKeyFailedAttemptMax?: number; apiKeyReserveIntervalMs?: number; platformFeeAccount?: string; marketEscrowAccount?: string; trustedKycIssuers?: string[]; devIssuerSeed?: string; isProduction?: boolean; didMasterConfigured?: boolean; registry?: IdentityRegistry; enabledDomains?: string[]; brandLogoPruneGraceMs?: number }
 
 /**
  * The app plus the repositories tests need to reach directly — used where a
@@ -135,6 +135,13 @@ export async function buildTestAppWithRepos(opts: TestAppOptions = {}): Promise<
     // `marketEscrowAccount: undefined` disables the market (503s).
     marketEscrowAccount: "marketEscrowAccount" in opts ? opts.marketEscrowAccount : TEST_MARKET_ESCROW,
     registry: opts.registry,
+    // 0 by default: almost every test's uploads happen milliseconds apart on
+    // purpose (that's the whole point of testing "the second prunes the
+    // first"), and the production default (60s) would make every one of them
+    // wait real wall-clock time to see a delete. Tests that specifically want
+    // to prove the production grace period protects a fresh sibling pass
+    // `BRAND_LOGO_PRUNE_GRACE_MS` explicitly.
+    brandLogoPruneGraceMs: opts.brandLogoPruneGraceMs ?? 0,
   };
   await ensurePlatformIssuerOrg(deps);
   return { app: await buildApp(deps), users, apiKeys, loginKeys, organizations, audit, deps };
