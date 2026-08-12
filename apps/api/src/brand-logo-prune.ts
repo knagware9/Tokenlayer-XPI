@@ -14,6 +14,14 @@ export interface Logger {
  * immediately in a fast, non-concurrent test, and separately construct one
  * app with THIS constant to prove the production value actually protects a
  * fresh sibling.
+ *
+ * An operator can override it with the `BRAND_LOGO_PRUNE_GRACE_MS` env var,
+ * which `env.ts` validates as a non-negative finite number and REFUSES TO BOOT
+ * on otherwise — this is a safety floor, and a typo that parsed to `NaN` would
+ * silently switch pruning off while a negative value would silently re-open
+ * the concurrent-upload data loss. Lowering it below the time a request takes
+ * to store its own row re-opens that race; `0` disables the protection
+ * entirely and exists for the test harness.
  */
 export const BRAND_LOGO_PRUNE_GRACE_MS = 60_000;
 

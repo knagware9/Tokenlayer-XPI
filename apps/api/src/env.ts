@@ -93,6 +93,17 @@ export interface Env {
   /** Minimum gap between bcrypt attempts for an over-budget prefix. Unset → 5000ms. */
   apiKeyReserveIntervalMs?: number;
   /**
+   * How old (ms) an unpinned brand-logo upload must be before
+   * `POST /orgs/{id}/branding/logo`'s prune will delete it. Unset → the
+   * module default (`BRAND_LOGO_PRUNE_GRACE_MS`, 60s). Left `undefined`
+   * rather than defaulted here so the number lives in exactly one place.
+   *
+   * This is a SAFETY floor, not a tuning knob: it is the whole reason two
+   * concurrent uploads no longer delete each other, so `0` disables that
+   * protection. Validated at boot rather than coerced — see below.
+   */
+  brandLogoPruneGraceMs?: number;
+  /**
    * Allowlist of trusted KYC credential issuer DIDs (comma-separated in the env).
    * Empty ⇒ no issuer is trusted, so identity verification fails closed.
    */
@@ -152,6 +163,29 @@ const marketEscrowAccount =
   process.env.MARKET_ESCROW_ACCOUNT ??
   (process.env.NODE_ENV === "production" ? undefined : DEMO_MARKET_ESCROW_ACCOUNT);
 
+/**
+ * Parse a millisecond duration that must be a non-negative finite number, or
+ * refuse to boot.
+ *
+ * The bare `Number(...)` used by the tunables below is how a typo becomes a
+ * silent behaviour change, and for a SAFETY floor that is not acceptable:
+ * `Number("6o")` is `NaN`, `ageMs >= NaN` is false for every row, so a
+ * fat-fingered grace period would switch the brand-logo prune off completely
+ * and say nothing — the storage leak it exists to fix would quietly return. A
+ * NEGATIVE value is worse than useless: it makes every row instantly reapable,
+ * re-opening by configuration the exact concurrency bug the grace period was
+ * added to close (two simultaneous uploads deleting each other). Refuse both at
+ * boot, the way `JWT_SECRET` is refused, rather than start in a state nobody
+ * chose. `0` is allowed and meaningful — it is what the test harness passes.
+ */
+function requireNonNegativeMs(name: string, raw: string): number {
+  const ms = Number(raw);
+  if (!Number.isFinite(ms) || ms < 0) {
+    throw new Error(`${name} must be a non-negative number of milliseconds; got ${JSON.stringify(raw)}.`);
+  }
+  return ms;
+}
+
 export const env: Env = {
   port: Number(process.env.PORT ?? 4000),
   nodeEnv: process.env.NODE_ENV ?? "development",
@@ -166,6 +200,11 @@ export const env: Env = {
   apiKeyRateLimitMax: process.env.API_KEY_RATE_LIMIT_MAX ? Number(process.env.API_KEY_RATE_LIMIT_MAX) : undefined,
   apiKeyFailedAttemptMax: process.env.API_KEY_FAILED_ATTEMPT_MAX ? Number(process.env.API_KEY_FAILED_ATTEMPT_MAX) : undefined,
   apiKeyReserveIntervalMs: process.env.API_KEY_RESERVE_INTERVAL_MS ? Number(process.env.API_KEY_RESERVE_INTERVAL_MS) : undefined,
+  // NOTE `"0"` is a truthy string, so an explicit zero reaches the parser and
+  // is honoured; only an unset/empty value falls through to the module default.
+  brandLogoPruneGraceMs: process.env.BRAND_LOGO_PRUNE_GRACE_MS
+    ? requireNonNegativeMs("BRAND_LOGO_PRUNE_GRACE_MS", process.env.BRAND_LOGO_PRUNE_GRACE_MS)
+    : undefined,
   trustedKycIssuers: (process.env.TRUSTED_KYC_ISSUERS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   devKycIssuerSeed: process.env.DEV_KYC_ISSUER_SEED,
   didMasterKey: process.env.DID_MASTER_KEY ?? DEV_DID_MASTER_KEY,

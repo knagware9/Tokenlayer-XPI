@@ -134,6 +134,7 @@ async function main(): Promise<void> {
     apiKeyRateLimitMax: env.apiKeyRateLimitMax,
     apiKeyFailedAttemptMax: env.apiKeyFailedAttemptMax,
     apiKeyReserveIntervalMs: env.apiKeyReserveIntervalMs,
+    brandLogoPruneGraceMs: env.brandLogoPruneGraceMs,
     registry,
   };
   const platformOrg = await ensurePlatformIssuerOrg(deps);
