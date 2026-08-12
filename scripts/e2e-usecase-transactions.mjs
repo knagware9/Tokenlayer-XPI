@@ -49,8 +49,17 @@ async function ensureInHolder(admin, email, wallet, name) {
 
 // Full DvP lifecycle for a fungible use case: issue w/ sale terms → allow+mint to
 // treasury → allow+fund buyer → buyer BUYS → buyer transfers a little onward.
-async function lifecycle({ admin, admin2, label, useCaseKey, chainId, metadata, treasury, buyerWallet, buyerLogin, unitPrice = "100", supply = "10000", buyQty = "500" }) {
+async function lifecycle({ admin, admin2, label, useCaseKey, chainId, chains, metadata, treasury, buyerWallet, buyerLogin, unitPrice = "100", supply = "10000", buyQty = "500" }) {
   console.log(`\n=== ${label} (${useCaseKey}) on ${chainId} ===`);
+  // EVM chains are real-or-absent by design, so a laptop with only Besu running
+  // cannot exercise the MST leg — and that is not a product failure. SKIP it,
+  // loudly: a silent skip would read as a pass, and a hard failure would train
+  // people to ignore this script's exit code (which is what it did while it
+  // exited 0 with two red checks on screen).
+  if (chains && !chains.has(chainId)) {
+    console.log(`  ⊘ SKIPPED — chain '${chainId}' is not configured on this API (GET /chains: available=false)`);
+    return "skipped";
+  }
   const id = await issueMaybeGated(admin, admin2, {
     useCaseKey, name: `${label} ${TAG}`, symbol: useCaseKey.slice(0, 4).toUpperCase(), chainId, metadata,
     treasuryAccount: treasury, sale: { unitPrice, currency: CCY, treasuryAccount: treasury },
@@ -97,23 +106,39 @@ async function main() {
   console.log(`Running end-to-end transactions (run tag ${TAG})`);
   const admin = await login("admin@tokenlayer.dev", "admin123");
   const admin2 = await login("admin2@tokenlayer.dev", "admin123");
+  // Which ledgers this API actually has. `available` is the API's own word for
+  // "configured and reachable" — the same field the console's Networks view reads.
+  const chains = new Set(((await call("GET", "/chains", admin)).body ?? []).filter((c) => c.available).map((c) => c.id));
+  console.log(`  chains available: ${[...chains].join(", ") || "(none)"}`);
   const R = {};
-  R["carbon-credit"] = await lifecycle({ admin, admin2, label: "Verra VCS Carbon", useCaseKey: "carbon-credit", chainId: "besu",
+  R["carbon-credit"] = await lifecycle({ admin, admin2, chains, label: "Verra VCS Carbon", useCaseKey: "carbon-credit", chainId: "besu",
     metadata: { projectName: "Amazon REDD+ Conservation", registry: "Verra VCS", vintage: 2026, methodology: "VM0007", country: "BR", creditType: "REDD+" },
     treasury: WALLET.treasury, buyerWallet: WALLET.ecofund, buyerLogin: { email: "carbon.buyer@tokenlayer.dev", password: "carbon123" } }).catch((e) => (step(false, e.message), false));
-  R["gold-loan"] = await lifecycle({ admin, admin2, label: "Gold Loan Pool", useCaseKey: "gold-loan", chainId: "mst",
+  R["gold-loan"] = await lifecycle({ admin, admin2, chains, label: "Gold Loan Pool", useCaseKey: "gold-loan", chainId: "mst",
     metadata: { borrower: "Ramesh Traders", goldWeightGrams: 1000, goldPurity: "22K", loanAmountInr: 5000000, interestRate: 12 },
     treasury: WALLET.treasury, buyerWallet: WALLET.alice, buyerLogin: { email: "gold.buyer@tokenlayer.dev", password: "gold123" } }).catch((e) => (step(false, e.message), false));
-  R["corporate-bond"] = await lifecycle({ admin, admin2, label: "Acme 2030 Bond", useCaseKey: "corporate-bond", chainId: "fabric",
+  R["corporate-bond"] = await lifecycle({ admin, admin2, chains, label: "Acme 2030 Bond", useCaseKey: "corporate-bond", chainId: "fabric",
     metadata: { issuer: "ACME Capital", isin: "INE000A01001", faceValue: 1000, couponRate: 7.5 },
     treasury: WALLET.treasury, buyerWallet: WALLET.bob, buyerLogin: { email: "bond.buyer@tokenlayer.dev", password: "bond123" }, unitPrice: "1000", supply: "5000", buyQty: "100" }).catch((e) => (step(false, e.message), false));
   R["invoice-tokenization"] = await invoiceLifecycle(admin).catch((e) => (step(false, e.message), false));
 
   console.log(`\n=== SUMMARY (run ${TAG}) ===`);
-  for (const [k, v] of Object.entries(R)) console.log(`  ${v ? "✓" : "✗"} ${k}`);
+  const mark = (v) => (v === "skipped" ? "⊘" : v ? "✓" : "✗");
+  for (const [k, v] of Object.entries(R)) console.log(`  ${mark(v)} ${k}${v === "skipped" ? " (chain not configured here)" : ""}`);
   const a = (await call("GET", "/analytics", admin)).body ?? {};
   console.log(`\n  Platform totals: supply ${a.totalSupply ?? "?"} · ${a.holders ?? "?"} holders · ${(a.trades30d ?? a.recent?.filter?.((r) => r.action === "buy").length) ?? "?"} recent trades`);
   console.log(`  By use case:`);
   for (const u of (a.byUseCase ?? [])) console.log(`    - ${u.name} · ${u.chainId} · supply ${u.supply} · holders ${u.holders} · value ${JSON.stringify(u.valueByCurrency ?? {})}`);
+
+  // THE EXIT CODE. Without this the script printed red checks and still exited
+  // 0, so `node scripts/e2e-usecase-transactions.mjs && echo ok` said ok — a
+  // harness that cannot fail teaches people to stop reading it. Skips are not
+  // failures; anything actually attempted and broken is.
+  const failed = Object.entries(R).filter(([, v]) => v === false).map(([k]) => k);
+  const skipped = Object.entries(R).filter(([, v]) => v === "skipped").map(([k]) => k);
+  console.log(failed.length
+    ? `\n❌ ${failed.length} USE CASE(S) FAILED — ${failed.join(", ")}`
+    : `\n✅ ALL ATTEMPTED USE CASES PASSED${skipped.length ? ` — ${skipped.length} skipped (${skipped.join(", ")})` : ""}`);
+  process.exit(failed.length ? 1 : 0);
 }
 main().catch((e) => { console.error(e); process.exit(1); });
