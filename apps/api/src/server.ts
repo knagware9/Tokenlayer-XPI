@@ -5,6 +5,7 @@ import type { AppDeps } from "./context.js";
 import { createEngine } from "./context.js";
 import { loadCurrencies } from "./currencies.js";
 import { env } from "./env.js";
+import { selectIdentityAssertions } from "./identity-assertions.js";
 import { createMemoryChallengeStore } from "./identity-challenges.js";
 import { createMemoryQrLoginStore } from "./qr-login-sessions.js";
 import { createKeystore } from "./keystore.js";
@@ -71,7 +72,26 @@ async function main(): Promise<void> {
   // Demo users/accounts (with predictable passwords) are seeded only outside production.
   if (env.nodeEnv !== "production") await seedDefaults(users, accounts);
 
-  const engine = createEngine(useCases, rbac, chains, audit, { users, accounts, credentials });
+  // WHERE "is this holder verified?" is answered on THIS deployment — the local
+  // credential store, a remote Identity service, or nowhere (and it says so).
+  const identity = selectIdentityAssertions({
+    enabledDomains: env.enabledDomains,
+    serviceUrl: env.identityServiceUrl,
+    serviceKey: env.identityServiceKey,
+    timeoutMs: env.identityServiceTimeoutMs,
+    credentials,
+  });
+  console.log(
+    `[identity] verified-identity answers come from: ${
+      env.identityServiceUrl
+        ? `remote ${env.identityServiceUrl}`
+        : env.enabledDomains.includes("identity")
+          ? "the local credential store"
+          : "NOWHERE — requireVerifiedIdentity use cases will refuse"
+    }`,
+  );
+
+  const engine = createEngine(useCases, rbac, chains, audit, { users, accounts, credentials, identity });
   // Seed default use cases and deploy their contracts on each allowed+available
   // chain (best-effort; never crashes boot). Available = present in the registry.
   await seedUseCases(useCases, {

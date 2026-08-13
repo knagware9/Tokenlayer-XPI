@@ -135,6 +135,20 @@ export interface Env {
   /** Domains this deployment runs (tokenization, identity). Empty/all-unknown ⇒ both. */
   enabledDomains: string[];
   /**
+   * A separately-deployed Identity service to ask "does this DID hold a valid
+   * credential?" — set BOTH or NEITHER (see the boot check below).
+   *
+   * Absent on a deployment that runs the identity domain itself: it owns the
+   * credentials and answers from its own store. Absent on a tokenization-only
+   * deployment means nothing can answer, and `requireVerifiedIdentity` use cases
+   * refuse loudly rather than quietly denying every holder.
+   */
+  identityServiceUrl?: string;
+  /** A peer API key on the identity service holding the `identity:assert` scope. */
+  identityServiceKey?: string;
+  /** Per-call timeout for the remote assertion; a compliance check must not hang a mint. */
+  identityServiceTimeoutMs?: number;
+  /**
    * Whether THIS process runs the webhook dispatcher (EN-C). Default on.
    *
    * The CAS claim makes several instances SAFE (no row is ever sent twice) but
@@ -223,11 +237,53 @@ export const env: Env = {
     if (parsed.length === 0) { if (raw.length) console.warn("[env] ENABLED_DOMAINS had no known domains — defaulting to both"); return known; }
     return parsed; // empty/all-unknown ⇒ both (never zero)
   })(),
+  identityServiceUrl: process.env.IDENTITY_SERVICE_URL?.trim() || undefined,
+  identityServiceKey: process.env.IDENTITY_SERVICE_KEY?.trim() || undefined,
+  identityServiceTimeoutMs: process.env.IDENTITY_SERVICE_TIMEOUT_MS
+    ? requireNonNegativeMs("IDENTITY_SERVICE_TIMEOUT_MS", process.env.IDENTITY_SERVICE_TIMEOUT_MS)
+    : undefined,
   webhooksEnabled: process.env.WEBHOOKS_ENABLED !== "0",
   webhooksPollMs: process.env.WEBHOOKS_POLL_MS ? Number(process.env.WEBHOOKS_POLL_MS) : 2000,
   webhooksAllowInsecure: process.env.WEBHOOKS_ALLOW_INSECURE === "1",
   webhooksTimeoutMs: process.env.WEBHOOKS_TIMEOUT_MS ? Number(process.env.WEBHOOKS_TIMEOUT_MS) : 10_000,
 };
+
+/**
+ * A URL without a key, or a key without a URL, is a half-configured remote
+ * identity service — and the failure it produces is the worst kind: the process
+ * boots, the deployment looks configured, and then every single
+ * `requireVerifiedIdentity` mint fails at runtime with an authorization error
+ * against a service the operator believes they wired up. Refuse at boot, where
+ * the fix is one line and nobody's transaction is in flight.
+ */
+if (!!env.identityServiceUrl !== !!env.identityServiceKey) {
+  throw new Error(
+    "IDENTITY_SERVICE_URL and IDENTITY_SERVICE_KEY must be set together (or neither): " +
+      `got URL=${env.identityServiceUrl ? "set" : "unset"}, KEY=${env.identityServiceKey ? "set" : "unset"}. ` +
+      "A URL with no key cannot authenticate; a key with no URL has nowhere to go.",
+  );
+}
+
+/**
+ * Running the identity domain AND pointing at a remote identity service is a
+ * contradiction, and the failure it produces is silent: the identity desk in
+ * THIS process issues a credential into THIS database, while the compliance
+ * gate asks a DIFFERENT service and is told the holder has nothing. Nobody sees
+ * a stack trace; they see a holder who was just verified being refused, and
+ * they go looking in the wrong database.
+ *
+ * Refuse, and name the fix. `ENABLED_DOMAINS` defaults to both, so this is
+ * mostly a prompt to state the topology once: a deployment that delegates
+ * identity is a tokenization deployment.
+ */
+if (env.identityServiceUrl && env.enabledDomains.includes("identity")) {
+  throw new Error(
+    "IDENTITY_SERVICE_URL is set, but this deployment also runs the 'identity' domain. " +
+      "One deployment cannot both own credentials and delegate them: the desk would write here " +
+      "while the compliance gate reads there. Set ENABLED_DOMAINS=tokenization to delegate, " +
+      "or unset IDENTITY_SERVICE_URL/IDENTITY_SERVICE_KEY to answer locally.",
+  );
+}
 
 if (!env.didMasterConfigured) {
   console.warn(

@@ -364,6 +364,10 @@ export function notFound(reply: FastifyReply, message: string): FastifyReply {
 function statusForPolicy(code: string): number {
   if (code === "FORBIDDEN") return 403;
   if (code === "UNKNOWN_USECASE") return 404;
+  // The one policy code that is NOT the caller's fault: we could not reach the
+  // identity service to find out. A 400 would tell an integrator to fix their
+  // request, when the same request may well succeed unchanged in a minute.
+  if (code === "IDENTITY_SERVICE_UNAVAILABLE") return 503;
   return 400;
 }
 

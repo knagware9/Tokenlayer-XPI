@@ -21,8 +21,19 @@
  *      the holder's consent in the presentation exchange; an assertion that
  *      leaked contents would be a back door around it.
  */
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { holdsValidCredential, IDENTITY_CREDENTIAL_TYPE, isExpired, isValidHeldCredential } from "../src/identity-assertions.js";
+import {
+  holdsValidCredential,
+  httpIdentityAssertions,
+  IDENTITY_CREDENTIAL_TYPE,
+  isExpired,
+  isValidHeldCredential,
+  localIdentityAssertions,
+  selectIdentityAssertions,
+  unavailableIdentityAssertions,
+} from "../src/identity-assertions.js";
 import { MemoryCredentialRepository } from "../src/persistence/memory.js";
 import type { CredentialRecord } from "../src/persistence/types.js";
 import { auth, buildTestAppWithRepos, loginAs, V1, type TestAppHandle } from "./helpers.js";
@@ -245,4 +256,226 @@ describe("the predicate the engine and the route share", () => {
     await repo.create(credential({ expiresAt: "2020-01-01T00:00:00.000Z" }));
     expect(await holdsValidCredential(repo, HOLDER, IDENTITY_CREDENTIAL_TYPE)).toBe(false);
   });
+});
+
+/**
+ * THE SEAM THE PRODUCT SPLIT TURNS ON.
+ *
+ * `IdentityAssertions` is one method with three implementations — the local
+ * store, an HTTP call to a separately-deployed Identity service, and a refusal
+ * for the deployment that was given neither. What these tests protect is not
+ * the plumbing but the two decisions inside it:
+ *
+ *   · FAIL-CLOSED IS NOT THE SAME AS `false`. A timeout, a 500 or a rejected
+ *     peer key must THROW. Returning `false` would report "this holder is not
+ *     verified" for what is really "we could not ask", and send an operator to
+ *     the holder's credentials instead of to the network.
+ *   · NO WALLET CROSSES THE WIRE. The question is asked about a DID. Address →
+ *     account → user → DID resolution stays on tokenization's side, because a
+ *     wallet is a tokenization concept and Identity has no business learning
+ *     about them.
+ */
+describe("the identity assertions seam", () => {
+  const DID = "did:key:z6MkRemoteHolder";
+
+  /** A fetch double that records the one call it is given. */
+  function stubFetch(reply: Response | Error) {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const impl = (async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      if (reply instanceof Error) throw reply;
+      return reply;
+    }) as unknown as typeof fetch;
+    return { impl, calls };
+  }
+
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+
+  it("relays the service's verdict, both ways", async () => {
+    for (const verdict of [true, false]) {
+      const { impl } = stubFetch(json({ subject: DID, credentialType: IDENTITY_CREDENTIAL_TYPE, holds: verdict }));
+      const remote = httpIdentityAssertions({ baseUrl: "https://id.example.com/api/v1", apiKey: "tl_live_x", fetchImpl: impl });
+      expect(await remote.holds(DID, IDENTITY_CREDENTIAL_TYPE)).toBe(verdict);
+    }
+  });
+
+  it("calls the assertion route with the peer key and the DID — and nothing else", async () => {
+    const { impl, calls } = stubFetch(json({ holds: true }));
+    // Trailing slash on purpose: an operator writes the base URL by hand.
+    const remote = httpIdentityAssertions({ baseUrl: "https://id.example.com/api/v1/", apiKey: "tl_live_secret", fetchImpl: impl });
+    await remote.holds(DID, IDENTITY_CREDENTIAL_TYPE);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toBe("https://id.example.com/api/v1/identity/assertions");
+    expect(calls[0]!.init.method).toBe("POST");
+    expect((calls[0]!.init.headers as Record<string, string>).authorization).toBe("Bearer tl_live_secret");
+
+    // The body carries a DID and a credential type. Anything else — an address,
+    // an asset id, a use-case key — would be tokenization leaking across the
+    // boundary, and the point of the split is that it does not.
+    const body = JSON.parse(String(calls[0]!.init.body)) as Record<string, unknown>;
+    expect(body).toEqual({ subject: DID, credentialType: IDENTITY_CREDENTIAL_TYPE });
+  });
+
+  it.each([
+    ["a refused connection", new Error("fetch failed: ECONNREFUSED")],
+    ["a timeout", Object.assign(new Error("The operation was aborted"), { name: "TimeoutError" })],
+  ])("throws IDENTITY_SERVICE_UNAVAILABLE on %s — it never answers `false`", async (_label, err) => {
+    const { impl } = stubFetch(err);
+    const remote = httpIdentityAssertions({ baseUrl: "https://id.example.com", apiKey: "k", fetchImpl: impl });
+    await expect(remote.holds(DID, IDENTITY_CREDENTIAL_TYPE)).rejects.toMatchObject({
+      name: "PolicyError", code: "IDENTITY_SERVICE_UNAVAILABLE",
+    });
+  });
+
+  it.each([401, 403, 404, 500, 503])("throws on HTTP %i rather than treating it as a denial", async (status) => {
+    const { impl } = stubFetch(json({ error: "FORBIDDEN" }, status));
+    const remote = httpIdentityAssertions({ baseUrl: "https://id.example.com", apiKey: "k", fetchImpl: impl });
+    await expect(remote.holds(DID, IDENTITY_CREDENTIAL_TYPE)).rejects.toMatchObject({
+      code: "IDENTITY_SERVICE_UNAVAILABLE", details: { status },
+    });
+  });
+
+  it("throws when a 200 carries no boolean verdict", async () => {
+    // A wrong-shaped 200 is the shape a proxy, a login page or a version skew
+    // produces. `undefined` is falsy, so a naive `return body.holds` would
+    // refuse every holder and look like policy.
+    for (const body of [{}, { holds: "yes" }, { holds: null }]) {
+      const { impl } = stubFetch(json(body));
+      const remote = httpIdentityAssertions({ baseUrl: "https://id.example.com", apiKey: "k", fetchImpl: impl });
+      await expect(remote.holds(DID, IDENTITY_CREDENTIAL_TYPE)).rejects.toMatchObject({
+        code: "IDENTITY_SERVICE_UNAVAILABLE",
+      });
+    }
+  });
+
+  it("the local implementation answers from the store", async () => {
+    const repo = new MemoryCredentialRepository();
+    const local = localIdentityAssertions(repo);
+    expect(await local.holds(HOLDER, IDENTITY_CREDENTIAL_TYPE)).toBe(false);
+    await repo.create(credential());
+    expect(await local.holds(HOLDER, IDENTITY_CREDENTIAL_TYPE)).toBe(true);
+  });
+
+  it("the unavailable implementation refuses loudly instead of denying quietly", async () => {
+    await expect(unavailableIdentityAssertions("not configured").holds(DID, IDENTITY_CREDENTIAL_TYPE))
+      .rejects.toMatchObject({ code: "IDENTITY_SERVICE_UNAVAILABLE" });
+  });
+
+  describe("selection at boot", () => {
+    const repo = new MemoryCredentialRepository();
+    const base = { credentials: repo };
+
+    it("a deployment running the identity domain answers from its own store", async () => {
+      await repo.create(credential());
+      const chosen = selectIdentityAssertions({ ...base, enabledDomains: ["tokenization", "identity"] });
+      expect(await chosen.holds(HOLDER, IDENTITY_CREDENTIAL_TYPE)).toBe(true);
+    });
+
+    it("a tokenization-only deployment with a service URL asks the service", async () => {
+      const { impl, calls } = stubFetch(json({ holds: true }));
+      const chosen = selectIdentityAssertions({
+        ...base, enabledDomains: ["tokenization"],
+        serviceUrl: "https://id.example.com/api/v1", serviceKey: "k", fetchImpl: impl,
+      });
+      // `true` although the LOCAL store holds nothing for this DID: proof the
+      // remote answered, not the store that happens to be in the same process.
+      expect(await chosen.holds(DID, IDENTITY_CREDENTIAL_TYPE)).toBe(true);
+      expect(calls[0]!.url).toBe("https://id.example.com/api/v1/identity/assertions");
+    });
+
+    it("a tokenization-only deployment with NO service refuses — it does not fall back to a store it does not own", async () => {
+      // The local store exists in-process (one binary, two products), so a
+      // fallback would compile and pass every test while quietly re-merging the
+      // two deployments' answers. This is the case that has to throw.
+      await repo.create(credential());
+      const chosen = selectIdentityAssertions({ ...base, enabledDomains: ["tokenization"] });
+      await expect(chosen.holds(HOLDER, IDENTITY_CREDENTIAL_TYPE)).rejects.toMatchObject({
+        code: "IDENTITY_SERVICE_UNAVAILABLE",
+      });
+    });
+
+    it("half a remote configuration is not a remote configuration", async () => {
+      // env.ts refuses this pair at boot; the selector must not silently treat a
+      // keyless URL as configured and send an unauthenticated request.
+      const { impl, calls } = stubFetch(json({ holds: true }));
+      const chosen = selectIdentityAssertions({
+        ...base, enabledDomains: ["tokenization"], serviceUrl: "https://id.example.com", fetchImpl: impl,
+      });
+      await expect(chosen.holds(DID, IDENTITY_CREDENTIAL_TYPE)).rejects.toMatchObject({
+        code: "IDENTITY_SERVICE_UNAVAILABLE",
+      });
+      expect(calls).toHaveLength(0);
+    });
+  });
+});
+
+/**
+ * THE TWO CONFIGURATIONS THE PROCESS MUST NOT BOOT WITH.
+ *
+ * Both are silent in production and loud here, which is the whole trade:
+ *
+ *   · A URL without a key authenticates against nothing, and the operator finds
+ *     out one 401 at a time, per mint, in a log.
+ *   · A remote service on a deployment that ALSO runs the identity domain means
+ *     the desk writes credentials here while the gate reads them there. Nobody
+ *     gets a stack trace; they get a holder who was verified a minute ago being
+ *     refused, and they go looking in the wrong database.
+ *
+ * Driven through a real child process rather than by re-reading the source,
+ * because the thing being asserted is that the MODULE refuses on import — a
+ * test that reproduced the condition itself would pass just as happily if the
+ * check were deleted.
+ */
+describe("boot refuses a half-configured or contradictory identity topology", () => {
+  const envModule = fileURLToPath(new URL("../src/env.ts", import.meta.url));
+
+  function boot(overrides: Record<string, string | undefined>): { code: number | null; stderr: string } {
+    const child = spawnSync(
+      "npx",
+      ["tsx", "-e", `import(${JSON.stringify(envModule)}).catch((e) => { console.error(e.message); process.exit(9); })`],
+      {
+        cwd: fileURLToPath(new URL("..", import.meta.url)),
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          IDENTITY_SERVICE_URL: undefined, IDENTITY_SERVICE_KEY: undefined, ENABLED_DOMAINS: undefined,
+          ...overrides,
+        } as NodeJS.ProcessEnv,
+      },
+    );
+    return { code: child.status, stderr: child.stderr ?? "" };
+  }
+
+  it("refuses a URL with no key", () => {
+    const { code, stderr } = boot({ IDENTITY_SERVICE_URL: "https://id.example.com", ENABLED_DOMAINS: "tokenization" });
+    expect(code).toBe(9);
+    expect(stderr).toContain("must be set together");
+  }, 60_000);
+
+  it("refuses a key with no URL", () => {
+    const { code, stderr } = boot({ IDENTITY_SERVICE_KEY: "tl_live_x", ENABLED_DOMAINS: "tokenization" });
+    expect(code).toBe(9);
+    expect(stderr).toContain("must be set together");
+  }, 60_000);
+
+  it("refuses delegating identity while also serving it", () => {
+    const { code, stderr } = boot({
+      IDENTITY_SERVICE_URL: "https://id.example.com", IDENTITY_SERVICE_KEY: "tl_live_x",
+      ENABLED_DOMAINS: "tokenization,identity",
+    });
+    expect(code).toBe(9);
+    expect(stderr).toContain("also runs the 'identity' domain");
+  }, 60_000);
+
+  it("boots a tokenization deployment that delegates to a service", () => {
+    // The positive control: without it the three refusals above would pass on a
+    // module that refused everything.
+    const { code, stderr } = boot({
+      IDENTITY_SERVICE_URL: "https://id.example.com", IDENTITY_SERVICE_KEY: "tl_live_x",
+      ENABLED_DOMAINS: "tokenization",
+    });
+    expect({ code, stderr }).toMatchObject({ code: 0 });
+  }, 60_000);
 });

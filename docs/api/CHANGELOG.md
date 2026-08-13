@@ -102,6 +102,39 @@ its expiry instant, matching the certificate renderer exactly. Comparison is on
 instants (`Date.parse`), not strings, so a timestamp carrying an offset is not
 mistaken for a later one.
 
+### Where the verified-identity answer comes from is now a deployment choice
+
+`compliance.requireVerifiedIdentity` used to be answered one way: read this
+process's own credential table. A tokenization-only deployment has no such
+table, so the rule was unenforceable there. It now has three sources, picked
+once at boot:
+
+| Configuration | Where "does this DID hold a KycCredential?" is answered |
+|---|---|
+| `ENABLED_DOMAINS` includes `identity` | this deployment's own credential store |
+| `IDENTITY_SERVICE_URL` + `IDENTITY_SERVICE_KEY` set | `POST /identity/assertions` on that deployment |
+| neither | nowhere — the mint is refused, loudly (below) |
+
+Only a **DID** crosses the wire. Resolving a wallet address to its user and DID
+stays on tokenization's side, because a wallet is a tokenization concept.
+
+**New error code `IDENTITY_SERVICE_UNAVAILABLE` (503).** A timeout, a refused
+connection, a 5xx or a rejected peer key answers this — deliberately NOT
+`IDENTITY_NOT_VERIFIED`, and deliberately not a `4xx`. "This holder has no valid
+credential" and "we could not find out" have different fixes, and answering
+`false` on a transport failure would send an operator to the holder's
+credentials instead of to the network. Treat it as retryable; nothing about the
+request needs to change.
+
+**Two configurations now refuse to boot**, because both fail silently in
+production: `IDENTITY_SERVICE_URL` without `IDENTITY_SERVICE_KEY` (or the
+reverse), and a remote identity service on a deployment that *also* runs the
+identity domain — where the desk would write credentials into one database while
+the gate read another, and a just-verified holder would be refused with nothing
+in any log to say why.
+
+No change for a deployment that serves both products, which is the default.
+
 ---
 
 ## Unreleased — a verifier can list the requests it raised
