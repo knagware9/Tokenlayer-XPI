@@ -15,6 +15,7 @@ import { deployAndCreateUseCase } from "../use-cases.js";
 import { computeAnalytics } from "../analytics.js";
 import { computeIdentityDashboard } from "../identity-analytics.js";
 import { issueCredentialFor, revokeCredentialById } from "../credential-issuance.js";
+import { namespaceHolding } from "../usecase-namespace.js";
 import { emitEvent, ownerOrgOfUseCase } from "../events.js";
 import { mintOrgMembership } from "../membership.js";
 import { ensurePlatformIssuerOrg, PLATFORM_ORG_NAME } from "../platform-org.js";
@@ -491,11 +492,35 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
   // the user has no use-case key (e.g. a PlatformAdmin) or the key names neither.
   async function resolveUseCaseDomain(useCaseKey: string | null): Promise<"tokenization" | "identity" | null> {
     if (!useCaseKey) return null;
-    const [tks, cks] = await Promise.all([deps.useCases.list(), deps.credentialUseCases.list()]);
+    // Each catalogue is listed only where this deployment KEEPS it. This runs on
+    // /auth/login, the QR poll and /me — all SHARED routes, present on every
+    // deployment — so consulting a table this instance does not own would fail
+    // sign-in itself on a single-product deployment. An absent catalogue
+    // contributes no keys, which is the truth: those use cases live elsewhere.
+    const [tks, cks] = await Promise.all([
+      deps.enabledDomains.includes("tokenization") ? deps.useCases.list() : Promise.resolve([]),
+      deps.enabledDomains.includes("identity") ? deps.credentialUseCases.list() : Promise.resolve([]),
+    ]);
     return useCaseDomainOf(useCaseKey, {
       tokenizationKeys: tks.map((u) => u.key),
       credentialKeys: cks.map((u) => u.key),
     }) ?? null;
+  }
+
+  /**
+   * The wallet behind a linked account id, or null — asked only where this
+   * deployment keeps wallets.
+   *
+   * `Account` is tokenization's table but the two SIGN-IN surfaces that
+   * decorate a session with `walletAddress` (POST /auth/login and the QR poll)
+   * are shared, so on an identity-only deployment this asked for a table it
+   * does not own and broke login for any user carrying an accountId — which is
+   * every user in a database migrated from a combined deployment. Null is the
+   * honest answer there: that deployment has no wallets to report.
+   */
+  async function linkedWallet(accountId: string | null): Promise<{ address: string } | null> {
+    if (!accountId || !deps.enabledDomains.includes("tokenization")) return null;
+    return deps.accounts.findById(accountId);
   }
 
   /**
@@ -542,7 +567,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       return reply.code(403).send({ error: "SERVICE_ACCOUNT", message: "this is a service account; authenticate with its API key" });
     }
     const claims: TokenClaims = claimsOf(user);
-    const wallet = user.accountId ? await deps.accounts.findById(user.accountId) : null;
+    const wallet = await linkedWallet(user.accountId);
     const useCaseDomain = await resolveUseCaseDomain(user.useCaseKey);
     // The org's capability envelope rides the session (like useCaseDomain): the
     // web builds its SessionUser from login/qr-poll, never /me.
@@ -632,7 +657,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       const done = deps.qrLogin.consume(id); // release the token exactly once
       if (done?.token && done.userId) {
         const user = await deps.users.findById(done.userId);
-        const wallet = user?.accountId ? await deps.accounts.findById(user.accountId) : null;
+        const wallet = await linkedWallet(user?.accountId ?? null);
         const claims: TokenClaims | null = user ? claimsOf(user) : null;
         const useCaseDomain = user ? await resolveUseCaseDomain(user.useCaseKey) : null;
         const org = user?.orgId ? await deps.organizations.get(user.orgId) : null;
@@ -752,7 +777,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     // A slug is unique across BOTH domains: reject a key already taken by a
     // credential use case (the credential-side route symmetrically checks this
     // repo too). Applies to both the OrgAdmin proposal and PlatformAdmin paths.
-    if (await deps.credentialUseCases.has(definition.key)) {
+    if ((await namespaceHolding(deps, definition.key)) === "identity") {
       return reply.code(409).send({ error: "KEY_TAKEN", message: `use-case key '${definition.key}' already exists` });
     }
     // OrgAdmin: gated. Stamp ownerOrgId from the caller's own claims (never the
@@ -978,7 +1003,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     if (!modeGate(request, reply, definition)) return reply;
     // A slug is unique across BOTH domains — the same collision rule the two
     // create routes apply to each other.
-    if ((await deps.useCases.has(definition.key)) || (await deps.credentialUseCases.has(definition.key))) {
+    if (await namespaceHolding(deps, definition.key)) {
       return reply.code(409).send({ error: "KEY_TAKEN", message: `use-case key '${definition.key}' already exists` });
     }
     if (claims.role === "OrgAdmin") {
@@ -1350,7 +1375,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     // the mode gate against the definition itself: a `tl_test_` key may create
     // only sandbox credential use cases, a `tl_live_` key only real ones.
     if (!modeGate(request, reply, def)) return reply;
-    if (await deps.credentialUseCases.has(def.key) || await deps.useCases.has(def.key)) {
+    if (await namespaceHolding(deps, def.key)) {
       return reply.code(409).send({ error: "KEY_TAKEN", message: `use-case key '${def.key}' already exists` });
     }
     // Resolve org existence up-front (validator is sync).
@@ -1935,7 +1960,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
   // aspirational: the check belongs here, once, rather than repeated at every
   // caller that reaches this function.
   async function createCredentialUseCaseFromDef(def: CredentialUseCaseDefinition, ownerOrgId: string | null, actorId: string) {
-    if (await deps.credentialUseCases.has(def.key) || await deps.useCases.has(def.key)) {
+    if (await namespaceHolding(deps, def.key)) {
       throw coded(409, "KEY_TAKEN", `use-case key '${def.key}' already exists`);
     }
     const known = await referencedOrgs(def);

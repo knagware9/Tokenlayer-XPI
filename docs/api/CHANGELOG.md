@@ -135,6 +135,50 @@ in any log to say why.
 
 No change for a deployment that serves both products, which is the default.
 
+### Each product now owns its own tables — and its own database
+
+`ENABLED_DOMAINS` stopped a deployment ANSWERING for a product it does not
+sell. It did not stop it WRITING that product's data, and those are not the same
+door: `POST /proposals/{id}/approve` is a **shared** route on every deployment,
+and a `create-use-case` proposal approved through it wrote a tokenization use
+case an identity-only instance had no route to serve. Boot was worse — it seeded
+tokenization use cases and attempted their contract deploys regardless.
+
+Every table now names its owner, in `prisma/schema.prisma` (a `/// domain:` line
+per model, checked against the runtime table by a test) and enforced at the
+repository seam:
+
+| Owner | Tables |
+|---|---|
+| tokenization | `UseCase` `Asset` `Listing` `Account` `CashBalance` `Cashflow` `StagedInvoice` |
+| identity | `CredentialUseCase` `CredentialUseCaseTemplate` `VerificationRequest` |
+| shared | `User` `ApiKey` `Organization` `Credential` `LoginKey` `Proposal` `AuditLog` `AuditAnchor` `Document` `Event` `WebhookEndpoint` `WebhookDelivery` `RegistryDeployment` |
+
+A single-product deployment's database needs its own tables plus the shared
+ones. Touching another product's table answers **`404 DOMAIN_NOT_ENABLED`** —
+the same code and status the route gate already uses, because "this route is not
+served here" and "this table is not kept here" are one fact from the outside.
+
+Two entries in that table are worth stating outright:
+
+- **`Credential` is shared.** Organization membership is built on VCs — adding a
+  member mints a sub-DID and a membership credential through `/orgs/{id}/members`,
+  a shared route. Making it identity-owned would mean a tokenization deployment
+  could not add an org member without a round trip to the identity service. The
+  credentials the identity PRODUCT issues still live only where it runs.
+- **`Account` is tokenization's.** A wallet is a tokenization concept, the same
+  line drawn at the assertion API, where only a DID crosses the wire.
+
+**What changes for you on a single-product deployment.** Supplying a
+`walletAddress` to `POST /users` on an identity-only instance is now refused
+with `404 DOMAIN_NOT_ENABLED` rather than accepted and silently dropped, and
+sign-in reports `walletAddress: null` instead of failing (it used to read that
+table and error). Creating a use case no longer consults the other product's
+slug namespace — on separate databases they cannot collide.
+
+**Nothing changes on a deployment that serves both products.** The guard is
+literally the same repository objects there; no proxy, no wrapper.
+
 ---
 
 ## Unreleased — a verifier can list the requests it raised

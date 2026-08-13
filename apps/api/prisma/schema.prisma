@@ -1,3 +1,11 @@
+// PRODUCT OWNERSHIP: every model below carries a `/// domain:` line naming the
+// product that owns it — tokenization, identity, or shared. It is not a comment
+// in the decorative sense: `apps/api/test/data-domains.test.ts` asserts these
+// lines agree, model for model, with MODEL_DOMAINS in
+// src/persistence/model-domains.ts, which is what the repository guard enforces
+// at runtime. A deployment serving one product keeps its own tables plus the
+// shared ones; the other product's tables belong to the other database.
+//
 generator client {
   provider = "prisma-client-js"
 }
@@ -7,6 +15,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/// domain: shared
 model User {
   id           String   @id @default(cuid())
   email        String   @unique
@@ -29,6 +38,7 @@ model User {
 // An org-scoped machine credential (EN-B). The secret exists exactly once — in
 // the create/rotate response — so only its bcrypt hash and a public prefix are
 // stored: a leaked database yields no working credential.
+/// domain: shared
 model ApiKey {
   id         String    @id @default(cuid())
   orgId      String?   // null = platform-owned key (PlatformAdmin-minted)
@@ -50,6 +60,7 @@ model ApiKey {
   @@index([orgId])
 }
 
+/// domain: tokenization
 model Asset {
   id            String   @id
   useCaseKey    String
@@ -77,6 +88,7 @@ model Asset {
 
 // Low-code use-case definitions, editable via the dashboard builder. JSON
 // columns hold the structured config; the repository validates + normalises.
+/// domain: tokenization
 model UseCase {
   key             String   @id
   name            String
@@ -108,6 +120,7 @@ model UseCase {
 
 // A configured credential (DID/VC) use case — the Identity-domain parallel of
 // the tokenization UseCase. JSON columns hold the structured config.
+/// domain: identity
 model CredentialUseCase {
   key             String   @id
   name            String
@@ -125,6 +138,7 @@ model CredentialUseCase {
   updatedAt       DateTime @updatedAt
 }
 
+/// domain: identity
 model CredentialUseCaseTemplate {
   key         String   @id
   name        String
@@ -138,6 +152,7 @@ model CredentialUseCaseTemplate {
 
 // Append-only audit stream. assetId is an unconstrained reference (not a FK) so
 // entries can be written before/after an asset row exists and survive its removal.
+/// domain: shared
 model AuditLog {
   id        String   @id @default(cuid())
   assetId   String?
@@ -158,6 +173,7 @@ model AuditLog {
 // On-ledger anchor of an audit chain head: the operator broadcasts the head
 // hash to the ledger so even a consistent full DB rewrite is caught (the stored
 // hash for the anchored seq no longer matches the on-ledger txHash's payload).
+/// domain: shared
 model AuditAnchor {
   id        String   @id @default(cuid())
   assetId   String
@@ -172,6 +188,7 @@ model AuditAnchor {
 
 // Secondary-market sell listing. `quantity` is the REMAINING quantity — it
 // decrements on takes and the row flips to "filled" when it reaches 0.
+/// domain: tokenization
 model Listing {
   id        String   @id @default(cuid())
   assetId   String
@@ -186,12 +203,14 @@ model Listing {
   @@index([assetId, status])
 }
 
+/// domain: tokenization
 model Account {
   id      String @id @default(cuid())
   address String @unique
   label   String
 }
 
+/// domain: tokenization
 model CashBalance {
   id       String @id @default(cuid())
   currency String
@@ -204,6 +223,7 @@ model CashBalance {
 // A materialized financial-terms cashflow (coupon or redemption) for one asset,
 // created at issue from the use case's `terms`. Only "scheduled"/"executing"/
 // "executed" are stored — "due"/"overdue" are derived from the date at read time.
+/// domain: tokenization
 model Cashflow {
   id         String    @id @default(cuid())
   assetId    String
@@ -221,6 +241,7 @@ model Cashflow {
 
 // Uploaded documents (e.g. invoice PDFs). Bytes are stored inline; the asset
 // metadata references the document by its GET URL + sha256 hash.
+/// domain: shared
 model Document {
   id          String   @id @default(cuid())
   contentType String
@@ -255,6 +276,7 @@ model Document {
 // A maker-checker proposal: a gated operation captured pending approval. The
 // pending -> approved transition is a CAS (updateMany where-status) so
 // concurrent Nth approvals execute the operation exactly once.
+/// domain: shared
 model Proposal {
   id            String    @id @default(cuid())
   useCaseKey    String? // null for non-token (e.g. credential) proposals
@@ -278,6 +300,7 @@ model Proposal {
 
 // A tenant organization. Its parent did:key is custodial: didSeedEncrypted holds
 // the AES-256-GCM encrypted Ed25519 seed the platform signs membership VCs with.
+/// domain: shared
 model Organization {
   id               String   @id @default(cuid())
   name             String   @unique
@@ -300,6 +323,7 @@ model Organization {
 
 // A stored Verifiable Credential (VC-JWT) held by a subject DID. subjectClaims is
 // the decoded credentialSubject (JSON) for quick display without re-decoding.
+/// domain: shared
 model Credential {
   id            String   @id @default(cuid())
   holderDid     String
@@ -330,6 +354,7 @@ model Credential {
 // The identity registries deployed on one chain. There is exactly one row per
 // chain that hosts them (in practice: REGISTRY_CHAIN_ID, default "besu"). The
 // row's existence IS the idempotency check for the boot-time deploy.
+/// domain: shared
 model RegistryDeployment {
   chainId      String   @id
   didRegistry  String
@@ -340,6 +365,7 @@ model RegistryDeployment {
 
 // A verifier's request for the holder to present credentials. Holder consent (a
 // single direct action, not maker-checker) triggers custodial VP signing.
+/// domain: identity
 model VerificationRequest {
   id                     String    @id @default(cuid())
   verifierOrgId          String
@@ -363,6 +389,7 @@ model VerificationRequest {
 
 // An invoice staged (uploaded/ERP-imported/manually entered) before selective
 // tokenization into an Asset via the invoice register.
+/// domain: tokenization
 model StagedInvoice {
   id             String    @id @default(cuid())
   useCaseKey     String
@@ -383,6 +410,7 @@ model StagedInvoice {
 
 // A self-custody device login key: the public did:key of a browser-held Ed25519
 // keypair, registered for passwordless login. The private key never leaves the device.
+/// domain: shared
 model LoginKey {
   id         String   @id @default(cuid())
   userId     String
@@ -401,6 +429,7 @@ model LoginKey {
 //
 // `seq` is the @id because SQLite/Prisma only allow @default(autoincrement())
 // on an Int @id. The public, stable identifier sent to integrators is `id`.
+/// domain: shared
 model Event {
   seq        Int      @id @default(autoincrement())
   id         String   @unique @default(cuid())
@@ -427,6 +456,7 @@ model Event {
 // place makes every stored secret unopenable. The dispatcher treats that as a
 // platform fault — the attempt fails with an honest reason and disables nothing
 // — but the deliveries do not recover until the old key is restored.
+/// domain: shared
 model WebhookEndpoint {
   id                       String    @id @default(cuid())
   orgId                    String? // null = platform-scope, PlatformAdmin only
@@ -461,6 +491,7 @@ model WebhookEndpoint {
 
 // One attempt chain for one (event, endpoint) pair. The unique pair is the
 // fan-out idempotency key: re-emitting or re-fanning cannot double-enqueue.
+/// domain: shared
 model WebhookDelivery {
   id             String    @id @default(cuid())
   endpointId     String
