@@ -3,7 +3,9 @@
 //   selective tokenization issuance → financing (financier buys, DvP) →
 //   secondary sale (list → another investor takes) → redeem (settle the
 //   redemption cashflow at maturity). All holders are IN-KYC (jurisdiction-gated).
-const BASE = "http://localhost:4000/api/v1";
+import { availableIds, chainForUseCase, envHintFor, fetchChains, skip } from "./lib/chain-preflight.mjs";
+
+const BASE = process.env.API ?? "http://localhost:4000/api/v1";
 const UC = "invoice-tokenization";
 const CCY = "CBDC-INR";
 const TAG = Date.now().toString(36).slice(-4).toUpperCase();
@@ -20,12 +22,29 @@ async function call(method, path, token, body) {
 }
 const login = async (email, password) => (await call("POST", "/auth/login", null, { email, password })).body.token;
 const ok = (s) => s === 200 || s === 201;
-const log = (good, msg, extra) => console.log(`  ${good ? "✓" : "✗"} ${msg}${!good && extra ? " — " + JSON.stringify(extra) : ""}`);
+// A ✗ HAS TO REACH THE EXIT CODE. This used to print and nothing else, so a run
+// that failed at step 3 and abandoned steps 4-8 still exited 0 — a green tick over
+// a third of a lifecycle. `fails` is what makes the checks below load-bearing.
+let fails = 0;
+const log = (good, msg, extra) => {
+  if (!good) fails++;
+  console.log(`  ${good ? "✓" : "✗"} ${msg}${!good && extra ? " — " + JSON.stringify(extra) : ""}`);
+};
 
 async function main() {
   const admin = await login("admin@tokenlayer.dev", "admin123");
   const admin2 = await login("admin2@tokenlayer.dev", "admin123");
   const desk = await login("m1.admin@tokenlayer.dev", "m1admin123"); // invoice UseCaseAdmin (maker + issuer)
+
+  // PREFLIGHT. Everything from step 3 onward hangs off one tokenization, which
+  // needs a chain this use case is allowed to mint on AND that exists here. Asked
+  // up front so an absent ledger reads as "Besu is not configured" rather than as
+  // a failed tokenization halfway down a lifecycle.
+  const available = availableIds(await fetchChains(BASE, admin));
+  const picked = await chainForUseCase(BASE, admin, UC, available);
+  if (!picked.chainId) skip(picked.reason, [envHintFor(picked.allowed[0] ?? "besu"), `Available here: ${[...available].join(", ") || "(none)"}`]);
+  const CHAIN = picked.chainId;
+  console.log(`chain: tokenizing '${UC}' on '${CHAIN}'`);
 
   // ── 1. DID / VC — onboard IN-KYC participants (maker desk → checker platform admin) ──
   console.log(`\n=== 1. DID / VC onboarding (IN-KYC, DID issued at onboard) ===`);
@@ -62,13 +81,20 @@ async function main() {
   console.log(`\n=== 3. Selective tokenization issuance (to supplier treasury, with sale terms) ===`);
   const target = staged.find((s) => s.metadata?.invoiceNumber === `LC-${TAG}-01`) ?? staged[0];
   const tok = await call("POST", `/use-cases/${UC}/invoices/tokenize`, desk, {
-    ids: [target.id], chainId: "besu", treasuryAccount: W.supplier, parValue: 1000,
+    ids: [target.id], chainId: CHAIN, treasuryAccount: W.supplier, parValue: 1000,
     sale: { unitPrice: "1000", currency: CCY },
   });
   const res0 = tok.body?.results?.[0];
   const assetId = res0?.assetId;
   log(ok(tok.status) && res0?.status === "tokenized", `tokenized ${target.metadata.invoiceNumber} → asset ${assetId} (supply = amount/par)`, tok.body);
-  if (!assetId) return;
+  // NOT a quiet `return`: without an asset there is no financing, no secondary
+  // sale and no redemption, so the run proved a fraction of what it claims to.
+  // Say so and carry the failure out through the exit code.
+  if (!assetId) {
+    console.log("\n❌ ABORTED — tokenization produced no asset, so steps 4-6 (financing, secondary sale, redemption) did not run.");
+    console.log(`   ${fails} check(s) failed.`);
+    process.exit(1);
+  }
 
   // ── 4. Financing — the financier buys the tokenized invoice (DvP, early liquidity) ──
   console.log(`\n=== 4. Financing — financier buys the invoice tokens (DvP) ===`);
@@ -113,5 +139,8 @@ async function main() {
   const cfs2 = (await call("GET", `/assets/${assetId}/cashflows`, admin)).body ?? [];
   const red2 = (cfs2.cashflows ?? []).find((c) => c.kind === "redemption");
   console.log(`  redemption cashflow status: ${red2?.status ?? "?"}`);
+
+  console.log(`\n${fails ? `❌ ${fails} CHECK(S) FAILED` : "✅ INVOICE LIFECYCLE PASSED — onboarding → register → tokenization → financing → secondary sale → redemption"}`);
+  process.exit(fails ? 1 : 0);
 }
 main().catch((e) => { console.error(e); process.exit(1); });
