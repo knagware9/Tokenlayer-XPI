@@ -28,11 +28,35 @@ async function retry(fn, n = 6) { for (let i = 0; i < n; i++) { try { return awa
 
 const admin = (await call("POST", "/auth/login", { email: "admin@tokenlayer.dev", password: "admin123" })).j.token;
 
+// WHICH EVM LEGS THIS MACHINE CAN ACTUALLY RUN. EVM chains are real-or-absent by
+// design, so a laptop with only Besu up cannot exercise MST — and that is not a
+// product failure. Asked BEFORE anything is configured, because the previous
+// behaviour was to configure MST anyway, get no contract back, and hand
+// `undefined` to ethers, which tried to resolve it as an ENS name and died with
+// `network does not support ENS` — an error about neither MST nor this platform.
+const registry = (await call("GET", "/chains", null, admin)).j ?? [];
+const available = new Set(registry.filter((c) => c.available).map((c) => c.id));
+const EVM = ["besu", "mst"];
+const legs = EVM.filter((c) => available.has(c));
+const skipped = EVM.filter((c) => !available.has(c));
+console.log(`chains available on this API: ${[...available].join(", ") || "(none)"}`);
+for (const c of skipped) {
+  console.log(`  ⊘ SKIPPED ${c.toUpperCase()} — not configured on this API (GET /chains: available=false).`);
+  console.log(`    Set ${c.toUpperCase()}_RPC_URL + ${c.toUpperCase()}_OPERATOR_KEY and reboot the API to include this leg.`);
+}
+// NOTHING TO PROVE IS NOT A PASS. If neither EVM chain is here, every on-chain
+// assertion below would simply not run, and exiting 0 would report a green run
+// for a script that verified nothing.
+if (legs.length === 0) {
+  console.log("\n⊘ NO REAL EVM CHAIN IS CONFIGURED — this script has nothing to verify. Not a pass.");
+  process.exit(2);
+}
+
 const key = "multi-dlt-e2e-" + String(Date.now()).slice(-6);
-console.log(`== Configure '${key}' across besu + mst + fabric → deploy real contracts ==`);
+console.log(`\n== Configure '${key}' across ${[...legs, "fabric"].join(" + ")} → deploy real contracts ==`);
 const created = await call("POST", "/use-cases", {
   key, name: "Multi-DLT E2E", description: "Real cross-ledger issuance demo.", tokenStandard: "ERC-20", symbol: "MDE",
-  allowedChainIds: ["besu", "mst", "fabric"], defaultChainId: "besu",
+  allowedChainIds: [...legs, "fabric"], defaultChainId: legs[0],
   metadataSchema: { type: "object", properties: { issuer: { type: "string", description: "Issuer" } }, required: ["issuer"] },
   lifecycle: { mint: true, transfer: true, burn: true, freeze: true },
   compliance: { allowlist: false, transferRestrictions: false },
@@ -41,9 +65,16 @@ const created = await call("POST", "/use-cases", {
 ok(created.status === 201, "use case created + deployed", created.j?.error ?? created.status);
 const contracts = created.j?.contracts ?? {};
 
-for (const chain of ["besu", "mst"]) {
+for (const chain of legs) {
   console.log(`\n== ${chain.toUpperCase()} — real on-chain issue → mint → transfer → verify ==`);
   const contract = addrOf(contracts[chain]?.contractRef);
+  // A configured chain that produced no contract IS a failure — the deploy was
+  // attempted and did not land. Reported as such and the leg abandoned, rather
+  // than fed to ethers as the string "undefined".
+  if (!contract || !contract.startsWith("0x")) {
+    ok(false, `${chain}: the use case deployed no contract here`, contracts[chain] ?? null);
+    continue;
+  }
   const provider = new ethers.JsonRpcProvider(RPC[chain]);
   const net = await provider.getNetwork();
   const token = new ethers.Contract(contract, ERC20, provider);
@@ -82,5 +113,11 @@ for (const chain of ["besu", "mst"]) {
   else console.log(`    (besu is a private QBFT network — no public explorer; verified directly via RPC ${RPC[chain]})`);
 }
 
-console.log(`\n${fails ? `❌ ${fails} CHECK(S) FAILED` : "✅ MULTI-DLT E2E PASSED — one use case, real contracts + mint + transfer independently verified on-chain on Besu AND MST"}`);
+// The summary names the legs that actually ran. Claiming "Besu AND MST" after
+// skipping MST is the same lie as a green exit code over a red check.
+const ran = legs.map((c) => c.toUpperCase()).join(" AND ");
+const caveat = skipped.length ? `  (${skipped.map((c) => c.toUpperCase()).join(", ")} skipped — not configured here)` : "";
+console.log(`\n${fails
+  ? `❌ ${fails} CHECK(S) FAILED`
+  : `✅ MULTI-DLT E2E PASSED — one use case, real contracts + mint + transfer independently verified on-chain on ${ran}${caveat}`}`);
 process.exit(fails ? 1 : 0);
