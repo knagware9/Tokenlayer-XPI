@@ -5,6 +5,7 @@ import swaggerUi from "@fastify/swagger-ui";
 import Fastify, { type FastifyInstance } from "fastify";
 import type { AppDeps } from "./context.js";
 import { openapiConfig } from "./http/openapi.js";
+import { applyDomainGate } from "./http/route-domains.js";
 import { components } from "./http/schemas.js";
 import { registerRoutes } from "./http/routes.js";
 import { errorHandler, requirePrincipal } from "./http/support.js";
@@ -94,6 +95,32 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   await app.register(
     async (instance) => {
+      /**
+       * THE PRODUCT BOUNDARY.
+       *
+       * `ENABLED_DOMAINS` used to reach exactly one route — `GET /config`, which
+       * tells the console which navigation to draw. Every identity route still
+       * answered on a deployment that had switched identity off, so "deploy the
+       * two products separately" was a menu item, not a boundary. This hook is
+       * the boundary, and it lives HERE rather than on 131 route registrations
+       * for the same reason the mode gate does: one chokepoint cannot be
+       * forgotten by the next route someone adds.
+       *
+       * `onRoute` fires once per route AT REGISTRATION, so an unclassified route
+       * fails the BOOT rather than a request. That is deliberate and is the
+       * whole anti-drift story: a test can be forgotten, a server that refuses
+       * to start cannot.
+       *
+       * A disabled route keeps its existing preHandler chain and only loses its
+       * handler, so an ANONYMOUS caller still gets the 401 it got before —
+       * turning off a product must not hand out a free oracle for which
+       * products a deployment runs. An authenticated caller gets 404 with a
+       * distinct code, because "this instance does not serve that product" is
+       * something an integrator has to be able to tell from "your id was wrong".
+       * It is hidden from the OpenAPI document too: a published surface that
+       * advertises routes which cannot answer is a lie told at scale.
+       */
+      instance.addHook("onRoute", (route) => applyDomainGate(route, deps.enabledDomains));
       registerRoutes(instance, deps, principal);
     },
     { prefix: "/api/v1" },
