@@ -26,6 +26,12 @@ export const NAV_DOMAIN: Record<string, DomainKey | "shared"> = {
   // key can be bound to either domain's roles, so domain-scoping this page would
   // hide an org's own integration credentials behind a switcher they may not have.
   developers: "shared",
+  // Audit is SHARED, and deliberately: the event log carries both products'
+  // facts (credential.issued and asset.transferred sit in one stream), and an
+  // auditor's question does not respect the domain switcher. The Integrity TAB
+  // inside it is tokenization-only and hides itself — that narrowing belongs to
+  // the tab, not to the sidebar, for the ID-N reason recorded in Developers.tsx.
+  audit: "shared",
   approvals: "shared", users: "shared", profile: "shared", credentials: "shared", back: "shared", logout: "shared",
 };
 
