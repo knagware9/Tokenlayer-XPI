@@ -18,10 +18,10 @@
  *      `/me/portfolio` is tokenization, `/me` itself is shared. That is where a
  *      prefix-based split would quietly get it wrong.
  *
-* The anti-drift control is the BOOT: an unclassified route throws from the
- * BOOT (see the onRoute hook in src/app.ts), so a new route cannot reach
- * production unclassified even if nobody adds a test for it. The last test
- * below proves the boot really does refuse.
+ * The anti-drift control is the BOOT, not this file: an unclassified route
+ * throws from the onRoute hook in src/app.ts, so a new route cannot reach
+ * production unclassified even if nobody remembers to add a test for it. The
+ * last block below drives that refusal directly.
  */
 import type { FastifyInstance } from "fastify";
 import { describe, expect, it } from "vitest";
