@@ -43,6 +43,30 @@ export const API_SCOPES = [
   // creates an ORG and a USE CASE, not people — conflating them would let a key
   // granted "may onboard users" reshape the deployment's configuration.
   "usecases:provision",
+  /**
+   * A PEER scope, not a customer one — read this before granting it.
+   *
+   * It answers one question for another SERVICE: does this subject hold a
+   * valid, unrevoked credential of this type? That is the question a
+   * separately-deployed Tokenization instance must ask Identity before it will
+   * let an account receive a token whose use case sets
+   * `compliance.requireVerifiedIdentity` — the same question the engine asks
+   * in-process today via `ComplianceProvider.hasVerifiedIdentity`.
+   *
+   * It is deliberately a YES/NO and never the credential: claims, issuer and
+   * id stay behind the holder's consent in the presentation exchange. An
+   * assertion that returned contents would be a back door around consent, and
+   * the whole point of the verification flow is that the holder authorises
+   * disclosure.
+   *
+   * Even so, a key holding this scope can ASK ABOUT ANY SUBJECT — there is no
+   * natural org boundary on "is this DID KYC'd", because the caller is a peer
+   * platform rather than a tenant. Hand it to a trusted peer only, never to a
+   * customer's integration key, or that customer can enumerate. Every call is
+   * written to the audit log for exactly this reason: a broad scope earns its
+   * breadth by being visible.
+   */
+  "identity:assert",
 ] as const;
 export type ApiScope = (typeof API_SCOPES)[number];
 

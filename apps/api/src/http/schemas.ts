@@ -3245,6 +3245,45 @@ export const S: Record<string, FastifySchema> = {
     response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
   },
 
+  identityAssert: {
+    tags: ["Identity"], summary: "Does a subject hold a valid credential of a type? (service-to-service)",
+    security: eitherCredential,
+    description:
+      "Requires the `identity:assert` scope, and is **machine-only** — a human session is refused with " +
+      "`403 SESSION_PRINCIPAL` even for a platform admin. Scopes are a property of API keys, so a scope check " +
+      "alone passes every interactive session; without the machine check this route would let any signed-in user " +
+      "enumerate who is KYC'd.\n\n" +
+      "This is the question a **separately-deployed Tokenization instance** must ask Identity before letting an " +
+      "account receive a token from a use case with `compliance.requireVerifiedIdentity`. In a single deployment " +
+      "the engine answers it in-process; the answer comes from the same predicate either way, so splitting the " +
+      "deployment cannot change who may hold a token.\n\n" +
+      "**It is a yes/no, never the credential.** No claims, no issuer, no credential id — those stay behind the " +
+      "holder's consent in the presentation exchange (`POST /verification-requests`). An assertion that returned " +
+      "contents would be a back door around consent.\n\n" +
+      "A POST rather than a GET on purpose: the subject DID stays out of URLs, proxy logs and referrers. Every " +
+      "call is written to the audit log — a scope this broad (any key holding it may ask about ANY subject) earns " +
+      "its breadth by being visible.",
+    body: {
+      type: "object", additionalProperties: false, required: ["subject"],
+      properties: {
+        subject: { type: "string", minLength: 1, description: "Holder DID, e.g. `did:key:z6Mk…`." },
+        credentialType: { type: "string", minLength: 1, description: "Credential type to test for. Defaults to `KycCredential` — what the tokenization gate means by a verified identity." },
+      },
+    },
+    response: {
+      200: {
+        type: "object", additionalProperties: true,
+        properties: {
+          subject: { type: "string" },
+          credentialType: { type: "string" },
+          holds: { type: "boolean", description: "True iff the subject holds an accepted, unrevoked credential of that type." },
+          checkedAt: { type: "string" },
+        },
+      },
+      ...errs(400, 401, 403),
+    },
+  },
+
   importInvoices: {
     tags: ["Invoice Register"], summary: "Stage a batch of invoice rows (upload)", security: eitherCredential,
     description:
