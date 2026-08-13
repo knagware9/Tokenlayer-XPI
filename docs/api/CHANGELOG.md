@@ -19,6 +19,32 @@ diff. That file is generated, not written by hand; see the header of
 
 ---
 
+## Unreleased — an issuer's register says which programme
+
+### `GET /orgs/{id}/credentials` gains `credentialUseCaseKey` and `acceptance`
+
+Purely additive; no existing field changed and nothing was removed.
+
+The register returned an undifferentiated pile. An authority running several
+credential use cases — a domicile certificate and an income certificate, say —
+could not tell which one a credential came from, so nothing could be counted,
+filtered or reconciled per programme. Both facts were already on the row:
+
+- **`credentialUseCaseKey`** — the use case the credential was issued under, or
+  `null` for a platform-catalog credential (the `KycCredential` minted at
+  onboarding, an organization credential). `null` means *no programme*, not
+  "unknown": treat those rows as enrolment paperwork rather than folding them
+  into a scheme's delivery numbers.
+- **`acceptance`** — `accepted | pending | rejected | changes_requested`.
+  **Issued is not in force.** A holder who never accepted has a credential that
+  exists and does not apply, and an issuer's own register is exactly where that
+  difference matters.
+
+Who may read the register is unchanged: `credentials:read`, and an org may still
+only read its own.
+
+---
+
 ## Unreleased — deploying Tokenization and Identity apart
 
 Two changes that turn "two products" from a menu into a boundary. Both are

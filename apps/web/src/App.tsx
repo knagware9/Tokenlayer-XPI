@@ -21,6 +21,7 @@ import { OrganizationWallet } from "./components/OrganizationWallet.js";
 import { PlatformHome, type PlatformTab } from "./components/PlatformHome.js";
 import { AuditConsole } from "./components/AuditConsole.js";
 import { PublicVerify } from "./components/PublicVerify.js";
+import { SchemeConsole } from "./components/SchemeConsole.js";
 import { QrSign } from "./components/QrSign.js";
 import { Signup } from "./components/Signup.js";
 import { UseCaseBuilder } from "./components/UseCaseBuilder.js";
@@ -160,6 +161,7 @@ export function App(): JSX.Element {
       { id: "organizations", label: "Organizations", icon: "users" },
       { id: "developers", label: "Developers", icon: "code" },
       { id: "audit", label: "Audit", icon: "shield" },
+      { id: "schemes", label: "Schemes", icon: "doc" },
       { id: "approvals", label: "Approvals", icon: "check" },
       { id: "verify", label: "Verification", icon: "shield" },
       { id: "identity", label: "Identity", icon: "shield" },
@@ -174,7 +176,7 @@ export function App(): JSX.Element {
     const branchDomains = availableDomains(items, enabledDomains);
     const effDomain = branchDomains.some((d) => d.key === activeDomain) ? activeDomain : (branchDomains[0]?.key ?? activeDomain);
     const visible = itemsForDomain(items, effDomain);
-    const knownIds = [...Object.keys(platViews), "profile", "credentials", "identity-dashboard", "developers", "audit"];
+    const knownIds = [...Object.keys(platViews), "profile", "credentials", "identity-dashboard", "developers", "audit", "schemes"];
     const activeId = knownIds.includes(view) && itemsForDomain([{ id: view }], effDomain).length ? view : DOMAINS.find((d) => d.key === effDomain)!.defaultView;
     const panel =
       activeId === "profile" ? <MyProfile onSelect={setView} />
@@ -182,6 +184,7 @@ export function App(): JSX.Element {
       : activeId === "identity-dashboard" ? <IdentityDashboard />
       : activeId === "developers" ? <Developers />
       : activeId === "audit" ? <AuditConsole enabledDomains={enabledDomains} />
+      : activeId === "schemes" ? <SchemeConsole />
       : <PlatformHome useCases={useCases} chains={chains} onReloadUseCases={reloadUseCases} view={platViews[activeId] ?? "overview"} />;
     return <AppShell items={visible} active={activeId} onSelect={handleSelect} domains={branchDomains} activeDomain={effDomain} onDomainChange={onDomainChange}>{panel}</AppShell>;
   }
@@ -252,6 +255,9 @@ export function App(): JSX.Element {
     // desk operator is left out on purpose: GET /events is ORG-grained, so it
     // would show them every use case in the org, including ones they cannot open.
     ...(isPlatform || isOrgAdmin ? [{ id: "audit", label: "Audit", icon: "shield" as const }] : []),
+    // Schemes reads the ORG's issued credentials, so it is offered to the roles
+    // that answer for the org — the same line Audit draws, for the same reason.
+    ...(isPlatform || isOrgAdmin ? [{ id: "schemes", label: "Schemes", icon: "doc" as const }] : []),
     ...((isPlatform || isOrgAdmin) && orgCan("Verifier") ? [{ id: "verify", label: "Verification", icon: "shield" as const }] : []),
     ...(isPlatform || isOrgAdmin ? [{ id: "identity", label: "Identity", icon: "shield" as const }] : []),
     ...(isPlatform || isOrgAdmin ? [{ id: "identity-dashboard", label: "Identity Dashboard", icon: "spark" as const }] : []),
@@ -290,6 +296,8 @@ export function App(): JSX.Element {
     panel = <Organizations />;
   } else if (activeId === "developers") {
     panel = <Developers />;
+  } else if (activeId === "schemes") {
+    panel = <SchemeConsole />;
   } else if (activeId === "audit") {
     // Scoped to the use case being operated, so the integrity tab verifies the
     // chains of the assets on screen rather than every asset on the platform.
