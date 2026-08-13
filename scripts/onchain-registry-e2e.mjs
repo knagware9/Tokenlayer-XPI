@@ -1,4 +1,4 @@
-// End-to-end against REAL Besu: the registries deploy at boot, an org's DID is
+// End-to-end against a REAL EVM chain: the registries deploy at boot, an org's DID is
 // registered on-chain, a credential is anchored through the approval chain, its
 // status resolves FROM CHAIN, revocation flips the chain, and an unknown id is
 // not read as a chain negative.
@@ -9,13 +9,13 @@
 //
 //   node scripts/onchain-registry-e2e.mjs
 import { createRequire } from "node:module";
+import { rpcFor, rpcUrlFor, skip } from "./lib/chain-preflight.mjs";
 // ethers is a dependency of @tokenlayer/adapters, not of the repo root — resolve
 // it from there so this script runs from any cwd.
 const require = createRequire(new URL("../packages/adapters/package.json", import.meta.url));
 const { keccak256, toUtf8Bytes, Interface } = require("ethers");
 
 const API = process.env.API ?? "http://localhost:4000/api/v1";
-const RPC = process.env.BESU_RPC_URL ?? "http://localhost:8545";
 const runId = String(Date.now()).slice(-7);
 
 async function call(method, path, body, token) {
@@ -30,8 +30,18 @@ const login = async (e, p) => (await call("POST", "/auth/login", { email: e, pas
 const platform = await login("admin@tokenlayer.dev", "admin123");
 if (!platform) { console.error("platform login failed"); process.exit(2); }
 
+// PREFLIGHT. Every decisive check below is an eth_call against the registry the
+// API deployed at boot, so the chain that matters is whichever one it landed on —
+// not a hardcoded localhost:8545 that dies with ECONNREFUSED when Besu is absent.
 console.log("== 1) The registries deployed at boot ==");
 const reg = (await call("GET", "/registry", null, platform)).json;
+if (!reg?.vcRegistry) skip("this API has no on-chain identity registry — nothing here can be proved on-chain", [
+  "The registries deploy at boot on REGISTRY_CHAIN_ID; without a real EVM chain there are none.",
+]);
+if (!rpcUrlFor(reg.chainId)) skip(`the registries are on '${reg.chainId}', which this script has no RPC URL for`, [
+  `Set ${String(reg.chainId).toUpperCase()}_RPC_URL so section 5 can read the chain directly.`,
+]);
+const rpc = rpcFor(reg.chainId);
 ok(reg?.vcRegistry?.startsWith("0x") && reg?.didRegistry?.startsWith("0x"),
   `registries on '${reg?.chainId}': vc=${reg?.vcRegistry?.slice(0, 12)}… did=${reg?.didRegistry?.slice(0, 12)}…`, reg);
 
@@ -63,7 +73,6 @@ ok(st.json?.chainId === reg.chainId && st.json?.registry === reg.vcRegistry, "it
 console.log("\n== 5) INDEPENDENT PROOF — read the chain directly, bypassing the API ==");
 const iface = new Interface(["function statusOf(bytes32) view returns (bool exists, bool revoked, uint64 revokedAt, bytes32 vcHash, uint64 issuedAt, uint64 expiresAt)"]);
 const data = iface.encodeFunctionData("statusOf", [keccak256(toUtf8Bytes(kyc.id))]);
-const rpc = async (m, p) => (await (await fetch(RPC, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: m, params: p }) })).json()).result;
 const decoded = iface.decodeFunctionResult("statusOf", await rpc("eth_call", [{ to: reg.vcRegistry, data }, "latest"]));
 ok(decoded.exists === true, "eth_call statusOf → exists: true (the anchor is genuinely on-chain)");
 ok(decoded.revoked === false, "eth_call statusOf → revoked: false");

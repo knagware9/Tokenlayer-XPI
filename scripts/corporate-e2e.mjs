@@ -11,13 +11,13 @@
 //
 //   node scripts/corporate-e2e.mjs
 import { createRequire } from "node:module";
+import { availableIds, envHintFor, fetchChains, pickChain, rpcFor, rpcUrlFor, skip } from "./lib/chain-preflight.mjs";
 // ethers is a dependency of @tokenlayer/adapters, not of the repo root — resolve
 // it from there so this script runs from any cwd.
 const require = createRequire(new URL("../packages/adapters/package.json", import.meta.url));
 const { keccak256, toUtf8Bytes, Interface } = require("ethers");
 
 const API = process.env.API ?? "http://localhost:4000/api/v1";
-const RPC = process.env.BESU_RPC_URL ?? "http://localhost:8545";
 const runId = String(Date.now()).slice(-7);
 
 async function call(method, path, body, token) {
@@ -28,14 +28,30 @@ async function call(method, path, body, token) {
 let fails = 0;
 const ok = (c, msg, d) => { if (c) console.log(`  ✓ ${msg}`); else { console.log(`  ✗ ${msg}${d !== undefined ? ` — ${JSON.stringify(d).slice(0, 260)}` : ""}`); fails++; } };
 const login = async (e, p) => (await call("POST", "/auth/login", { email: e, password: p }, null)).json?.token;
-const rpc = async (m, p) => (await (await fetch(RPC, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: m, params: p }) })).json()).result;
 const addr = (s) => "0x" + s.toLowerCase().padStart(40, "0").slice(-40);
 
 const platform = await login("admin@tokenlayer.dev", "admin123");
 if (!platform) { console.error("platform login failed — is the API up?"); process.exit(2); }
 
+// PREFLIGHT. This script proves two on-chain facts by eth_call (the org DID's
+// registration and its anchored OrganizationCredential) and then mints on a use
+// case it configures itself. The anchor chain is the API's choice; the ISSUANCE
+// chain is ours, so it is picked from what exists rather than pinned to Besu.
+const available = availableIds(await fetchChains(API, platform));
 console.log("== 0) Registries are live on-chain ==");
 const reg = (await call("GET", "/registry", null, platform)).json;
+if (!reg?.didRegistry) skip("this API has no on-chain identity registry — the DID and KYB anchors cannot be proved", [
+  "The registries deploy at boot on REGISTRY_CHAIN_ID; without a real EVM chain there are none.",
+]);
+if (!rpcUrlFor(reg.chainId)) skip(`the registries are on '${reg.chainId}', which this script has no RPC URL for`, [
+  `Set ${String(reg.chainId).toUpperCase()}_RPC_URL so the eth_call proofs can bypass our API.`,
+]);
+const rpc = rpcFor(reg.chainId);
+const CHAIN = pickChain(available, ["besu", "mst"]);
+if (!CHAIN) skip("no real EVM chain is available here, so the corporate has nothing to tokenize on", [
+  envHintFor("besu"), `Available here: ${[...available].join(", ") || "(none)"}`,
+]);
+console.log(`chains: anchoring on '${reg.chainId}', the corporate will tokenize on '${CHAIN}'\n`);
 ok(reg?.didRegistry?.startsWith("0x"), `DidRegistry on '${reg?.chainId}': ${reg?.didRegistry?.slice(0, 14)}…`, reg);
 
 console.log("\n== 1) A company REGISTERS itself (public, no token) → pending org + pending admin ==");
@@ -99,7 +115,7 @@ console.log("\n== 5) The org admin CONFIGURES a use case (maker-checker 202 prop
 const useCaseKey = `globex-bond-${runId}`;
 const def = {
   key: useCaseKey, name: `Globex Bond ${runId}`, symbol: "GXB", tokenStandard: "ERC-20",
-  allowedChainIds: ["besu"], defaultChainId: "besu",
+  allowedChainIds: [CHAIN], defaultChainId: CHAIN,
   metadataSchema: { type: "object", properties: {} },
   lifecycle: { mint: true, transfer: true, burn: true, freeze: true },
   compliance: { allowlist: false, transferRestrictions: false },
@@ -125,8 +141,8 @@ const issuerEmail = `issuer.${runId}@globex.example`;
 const issuer = await call("POST", `/orgs/${orgId}/users`, { email: issuerEmail, password: "globexissuer1", role: "Issuer", useCaseKey }, adminTok);
 ok(issuer.status === 201 && !!issuer.json?.did, "the org onboarded an Issuer (sub-DID + membership VC minted)", issuer.json?.error ?? { did: issuer.json?.did?.slice(0, 22) });
 const issuerTok = await login(issuerEmail, "globexissuer1");
-const asset = await call("POST", "/assets", { useCaseKey, name: `Bond Series ${runId}`, chainId: "besu", initialSupply: "1000", treasuryAccount: addr("b09d" + runId), metadata: {} }, issuerTok);
-ok(asset.status === 201 && !!asset.json?.asset?.id, "the Issuer minted a bond asset on besu — the corporate is tokenizing", asset.json?.error ?? asset.json?.asset?.id);
+const asset = await call("POST", "/assets", { useCaseKey, name: `Bond Series ${runId}`, chainId: CHAIN, initialSupply: "1000", treasuryAccount: addr("b09d" + runId), metadata: {} }, issuerTok);
+ok(asset.status === 201 && !!asset.json?.asset?.id, `the Issuer minted a bond asset on ${CHAIN} — the corporate is tokenizing`, asset.json?.error ?? asset.json?.asset?.id);
 
-console.log(`\n${fails ? `❌ ${fails} CHECK(S) FAILED` : "✅ CORPORATE SELF-SERVICE END-TO-END PASSED — KYB documents uploaded → public self-registration → platform approval issues the DID (registered on real Besu) AND a platform-signed OrganizationCredential (anchored, both proven by eth_call) → membership VC + login → gated use-case config (SoD enforced) → org-owned deploy → the corporate onboards an Issuer and mints an asset"}`);
+console.log(`\n${fails ? `❌ ${fails} CHECK(S) FAILED` : `✅ CORPORATE SELF-SERVICE END-TO-END PASSED — KYB documents uploaded → public self-registration → platform approval issues the DID (registered on real ${reg.chainId}) AND a platform-signed OrganizationCredential (anchored, both proven by eth_call) → membership VC + login → gated use-case config (SoD enforced) → org-owned deploy → the corporate onboards an Issuer and mints an asset`}`);
 process.exit(fails ? 1 : 0);
