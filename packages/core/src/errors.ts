@@ -24,6 +24,14 @@ export type PolicyErrorCode =
   | "LOCKUP_ACTIVE"
   | "JURISDICTION_NOT_ALLOWED"
   | "IDENTITY_NOT_VERIFIED"
+  // Deliberately NOT the same code as IDENTITY_NOT_VERIFIED, and this is the
+  // whole point of it existing. "This holder has no valid credential" and "we
+  // could not find out" are different facts with different fixes: the first
+  // sends an operator to the holder's credentials, the second to the network or
+  // the peer key. Collapsing them — by answering `false` when a call to the
+  // Identity service fails — would send every investigation down the wrong path
+  // while looking prudently fail-closed.
+  | "IDENTITY_SERVICE_UNAVAILABLE"
   | "UNKNOWN_CREDENTIAL_TYPE"
   | "INVALID_TEMPLATE"
   | "INVALID_TEMPLATE_PARAMS"

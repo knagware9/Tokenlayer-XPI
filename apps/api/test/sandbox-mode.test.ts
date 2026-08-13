@@ -2195,7 +2195,12 @@ describe("EN-D2 · no creation path may silently drop sandbox", () => {
         ).toBeNull();
       }
     }
-  });
+    // Builds a FRESH app per creation path — deliberately, so one path's writes
+    // cannot mask another's — which makes the cost grow with CREATION_PATHS,
+    // and it has outgrown vitest's 5s default. The 5s was never a claim about
+    // this test; leaving it would make the next added path fail the suite for
+    // being the straw, with a timeout that says nothing about sandbox.
+  }, 60_000);
 
   it("the misplaced-flag refusal says where the flag belongs, and provisions NOTHING", async () => {
     // A refusal that does not say what to do instead is only a slower silent

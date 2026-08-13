@@ -2,6 +2,7 @@ import { LifecycleEngine, RbacPolicy, type UseCaseSource } from "@tokenlayer/cor
 import { RepositoryAuditSink } from "./audit-sink.js";
 import type { ChainRegistry } from "./chains.js";
 import { createComplianceProvider } from "./compliance-provider.js";
+import { localIdentityAssertions, type IdentityAssertions } from "./identity-assertions.js";
 import type { Currency } from "./currencies.js";
 import type { ChallengeStore } from "./identity-challenges.js";
 import type { Keystore } from "./keystore.js";
@@ -158,7 +159,19 @@ export function createEngine(
   rbac: RbacPolicy,
   chains: ChainRegistry,
   audit: AuditRepository,
-  complianceRepos?: { users: UserRepository; accounts: AccountRepository; credentials: CredentialRepository },
+  complianceRepos?: {
+    users: UserRepository;
+    accounts: AccountRepository;
+    /** Local credential store — used only when `identity` is not supplied. */
+    credentials: CredentialRepository;
+    /**
+     * Where the "is this subject verified" answer comes from. Omit and the
+     * local store answers, which is every single-deployment caller and every
+     * test — so this stays a one-line change for the split, not a rewrite of
+     * every construction site.
+     */
+    identity?: IdentityAssertions;
+  },
 ): LifecycleEngine {
   return new LifecycleEngine({
     useCases,
@@ -166,7 +179,12 @@ export function createEngine(
     resolveAdapter: (chainId) => chains.resolveAdapter(chainId),
     audit: new RepositoryAuditSink(audit),
     compliance: complianceRepos
-      ? createComplianceProvider({ audit, users: complianceRepos.users, accounts: complianceRepos.accounts, credentials: complianceRepos.credentials })
+      ? createComplianceProvider({
+          audit,
+          users: complianceRepos.users,
+          accounts: complianceRepos.accounts,
+          identity: complianceRepos.identity ?? localIdentityAssertions(complianceRepos.credentials),
+        })
       : undefined,
   });
 }
