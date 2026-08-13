@@ -22,7 +22,7 @@
  *      leaked contents would be a back door around it.
  */
 import { describe, expect, it } from "vitest";
-import { holdsValidCredential, IDENTITY_CREDENTIAL_TYPE, isValidHeldCredential } from "../src/identity-assertions.js";
+import { holdsValidCredential, IDENTITY_CREDENTIAL_TYPE, isExpired, isValidHeldCredential } from "../src/identity-assertions.js";
 import { MemoryCredentialRepository } from "../src/persistence/memory.js";
 import type { CredentialRecord } from "../src/persistence/types.js";
 import { auth, buildTestAppWithRepos, loginAs, V1, type TestAppHandle } from "./helpers.js";
@@ -87,6 +87,28 @@ describe("POST /identity/assertions", () => {
 
     await h.deps.credentials.revoke(c.id, { reason: "lapsed", by: "admin", at: new Date().toISOString() });
     expect((await assert(h, key, { subject: HOLDER })).json().holds).toBe(false);
+    await h.app.close();
+  });
+
+  it("says no for a credential that has expired", async () => {
+    // Through the ROUTE, not just the predicate: the HTTP surface is where an
+    // integrator meets this rule, and it is the answer a split deployment acts
+    // on. Before the expiry fix this returned true — a lapsed KYC would still
+    // have opened the tokenization gate.
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    await h.deps.credentials.create(credential({ expiresAt: "2020-01-01T00:00:00.000Z" }));
+    const key = await peerKey(h, admin, ["identity:assert"]);
+    expect((await assert(h, key, { subject: HOLDER })).json().holds).toBe(false);
+    await h.app.close();
+  });
+
+  it("says yes for one whose expiry is still ahead", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    await h.deps.credentials.create(credential({ expiresAt: "2099-01-01T00:00:00.000Z" }));
+    const key = await peerKey(h, admin, ["identity:assert"]);
+    expect((await assert(h, key, { subject: HOLDER })).json().holds).toBe(true);
     await h.app.close();
   });
 
@@ -183,13 +205,44 @@ describe("the predicate the engine and the route share", () => {
     expect(isValidHeldCredential(credential(over), IDENTITY_CREDENTIAL_TYPE)).toBe(expected);
   });
 
-  it("DOES NOT check expiry — a known gap, pinned so the fix is a deliberate change", () => {
-    // The certificate renderer stamps EXPIRED and the identity dashboard counts
-    // an expired credential as expired, while this predicate still says yes.
-    // That inconsistency predates the split and was preserved on purpose so the
-    // extraction changed no behaviour. This test is the reminder, and it is the
-    // test that will fail — loudly, in one place — when expiry is added.
+  it("treats an EXPIRED credential as invalid, like every other component already did", () => {
+    // The gate used to say yes here while the verification exchange
+    // (`notExpired`), the certificate renderer (the EXPIRED watermark) and the
+    // identity dashboard (the "expired" bucket) all said the credential was
+    // finished. Four components, two answers, and the dissenter was the one
+    // enforcing compliance.
     const expired = credential({ expiresAt: "2020-01-01T00:00:00.000Z" });
-    expect(isValidHeldCredential(expired, IDENTITY_CREDENTIAL_TYPE)).toBe(true);
+    expect(isValidHeldCredential(expired, IDENTITY_CREDENTIAL_TYPE)).toBe(false);
+  });
+
+  it.each([
+    ["no expiry at all", null, false],
+    ["expires in the future", "2099-01-01T00:00:00.000Z", false],
+    ["expired long ago", "2020-01-01T00:00:00.000Z", true],
+  ])("%s → expired=%s", (_label, expiresAt, expected) => {
+    expect(isExpired(credential({ expiresAt }), Date.parse("2026-08-13T00:00:00.000Z"))).toBe(expected);
+  });
+
+  it("is expired STRICTLY after the instant, so the expiry moment itself is still valid", () => {
+    // Matches the certificate renderer's `< nowMs` exactly. A boundary picked by
+    // one component and guessed by another is how the two drift apart again.
+    const at = "2026-08-13T00:00:00.000Z";
+    const t = Date.parse(at);
+    expect(isExpired(credential({ expiresAt: at }), t)).toBe(false);
+    expect(isExpired(credential({ expiresAt: at }), t + 1)).toBe(true);
+  });
+
+  it("compares instants, not strings — an offset timestamp does not fool it", () => {
+    // `2026-08-13T05:30:00+05:30` IS midnight UTC. Lexicographically it sorts
+    // after "2026-08-13T00:00:00.000Z" and a string compare would call it
+    // unexpired an hour after it lapsed.
+    const offset = credential({ expiresAt: "2026-08-13T05:30:00+05:30" });
+    expect(isExpired(offset, Date.parse("2026-08-13T00:00:01.000Z"))).toBe(true);
+  });
+
+  it("the async wrapper agrees with the predicate on expiry", async () => {
+    const repo = new MemoryCredentialRepository();
+    await repo.create(credential({ expiresAt: "2020-01-01T00:00:00.000Z" }));
+    expect(await holdsValidCredential(repo, HOLDER, IDENTITY_CREDENTIAL_TYPE)).toBe(false);
   });
 });

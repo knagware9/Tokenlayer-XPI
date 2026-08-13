@@ -19,33 +19,56 @@
  * credential id stay behind the holder's consent in the presentation exchange —
  * an assertion that returned contents would be a back door around the consent
  * this platform is built on.
+ *
+ * `nowMs` is injected rather than read from the clock inside the predicate, so
+ * expiry is testable at the boundary instead of only by waiting.
  */
 import type { CredentialRecord, CredentialRepository } from "./persistence/types.js";
 
 /**
- * Is this a credential of `type` that its holder currently holds validly?
+ * Has this credential passed its expiry?
  *
- * KNOWN GAP, PRESERVED ON PURPOSE: expiry is NOT checked here, because the
- * in-process gate never checked it and this extraction must not change
- * behaviour on its way to becoming shared. It is a real inconsistency — the
- * certificate renderer stamps EXPIRED and the identity dashboard counts an
- * expired credential as expired, while this predicate still says yes — and it
- * should be fixed. Fixing it HERE now fixes both callers at once, which is the
- * reason this function exists; doing it as part of the extraction would have
- * hidden a behaviour change inside a refactor.
+ * `Date.parse` rather than the lexicographic `c.expiresAt < now` the identity
+ * dashboard uses. The two agree for every timestamp this platform writes — ISO
+ * 8601, UTC, one format — but they stop agreeing the moment a row carries an
+ * offset (`…+05:30`), where string order is not time order. Comparing instants
+ * cannot drift that way, and it matches the certificate renderer, which is the
+ * component a holder actually sees.
+ *
+ * Null `expiresAt` means no expiry, not "expired now".
  */
-export function isValidHeldCredential(c: CredentialRecord, type: string): boolean {
-  return !c.revoked && c.acceptance === "accepted" && c.type.includes(type);
+export function isExpired(c: CredentialRecord, nowMs: number): boolean {
+  return c.expiresAt !== null && Date.parse(c.expiresAt) < nowMs;
 }
 
-/** True iff `holderDid` holds a valid, unrevoked credential of `type`. */
+/**
+ * Is this a credential of `type` that its holder currently holds validly?
+ *
+ * EXPIRY IS PART OF VALID, and did not used to be. The gate that decides
+ * whether an account may receive a token accepted a lapsed KYC credential,
+ * while three other components — the verification exchange (`notExpired`), the
+ * certificate renderer (the EXPIRED watermark) and the identity dashboard (the
+ * "expired" bucket) — all treated the same credential as finished. Four
+ * components, two answers, and the one that disagreed was the one enforcing
+ * compliance.
+ *
+ * That is now fixed here, in the single predicate the in-process gate and
+ * `POST /identity/assertions` share, so all four agree and a split deployment
+ * inherits the agreement.
+ */
+export function isValidHeldCredential(c: CredentialRecord, type: string, nowMs: number = Date.now()): boolean {
+  return !c.revoked && c.acceptance === "accepted" && c.type.includes(type) && !isExpired(c, nowMs);
+}
+
+/** True iff `holderDid` holds a valid, unrevoked, unexpired credential of `type`. */
 export async function holdsValidCredential(
   credentials: CredentialRepository,
   holderDid: string,
   type: string,
+  nowMs: number = Date.now(),
 ): Promise<boolean> {
   const held = await credentials.listByHolder(holderDid);
-  return held.some((c) => isValidHeldCredential(c, type));
+  return held.some((c) => isValidHeldCredential(c, type, nowMs));
 }
 
 /**

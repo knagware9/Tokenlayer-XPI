@@ -76,12 +76,31 @@ cannot change who may hold a token**.
 - **POST rather than GET** deliberately: the subject DID stays out of URLs,
   proxy logs and referrers.
 
-**Known gap, stated rather than hidden:** the predicate does not check expiry, so
-a lapsed credential still asserts `holds: true`. That is the behaviour the
-in-process gate has always had, preserved here so this change altered nothing;
-the certificate renderer and identity dashboard already treat expiry as
-invalidating, so the three disagree. It is now one function, so fixing it fixes
-every caller at once.
+### **ACTION REQUIRED** — an expired credential no longer passes the identity gate
+
+Previously, `compliance.requireVerifiedIdentity` accepted a KYC credential that
+had passed its `expiresAt`: the gate deciding whether an account may receive a
+token treated a lapsed credential as valid. Three other components did not — the
+verification exchange reports `notExpired: false`, the certificate renderer
+stamps **EXPIRED**, and the identity dashboard counts it in the "expired"
+bucket. Four components, two answers, and the dissenter was the one enforcing
+compliance.
+
+They now agree. Expiry is part of validity in the one predicate the in-process
+gate and `POST /identity/assertions` share.
+
+**What changes for you:** an account whose KYC credential has lapsed is now
+refused with `IDENTITY_NOT_VERIFIED` on mint/transfer/buy into a use case with
+`requireVerifiedIdentity`, and `POST /identity/assertions` answers
+`holds: false` for it. If you rely on long-lived eligibility, either re-issue
+before expiry or issue with `expiresAt: null` (no expiry), which is unchanged
+and still valid forever. Nothing else about issuance, revocation or acceptance
+moved.
+
+The boundary is **strictly after**: a credential is valid up to and including
+its expiry instant, matching the certificate renderer exactly. Comparison is on
+instants (`Date.parse`), not strings, so a timestamp carrying an offset is not
+mistaken for a later one.
 
 ---
 
