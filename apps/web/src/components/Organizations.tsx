@@ -816,6 +816,7 @@ function Members({ org }: { org: Organization }): JSX.Element {
                 <th className="text-left font-medium px-4 py-2.5">Use case</th>
                 <th className="text-left font-medium px-4 py-2.5">DID</th>
                 <th className="text-left font-medium px-4 py-2.5">KYC</th>
+                <th className="text-left font-medium px-4 py-2.5">Access</th>
               </tr>
             </thead>
             <tbody>
@@ -829,6 +830,13 @@ function Members({ org }: { org: Organization }): JSX.Element {
                   </td>
                   <td className="px-4 py-2">
                     <Pill tone={m.kycStatus === "approved" ? "ok" : m.kycStatus === "rejected" ? "danger" : "warn"}>{m.kycStatus}</Pill>
+                  </td>
+                  {/* `active` was fetched on every row and rendered nowhere, so a
+                      SUSPENDED member was indistinguishable from a working one in
+                      the only roster an admin has. Suspension is exactly what a
+                      roster is read to confirm. */}
+                  <td className="px-4 py-2">
+                    <Pill tone={m.active ? "ok" : "danger"}>{m.active ? "active" : "suspended"}</Pill>
                   </td>
                 </tr>
               ))}
