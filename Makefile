@@ -5,7 +5,7 @@ COMPOSE      := docker compose -f docker-compose.yml
 COMPOSE_BESU := docker compose -f docker-compose.yml -f docker-compose.besu.yml
 
 .DEFAULT_GOAL := help
-.PHONY: help deploy deploy-besu deploy-sim verify verify-sim down down-besu besu-up besu-down fabric-up fabric-down api-fabric logs status rebuild
+.PHONY: help deploy deploy-besu deploy-sim deploy-split verify verify-sim verify-split down down-split down-besu besu-up besu-down fabric-up fabric-down api-fabric logs status rebuild
 
 help: ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -20,8 +20,14 @@ deploy-besu: ## Alias of deploy
 deploy-sim: ## Deploy on simulated ledgers only (no external chain)
 	./scripts/deploy.sh --sim
 
+deploy-split: ## Deploy the SPLIT topology: Identity and Tokenization as two deployments
+	./scripts/deploy-split.sh
+
 verify: ## Smoke test: issue + buy, assert real on-chain contract
 	./scripts/verify.sh --besu
+
+verify-split: ## Prove the split topology locally (two processes, two databases, no docker)
+	./scripts/split-topology-up.sh
 
 verify-sim: ## Smoke test against the simulated stack
 	./scripts/verify.sh
@@ -61,6 +67,9 @@ logs: ## Tail API + web logs
 
 rebuild: ## Rebuild images without cache and restart
 	$(COMPOSE_BESU) build --no-cache && $(COMPOSE_BESU) up -d
+
+down-split: ## Stop the split stack (keeps both data volumes)
+	docker compose -f docker-compose.split.yml --env-file .env --env-file .env.split down
 
 down: ## Stop the app stack (keeps data volume)
 	$(COMPOSE) down

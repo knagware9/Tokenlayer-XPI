@@ -6,6 +6,8 @@ coverage/
 *.log
 .env
 .env.local
+# The minted identity:assert peer key for the split topology — a LIVE credential.
+.env.split
 .DS_Store
 
 # Prisma / SQLite
