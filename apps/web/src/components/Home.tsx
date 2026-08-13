@@ -75,6 +75,15 @@ export function Home(): JSX.Element {
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
           <Logo onDark size={30} />
           <div className="flex items-center gap-2">
+            {/* The only entry point a member of the public has. Without it the
+                portal is reachable only by someone who already knows the URL —
+                which is nobody the page was built for. */}
+            <button
+              onClick={() => navigate("/verify")}
+              className="rounded-lg text-slate-200 px-4 py-2 text-sm font-medium hover:bg-white/10 transition-colors"
+            >
+              Verify a credential
+            </button>
             <button
               onClick={() => navigate("/login")}
               className="rounded-lg border border-white/20 text-slate-100 px-4 py-2 text-sm font-medium hover:bg-white/10 transition-colors"

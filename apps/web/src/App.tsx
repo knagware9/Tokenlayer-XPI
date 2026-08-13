@@ -19,6 +19,7 @@ import { MyProfile } from "./components/MyProfile.js";
 import { Organizations } from "./components/Organizations.js";
 import { OrganizationWallet } from "./components/OrganizationWallet.js";
 import { PlatformHome, type PlatformTab } from "./components/PlatformHome.js";
+import { PublicVerify } from "./components/PublicVerify.js";
 import { QrSign } from "./components/QrSign.js";
 import { Signup } from "./components/Signup.js";
 import { UseCaseBuilder } from "./components/UseCaseBuilder.js";
@@ -86,6 +87,13 @@ export function App(): JSX.Element {
   // regardless of its own session — so this precedes the auth gate below.
   // Placed after all hooks to keep hook order unconditional on every render.
   if (routeKey === "qr-sign") return <QrSign />;
+
+  // The PUBLIC verification portal, before the auth gate for the same reason as
+  // qr-sign: its whole audience is people with no account here — a counterparty
+  // handed a certificate, a citizen, a regulator. It also has to work for a
+  // signed-in operator who follows a link, so it precedes the session check
+  // rather than living inside the console's view switch.
+  if (routeKey === "verify") return <PublicVerify />;
 
   // Public (unauthenticated) surface: a marketing homepage plus the corporate
   // self-registration flow. The first path segment selects the screen.

@@ -757,6 +757,33 @@ export interface CredentialStatusInfo {
   chainId?: string;
   registry?: string;
   vcHash?: string;
+  /** ID-O receipts, present only on a `chain` answer: the writes behind this credential. */
+  anchorTxHash?: string | null;
+  anchorChainId?: string | null;
+  revokeTxHash?: string | null;
+}
+
+/**
+ * A W3C DID Resolution Result from the PUBLIC `GET /dids/{did}/resolve`.
+ *
+ * Distinct from `DidDocument` (the authenticated `/document` route) because the
+ * public resolver answers in the W3C envelope — the failure arm carries a
+ * `didResolutionMetadata.error` and a null document rather than an HTTP error,
+ * and the registration facts live in `didDocumentMetadata`, whose `source`
+ * distinguishes "the chain says so" from "this deployment anchors no registry".
+ * Flattening the two would lose exactly that distinction.
+ */
+export interface DidResolution {
+  didResolutionMetadata: { contentType: string; error?: "invalidDid" | "methodNotSupported" };
+  didDocument: {
+    id: string;
+    verificationMethod: { id: string; type: string; controller: string; publicKeyMultibase: string }[];
+    authentication: string[];
+    assertionMethod: string[];
+  } | null;
+  didDocumentMetadata:
+    | { source: "chain"; registered: boolean; active: boolean; deactivated: boolean; chainId: string; registry: string }
+    | { source: "off-chain" };
 }
 
 /** A credential an organization has issued (GET /orgs/:id/credentials). */
