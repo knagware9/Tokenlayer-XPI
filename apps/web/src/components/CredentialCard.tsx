@@ -170,6 +170,14 @@ export function CredentialCard({ credential: c, status, onAcceptanceAction, chai
               <a className="rounded-lg border border-brand-200 bg-brand-50 px-2.5 py-1 text-[11px] font-medium text-brand-700 hover:border-brand-400"
                 href={api.certificateUrl(c.id)} target="_blank" rel="noopener noreferrer">Download certificate</a>
             )}
+            {/* What the holder gives a counterparty. Deliberately NOT the
+                VC-JWT: this link proves the credential is live without handing
+                over its claims, which is the whole point of the public status
+                route it lands on. */}
+            <button className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-medium hover:border-brand-400"
+              onClick={() => void navigator.clipboard.writeText(`${window.location.origin}/verify?id=${encodeURIComponent(c.id)}`)}>
+              Copy verification link
+            </button>
           </div>
         </div>
       )}

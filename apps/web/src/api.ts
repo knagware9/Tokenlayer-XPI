@@ -1,5 +1,5 @@
 import type { ResourceMode } from "./lib/modes.js";
-import type { AccountState, ActivityEvent, AnalyticsSummary, ApiKeyView, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, CertificateFieldPlacement, ChainInfo, ChainStatus, CompanyCategory, ContractCode, CredentialStatusInfo, CredentialTypeInfo, CredentialTypeSpec, CredentialUseCase, DidDocument, EligibleHolder, HeldCredential, IdentityDashboardData, IdentityRegistryInfo, IdentityResult, InvoiceRowResult, IssuedCredential, Listing, LoginKeyInfo, MintedApiKey, MintedWebhook, OrgCapabilities, OrgMember, OrgType, Organization, PlatformEvent, Portfolio, ProvisionResult, Proposal, QrLoginPoll, QrLoginStart, Role, SessionPrincipal, SessionUser, StagedInvoice, TokenInfo, TokenStandard, TokenizeResult, Trade, UseCase, UseCaseTemplate, UseCaseTemplateMeta, VerificationRequest, VerificationResult, WebhookDelivery, WebhookEndpoint } from "./types.js";
+import type { AccountState, ActivityEvent, AnalyticsSummary, ApiKeyView, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, CertificateFieldPlacement, ChainInfo, ChainStatus, CompanyCategory, ContractCode, CredentialStatusInfo, CredentialTypeInfo, CredentialTypeSpec, CredentialUseCase, DidDocument, DidResolution, EligibleHolder, HeldCredential, IdentityDashboardData, IdentityRegistryInfo, IdentityResult, InvoiceRowResult, IssuedCredential, Listing, LoginKeyInfo, MintedApiKey, MintedWebhook, OrgCapabilities, OrgMember, OrgType, Organization, PlatformEvent, Portfolio, ProvisionResult, Proposal, QrLoginPoll, QrLoginStart, Role, SessionPrincipal, SessionUser, StagedInvoice, TokenInfo, TokenStandard, TokenizeResult, Trade, UseCase, UseCaseTemplate, UseCaseTemplateMeta, VerificationRequest, VerificationResult, WebhookDelivery, WebhookEndpoint } from "./types.js";
 
 export interface Currency { code: string; label: string; }
 export interface CashBalance { currency: string; address: string; amount: string; }
@@ -427,6 +427,13 @@ export const api = {
   identityRegistry: (token: string) => request<IdentityRegistryInfo | null>("/registry", token),
   // Public: a verifier must be able to check a credential without an account.
   credentialStatus: (id: string) => request<CredentialStatusInfo>(`/credentials/${encodeURIComponent(id)}/status`, null),
+  /**
+   * PUBLIC W3C DID resolution — deliberately token-free, like `credentialStatus`
+   * above. `didDocument` (the /document route) is NOT the same call: it requires
+   * a session. A third party checking who issued a credential has no account
+   * here, so the public portal must use this one.
+   */
+  resolveDid: (did: string) => request<DidResolution>(`/dids/${encodeURIComponent(did)}/resolve`, null),
   createVerificationRequest: (token: string, body: { holderDid: string; requestedTypes: string[]; purpose: string; credentialUseCaseKey?: string }) =>
     request<VerificationRequest>("/verification-requests", token, { method: "POST", body: JSON.stringify(body) }),
   myVerificationRequests: (token: string) => request<VerificationRequest[]>("/me/verification-requests", token),
