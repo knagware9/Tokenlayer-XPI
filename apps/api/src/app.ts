@@ -7,6 +7,7 @@ import type { AppDeps } from "./context.js";
 import { openapiConfig } from "./http/openapi.js";
 import { applyDomainGate } from "./http/route-domains.js";
 import { components } from "./http/schemas.js";
+import { guardRepositories } from "./persistence/model-domains.js";
 import { registerRoutes } from "./http/routes.js";
 import { errorHandler, requirePrincipal } from "./http/support.js";
 
@@ -19,7 +20,14 @@ const TOKEN_TTL_MS = 1000 * 60 * 60 * 8; // 8 hours
  * injected so the same app runs over Prisma (production) or in-memory repos
  * (tests/demo).
  */
-export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
+export async function buildApp(rawDeps: AppDeps): Promise<FastifyInstance> {
+  // THE PERSISTENCE HALF OF THE PRODUCT BOUNDARY. The onRoute hook below stops
+  // this deployment ANSWERING for a product it does not sell; this stops it
+  // WRITING that product's data through a door the route gate never sees — a
+  // proposal executor reached through shared `/proposals/:id/approve`, the
+  // webhook dispatcher, anything added later. Transparent (literally the same
+  // objects) on a deployment that serves both products, which is the default.
+  const deps = guardRepositories(rawDeps, rawDeps.enabledDomains);
   // 256 KB body cap — bounds payload-size abuse.
   const app = Fastify({ logger: false, bodyLimit: 256 * 1024 });
 

@@ -69,8 +69,12 @@ async function main(): Promise<void> {
   const webhookEndpoints = new PrismaWebhookEndpointRepository();
   const webhookDeliveries = new PrismaWebhookDeliveryRepository();
   const keystore = createKeystore(env.didMasterKey);
-  // Demo users/accounts (with predictable passwords) are seeded only outside production.
-  if (env.nodeEnv !== "production") await seedDefaults(users, accounts);
+  // Demo users/accounts (with predictable passwords) are seeded only outside
+  // production. The ROSTER is seeded on every deployment — it is how anyone logs
+  // in — but the demo WALLETS behind it only where tokenization is sold.
+  if (env.nodeEnv !== "production") {
+    await seedDefaults(users, accounts, undefined, env.enabledDomains.includes("tokenization"));
+  }
 
   // WHERE "is this holder verified?" is answered on THIS deployment — the local
   // credential store, a remote Identity service, or nowhere (and it says so).
@@ -94,10 +98,18 @@ async function main(): Promise<void> {
   const engine = createEngine(useCases, rbac, chains, audit, { users, accounts, credentials, identity });
   // Seed default use cases and deploy their contracts on each allowed+available
   // chain (best-effort; never crashes boot). Available = present in the registry.
-  await seedUseCases(useCases, {
-    availableChainIds: new Set(chains.list().map((c) => c.id)),
-    deploy: (def, chainId) => engine.deployUseCaseContract(def, chainId),
-  });
+  //
+  // ONLY WHERE TOKENIZATION IS SOLD. This ran unconditionally, so an
+  // identity-only deployment wrote tokenization use cases it had no route to
+  // serve and — worse — spent boot deploying their contracts on a real chain.
+  // Boot happens before `buildApp` installs the repository guard, so this is
+  // the explicit condition rather than a caught refusal.
+  if (env.enabledDomains.includes("tokenization")) {
+    await seedUseCases(useCases, {
+      availableChainIds: new Set(chains.list().map((c) => c.id)),
+      deploy: (def, chainId) => engine.deployUseCaseContract(def, chainId),
+    });
+  }
   const registry = await resolveIdentityRegistry({
     chainId: env.registryChainId,
     chains,
@@ -178,11 +190,16 @@ async function main(): Promise<void> {
         `${d.prefix}.admin@tokenlayer.dev`, `${d.prefix}.issuer@tokenlayer.dev`,
         `${d.prefix}.buyer@tokenlayer.dev`, `${d.prefix}.auditor@tokenlayer.dev`,
       ]);
-      if (d.issuerWallet) await ensureUserWallet(deps, `${d.prefix}.issuer@tokenlayer.dev`, d.issuerWallet, `${d.name} Desk`);
+      // A wallet is tokenization data (Account) — no wallet to link where that product is not sold.
+      if (d.issuerWallet && env.enabledDomains.includes("tokenization")) {
+        await ensureUserWallet(deps, `${d.prefix}.issuer@tokenlayer.dev`, d.issuerWallet, `${d.name} Desk`);
+      }
     }
     // Seed one example credential use case (Identity domain) so the Identity
-    // section is populated on a fresh boot. Idempotent.
-    if (!(await credentialUseCases.has("corp-trade-credentials"))) {
+    // section is populated on a fresh boot. Idempotent — and only where that
+    // product is sold: this ran unconditionally, writing an identity row into a
+    // tokenization-only deployment that has no route to serve it.
+    if (env.enabledDomains.includes("identity") && !(await credentialUseCases.has("corp-trade-credentials"))) {
       await credentialUseCases.create({
         key: "corp-trade-credentials", name: "Corporate Trade Credentials",
         description: "Government-issued trade credentials (MCA, GSTIN) for registered corporates.",

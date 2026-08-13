@@ -368,6 +368,9 @@ function statusForPolicy(code: string): number {
   // identity service to find out. A 400 would tell an integrator to fix their
   // request, when the same request may well succeed unchanged in a minute.
   if (code === "IDENTITY_SERVICE_UNAVAILABLE") return 503;
+  // Matches the route gate's 404 exactly: the same fact must not arrive as two
+  // different statuses depending on which door the caller happened to knock on.
+  if (code === "DOMAIN_NOT_ENABLED") return 404;
   return 400;
 }
 

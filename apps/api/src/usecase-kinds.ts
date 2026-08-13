@@ -13,6 +13,7 @@ import type { TokenClaims } from "./http/support.js";
 import type { ProposalKindHandler } from "./proposal-kinds.js";
 import type { ProposalRecord } from "./persistence/types.js";
 import { deployAndCreateUseCase } from "./use-cases.js";
+import { namespaceHolding } from "./usecase-namespace.js";
 
 /** PlatformAdmin, or an OrgAdmin of the proposal's own org. Never null-matches. */
 const orgScopedView = async (_deps: AppDeps, claims: TokenClaims, p: ProposalRecord): Promise<boolean> =>
@@ -30,7 +31,13 @@ export const createUseCaseKind: ProposalKindHandler = {
     // proposal), in EITHER domain (a slug is unique across use cases and
     // credential use cases alike).
     if (await ctx.deps.useCases.has(def.key)) throw coded(409, "USECASE_EXISTS", `use case '${def.key}' already exists`);
-    if (await ctx.deps.credentialUseCases.has(def.key)) throw coded(409, "KEY_TAKEN", `use-case key '${def.key}' already exists`);
+    // The credential namespace is only consulted where this deployment KEEPS
+    // one. On a tokenization-only instance the two namespaces live in different
+    // databases, so they cannot collide and there is nothing to ask; asking
+    // anyway would fail the proposal on a refusal from the repository guard.
+    if ((await namespaceHolding(ctx.deps, def.key)) === "identity") {
+      throw coded(409, "KEY_TAKEN", `use-case key '${def.key}' already exists`);
+    }
     // EN-A: the owning org must STILL have the tokenization domain — its
     // envelope may have been tightened between propose and approve (the drafting
     // route's friendly 403 is only a snapshot). A null (legacy) envelope passes;

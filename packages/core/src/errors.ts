@@ -32,6 +32,11 @@ export type PolicyErrorCode =
   // Identity service fails — would send every investigation down the wrong path
   // while looking prudently fail-closed.
   | "IDENTITY_SERVICE_UNAVAILABLE"
+  // The SAME code the route gate answers with, on purpose. A route that is not
+  // served here and a table that is not kept here are one fact from the
+  // caller's side — "this deployment does not sell that product" — and giving
+  // them one vocabulary means an integrator learns it once.
+  | "DOMAIN_NOT_ENABLED"
   | "UNKNOWN_CREDENTIAL_TYPE"
   | "INVALID_TEMPLATE"
   | "INVALID_TEMPLATE_PARAMS"

@@ -72,22 +72,41 @@ export const DEFAULT_ACCOUNTS: { address: string; label: string }[] = [
 const DEFAULT_CBDC = "CBDC-INR";
 const DEMO_CBDC_AMOUNT = "1000000";
 
-/** Idempotently seeds the default users and demo accounts. */
-export async function seedDefaults(users: UserRepository, accounts: AccountRepository, cash?: CashRepository): Promise<void> {
-  for (const a of DEFAULT_ACCOUNTS) {
-    await accounts.upsert(a.address, a.label);
+/**
+ * Idempotently seeds the default users and demo accounts.
+ *
+ * `wallets` is what an identity-only deployment turns off. A wallet is a
+ * tokenization concept and `Account` is a tokenization table (see
+ * `persistence/model-domains.ts`), but the demo OPERATORS are how anyone logs
+ * in at all — so the roster is seeded on every deployment and only the wallets
+ * behind it are conditional. Default `true`, so every existing caller and every
+ * test is unchanged.
+ */
+export async function seedDefaults(
+  users: UserRepository,
+  accounts: AccountRepository,
+  cash?: CashRepository,
+  wallets = true,
+): Promise<void> {
+  if (wallets) {
+    for (const a of DEFAULT_ACCOUNTS) {
+      await accounts.upsert(a.address, a.label);
+    }
   }
   for (const u of DEFAULT_USERS) {
     if (await users.findByEmail(u.email)) continue;
     let accountId: string | null = null;
-    if (u.walletLabel) {
+    if (wallets && u.walletLabel) {
       const acct = DEFAULT_ACCOUNTS.find((a) => a.label === u.walletLabel);
       if (acct) accountId = (await accounts.upsert(acct.address, acct.label)).id;
     }
     await users.create({ email: u.email, passwordHash: bcrypt.hashSync(u.password, 10), role: u.role, useCaseKey: u.useCaseKey, accountId, active: true, kycStatus: "approved", kyc: null, kind: "human" });
   }
 
-  if (cash) {
+  // `wallets` gates this too: demo CBDC is a balance held BY a wallet, so
+  // funding one without seeding it would be writing tokenization data on a
+  // deployment that keeps none.
+  if (cash && wallets) {
     // Identify buyer wallet addresses: users with role "Buyer" that have a walletLabel
     const buyerWalletLabels = DEFAULT_USERS
       .filter((u) => u.role === "Buyer" && u.walletLabel)
