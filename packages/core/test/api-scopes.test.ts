@@ -60,6 +60,11 @@ describe("API_SCOPES", () => {
     // `users:onboard` would have described dishonestly.
     // "webhooks" was added for EN-C's `webhooks:read`/`webhooks:write`
     // (managing an org's own webhook endpoints and reading its event log).
-    expect([...API_SCOPE_RESOURCES].sort()).toEqual(["assets", "credentials", "org", "usecases", "users", "verifications", "webhooks"]);
+    // "identity" was added for `identity:assert` — the PEER scope a separately
+    // deployed Tokenization instance uses to ask Identity whether a subject
+    // holds a valid credential. Its own stem rather than `credentials:*`
+    // because it is not a credential read: it returns a yes/no and never the
+    // credential, and it is granted to a peer platform rather than a tenant.
+    expect([...API_SCOPE_RESOURCES].sort()).toEqual(["assets", "credentials", "identity", "org", "usecases", "users", "verifications", "webhooks"]);
   });
 });

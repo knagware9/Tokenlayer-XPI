@@ -19,6 +19,72 @@ diff. That file is generated, not written by hand; see the header of
 
 ---
 
+## Unreleased — deploying Tokenization and Identity apart
+
+Two changes that turn "two products" from a menu into a boundary. Both are
+additive for a deployment that serves both products, which is the default.
+
+### `ENABLED_DOMAINS` is now enforced, not just displayed
+
+`ENABLED_DOMAINS` previously reached one route — `GET /config`, which tells the
+console which navigation to draw. Every identity route still answered on a
+deployment that had switched identity off.
+
+Now a deployment serves only the products it is configured for. On a
+tokenization-only instance, identity routes answer **`404 DOMAIN_NOT_ENABLED`**
+and are absent from `GET /openapi.json`; the mirror holds for identity-only.
+Shared routes — `/auth`, `/me`, `/orgs`, `/users`, `/proposals`, `/audit`,
+`/documents`, `/events`, `/chains`, `/config` — always answer, because without
+them neither product works.
+
+**ACTION REQUIRED only if you set `ENABLED_DOMAINS` to a single product AND
+called the other's routes.** The default (`tokenization,identity`) is unchanged
+and publishes exactly the surface it did before. An unauthenticated request is
+also unchanged: it still gets `401`, so the gate is not an oracle for which
+products an instance runs.
+
+### New: `POST /identity/assertions`
+
+Answers one question for another SERVICE: does this subject hold a valid,
+unrevoked credential of this type?
+
+```
+POST /api/v1/identity/assertions
+{ "subject": "did:key:z6Mk…", "credentialType": "KycCredential" }
+→ 200 { "subject": "…", "credentialType": "KycCredential",
+        "holds": true, "checkedAt": "2026-08-13T…" }
+```
+
+This is what a separately-deployed Tokenization instance calls before letting an
+account receive a token from a use case with
+`compliance.requireVerifiedIdentity`. In a single deployment the engine answers
+it in-process; both paths run the same predicate, so **splitting the deployment
+cannot change who may hold a token**.
+
+- **New scope `identity:assert`.** A PEER scope, not a customer one: a key
+  holding it may ask about ANY subject, because the caller is a peer platform
+  rather than a tenant. Grant it to a trusted peer only. Every call is written
+  to the audit log — that visibility is what a scope this broad is traded for.
+- **Machine-only.** A human session is refused with **`403 SESSION_PRINCIPAL`**,
+  even a platform admin's. Scopes are a property of API keys, so a scope check
+  alone passes every interactive session; without this the route would let any
+  signed-in user enumerate who is KYC'd.
+- **A verdict, never the credential.** No claims, no issuer, no credential id.
+  Those stay behind the holder's consent in the presentation exchange
+  (`POST /verification-requests`) — an assertion that returned contents would be
+  a back door around consent.
+- **POST rather than GET** deliberately: the subject DID stays out of URLs,
+  proxy logs and referrers.
+
+**Known gap, stated rather than hidden:** the predicate does not check expiry, so
+a lapsed credential still asserts `holds: true`. That is the behaviour the
+in-process gate has always had, preserved here so this change altered nothing;
+the certificate renderer and identity dashboard already treat expiry as
+invalidating, so the three disagree. It is now one function, so fixing it fixes
+every caller at once.
+
+---
+
 ## Unreleased — a verifier can list the requests it raised
 
 Purely additive; no existing route, response or scope changed.

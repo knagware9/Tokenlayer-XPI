@@ -28,6 +28,7 @@ import { checkUrl } from "../webhooks/url-guard.js";
 import { API_KEY_BCRYPT_ROUNDS, invalidateVerifiedPrefix, mintSecret } from "../api-keys.js";
 import { BRAND_LOGO_PRUNE_GRACE_MS, pruneSupersededBrandLogos } from "../brand-logo-prune.js";
 import { S } from "./schemas.js";
+import { holdsValidCredential, IDENTITY_CREDENTIAL_TYPE } from "../identity-assertions.js";
 import { actorOf, claimsOf, contextOf, isPositiveIntString, machinePrincipal, notFound, requirePrincipal, requireScope, scopedToCaller, type TokenClaims } from "./support.js";
 
 const NO_USE_CASE = "__none__"; // sentinel: a use-case key that matches no real use case (denies scoped users with no assigned use case)
@@ -6093,6 +6094,52 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     // never see this row anyway — it carries no assetId).
     await deps.audit.append({ actorId: actorOf(request).id, action: "kyc-verified" as LifecycleAction, payload: { userId: target.id, did: result.holderDid, issuer: result.credential!.issuer, country: vcClaims.country ?? null } });
     return { status: "approved", did: result.holderDid, claims: result.credential!.claims, issuer: result.credential!.issuer };
+  });
+
+  /**
+   * SERVICE-TO-SERVICE: does this subject hold a valid credential of this type?
+   *
+   * The one question Tokenization must ask Identity once the two are deployed
+   * apart. In a single deployment the LifecycleEngine asks it in-process
+   * through `ComplianceProvider.hasVerifiedIdentity`; both paths run
+   * `holdsValidCredential`, so the answer cannot depend on the topology. That
+   * shared predicate is the point — two implementations would mean splitting
+   * the deployment silently changes who may hold a token.
+   *
+   * MACHINE-ONLY, and this is the subtle part. `requireScope` short-circuits
+   * for a human session (`granted === null` ⇒ every check passes), because
+   * scopes are a property of API keys. So `authScoped` ALONE would leave this
+   * route open to every signed-in user — a Buyer could sit and enumerate which
+   * DIDs are KYC'd. The scope narrows machines; the explicit refusal below is
+   * what keeps humans out. Both halves, or the gate answers the wrong question.
+   *
+   * The response is a boolean. Claims, issuer and credential id stay behind the
+   * holder's consent in the presentation exchange — see the scope's own note.
+   */
+  app.post("/identity/assertions", { schema: S.identityAssert, ...authScoped("identity:assert") }, async (request, reply) => {
+    if (!machinePrincipal(request)) {
+      return reply.code(403).send({
+        error: "SESSION_PRINCIPAL",
+        message: "this is a service-to-service route; present an API key with the 'identity:assert' scope",
+      });
+    }
+    const b = request.body as { subject: string; credentialType?: string };
+    const subject = b.subject.trim();
+    const credentialType = (b.credentialType ?? IDENTITY_CREDENTIAL_TYPE).trim();
+    if (!subject || !credentialType) {
+      return reply.code(400).send({ error: "INVALID_ASSERTION", message: "subject and credentialType must be non-empty" });
+    }
+    const holds = await holdsValidCredential(deps.credentials, subject, credentialType);
+    // Audited every time, answer included. A key with this scope may ask about
+    // ANY subject — there is no tenant boundary on "is this DID KYC'd" when the
+    // caller is a peer platform rather than a customer — so the compensating
+    // control is that asking is never silent.
+    await deps.audit.append({
+      actorId: (request.user as TokenClaims).id,
+      action: "identity-asserted" as LifecycleAction,
+      payload: { subject, credentialType, holds },
+    });
+    return reply.code(200).send({ subject, credentialType, holds, checkedAt: new Date().toISOString() });
   });
 
   // Demo-only: mint a demo issuer-signed VC wrapped in a holder-signed VP over a

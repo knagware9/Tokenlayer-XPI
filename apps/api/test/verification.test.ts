@@ -395,7 +395,15 @@ describe("the verifier's outbound list", () => {
       expect(r).not.toHaveProperty("eligibleCredentials");
     }
     // Newest first — the pending one a verifier is chasing is at the top.
-    const ordered = rows.map((r) => r.id);
-    expect(ordered.indexOf(second)).toBeLessThan(ordered.indexOf(first));
+    //
+    // Asserted as a SORT PROPERTY over the whole list rather than "second comes
+    // before first". Those two requests are created microseconds apart and can
+    // land on the same `createdAt` millisecond, where "newest" has no answer and
+    // the comparator returns 0 — so the id-order form passed or failed on
+    // whichever way the runtime happened to order equal keys. It did fail, the
+    // first time an unrelated test file shifted the timing. A tie is not a bug;
+    // claiming an order between tied rows was.
+    const stamps = rows.map((r) => r.createdAt);
+    expect(stamps).toEqual([...stamps].sort((a, b) => b.localeCompare(a)));
   });
 });
