@@ -25,6 +25,21 @@ export interface OnboardUserPayload {
   useCaseKey: string | null;
   walletAddress: string | null;
   kyc: { legalName: string; country: string; idType?: string; idNumber?: string; documentRef?: string } | null;
+  /**
+   * A DID this holder ALREADY HAS, minted by a separately-deployed Identity
+   * service — link it instead of minting one.
+   *
+   * Without this the split topology cannot work at all: onboarding mints a
+   * fresh custodial DID per deployment, so the same person onboarded on both
+   * sides gets two, and `hasVerifiedIdentity` asks Identity about a DID it has
+   * never seen. The answer is "no", forever, for every holder — a gate that
+   * looks like policy and is really a plumbing mismatch.
+   *
+   * Null on every deployment that owns identity (there it mints, and the route
+   * REFUSES a supplied DID — accepting one would let an operator point a wallet
+   * at someone else's verified identity).
+   */
+  did: string | null;
 }
 
 /** ownerOrg of the use case when present, else the platform issuer org. */
@@ -59,11 +74,22 @@ async function onboardSingle(deps: AppDeps, proposer: Actor, pl: OnboardUserPayl
   });
   let issuedCredentialId: string | null = null;
   try {
-    // Mint the custodial DID (same custody as org members: encrypted Ed25519 seed).
-    const seed = deps.keystore.newSeed();
-    const didSeedEncrypted = deps.keystore.encryptSeed(seed);
-    const did = didKeyFromSeed(seed).did;
-    await deps.users.update(created.id, { did, didSeedEncrypted });
+    // LINK, or MINT. A supplied DID belongs to a separately-deployed Identity
+    // service: this deployment records it and stores NO seed, because it does
+    // not hold that key and must never be able to sign as the holder. It also
+    // issues no KycCredential — that is the identity product's act, and the
+    // route refuses `did` together with `kyc` so the two cannot be confused.
+    let did: string;
+    if (pl.did) {
+      did = pl.did;
+      await deps.users.update(created.id, { did });
+    } else {
+      // Mint the custodial DID (same custody as org members: encrypted Ed25519 seed).
+      const seed = deps.keystore.newSeed();
+      const didSeedEncrypted = deps.keystore.encryptSeed(seed);
+      did = didKeyFromSeed(seed).did;
+      await deps.users.update(created.id, { did, didSeedEncrypted });
+    }
     if (pl.kyc) {
       const issuerOrg = await resolveIssuerOrg(deps, pl.useCaseKey);
       // EN-A (review fix): onboarding SIGNS a KycCredential with this org's DID

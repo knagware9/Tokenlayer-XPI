@@ -179,6 +179,38 @@ slug namespace — on separate databases they cannot collide.
 **Nothing changes on a deployment that serves both products.** The guard is
 literally the same repository objects there; no proxy, no wrapper.
 
+### `POST /users` takes a `did` — for a holder whose identity lives elsewhere
+
+The last thing standing between the split and a working deployment. Onboarding
+mints a custodial DID, so the same person onboarded on the identity deployment
+and on the tokenization deployment ended up with **two**, and
+`requireVerifiedIdentity` asked the identity service about one it had never
+issued anything to. Every holder failed the gate, and it looked like policy.
+
+```
+POST /api/v1/users
+{ "email": "…", "password": "…", "role": "Buyer", "useCaseKey": "…",
+  "walletAddress": "0x…", "did": "did:key:z6Mk…" }   ← issued by the identity service
+```
+
+- **Optional and additive.** Omit it and onboarding mints a DID exactly as
+  before, seed and all.
+- **Refused with `400 DID_NOT_ACCEPTED` by a deployment that runs the identity
+  product** — there it mints its own, and accepting a caller's would be a way to
+  point a wallet at somebody else's verified identity.
+- **Refused together with `kyc`** (same code). One links an identity issued
+  elsewhere; the other asks *this* deployment to issue one.
+- **No custodial seed is stored** for a linked DID. This deployment does not
+  hold that key and must never be able to sign as the holder.
+
+### Also fixed: sign-in on a single-product deployment
+
+`POST /auth/login`, the QR poll and `GET /me` resolved a session's use-case
+domain by listing BOTH catalogues, and login additionally read the user's wallet
+— tables a single-product deployment does not keep. Sign-in failed outright for
+any user carrying an `accountId`. Each now consults only what its deployment
+owns; a combined deployment is unaffected.
+
 ---
 
 ## Unreleased — a verifier can list the requests it raised

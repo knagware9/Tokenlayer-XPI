@@ -508,6 +508,19 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
   }
 
   /**
+   * Both use-case catalogues, each listed only where this deployment keeps it.
+   * Same rule as `resolveUseCaseDomain`: these run on SHARED onboarding routes,
+   * so consulting a table this instance does not own would fail them outright.
+   */
+  async function useCaseKeysByDomain(): Promise<{ tokenizationKeys: string[]; credentialKeys: string[] }> {
+    const [tks, cks] = await Promise.all([
+      deps.enabledDomains.includes("tokenization") ? deps.useCases.list() : Promise.resolve([]),
+      deps.enabledDomains.includes("identity") ? deps.credentialUseCases.list() : Promise.resolve([]),
+    ]);
+    return { tokenizationKeys: tks.map((u) => u.key), credentialKeys: cks.map((u) => u.key) };
+  }
+
+  /**
    * The wallet behind a linked account id, or null — asked only where this
    * deployment keeps wallets.
    *
@@ -3497,14 +3510,33 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
 
   app.post("/users", { schema: S.createUser, ...authScoped("users:onboard") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
-    const b = request.body as { email: string; password: string; role: Role; useCaseKey?: string; walletAddress?: string; kyc?: KycDetails };
+    const b = request.body as { email: string; password: string; role: Role; useCaseKey?: string; walletAddress?: string; did?: string; kyc?: KycDetails };
+    // A DID MINTED SOMEWHERE ELSE is accepted only by a deployment that does not
+    // run the identity product — there it is the ONLY way a holder's tokenization
+    // record can carry the DID the Identity service knows them by, and without it
+    // `requireVerifiedIdentity` can never pass on a split topology: onboarding
+    // mints a fresh DID per deployment, so the same person ends up with two and
+    // the assertion asks about one Identity has never seen. Where this deployment
+    // DOES own identity it mints its own, and accepting a caller's would be a way
+    // to point a wallet at someone else's verified identity.
+    if (b.did && deps.enabledDomains.includes("identity")) {
+      return reply.code(400).send({
+        error: "DID_NOT_ACCEPTED",
+        message: "this deployment issues its own DIDs — omit 'did' (it is for a deployment that delegates identity)",
+      });
+    }
+    // The two are alternatives, not a pair: `kyc` asks THIS deployment to issue a
+    // KycCredential, which is exactly the act a delegated deployment does not
+    // perform. Refusing is the difference between a clear 400 and a holder who
+    // looks onboarded and is quietly unverifiable.
+    if (b.did && b.kyc) {
+      return reply.code(400).send({
+        error: "DID_NOT_ACCEPTED",
+        message: "'did' links an identity issued elsewhere; 'kyc' asks this deployment to issue one — send one or the other",
+      });
+    }
     const targetUseCaseKey = claims.role === "PlatformAdmin" ? (b.useCaseKey || null) : claims.useCaseKey;
-    const targetDomain = targetUseCaseKey
-      ? useCaseDomainOf(targetUseCaseKey, {
-          tokenizationKeys: (await deps.useCases.list()).map((u) => u.key),
-          credentialKeys: (await deps.credentialUseCases.list()).map((u) => u.key),
-        })
-      : undefined;
+    const targetDomain = targetUseCaseKey ? useCaseDomainOf(targetUseCaseKey, await useCaseKeysByDomain()) : undefined;
     if (targetUseCaseKey && !targetDomain) {
       return reply.code(404).send({ error: "USE_CASE_NOT_FOUND", message: `no use case '${targetUseCaseKey}'` });
     }
@@ -3557,7 +3589,12 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
         kind: "human",
       });
       let mintedDid: string | null = null;
-      if (org) {
+      if (b.did) {
+        // Linked, not minted — see the refusal above. No membership VC either:
+        // this deployment holds no key for this subject and cannot sign as them.
+        await deps.users.update(created.id, { did: b.did });
+        mintedDid = b.did;
+      } else if (org) {
         try {
           mintedDid = await mintMembership(org, created, b.role);
         } catch (err) {
@@ -3577,6 +3614,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       payload: {
         email: b.email, passwordHash: await bcrypt.hash(b.password, BCRYPT_ROUNDS),
         role: b.role, useCaseKey: targetUseCaseKey, walletAddress: b.walletAddress ?? null, kyc,
+        did: b.did ?? null,
       },
       proposerId: claims.id, proposerLabel: claims.email, required: 1,
     });
@@ -3590,8 +3628,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
   app.post("/users/batch", { schema: S.createUsersBatch, ...authScoped("users:onboard") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const { rows } = request.body as { rows: { email: string; password: string; role: Role; useCaseKey?: string; walletAddress?: string; kyc?: KycDetails }[] };
-    const tokKeys = (await deps.useCases.list()).map((u) => u.key);
-    const credKeys = (await deps.credentialUseCases.list()).map((u) => u.key);
+    const { tokenizationKeys: tokKeys, credentialKeys: credKeys } = await useCaseKeysByDomain();
     const problems: { index: number; error: string }[] = [];
     const seen = new Set<string>();
     const prepared: OnboardUserPayload[] = [];
@@ -3622,6 +3659,7 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
       prepared.push({
         email: b.email, passwordHash: await bcrypt.hash(b.password, BCRYPT_ROUNDS),
         role: b.role, useCaseKey: targetUseCaseKey, walletAddress: b.walletAddress ?? null, kyc,
+        did: null, // CSV batch carries no DID column; linking is the single-user door
       });
       targetKeys.add(targetUseCaseKey);
     }

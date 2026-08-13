@@ -3053,6 +3053,12 @@ export const S: Record<string, FastifySchema> = {
         role: { type: "string", enum: ["UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor", "Holder", "Verifier"] },
         useCaseKey: { type: "string" },
         walletAddress: { type: "string" },
+        // A DID this holder already has, issued by a separately-deployed Identity
+        // service. Accepted ONLY by a deployment that does not run the identity
+        // product (400 DID_NOT_ACCEPTED otherwise, and 400 if sent with `kyc`).
+        // On a split topology this is what lets the tokenization side recognise
+        // the subject the Identity service will be asked about.
+        did: { type: "string" },
         kyc: {
           type: "object",
           additionalProperties: false,

@@ -166,6 +166,47 @@ Fabric at boot (a `TotalSupply` chaincode read) and refuses to start if the conf
 is unreachable. Fabric needs ~2–3 GiB free in the Docker VM for its peers/orderer. See
 [infra/fabric/README.md](infra/fabric/README.md) for details.
 
+## Deploy the two products APART (the split topology)
+
+The stack above is **one deployment serving both products**. XI can also run as
+**two deployments, one product each**, with separate databases:
+
+```bash
+make deploy-split      # identity :4100 / :8081 · tokenization :4000 / :8080
+make down-split
+```
+
+Tokenization asks Identity exactly one question — *does this DID hold a valid
+KycCredential?* — over HTTP, and nothing else. A wallet address never crosses
+the boundary: the address → account → user → DID resolution stays on
+tokenization's side.
+
+**Why it is a script and not just `docker compose up`.** `IDENTITY_SERVICE_KEY`
+is an API key that does not exist until the identity deployment is running, so
+the order is load-bearing: bring identity up → mint a peer key holding
+`identity:assert` → bring tokenization up with it. `deploy-split.sh` does that
+and writes the key to `.env.split` (git-ignored — it is a live credential).
+
+**Onboarding a holder across both.** Onboard them on the identity deployment
+first, then on the tokenization deployment with `did` set to the DID identity
+issued them (`POST /users`, alongside `walletAddress`). Without it each side
+mints its own DID and the gate asks about one the other has never seen — the
+answer is no, for every holder. A deployment that runs the identity product
+refuses a supplied `did`: there it mints its own.
+
+**What each database holds.** Every model in `apps/api/prisma/schema.prisma`
+carries a `/// domain:` line naming its owner. A single-product deployment keeps
+its own tables plus the shared ones; touching the other product's answers
+`404 DOMAIN_NOT_ENABLED`.
+
+**Verify it without Docker** — two local processes, two throwaway SQLite
+databases, and the end-to-end proof (including that the gate fails *closed and
+loudly* with `503 IDENTITY_SERVICE_UNAVAILABLE` when identity is stopped):
+
+```bash
+make verify-split
+```
+
 ## Common commands
 
 ```bash
