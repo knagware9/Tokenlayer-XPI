@@ -797,6 +797,11 @@ export interface IssuedCredential {
   revoked: boolean;
   revokedAt: string | null;
   revokedReason: string | null;
+  /** The credential use case (programme) this was issued under; null for a
+   *  platform-catalog credential such as the KycCredential minted at onboarding. */
+  credentialUseCaseKey?: string | null;
+  /** accepted | pending | rejected | changes_requested. Issued is not in force. */
+  acceptance?: string;
 }
 
 export interface VerificationRequest {

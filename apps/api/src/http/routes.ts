@@ -5706,6 +5706,15 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     return (await deps.credentials.listByIssuer(org.did)).map((c) => ({
       id: c.id, type: c.type, holderDid: c.holderDid, claims: c.subjectClaims,
       issuedAt: c.issuedAt, expiresAt: c.expiresAt, revoked: c.revoked, revokedAt: c.revokedAt, revokedReason: c.revokedReason,
+      // WHICH PROGRAMME THIS BELONGS TO, and whether the holder took it up.
+      // Both were on the row and neither reached the caller, which made this an
+      // undifferentiated pile: an issuer running several credential use cases
+      // could not tell which one a credential came from, so nothing could be
+      // counted, filtered or reconciled per programme. `acceptance` is the same
+      // omission one step on — "issued" and "in force" are different facts, and
+      // an issuer's own register is exactly where that difference matters.
+      credentialUseCaseKey: c.credentialUseCaseKey,
+      acceptance: c.acceptance,
     }));
   });
 

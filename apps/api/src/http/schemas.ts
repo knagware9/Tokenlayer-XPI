@@ -2863,6 +2863,11 @@ export const S: Record<string, FastifySchema> = {
             revoked: { type: "boolean" },
             revokedAt: { type: "string", nullable: true },
             revokedReason: { type: "string", nullable: true },
+            // DECLARED, not just returned: fast-json-stringify drops any field
+            // the schema does not name, so an addition made only in the handler
+            // is an addition that never leaves the process.
+            credentialUseCaseKey: { type: "string", nullable: true, description: "The credential use case this was issued under — the programme it belongs to. null for a platform-catalog credential (e.g. KycCredential at onboarding)." },
+            acceptance: { type: "string", description: "accepted | pending | rejected | changes_requested. Issued is not the same as in force." },
           },
           required: ["id", "type", "holderDid", "issuedAt", "revoked"],
         },
