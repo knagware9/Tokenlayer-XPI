@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { API_BASE, ApiError, api } from "../api.js";
 import { useAuth } from "../auth.js";
 import { isOrgOperatingRole, orgRoleEnabled } from "../lib/capabilities.js";
+import { HEALTH_LABEL, HEALTH_NOTE, healthOf, liveScopes, summarize, type KeyHealth } from "../lib/key-hygiene.js";
 import { KEY_MARKERS, keyMarker, modeLabel, modeTone, type ResourceMode } from "../lib/modes.js";
 import { confirmNavigation, setNavGuard } from "../lib/nav-guard.js";
 import { API_SCOPES, type ApiKeyView, type ApiScope, type OrgCapabilities, type Organization, type Role } from "../types.js";
@@ -131,6 +132,53 @@ const ORG_SCOPED_TABS: readonly DevTab[] = ["keys", "webhooks"];
  * panel and the webhooks panel are two views of the same tenant and switching
  * between them must not reset which tenant you were looking at.
  */
+/** Colour by how much a reviewer should care — dead keys are grey, not red. */
+function healthTone(h: KeyHealth): "ok" | "warn" | "danger" | "muted" {
+  if (h === "healthy") return "ok";
+  if (h === "revoked" || h === "expired") return "muted";
+  if (h === "never-used") return "danger";
+  return "warn";
+}
+
+/**
+ * The hygiene strip: counts, and the standing power those keys represent.
+ *
+ * `liveScopes` is the second half and the less obvious one. "What can our
+ * machine credentials do?" is answered by the union over keys that can still
+ * authenticate — a revoked key's scopes are not a standing power, and counting
+ * them would overstate exposure in the one place someone is measuring it.
+ */
+function KeyHygiene({ keys }: { keys: ApiKeyView[] }): JSX.Element {
+  const s = summarize(keys);
+  const scopes = liveScopes(keys);
+  return (
+    <Card
+      title="Key hygiene"
+      // "every live key is in use" would be an overclaim: a key minted this week
+      // and not yet called is inside the grace window and healthy, but it is
+      // not in use. Say what is true — nothing is flagged.
+      description={s.needsAttention === 0
+        ? "Nothing is flagged: no live key is unused, stale or near expiry."
+        : `${s.needsAttention} live key${s.needsAttention === 1 ? "" : "s"} want${s.needsAttention === 1 ? "s" : ""} a decision.`}
+    >
+      <div className="flex flex-wrap gap-4 text-sm">
+        <div><span className="font-semibold text-slate-900">{s.live}</span> <span className="text-slate-500">live</span></div>
+        {s.neverUsed > 0 && <div><span className="font-semibold text-red-700">{s.neverUsed}</span> <span className="text-slate-500">never used</span></div>}
+        {s.stale > 0 && <div><span className="font-semibold text-amber-700">{s.stale}</span> <span className="text-slate-500">unused 90+ days</span></div>}
+        {s.expiring > 0 && <div><span className="font-semibold text-amber-700">{s.expiring}</span> <span className="text-slate-500">expiring within 30 days</span></div>}
+        {s.expired > 0 && <div><span className="font-semibold text-slate-500">{s.expired}</span> <span className="text-slate-500">expired</span></div>}
+        {s.revoked > 0 && <div><span className="font-semibold text-slate-500">{s.revoked}</span> <span className="text-slate-500">revoked</span></div>}
+      </div>
+      <div className="mt-3">
+        <div className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">What these credentials can do</div>
+        {scopes.length === 0
+          ? <p className="text-sm text-slate-500">No live key holds any scope.</p>
+          : <div className="flex flex-wrap gap-1">{scopes.map((sc) => <Pill key={sc} tone="info">{sc}</Pill>)}</div>}
+      </div>
+    </Card>
+  );
+}
+
 export function Developers(): JSX.Element {
   const { token, user } = useAuth();
   const isPlatform = user?.role === "PlatformAdmin";
@@ -425,6 +473,14 @@ function ApiKeys({ orgId, org }: { orgId: string | null; org: Organization | nul
         />
       )}
 
+      {/*
+        THE QUARTERLY QUESTION, answered above the table rather than left to be
+        derived from twenty rows of dates: which of these should not still
+        exist? Every number is a count of rows below it — nothing here is a
+        score, and nothing calls a key unsafe. See lib/key-hygiene.ts.
+      */}
+      {orgId && keys.length > 0 && <KeyHygiene keys={keys} />}
+
       {!orgId ? (
         <Card>
           <EmptyState icon="code" title="No organization" hint="Your account is not linked to an organization, so there is nothing to issue keys for." />
@@ -446,6 +502,7 @@ function ApiKeys({ orgId, org }: { orgId: string | null; org: Organization | nul
                 <th className="text-left font-medium px-4 py-2.5">Last used</th>
                 <th className="text-left font-medium px-4 py-2.5">Expires</th>
                 <th className="text-left font-medium px-4 py-2.5">Status</th>
+                <th className="text-left font-medium px-4 py-2.5">Health</th>
                 <th className="text-right font-medium px-4 py-2.5">Actions</th>
               </tr>
             </thead>
@@ -474,6 +531,12 @@ function ApiKeys({ orgId, org }: { orgId: string | null; org: Organization | nul
                   <td className="px-4 py-2 text-slate-500 whitespace-nowrap">{fmt(k.lastUsedAt)}</td>
                   <td className="px-4 py-2 text-slate-500 whitespace-nowrap">{k.expiresAt ? fmt(k.expiresAt) : "never"}</td>
                   <td className="px-4 py-2"><Pill tone={statusTone(k.status)}>{k.status}</Pill></td>
+                  {/* `status` is what the server stores; health is what it
+                      MEANS for a reviewer. An active key unused for a year is
+                      "active" and is also the one worth a conversation. */}
+                  <td className="px-4 py-2">
+                    {(() => { const h = healthOf(k); return <span title={HEALTH_NOTE[h]}><Pill tone={healthTone(h)}>{HEALTH_LABEL[h]}</Pill></span>; })()}
+                  </td>
                   <td className="px-4 py-2">
                     <div className="flex justify-end gap-2">
                       {/*
