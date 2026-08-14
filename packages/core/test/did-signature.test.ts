@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { sign as edSign } from "node:crypto";
-import { generateDidKey, verifyDidSignature } from "../src/identity.js";
+import { generateDidKey, verifyDidSignature } from "../src/identity/did-vc.js";
 
 const b64u = (b: Buffer): string => b.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 

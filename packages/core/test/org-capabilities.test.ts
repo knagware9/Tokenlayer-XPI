@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { orgDomainEnabled, orgRoleEnabled, validateOrgCapabilities } from "../src/org-capabilities.js";
-import { PolicyError } from "../src/errors.js";
+import { orgDomainEnabled, orgRoleEnabled, validateOrgCapabilities } from "../src/shared/org-capabilities.js";
+import { PolicyError } from "../src/shared/errors.js";
 
 describe("org capability predicates", () => {
   it("null = unrestricted legacy envelope (both predicates true)", () => {

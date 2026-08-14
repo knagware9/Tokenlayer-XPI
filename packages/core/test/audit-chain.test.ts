@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { auditGenesis, auditEntryHash, verifyChain, type AuditChainFields, type ChainEntry } from "../src/audit-chain.js";
+import { auditGenesis, auditEntryHash, verifyChain, type AuditChainFields, type ChainEntry } from "../src/shared/audit-chain.js";
 
 const f = (seq: number, over: Partial<AuditChainFields> = {}): AuditChainFields => ({
   assetId: "a1", seq, actorId: "u1", action: "mint", payload: { to: "0xabc", amount: "100" },

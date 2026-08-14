@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { RbacPolicy } from "../src/rbac.js";
+import { RbacPolicy } from "../src/shared/rbac.js";
 
 describe("RbacPolicy (per-use-case roles)", () => {
   const rbac = new RbacPolicy();

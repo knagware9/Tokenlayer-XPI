@@ -5,7 +5,7 @@
  *
  * The generated files are COMMITTED, and persona-edge-config.test.ts regenerates
  * them and fails on any diff. That is what keeps the deployed boundary and
- * packages/core/src/personas.ts the same object: you cannot edit one without the
+ * packages/core/src/shared/personas.ts the same object: you cannot edit one without the
  * other going red.
  *
  * ── THE ORDERING TRAP ───────────────────────────────────────────────────────
@@ -38,7 +38,7 @@ import { fileURLToPath } from "node:url";
 import {
   PERSONAS, personaMethodsFor, personaRules,
   type HttpMethod, type PersonaDef,
-} from "../packages/core/src/personas.js";
+} from "../packages/core/src/shared/personas.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const OUT_DIR = resolve(HERE, "../deploy/persona-edges");
@@ -119,7 +119,7 @@ export function edgeDecision(persona: PersonaDef, method: string, url: string): 
 }
 
 const BANNER = (persona: PersonaDef) => `# ─────────────────────────────────────────────────────────────────────────────
-# GENERATED — DO NOT EDIT.  Source: packages/core/src/personas.ts
+# GENERATED — DO NOT EDIT.  Source: packages/core/src/shared/personas.ts
 # Regenerate with:  pnpm gen:persona-edges
 # persona-edge-config.test.ts fails if this file and the catalogue disagree.
 #
@@ -204,5 +204,5 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
     writeFileSync(resolve(OUT_DIR, name), body);
     console.log(`  wrote deploy/persona-edges/${name}`);
   }
-  console.log(`\n${PERSONAS.length} persona edge configs generated from packages/core/src/personas.ts`);
+  console.log(`\n${PERSONAS.length} persona edge configs generated from packages/core/src/shared/personas.ts`);
 }

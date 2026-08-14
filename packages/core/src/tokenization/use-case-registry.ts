@@ -1,6 +1,6 @@
-import { PolicyError } from "./errors.js";
-import { tokenTypeForStandard, type UseCaseDefinition } from "./types.js";
-import { validateUseCaseDefinition } from "./validation.js";
+import { PolicyError } from "../shared/errors.js";
+import { tokenTypeForStandard, type UseCaseDefinition } from "../shared/types.js";
+import { validateUseCaseDefinition } from "../shared/validation.js";
 
 /** Validates and fills derived fields (tokenType) on a raw definition. */
 export function normalizeUseCaseDefinition(def: unknown): UseCaseDefinition {

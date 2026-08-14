@@ -15,7 +15,7 @@
 import { describe, expect, it } from "vitest";
 import {
   PERSONAS, personaAllows, personaByKey, personaMethodsFor, personaRules, personasForDomain,
-} from "../src/personas.js";
+} from "../src/shared/personas.js";
 
 const p = (key: string) => {
   const def = personaByKey(key);

@@ -10,7 +10,7 @@ import {
   issueCredential,
   presentCredential,
   verifyPresentation,
-} from "../src/identity.js";
+} from "../src/identity/did-vc.js";
 
 describe("did:key + JWT primitives", () => {
   it("round-trips a did:key ⇄ public key", () => {

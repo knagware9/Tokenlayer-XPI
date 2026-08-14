@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { validateCredentialUseCase, type CredentialUseCaseDefinition } from "../src/credential-use-cases.js";
-import { instantiateTemplate, validateTemplate, type UseCaseTemplate } from "../src/use-case-templates.js";
+import { validateCredentialUseCase, type CredentialUseCaseDefinition } from "../src/identity/credential-use-cases.js";
+import { instantiateTemplate, validateTemplate, type UseCaseTemplate } from "../src/identity/use-case-templates.js";
 
 const ctx = { orgExists: () => true };
 
@@ -81,7 +81,7 @@ describe("CertificateConfig carries artwork", () => {
 });
 
 describe("templates carry placements, never artwork", () => {
-  // NOTE the real shapes, checked against packages/core/src/use-case-templates.ts:
+  // NOTE the real shapes, checked against packages/core/src/identity/use-case-templates.ts:
   // the type is `UseCaseTemplate`, the body uses `keyTemplate`/`nameTemplate`,
   // interpolation is `${param}` (NOT `{{param}}`), a template carries NO issuer,
   // and the function is `instantiateTemplate(template, values)` — two arguments.

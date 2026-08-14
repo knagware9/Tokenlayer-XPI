@@ -1,6 +1,6 @@
-import { PolicyError } from "./errors.js";
-import type { RbacPolicy } from "./rbac.js";
-import { validateMetadata } from "./validation.js";
+import { PolicyError } from "../shared/errors.js";
+import type { RbacPolicy } from "../shared/rbac.js";
+import { validateMetadata } from "../shared/validation.js";
 import type {
   Actor,
   AssetContext,
@@ -15,7 +15,7 @@ import type {
   UseCaseContract,
   UseCaseDefinition,
   UseCaseSource,
-} from "./types.js";
+} from "../shared/types.js";
 
 export interface IssueInput {
   useCaseKey: string;

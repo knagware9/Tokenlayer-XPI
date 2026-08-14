@@ -37,7 +37,7 @@ function mirrored(key: string): { label?: string; domain?: string; defaultView?:
   };
 }
 
-describe("apps/web/src/personas.ts mirrors packages/core/src/personas.ts", () => {
+describe("apps/web/src/personas.ts mirrors packages/core/src/shared/personas.ts", () => {
   it("mirrors every persona — none missing, none invented", () => {
     for (const persona of PERSONAS) {
       expect(source, `web mirror is missing '${persona.key}'`).toContain(`key: "${persona.key}"`);

@@ -1,5 +1,5 @@
 import { UseCaseRegistry } from "./use-case-registry.js";
-import type { UseCaseDefinition, UseCaseSource } from "./types.js";
+import type { UseCaseDefinition, UseCaseSource } from "../shared/types.js";
 
 /**
  * An in-memory UseCaseSource backed by a validated UseCaseRegistry. Used by the

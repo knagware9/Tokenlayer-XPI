@@ -1,7 +1,7 @@
 /**
  * THE ALLOWLIST AND THE API MUST DESCRIBE THE SAME SURFACE.
  *
- * `packages/core/src/personas.ts` decides what each persona's edge container
+ * `packages/core/src/shared/personas.ts` decides what each persona's edge container
  * admits, and the nginx configs are generated from it. That makes it a SECOND
  * description of the route surface, and a second description is a thing that
  * goes stale. The two checks here are what stop it, and they fail in opposite
@@ -87,7 +87,7 @@ describe("the persona allowlist against the API's real surface", () => {
       .map((e) => `${e.method} ${e.pattern}`);
     expect(
       orphans,
-      "routes no persona container can reach. Grant them to a persona in packages/core/src/personas.ts, " +
+      "routes no persona container can reach. Grant them to a persona in packages/core/src/shared/personas.ts, " +
         `or add them to DELIBERATELY_UNREACHABLE with a reason:\n  ${orphans.join("\n  ")}`,
     ).toEqual([]);
   }, 60_000);

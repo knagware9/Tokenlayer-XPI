@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { useCaseDomainOf } from "../src/use-case-domain.js";
-import { assignableRoles, canCreateUser } from "../src/user-policy.js";
+import { useCaseDomainOf } from "../src/shared/use-case-domain.js";
+import { assignableRoles, canCreateUser } from "../src/shared/user-policy.js";
 
 describe("useCaseDomainOf", () => {
   const known = { tokenizationKeys: ["invoice-tokenization", "carbon-credit"], credentialKeys: ["kyc-credential", "mca-verification"] };
