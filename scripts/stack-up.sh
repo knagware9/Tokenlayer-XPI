@@ -50,7 +50,9 @@ if [ ! -f "$ENV_FILE" ]; then
   } > "$ENV_FILE"
 fi
 # Repo .env FIRST (ledger settings), the deployment's own file LAST so its
-# secrets win — see the long note this replaces in personas-up.sh.
+# secrets win. Getting this backwards makes every custodial seed undecryptable,
+# surfacing later as "Unsupported state or unable to authenticate data" at the
+# next onboarding — an error that names an AES failure and not its cause.
 if [ -f .env ]; then set -a; . ./.env; set +a; fi
 set -a; . "./$ENV_FILE"; set +a
 

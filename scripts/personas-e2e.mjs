@@ -1,6 +1,10 @@
 // SIX AUDIENCE APPS, AND THE BOUNDARY BETWEEN THEM — proven against the live stack.
 //
-//   bash scripts/personas-up.sh && node scripts/personas-e2e.mjs
+//   bash scripts/stack-up.sh identity tokenization && node scripts/personas-e2e.mjs
+//
+// Both stacks must be up: sections 4 and 6 assert that neither product is
+// reachable through the other's edges, which needs both to exist. Bring up only
+// one and section 0 stops with the command to run.
 //
 // ── WHAT THIS PROVES THAT A UNIT TEST CANNOT ─────────────────────────────────
 //
@@ -68,7 +72,7 @@ for (const [persona, port] of Object.entries(EDGES)) {
   ok(health?.persona === persona, `${persona} edge on :${port} reports itself as '${health?.persona}'`, health);
 }
 if (fails) {
-  console.log("\n⊘ the edges are not up. Run: bash scripts/personas-up.sh");
+  console.log("\n⊘ not every edge is up. Run: bash scripts/stack-up.sh identity tokenization");
   process.exit(2);
 }
 

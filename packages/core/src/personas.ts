@@ -14,6 +14,20 @@
  * holder's browser cannot reach `POST /orgs/:id/users` because the container it
  * talks to does not route it, not merely because the UI omits a button.
  *
+ * ── WHY EACH PRODUCT KEEPS ONE API, AND THE BOUNDARY LIVES AT THE EDGE ──────
+ *
+ * Six API PROCESSES — one per persona — was the first design, and it does not
+ * work on SQLite. The three identity personas must read and write the SAME
+ * data: an issued credential has to be visible to the holder and checkable by
+ * the verifier. Three containers writing one SQLite file over a shared volume is
+ * a corruption hazard, not a theoretical one.
+ *
+ * Six real processes therefore need a real database server, which means a
+ * Postgres migration — and Prisma pins one provider per schema, so that would
+ * drag the whole test suite with it. So each product keeps exactly ONE writer,
+ * and the persona boundary is enforced at the edge, where it is a network fact
+ * rather than a convention. Revisit if this ever moves to Postgres.
+ *
  * ── WHY A TABLE, AND WHY HERE ───────────────────────────────────────────────
  *
  * An allowlist living in hand-written nginx would be a SECOND copy of routing
