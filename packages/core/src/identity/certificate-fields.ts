@@ -3,7 +3,7 @@
  * artwork. Pure — no rendering, no I/O — because it is shared three ways: the
  * API renderer, the API validator, and (mirrored) the web designer.
  */
-import { PolicyError } from "./errors.js";
+import { PolicyError } from "../shared/errors.js";
 
 /** pdfkit's three built-in families. No font pipeline, no licensing question. */
 export type CertificateFont = "sans" | "serif" | "mono";

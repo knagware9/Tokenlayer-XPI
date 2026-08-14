@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateBrandAccent } from "../src/branding.js";
+import { validateBrandAccent } from "../src/shared/branding.js";
 
 const bad = (v: unknown): string | null => {
   try { validateBrandAccent(v); return null; } catch (e) { return (e as Error).message; }

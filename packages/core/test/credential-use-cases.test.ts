@@ -4,8 +4,8 @@ import {
   validateCredentialUseCase,
   credentialUseCaseType, issuerBindingAllows, holderPolicyAllows, verifierBindingAllows,
   type CredentialUseCaseDefinition,
-} from "../src/credential-use-cases.js";
-import { PolicyError } from "../src/errors.js";
+} from "../src/identity/credential-use-cases.js";
+import { PolicyError } from "../src/shared/errors.js";
 
 const KNOWN_ORG = "org_1";
 const orgExists = (id: string) => id === KNOWN_ORG;

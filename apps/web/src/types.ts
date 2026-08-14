@@ -409,7 +409,7 @@ export interface OrgMember {
 // ---- EN-B: machine API access (org-scoped API keys) ------------------------
 /**
  * A DELIBERATE MIRROR of `@tokenlayer/core`'s `API_SCOPES`
- * (packages/core/src/api-scopes.ts). The web app has no dependency on core —
+ * (packages/core/src/shared/api-scopes.ts). The web app has no dependency on core —
  * every shared vocabulary here is copied the same way `ORG_DOMAINS` above is —
  * so this list must be updated when core's is. It is only ever a display and
  * pick-list: the server runs core's `validateScopes` and answers 400
@@ -446,7 +446,7 @@ export type ApiScope = (typeof API_SCOPES)[number];
 // ---- EN-F: certificate designer ------------------------------------------
 /**
  * A DELIBERATE MIRROR of `@tokenlayer/core`'s `CERTIFICATE_FIXED_FIELDS`
- * (packages/core/src/certificate-fields.ts), on the same terms as `API_SCOPES`
+ * (packages/core/src/identity/certificate-fields.ts), on the same terms as `API_SCOPES`
  * above: the web app has no dependency on core.
  *
  * Unlike those, this one is PINNED — `apps/api/test/certificate-mirror.test.ts`
@@ -551,7 +551,7 @@ export interface MintedApiKey {
 // ---- EN-C: webhooks & events ----------------------------------------------
 /**
  * A DELIBERATE MIRROR of `@tokenlayer/core`'s `EVENT_TYPES`
- * (packages/core/src/events.ts), on the same terms as `API_SCOPES` above: the
+ * (packages/core/src/shared/events.ts), on the same terms as `API_SCOPES` above: the
  * web app has no dependency on core, so this list must be updated when core's
  * is. It is only ever a display and pick-list — the server runs core's
  * `validateEventTypes` and answers 400 UNKNOWN_EVENT_TYPE for anything it does

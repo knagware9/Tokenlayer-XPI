@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeCashflowSchedule, splitProRata } from "../src/cashflows.js";
+import { computeCashflowSchedule, splitProRata } from "../src/tokenization/cashflows.js";
 
 const TERMS = { principalField: "amountInr", maturityField: "dueDate", currency: "CBDC-INR" } as const;
 

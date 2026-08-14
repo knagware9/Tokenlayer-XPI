@@ -3,9 +3,9 @@
  * types (claim schemas) plus Issuer / Holder / Verifier bindings. Parallel to
  * the tokenization UseCaseDefinition, sharing the metadata-schema validator.
  */
-import { PolicyError } from "./errors.js";
-import type { MetadataSchema, OrgType } from "./types.js";
-import { validateMetadataSchema } from "./validation.js";
+import { PolicyError } from "../shared/errors.js";
+import type { MetadataSchema, OrgType } from "../shared/types.js";
+import { validateMetadataSchema } from "../shared/validation.js";
 import { validateCertificatePlacements, type CertificateFieldPlacement } from "./certificate-fields.js";
 
 export interface CredentialTypeSpec {

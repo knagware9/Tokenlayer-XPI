@@ -10,7 +10,7 @@
  * `validateCredentialUseCase` validator and runtime unchanged.
  */
 import { validateCertificatePlacements } from "./certificate-fields.js";
-import { PolicyError } from "./errors.js";
+import { PolicyError } from "../shared/errors.js";
 import {
   isDocumentSha256,
   type CredentialUseCaseDefinition,
@@ -19,7 +19,7 @@ import {
   type VerifierBinding,
   type CertificateConfig,
 } from "./credential-use-cases.js";
-import type { MetadataSchema, PropertySchema } from "./types.js";
+import type { MetadataSchema, PropertySchema } from "../shared/types.js";
 
 export type TemplateParamType = "text" | "number" | "enum" | "boolean";
 

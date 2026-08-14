@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { RbacPolicy } from "../src/rbac.js";
-import { assignableRoles, canCreateOrgMember, canManageUsers, canCreateUser } from "../src/user-policy.js";
-import { ROLES } from "../src/types.js";
+import { RbacPolicy } from "../src/shared/rbac.js";
+import { assignableRoles, canCreateOrgMember, canManageUsers, canCreateUser } from "../src/shared/user-policy.js";
+import { ROLES } from "../src/shared/types.js";
 
 describe("user-policy", () => {
   it("PlatformAdmin may mint any roster role, in an explicit use case (gated onboarding)", () => {

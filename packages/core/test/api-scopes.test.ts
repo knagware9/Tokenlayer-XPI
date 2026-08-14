@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { API_SCOPES, API_SCOPE_RESOURCES, scopeAllows, validateScopes } from "../src/api-scopes.js";
-import { PolicyError } from "../src/errors.js";
+import { API_SCOPES, API_SCOPE_RESOURCES, scopeAllows, validateScopes } from "../src/shared/api-scopes.js";
+import { PolicyError } from "../src/shared/errors.js";
 
 describe("scopeAllows", () => {
   it("null granted (a human session) allows everything — scopes are a key-only concept", () => {

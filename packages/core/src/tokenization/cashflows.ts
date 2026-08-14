@@ -3,7 +3,7 @@
  * (coupons + redemption) and pro-rata payout splitting. No I/O, no Date.now —
  * callers inject `issuedAt`. All money math is BigInt over integer amounts.
  */
-import { PolicyError } from "./errors.js";
+import { PolicyError } from "../shared/errors.js";
 
 export interface TermsConfig {
   principalField: string;

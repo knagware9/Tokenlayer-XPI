@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { invoiceFingerprint } from "../src/invoice-fingerprint.js";
+import { invoiceFingerprint } from "../src/tokenization/invoice-fingerprint.js";
 
 describe("invoiceFingerprint", () => {
   const base = { invoiceNumber: "INV-1", buyerName: "JSW Steel Limited", currency: "INR", amount: 1000000, dueDate: "2026-12-31" };

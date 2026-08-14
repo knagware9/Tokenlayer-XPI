@@ -6,8 +6,8 @@
  * `claimSchema` with the same `validateMetadata` used for use-case issuance
  * metadata — an unvalidated claim set must never reach a signed credential.
  */
-import { PolicyError } from "./errors.js";
-import type { MetadataSchema, OrgType } from "./types.js";
+import { PolicyError } from "../shared/errors.js";
+import type { MetadataSchema, OrgType } from "../shared/types.js";
 
 export type CredentialType = "KycCredential" | "AccreditedInvestor" | "AuthorizedSignatory" | "OrganizationCredential";
 

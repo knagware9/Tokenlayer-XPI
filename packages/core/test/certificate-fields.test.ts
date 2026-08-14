@@ -9,7 +9,7 @@ import {
   isClaimRef,
   validateCertificatePlacements,
   type CertificateFieldPlacement,
-} from "../src/certificate-fields.js";
+} from "../src/identity/certificate-fields.js";
 
 const CLAIMS = ["fullName", "district"] as const;
 const ok = (p: Partial<CertificateFieldPlacement> = {}): CertificateFieldPlacement =>
