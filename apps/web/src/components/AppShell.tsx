@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api.js";
+import { activePersona, landingView, narrowToPersona } from "../lib/persona.js";
 import { useAuth } from "../auth.js";
 import type { DomainDef, DomainKey } from "../domains.js";
 import { brandCssVars } from "../lib/branding.js";
@@ -61,6 +62,13 @@ export function useOrgLogo(documentId: string | null | undefined, token: string 
  * The single left-sidebar console shell shared by every authenticated role.
  * The caller owns the nav model (`items`), the active id and selection — the
  * shell only renders the chrome and the current panel (`children`).
+ *
+ * PERSONA NARROWING happens HERE rather than at the four call sites, because
+ * here it cannot be forgotten at one of them — and a persona app that leaked a
+ * single extra entry would render a button whose request the edge container
+ * refuses, which reads to the user as a broken product rather than a narrow one.
+ * With no persona configured this is the identity function and the shell behaves
+ * exactly as it always has.
  */
 export function AppShell({
   items,
@@ -80,6 +88,16 @@ export function AppShell({
   onDomainChange?: (d: DomainKey) => void;
 }): JSX.Element {
   const { user, token, refreshSession } = useAuth();
+  const persona = activePersona();
+  const shown = narrowToPersona(items, persona);
+
+  // If the caller's active view did not survive narrowing, move to one that did
+  // rather than render an empty frame. A wallet opened on `dashboard` — the
+  // full app's default — would otherwise show a sidebar and nothing beside it.
+  const target = landingView(shown, persona, active);
+  useEffect(() => {
+    if (persona && shown.length > 0 && !shown.some((i) => i.id === active) && target !== active) onSelect(target);
+  }, [persona, active, target, shown, onSelect]);
   // Through the org's own door, not the document store: every role that renders
   // this shell is refused by `GET /documents/:id`, which is why the sidebar mark
   // was invisible to all of them before Task 6b.
@@ -101,8 +119,8 @@ export function AppShell({
     void refreshSession().catch(() => undefined);
   }, [user, brandKnown, refreshSession]);
 
-  const main = items.filter((i) => !i.pinned);
-  const pinned = items.filter((i) => i.pinned);
+  const main = shown.filter((i) => !i.pinned);
+  const pinned = shown.filter((i) => i.pinned);
 
   const navButton = (item: NavItem): JSX.Element => {
     const isActive = active === item.id;
@@ -138,7 +156,9 @@ export function AppShell({
             </>
           )}
         </div>
-        {domains && domains.length > 1 && activeDomain && onDomainChange && (
+        {/* A persona app serves exactly one product; offering to switch to the
+            other would offer a product this container's edge does not proxy. */}
+        {!persona && domains && domains.length > 1 && activeDomain && onDomainChange && (
           <div className="px-3 pt-1 pb-2">
             <div className="flex gap-1 rounded-lg bg-white/5 p-1">
               {domains.map((d) => (
