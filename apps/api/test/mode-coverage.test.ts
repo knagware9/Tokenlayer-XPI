@@ -349,7 +349,11 @@ describe("mode-gate coverage (EN-D2)", () => {
     // The refusal is the gate's, not a call site's. A second hand-rolled 403
     // would be the beginning of the drift this whole file exists to prevent —
     // one that forgets `details`, or gets the direction the wrong way round.
+    // Counts the SEND, not the word: `error: "WRONG_MODE"`. The bare token also
+    // appears in prose explaining why a particular route does NOT use the gate,
+    // and a test that fails when someone writes a comment is a test people learn
+    // to edit rather than read.
     const src = routes.map((r) => r.body ?? "").join("\n") + helpers.map((h) => h.body).join("\n");
-    expect(src.match(/WRONG_MODE/g) ?? []).toHaveLength(1);
+    expect(src.match(/error:\s*"WRONG_MODE"/g) ?? []).toHaveLength(1);
   });
 });

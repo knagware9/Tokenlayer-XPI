@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 /**
@@ -22,7 +22,18 @@ import { fileURLToPath } from "node:url";
  * declaration — the shape a future author copies — and a runtime table cannot
  * tell "no scope gate" from "a scope gate that passed".
  */
-const ROUTES_TS = fileURLToPath(new URL("../src/http/routes.ts", import.meta.url));
+/**
+ * ONE FILE PER PRODUCT since routes.ts was split, so the source these checks read
+ * is the CONCATENATION of the route families. Reading the folder rather than a
+ * hard-coded list matters: a fourth family added tomorrow is covered the day it
+ * appears, whereas a list would silently stop being the denominator.
+ */
+const ROUTES_DIR = fileURLToPath(new URL("../src/http/routes", import.meta.url));
+function readAllRouteSources(): string {
+  const files = readdirSync(ROUTES_DIR).filter((f) => f.endsWith(".ts")).sort();
+  if (files.length < 4) throw new Error(`expected the split route files in ${ROUTES_DIR}, found ${files.join(", ")}`);
+  return files.map((f) => readFileSync(`${ROUTES_DIR}/${f}`, "utf8")).join("\n");
+}
 
 /** The head of a declaration, up to and including the options object's `{`. */
 const ROUTE_HEAD_RE = /app\.(get|post|put|patch|delete)\("([^"]+)",\s*\{/g;
@@ -85,7 +96,7 @@ export interface RouteDecl {
 }
 
 export function declaredRoutes(): RouteDecl[] {
-  const src = readFileSync(ROUTES_TS, "utf8");
+  const src = readAllRouteSources();
   const out: RouteDecl[] = [];
   for (const m of src.matchAll(ROUTE_HEAD_RE)) {
     const [, method, path] = m as unknown as [string, string, string];
@@ -161,9 +172,17 @@ export interface HelperDecl {
  * renamed or newly-added helper is picked up on its own.
  */
 export function declaredHelpers(): HelperDecl[] {
-  const src = readFileSync(ROUTES_TS, "utf8");
+  const src = readAllRouteSources();
   const out: HelperDecl[] = [];
+  // The four WRAPPERS are not helpers — they are the functions the helpers live
+  // inside. Counting them would count every nested helper's body twice: once on
+  // its own and once again as part of its wrapper, which is exactly what
+  // happened when routes.ts became routes/ and `WRONG_MODE is sent from exactly
+  // one place` started reporting two sends of a refusal that is written once.
+  const WRAPPERS = new Set(["registerRoutes", "buildRouteContext", "registerSharedRoutes",
+    "registerTokenizationRoutes", "registerIdentityRoutes"]);
   for (const m of src.matchAll(/(?:async\s+)?function\s+(\w+)\s*\(/g)) {
+    if (WRAPPERS.has(m[1]!)) continue;
     const openParen = m.index + m[0].length - 1;
     const params = balanced(src, openParen, "(", ")");
     if (params === null) continue;
@@ -180,7 +199,7 @@ export function declaredHelpers(): HelperDecl[] {
 
 /** Every route declaration in the file, whether or not the parser understood it. */
 export function allRouteDeclarations(): string[] {
-  const src = readFileSync(ROUTES_TS, "utf8");
+  const src = readAllRouteSources();
   return [...src.matchAll(ANY_ROUTE_RE)].map((m) => `${m[1]!.toUpperCase()} ${m[2]!}`);
 }
 
