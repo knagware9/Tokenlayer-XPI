@@ -1,11 +1,21 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { components, S } from "../src/http/schemas.js";
+import { components, S } from "../src/http/schemas/index.js";
 import { buildTestApp, loginAs, V1 } from "./helpers.js";
 import { allRouteDeclarations, declaredRoutes, routeKey, type RouteDecl } from "./route-decls.js";
 
-const SCHEMAS_TS = fileURLToPath(new URL("../src/http/schemas.ts", import.meta.url));
+/**
+ * ONE FILE PER PRODUCT since schemas.ts was split. The count below is over ALL
+ * of them: `additionalProperties: true` moving from one product's file to
+ * another is not a narrowing, but losing one anywhere is.
+ */
+const SCHEMAS_DIR = fileURLToPath(new URL("../src/http/schemas", import.meta.url));
+const readAllSchemaSources = (): string => {
+  const files = readdirSync(SCHEMAS_DIR).filter((f) => f.endsWith(".ts")).sort();
+  if (files.length < 4) throw new Error(`expected the split schema files in ${SCHEMAS_DIR}, found ${files.join(", ")}`);
+  return files.map((f) => readFileSync(`${SCHEMAS_DIR}/${f}`, "utf8")).join("\n");
+};
 
 /**
  * EN-D1: the OpenAPI document is a PRODUCT SURFACE, not a by-product.
@@ -340,7 +350,7 @@ function allResponseObjectNodes(): Map<string, SchemaNode> {
 
 describe("the additivity rule", () => {
   it("never removes additionalProperties: true from a response schema", () => {
-    const src = readFileSync(SCHEMAS_TS, "utf8");
+    const src = readAllSchemaSources();
     const count = (src.match(/additionalProperties:\s*true/g) ?? []).length;
     expect(count, "a response schema was narrowed — that STRIPS fields from live responses").toBeGreaterThanOrEqual(
       ADDITIVE_FLOOR,

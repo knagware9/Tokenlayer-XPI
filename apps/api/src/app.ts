@@ -6,7 +6,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import type { AppDeps } from "./context.js";
 import { openapiConfig } from "./http/openapi.js";
 import { applyDomainGate } from "./http/route-domains.js";
-import { components } from "./http/schemas.js";
+import { components } from "./http/schemas/index.js";
 import { guardRepositories } from "./persistence/model-domains.js";
 import { registerRoutes } from "./http/routes/index.js";
 import { errorHandler, requirePrincipal } from "./http/support.js";

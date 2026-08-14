@@ -40,7 +40,7 @@ import { resolveDid } from "../../did-resolver.js";
 import { checkUrl } from "../../webhooks/url-guard.js";
 import { API_KEY_BCRYPT_ROUNDS, invalidateVerifiedPrefix, mintSecret } from "../../api-keys.js";
 import { BRAND_LOGO_PRUNE_GRACE_MS, pruneSupersededBrandLogos } from "../../brand-logo-prune.js";
-import { S } from "../schemas.js";
+import { S } from "../schemas/index.js";
 import { holdsValidCredential, IDENTITY_CREDENTIAL_TYPE } from "../../identity-assertions.js";
 import { actorOf, claimsOf, contextOf, isPositiveIntString, machinePrincipal, notFound, requirePrincipal, requireScope, scopedToCaller, type TokenClaims } from "../support.js";
 import { buildRouteContext } from "./context.js";
