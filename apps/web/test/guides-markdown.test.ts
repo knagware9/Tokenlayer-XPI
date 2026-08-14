@@ -16,7 +16,7 @@
  * the bug the counters below would otherwise bless.
  */
 import { describe, expect, it } from "vitest";
-import { parseMarkdown } from "../src/components/Guides.js";
+import { parseMarkdown } from "../src/components/shared/Guides.js";
 import issueACredential from "../../../docs/api/guides/issue-a-credential.md?raw";
 import receiveWebhooks from "../../../docs/api/guides/receive-webhooks.md?raw";
 import tokenizeAnAsset from "../../../docs/api/guides/tokenize-an-asset.md?raw";

@@ -1,4 +1,4 @@
-import type { IconName } from "./components/ui.js";
+import type { IconName } from "./components/shared/ui.js";
 
 export type DomainKey = "tokenization" | "identity";
 

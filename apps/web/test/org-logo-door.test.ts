@@ -21,7 +21,7 @@ const read = (rel: string): string => readFileSync(fileURLToPath(new URL(rel, im
 
 describe("the org logo goes through GET /orgs/:id/branding/logo", () => {
   const api = read("../src/api.ts");
-  const shell = read("../src/components/AppShell.tsx");
+  const shell = read("../src/components/shared/AppShell.tsx");
 
   it("the client method exists, returns a Blob, and puts NO document id in the URL", () => {
     const method = api.slice(api.indexOf("brandLogo: async"), api.indexOf("orgMembers:"));
@@ -51,7 +51,7 @@ describe("the org logo goes through GET /orgs/:id/branding/logo", () => {
   });
 
   it("the brand editor previews a pending upload locally, not through the document store", () => {
-    const orgs = read("../src/components/Organizations.tsx");
+    const orgs = read("../src/components/shared/Organizations.tsx");
     const card = orgs.slice(orgs.indexOf("function OrgBrandingCard"), orgs.indexOf("export function Organizations"));
     // The saved mark comes through the org's door...
     expect(card).toContain("useOrgLogo(org.brandLogoDocumentId ?? null, token, org.id)");
@@ -67,7 +67,7 @@ describe("the org logo goes through GET /orgs/:id/branding/logo", () => {
   });
 
   it("the editor saves only what CHANGED, so a logo-only save cannot pin the platform's own colour", () => {
-    const orgs = read("../src/components/Organizations.tsx");
+    const orgs = read("../src/components/shared/Organizations.tsx");
     const card = orgs.slice(orgs.indexOf("function OrgBrandingCard"), orgs.indexOf("export function Organizations"));
     // Sending both keys made an OrgAdmin who only uploaded a logo persist
     // DEFAULT_ACCENT — the platform's teal — as their org's accent, which then
