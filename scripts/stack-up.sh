@@ -72,6 +72,15 @@ wait_for() {   # wait_for <port> <label>
 }
 
 # ── Identity ─────────────────────────────────────────────────────────────────
+# THE PEER KEY BELONGS TO THE IDENTITY DATABASE, not to this file. Noting whether
+# that database already exists is how we know a stored key can still be valid: a
+# fresh volume has never heard of it, and the stale key would surface later as
+# "the identity service refused the assertion (HTTP 401)" — an error that blames
+# the service for a credential problem and sends the operator to the wrong logs.
+IDENTITY_VOLUME="xi-identity_identity-data"
+IDENTITY_DATA_EXISTED=0
+docker volume inspect "$IDENTITY_VOLUME" >/dev/null 2>&1 && IDENTITY_DATA_EXISTED=1
+
 if [ "$WANT_IDENTITY" = 1 ]; then
   say "building and starting the IDENTITY stack…"
   $ID_COMPOSE up -d --build
@@ -83,6 +92,12 @@ fi
 
 # ── The peer key, only when BOTH are wanted ──────────────────────────────────
 if [ "$WANT_IDENTITY" = 1 ] && [ "$WANT_TOKENIZATION" = 1 ]; then
+  if [ "$IDENTITY_DATA_EXISTED" = 0 ] && grep -q '^IDENTITY_SERVICE_KEY=' "$ENV_FILE" 2>/dev/null; then
+    say "the identity database is NEW — the stored peer key belongs to a database that no longer exists; re-minting"
+    # Portable in-place delete (BSD sed needs the empty -i argument).
+    sed -i.bak '/^IDENTITY_SERVICE_KEY=/d' "$ENV_FILE" && rm -f "$ENV_FILE.bak"
+    unset IDENTITY_SERVICE_KEY
+  fi
   if grep -q '^IDENTITY_SERVICE_KEY=' "$ENV_FILE" 2>/dev/null; then
     say "peer key already present in $ENV_FILE"
   else

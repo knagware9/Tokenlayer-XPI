@@ -20,14 +20,14 @@ deploy-besu: ## Alias of deploy
 deploy-sim: ## Deploy on simulated ledgers only (no external chain)
 	./scripts/deploy.sh --sim
 
-deploy-split: ## Deploy the SPLIT topology: Identity and Tokenization as two deployments
-	./scripts/deploy-split.sh
+deploy-split: ## Deploy the two products as separate stacks, each with its three audience apps
+	bash scripts/stack-up.sh identity tokenization
 
 verify: ## Smoke test: issue + buy, assert real on-chain contract
 	./scripts/verify.sh --besu
 
-verify-split: ## Prove the split topology locally (two processes, two databases, no docker)
-	./scripts/split-topology-up.sh
+verify-split: ## Prove the two-stack topology: the persona boundary AND the identity seam
+	node scripts/personas-e2e.mjs && node scripts/seam-e2e.mjs
 
 verify-sim: ## Smoke test against the simulated stack
 	./scripts/verify.sh
@@ -68,8 +68,9 @@ logs: ## Tail API + web logs
 rebuild: ## Rebuild images without cache and restart
 	$(COMPOSE_BESU) build --no-cache && $(COMPOSE_BESU) up -d
 
-down-split: ## Stop the split stack (keeps both data volumes)
-	docker compose -f docker-compose.split.yml --env-file .env --env-file .env.split down
+down-split: ## Stop both stacks (keeps both data volumes)
+	docker compose -p xi-identity -f docker-compose.identity.yml down
+	docker compose -p xi-tokenization -f docker-compose.tokenization.yml down
 
 down: ## Stop the app stack (keeps data volume)
 	$(COMPOSE) down

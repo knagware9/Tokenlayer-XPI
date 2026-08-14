@@ -166,15 +166,34 @@ Fabric at boot (a `TotalSupply` chaincode read) and refuses to start if the conf
 is unreachable. Fabric needs ~2–3 GiB free in the Docker VM for its peers/orderer. See
 [infra/fabric/README.md](infra/fabric/README.md) for details.
 
-## Deploy the two products APART (the split topology)
+## Deploy the two products APART, and by AUDIENCE
 
-The stack above is **one deployment serving both products**. XI can also run as
-**two deployments, one product each**, with separate databases:
+The stack above is **one deployment serving both products**. XI also ships as
+**two stacks, one product each**, and each stack serves its three audiences from
+its own container:
 
 ```bash
-make deploy-split      # identity :4100 / :8081 · tokenization :4000 / :8080
-make down-split
+bash scripts/stack-up.sh identity tokenization   # or either name alone
 ```
+
+| App | Web | Its API edge |
+|---|---|---|
+| Identity · Issuer Console | :8090 | :4110 |
+| Identity · Verifier Console | :8091 | :4111 |
+| Identity · Wallet | :8092 | :4112 |
+| Tokenization · Issuer Desk | :8100 | :4120 |
+| Tokenization · Marketplace | :8101 | :4121 |
+| Tokenization · Platform Admin | :8102 | :4122 |
+
+**Neither API publishes a host port.** Each persona's *edge* — nginx carrying one
+generated route allowlist — is the only way in, so a holder's browser cannot
+reach `POST /orgs/:id/users` because the container it talks to has no route for
+it. The allowlists are generated from `packages/core/src/personas.ts`
+(`pnpm gen:persona-edges`) and a test fails if the committed configs drift.
+
+The two stacks are separate compose projects on an **external** network
+(`xi-net`), so either can be started, stopped and upgraded without the other, in
+any order.
 
 Tokenization asks Identity exactly one question — *does this DID hold a valid
 KycCredential?* — over HTTP, and nothing else. A wallet address never crosses
@@ -184,8 +203,10 @@ tokenization's side.
 **Why it is a script and not just `docker compose up`.** `IDENTITY_SERVICE_KEY`
 is an API key that does not exist until the identity deployment is running, so
 the order is load-bearing: bring identity up → mint a peer key holding
-`identity:assert` → bring tokenization up with it. `deploy-split.sh` does that
-and writes the key to `.env.split` (git-ignored — it is a live credential).
+`identity:assert` → bring tokenization up with it. `stack-up.sh` does that, and
+re-mints automatically when the identity database is new — a key from a database
+that no longer exists surfaces as *"the identity service refused the assertion
+(HTTP 401)"*, which blames the service for a credential problem.
 
 **Onboarding a holder across both.** Onboard them on the identity deployment
 first, then on the tokenization deployment with `did` set to the DID identity
@@ -194,18 +215,27 @@ mints its own DID and the gate asks about one the other has never seen — the
 answer is no, for every holder. A deployment that runs the identity product
 refuses a supplied `did`: there it mints its own.
 
+**Running tokenization without DIDs at all.** `SUBJECT_IDENTIFIERS=plain` makes
+its users ordinary accounts — no custodial DID, no credential. Organizations
+still carry a DID (theirs signs members' credentials and anchors to the
+registry). The API refuses to boot on `plain` together with the identity domain
+or with `IDENTITY_SERVICE_URL`, rather than failing per request.
+
 **What each database holds.** Every model in `apps/api/prisma/schema.prisma`
 carries a `/// domain:` line naming its owner. A single-product deployment keeps
 its own tables plus the shared ones; touching the other product's answers
 `404 DOMAIN_NOT_ENABLED`.
 
-**Verify it without Docker** — two local processes, two throwaway SQLite
-databases, and the end-to-end proof (including that the gate fails *closed and
-loudly* with `503 IDENTITY_SERVICE_UNAVAILABLE` when identity is stopped):
+**Prove it.** Two scripts, and they answer different questions:
 
 ```bash
-make verify-split
+node scripts/personas-e2e.mjs   # the persona BOUNDARY: which audience may call what
+node scripts/seam-e2e.mjs       # the SEAM: the gate admits, refuses, and fails CLOSED
 ```
+
+`seam-e2e` stops the identity stack mid-run and requires `503
+IDENTITY_SERVICE_UNAVAILABLE` — not a quiet "not verified" (a network failure
+reported as policy) and not a 200 (an outage as an open door).
 
 ## Common commands
 
