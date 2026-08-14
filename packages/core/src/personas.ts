@@ -88,6 +88,20 @@ export interface PersonaDef {
   readonly label: string;
   /** One line for the container's landing page and the compose file. */
   readonly description: string;
+  /**
+   * WHICH CONSOLE this app renders, independent of the signed-in role.
+   *
+   * The web app picks its shell from the user's ROLE — investor portal for a
+   * Buyer, operator desk for a UseCaseAdmin, platform console for an admin. In a
+   * persona deployment that is the wrong question: the Marketplace container is
+   * the investor app whoever signs in, and choosing by role gave a PlatformAdmin
+   * the platform console's nav intersected down to "My Profile" and "Logout".
+   *
+   *   "self-service"  what a member of the public sees — their own wallet,
+   *                   their own portfolio. Never a roster or a ledger.
+   *   "console"       an organization's staff console, chosen by role as before.
+   */
+  readonly shell: "self-service" | "console";
   /** Web nav ids this app may render (intersected with role RBAC, never a widening). */
   readonly surfaces: readonly string[];
   readonly defaultView: string;
@@ -157,6 +171,7 @@ export const PERSONAS: readonly PersonaDef[] = [
   // ── Identity ────────────────────────────────────────────────────────────
   {
     key: "identity-issuer",
+    shell: "console",
     domain: "identity",
     label: "Issuer Console",
     description: "An authority defines credential programmes and issues, reissues and revokes credentials.",
@@ -184,6 +199,7 @@ export const PERSONAS: readonly PersonaDef[] = [
   },
   {
     key: "identity-verifier",
+    shell: "console",
     domain: "identity",
     label: "Verifier Console",
     description: "A relying party asks a holder for credentials and checks the answer against the chain.",
@@ -204,6 +220,7 @@ export const PERSONAS: readonly PersonaDef[] = [
   },
   {
     key: "identity-holder",
+    shell: "self-service",
     domain: "identity",
     label: "Wallet",
     description: "A person holds their credentials, accepts or rejects what is offered, and consents to share.",
@@ -226,6 +243,7 @@ export const PERSONAS: readonly PersonaDef[] = [
   // ── Tokenization ────────────────────────────────────────────────────────
   {
     key: "tokenization-issuer",
+    shell: "console",
     domain: "tokenization",
     label: "Issuer Desk",
     description: "An issuer configures use cases, stages invoices and mints assets onto a ledger.",
@@ -244,6 +262,7 @@ export const PERSONAS: readonly PersonaDef[] = [
   },
   {
     key: "tokenization-marketplace",
+    shell: "self-service",
     domain: "tokenization",
     label: "Marketplace",
     description: "An investor browses offerings, buys and sells units, and watches their portfolio.",
@@ -264,6 +283,7 @@ export const PERSONAS: readonly PersonaDef[] = [
   },
   {
     key: "tokenization-admin",
+    shell: "console",
     domain: "tokenization",
     label: "Platform Admin",
     description: "The platform operator approves organizations, oversees every use case, and audits the ledger.",

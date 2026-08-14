@@ -21,7 +21,7 @@ const WEB_PERSONAS = fileURLToPath(new URL("../../web/src/personas.ts", import.m
 const source = readFileSync(WEB_PERSONAS, "utf8");
 
 /** Pull one persona's mirrored fields out of the web source. */
-function mirrored(key: string): { label?: string; domain?: string; defaultView?: string; surfaces?: string[] } {
+function mirrored(key: string): { label?: string; domain?: string; defaultView?: string; shell?: string; surfaces?: string[] } {
   const start = source.indexOf(`key: "${key}"`);
   if (start < 0) return {};
   const end = source.indexOf("  {", start) > 0 ? source.indexOf("\n  },", start) : source.length;
@@ -32,6 +32,7 @@ function mirrored(key: string): { label?: string; domain?: string; defaultView?:
     label: one("label"),
     domain: one("domain"),
     defaultView: one("defaultView"),
+    shell: one("shell"),
     surfaces: surfaces ? [...surfaces.matchAll(/"([^"]+)"/g)].map((m) => m[1]!) : undefined,
   };
 }
@@ -51,6 +52,7 @@ describe("apps/web/src/personas.ts mirrors packages/core/src/personas.ts", () =>
     expect(web.label, "label").toBe(core.label);
     expect(web.domain, "domain").toBe(core.domain);
     expect(web.defaultView, "defaultView").toBe(core.defaultView);
+    expect(web.shell, "shell").toBe(core.shell);
     expect(web.surfaces, "surfaces").toEqual([...core.surfaces]);
   });
 
