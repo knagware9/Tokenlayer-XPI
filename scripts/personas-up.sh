@@ -18,6 +18,9 @@ die() { echo -e "${R}[personas] ERROR:${N} $*" >&2; exit 1; }
 
 COMPOSE="docker compose -f docker-compose.personas.yml"
 ENV_FILE=".env.personas"
+# Stands in for the peer key only while the identity side starts. Named so that
+# if it ever reaches a running tokenization-api, the failure says what happened.
+SENTINEL="PENDING-MINT-DO-NOT-USE"
 
 command -v docker >/dev/null || die "docker is not on PATH"
 
@@ -35,13 +38,24 @@ if [ ! -f "$ENV_FILE" ]; then
 else
   say "reusing $ENV_FILE"
 fi
-set -a; . "./$ENV_FILE"; set +a
-# Ledger settings, if the operator has any, come from the repo .env.
+# ORDER MATTERS AND IS THE OPPOSITE OF WHAT LOOKS NATURAL. The repo .env is read
+# FIRST, for ledger settings (MST_*/BESU_*), and $ENV_FILE LAST so this
+# deployment's own secrets always win. Both files can define DID_MASTER_KEY, and
+# if the repo's were allowed to override, the custodial seeds written on the
+# first boot would become undecryptable the moment someone edited .env —
+# surfacing as "Unsupported state or unable to authenticate data" on the next
+# onboarding, which names an AES failure and not the cause.
 if [ -f .env ]; then set -a; . ./.env; set +a; fi
+set -a; . "./$ENV_FILE"; set +a
 
 # ── 2. Identity first: its API, its three edges, its three apps ──────────────
+# Compose interpolates the WHOLE file even when starting a subset, so the
+# `${IDENTITY_SERVICE_KEY:?}` guard on tokenization-api fires here — before the
+# key can possibly exist. A sentinel gets us past interpolation; nothing started
+# in this phase reads it, and step 4 refuses to continue if it survives.
 say "building and starting the identity side…"
-$COMPOSE up -d --build identity-api identity-issuer-edge identity-verifier-edge identity-holder-edge
+IDENTITY_SERVICE_KEY="${IDENTITY_SERVICE_KEY:-$SENTINEL}" \
+  $COMPOSE up -d --build identity-api identity-issuer-edge identity-verifier-edge identity-holder-edge
 
 ISSUER_PORT="${IDENTITY_ISSUER_API_PORT:-4110}"
 say "waiting for the issuer edge on :$ISSUER_PORT…"
@@ -68,17 +82,29 @@ else
   echo "IDENTITY_SERVICE_KEY=$KEY" >> "$ENV_FILE"
   say "peer key stored in $ENV_FILE (it is shown exactly once and never again)"
 fi
-set -a; . "./$ENV_FILE"; set +a
+set -a; . "./$ENV_FILE"; set +a   # re-read: the mint step appended the peer key
 
 # ── 4. Everything else ───────────────────────────────────────────────────────
+# The sentinel must be gone by now. Booting tokenization with it would produce a
+# deployment whose identity gate fails on every call, with an error about an
+# invalid API key rather than about this script having skipped a step.
+[ -n "${IDENTITY_SERVICE_KEY:-}" ] || die "IDENTITY_SERVICE_KEY is unset after the mint step"
+[ "${IDENTITY_SERVICE_KEY}" != "$SENTINEL" ] || die "the peer key was never minted — $ENV_FILE still holds the placeholder"
+
 say "building and starting tokenization and all six web apps…"
 $COMPOSE up -d --build
 
-say "waiting for the tokenization edges…"
-for port in "${TOKENIZATION_ISSUER_API_PORT:-4120}" "${TOKENIZATION_MARKETPLACE_API_PORT:-4121}" "${TOKENIZATION_ADMIN_API_PORT:-4122}"; do
-  for i in $(seq 1 90); do
-    curl -sf "http://localhost:${port}/healthz" >/dev/null 2>&1 && break
-    [ "$i" = 90 ] && die "edge on :$port did not come up — try: $COMPOSE logs"
+# THROUGH the edge to a real API route, not just /healthz. nginx answers its own
+# healthz whether or not anything is behind it, so waiting on that declared the
+# stack ready while the API was still deploying contracts — and the first thing
+# to run against it got 502s that looked like a product failure.
+say "waiting for both APIs to answer THROUGH their edges…"
+for port in "${TOKENIZATION_ISSUER_API_PORT:-4120}" "${TOKENIZATION_MARKETPLACE_API_PORT:-4121}" "${TOKENIZATION_ADMIN_API_PORT:-4122}" \
+            "${IDENTITY_VERIFIER_API_PORT:-4111}" "${IDENTITY_HOLDER_API_PORT:-4112}" "$ISSUER_PORT"; do
+  for i in $(seq 1 150); do
+    code=$(curl -so /dev/null -w '%{http_code}' "http://localhost:${port}/api/v1/config" 2>/dev/null || echo 000)
+    case "$code" in 200|401) break;; esac
+    [ "$i" = 150 ] && die "the API behind :$port never answered (last status $code) — try: $COMPOSE logs"
     sleep 2
   done
 done
