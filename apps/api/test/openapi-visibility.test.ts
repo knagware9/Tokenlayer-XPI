@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { components, S } from "../src/http/schemas.js";
+import { components, S } from "../src/http/schemas/index.js";
 import { buildTestApp, V1 } from "./helpers.js";
 import { declaredRoutes, routeKey } from "./route-decls.js";
 
