@@ -1,0 +1,203 @@
+# ═════════════════════════════════════════════════════════════════════════════
+# XI TOKENIZE — SIX AUDIENCE APPS, TWO PRODUCTS, FOURTEEN CONTAINERS
+#
+#   scripts/personas-up.sh          (brings the whole thing up in the right order)
+#
+# ── THE SHAPE ────────────────────────────────────────────────────────────────
+#
+#   identity-api ────┬── identity-issuer-edge   ── identity-issuer-web    :8090
+#   (identity-data)  ├── identity-verifier-edge ── identity-verifier-web  :8091
+#                    └── identity-holder-edge   ── identity-holder-web    :8092
+#
+#   tokenization-api ┬── tokenization-issuer-edge      ── …-web           :8100
+#   (tokenization-   ├── tokenization-marketplace-edge ── …-web           :8101
+#    data)           └── tokenization-admin-edge       ── …-web           :8102
+#
+# Each EDGE is nginx carrying one generated allowlist (deploy/persona-edges/),
+# and it is the ONLY way in: the two API containers publish no host ports at all.
+# A holder's browser cannot reach POST /orgs/:id/users because the container it
+# talks to has no route for it — not because the UI hides the button.
+#
+# ── WHY TWO APIS AND NOT SIX ─────────────────────────────────────────────────
+#
+# Six API PROCESSES was the first design. It does not work on SQLite: the three
+# identity personas must read and write the same data (an issued credential has
+# to be visible to the holder and checkable by the verifier), and three
+# containers writing one SQLite file over a shared volume is a corruption
+# hazard, not a theoretical one. Six real processes need a real database server;
+# that is a Postgres migration, and Prisma pins one provider per schema, so it
+# would drag the whole test suite with it. The persona boundary is therefore
+# enforced at the edge, where it is a network fact, and each product keeps
+# exactly one writer. Revisit if this ever moves to Postgres.
+#
+# ── SECRETS ──────────────────────────────────────────────────────────────────
+#
+# JWT_SECRET, DID_MASTER_KEY and IDENTITY_SERVICE_KEY come from the environment
+# (.env.personas, written by the bring-up script and git-ignored). Nothing in
+# this file has a secret default: an unset one fails the boot loudly rather than
+# starting a deployment whose custody key is the word "changeme".
+# ═════════════════════════════════════════════════════════════════════════════
+
+x-edge-build: &edge-build
+  context: .
+  dockerfile: apps/edge/Dockerfile
+
+x-web-build: &web-build
+  context: .
+  dockerfile: apps/web/Dockerfile
+
+x-api-env: &api-env
+  PORT: "4000"
+  NODE_ENV: production
+  JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET — e.g. openssl rand -hex 32}
+  DID_MASTER_KEY: ${DID_MASTER_KEY:?Set DID_MASTER_KEY — custodial DID seeds are encrypted with it}
+  CHAIN_STRICT: ${CHAIN_STRICT:-0}
+  LOGIN_RATE_LIMIT_MAX: ${LOGIN_RATE_LIMIT_MAX:-200}
+
+services:
+  # ── IDENTITY ───────────────────────────────────────────────────────────────
+  identity-api:
+    build: { context: ., dockerfile: apps/api/Dockerfile }
+    environment:
+      <<: *api-env
+      DATABASE_URL: "file:/data/identity.db"
+      ENABLED_DOMAINS: identity
+      # Every persona web app that talks to this product, so the browser's
+      # preflight is accepted from each of their origins and no others.
+      CORS_ORIGINS: ${IDENTITY_WEB_ORIGINS:-http://localhost:8090,http://localhost:8091,http://localhost:8092}
+      REGISTRY_CHAIN_ID: ${REGISTRY_CHAIN_ID:-}
+      MST_RPC_URL: ${MST_RPC_URL:-}
+      MST_OPERATOR_KEY: ${MST_OPERATOR_KEY:-}
+      BESU_RPC_URL: ${BESU_RPC_URL:-}
+      BESU_OPERATOR_KEY: ${BESU_OPERATOR_KEY:-}
+      TRUSTED_KYC_ISSUERS: ${TRUSTED_KYC_ISSUERS:-}
+      DEV_KYC_ISSUER_SEED: ${DEV_KYC_ISSUER_SEED:-}
+    volumes: [identity-data:/data]
+    # NO `ports:` — deliberately. The edges are the only door. To debug the API
+    # directly, add a temporary mapping here and remember to take it out.
+    restart: unless-stopped
+
+  identity-issuer-edge:
+    build: { <<: *edge-build, args: { PERSONA: identity-issuer } }
+    ports: ["${IDENTITY_ISSUER_API_PORT:-4110}:80"]
+    depends_on: [identity-api]
+    restart: unless-stopped
+
+  identity-verifier-edge:
+    build: { <<: *edge-build, args: { PERSONA: identity-verifier } }
+    ports: ["${IDENTITY_VERIFIER_API_PORT:-4111}:80"]
+    depends_on: [identity-api]
+    restart: unless-stopped
+
+  identity-holder-edge:
+    build: { <<: *edge-build, args: { PERSONA: identity-holder } }
+    ports: ["${IDENTITY_HOLDER_API_PORT:-4112}:80"]
+    depends_on: [identity-api]
+    restart: unless-stopped
+
+  identity-issuer-web:
+    build:
+      <<: *web-build
+      args:
+        VITE_API_URL: ${IDENTITY_ISSUER_API_URL:-http://localhost:4110}
+        VITE_APP_PERSONA: identity-issuer
+    ports: ["${IDENTITY_ISSUER_WEB_PORT:-8090}:80"]
+    depends_on: [identity-issuer-edge]
+    restart: unless-stopped
+
+  identity-verifier-web:
+    build:
+      <<: *web-build
+      args:
+        VITE_API_URL: ${IDENTITY_VERIFIER_API_URL:-http://localhost:4111}
+        VITE_APP_PERSONA: identity-verifier
+    ports: ["${IDENTITY_VERIFIER_WEB_PORT:-8091}:80"]
+    depends_on: [identity-verifier-edge]
+    restart: unless-stopped
+
+  identity-holder-web:
+    build:
+      <<: *web-build
+      args:
+        VITE_API_URL: ${IDENTITY_HOLDER_API_URL:-http://localhost:4112}
+        VITE_APP_PERSONA: identity-holder
+    ports: ["${IDENTITY_HOLDER_WEB_PORT:-8092}:80"]
+    depends_on: [identity-holder-edge]
+    restart: unless-stopped
+
+  # ── TOKENIZATION ───────────────────────────────────────────────────────────
+  tokenization-api:
+    build: { context: ., dockerfile: apps/api/Dockerfile }
+    environment:
+      <<: *api-env
+      DATABASE_URL: "file:/data/tokenization.db"
+      ENABLED_DOMAINS: tokenization
+      CORS_ORIGINS: ${TOKENIZATION_WEB_ORIGINS:-http://localhost:8100,http://localhost:8101,http://localhost:8102}
+      MARKET_ESCROW_ACCOUNT: ${MARKET_ESCROW_ACCOUNT:-0x000000000000000000000000000000000000E5C0}
+      PLATFORM_FEE_ACCOUNT: ${PLATFORM_FEE_ACCOUNT:-0x000000000000000000000000000000000000FEE5}
+      MST_RPC_URL: ${MST_RPC_URL:-}
+      MST_OPERATOR_KEY: ${MST_OPERATOR_KEY:-}
+      BESU_RPC_URL: ${BESU_RPC_URL:-}
+      BESU_OPERATOR_KEY: ${BESU_OPERATOR_KEY:-}
+      # The seam between the products. Container-to-container, so the host ports
+      # above are irrelevant here — and note it points at identity-api DIRECTLY,
+      # not at an edge: this is service-to-service traffic carrying an
+      # identity:assert peer key, and /identity/assertions is on no persona's
+      # allowlist precisely so it cannot be reached from a browser.
+      IDENTITY_SERVICE_URL: ${IDENTITY_SERVICE_URL:-http://identity-api:4000/api/v1}
+      IDENTITY_SERVICE_KEY: ${IDENTITY_SERVICE_KEY:?Mint a peer key with the identity:assert scope — scripts/personas-up.sh does this for you}
+    volumes: [tokenization-data:/data]
+    depends_on: [identity-api]
+    restart: unless-stopped
+
+  tokenization-issuer-edge:
+    build: { <<: *edge-build, args: { PERSONA: tokenization-issuer } }
+    ports: ["${TOKENIZATION_ISSUER_API_PORT:-4120}:80"]
+    depends_on: [tokenization-api]
+    restart: unless-stopped
+
+  tokenization-marketplace-edge:
+    build: { <<: *edge-build, args: { PERSONA: tokenization-marketplace } }
+    ports: ["${TOKENIZATION_MARKETPLACE_API_PORT:-4121}:80"]
+    depends_on: [tokenization-api]
+    restart: unless-stopped
+
+  tokenization-admin-edge:
+    build: { <<: *edge-build, args: { PERSONA: tokenization-admin } }
+    ports: ["${TOKENIZATION_ADMIN_API_PORT:-4122}:80"]
+    depends_on: [tokenization-api]
+    restart: unless-stopped
+
+  tokenization-issuer-web:
+    build:
+      <<: *web-build
+      args:
+        VITE_API_URL: ${TOKENIZATION_ISSUER_API_URL:-http://localhost:4120}
+        VITE_APP_PERSONA: tokenization-issuer
+    ports: ["${TOKENIZATION_ISSUER_WEB_PORT:-8100}:80"]
+    depends_on: [tokenization-issuer-edge]
+    restart: unless-stopped
+
+  tokenization-marketplace-web:
+    build:
+      <<: *web-build
+      args:
+        VITE_API_URL: ${TOKENIZATION_MARKETPLACE_API_URL:-http://localhost:4121}
+        VITE_APP_PERSONA: tokenization-marketplace
+    ports: ["${TOKENIZATION_MARKETPLACE_WEB_PORT:-8101}:80"]
+    depends_on: [tokenization-marketplace-edge]
+    restart: unless-stopped
+
+  tokenization-admin-web:
+    build:
+      <<: *web-build
+      args:
+        VITE_API_URL: ${TOKENIZATION_ADMIN_API_URL:-http://localhost:4122}
+        VITE_APP_PERSONA: tokenization-admin
+    ports: ["${TOKENIZATION_ADMIN_WEB_PORT:-8102}:80"]
+    depends_on: [tokenization-admin-edge]
+    restart: unless-stopped
+
+volumes:
+  identity-data:
+  tokenization-data:

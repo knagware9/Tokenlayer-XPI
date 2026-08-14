@@ -31,3 +31,4 @@ infra/fabric/.runtime/
 
 # Local screen recordings / demo captures — never committed (large binaries)
 tmp-videos/
+.env.personas
