@@ -8,7 +8,7 @@ import { openapiConfig } from "./http/openapi.js";
 import { applyDomainGate } from "./http/route-domains.js";
 import { components } from "./http/schemas.js";
 import { guardRepositories } from "./persistence/model-domains.js";
-import { registerRoutes } from "./http/routes.js";
+import { registerRoutes } from "./http/routes/index.js";
 import { errorHandler, requirePrincipal } from "./http/support.js";
 
 /** JWT lifetime — tokens expire so a leaked/stale token is not valid forever. */

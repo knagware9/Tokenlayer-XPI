@@ -14,7 +14,7 @@
  *
  * A denylist plus "remember to add to it" is the same shape as the comment it
  * replaces: a claim, maintained by attention. So the answer is COMPUTED from
- * `apps/api/src/http/routes.ts` — every GET handler's body is read, and any one
+ * `apps/api/src/http/routes/` — every GET handler's body is read, and any one
  * that reaches a write primitive must be either denied a button or recorded in
  * `TRY_IT_SAFE` below with a written reason.
  *
@@ -46,7 +46,7 @@
  * handlers, or a body runs past the next declaration, the test says so instead
  * of passing on an empty result.
  */
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
@@ -57,7 +57,14 @@ import {
   tryItAllowed,
 } from "../src/lib/openapi.js";
 
-const ROUTES_TS = fileURLToPath(new URL("../../api/src/http/routes.ts", import.meta.url));
+// ONE FILE PER PRODUCT since routes.ts was split. Read the folder, not a list:
+// a family added later is covered the day it appears.
+const ROUTES_DIR = fileURLToPath(new URL("../../api/src/http/routes", import.meta.url));
+const readAllRouteSources = (): string => {
+  const files = readdirSync(ROUTES_DIR).filter((f) => f.endsWith(".ts")).sort();
+  if (files.length < 4) throw new Error(`expected the split route files in ${ROUTES_DIR}, found ${files.join(", ")}`);
+  return files.map((f) => readFileSync(`${ROUTES_DIR}/${f}`, "utf8")).join("\n");
+};
 
 /** The head of a declaration, up to and including the options object's `{`. */
 const ROUTE_HEAD_RE = /app\.(get|post|put|patch|delete)\("([^"]+)",\s*\{/g;
@@ -88,7 +95,7 @@ interface Handler { method: string; path: string; body: string | null; start: nu
  * one, by asserting no body swallows the declaration that follows it.
  */
 function handlers(): Handler[] {
-  const src = readFileSync(ROUTES_TS, "utf8");
+  const src = readAllRouteSources();
   const out: Handler[] = [];
   for (const m of src.matchAll(ROUTE_HEAD_RE)) {
     const [, method, path] = m as unknown as [string, string, string];
