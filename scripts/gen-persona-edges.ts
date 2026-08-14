@@ -134,7 +134,12 @@ export function renderConfig(persona: PersonaDef): string {
       : `\n    limit_except ${r.methods.join(" ")} { deny all; }\n    error_page 403 =404 @denied;`;
     return `  # ${r.prefix} — ${r.why}
   location ~ "${r.regex}" {${guard}
-    proxy_pass ${upstream};
+    # Through a VARIABLE so nginx resolves the upstream at request time, not at
+    # config-parse time. Two things depend on it: 'nginx -t' can validate this
+    # file in a build where no API container exists, and the edge survives the
+    # API restarting on a new address instead of caching the first one forever.
+    set $upstream_api ${upstream};
+    proxy_pass $upstream_api;
     proxy_http_version 1.1;
     proxy_set_header Host              $host;
     proxy_set_header X-Real-IP         $remote_addr;
@@ -151,6 +156,7 @@ server {
   listen 80;
   server_name _;
   client_max_body_size 12m;   # KYB documents and certificate artwork travel this way
+  resolver 127.0.0.11 valid=10s ipv6=off;   # docker compose's embedded DNS
 
   # Liveness for compose healthchecks — answered by the edge itself, so it stays
   # truthful about the EDGE rather than about the API behind it.

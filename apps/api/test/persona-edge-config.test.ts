@@ -57,7 +57,7 @@ describe("the generated edge configs are the catalogue, compiled", () => {
     for (const persona of PERSONAS) {
       const body = files.get(`${persona.key}.conf`);
       expect(body).toBeDefined();
-      expect(body).toContain(`proxy_pass http://${persona.domain}-api:4000`);
+      expect(body).toContain(`set $upstream_api http://${persona.domain}-api:4000;`);
       // The other product's API must not appear anywhere in the file.
       const other = persona.domain === "identity" ? "tokenization" : "identity";
       expect(body).not.toContain(`http://${other}-api:4000`);

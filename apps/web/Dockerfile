@@ -14,6 +14,13 @@ RUN pnpm install --frozen-lockfile --filter "@tokenlayer/web..."
 # The API origin is baked into the bundle at build time (Vite static replacement).
 ARG VITE_API_URL=http://localhost:4000
 ENV VITE_API_URL=$VITE_API_URL
+
+# WHICH AUDIENCE this image serves. Unset builds the full console, which is what
+# the single-container and two-container topologies want; set to a persona key it
+# builds that audience's app — a different artifact, with no runtime switch back.
+ARG VITE_APP_PERSONA=
+ENV VITE_APP_PERSONA=$VITE_APP_PERSONA
+
 RUN pnpm --filter @tokenlayer/web build
 
 FROM nginx:1.27-alpine AS runtime
