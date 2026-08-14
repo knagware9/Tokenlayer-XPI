@@ -93,6 +93,14 @@ export interface AppDeps {
   publicWebUrl: string;
   /** Domains this deployment runs (tokenization, identity). Never empty. */
   enabledDomains: string[];
+  /**
+   * Do the PEOPLE here carry DIDs? Absent means "did" — the behaviour every
+   * deployment had before this existed, so no construction site changes.
+   *
+   * ORGANIZATIONS carry a DID either way: an org's DID signs its members'
+   * credentials and is what the on-chain registry trusts.
+   */
+  subjectIdentifiers?: "did" | "plain";
   /** Allowlist of trusted KYC credential issuer DIDs; empty/absent ⇒ no issuer is trusted (fail closed). */
   trustedKycIssuers?: string[];
   /** Dev-only deterministic issuer seed for the demo mint route (never set in production). */

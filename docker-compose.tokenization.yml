@@ -1,0 +1,135 @@
+# ═════════════════════════════════════════════════════════════════════════════
+# THE TOKENIZATION STACK — one API, three audience apps.
+#
+#   bash scripts/stack-up.sh tokenization      (or: identity + tokenization)
+#
+#   tokenization-api ┬── tokenization-issuer-edge      ── …-web           :8100
+#   (tokenization-   ├── tokenization-marketplace-edge ── …-web           :8101
+#    data)           └── tokenization-admin-edge       ── …-web           :8102
+#
+# ── RUNNING IT ALONE ─────────────────────────────────────────────────────────
+#
+# This stack stands alone TOO, and which way depends on one setting:
+#
+#   SUBJECT_IDENTIFIERS=did    users get custodial DIDs and KYC credentials from
+#                              this deployment, or from a linked identity one.
+#   SUBJECT_IDENTIFIERS=plain  users are ordinary accounts. No DIDs, no
+#                              credentials, no identity service.
+#
+# and, independently, on whether IDENTITY_SERVICE_URL is set. Leave it unset and
+# nothing here reaches out; set it and `requireVerifiedIdentity` use cases ask
+# the identity deployment over the shared network. The API refuses to boot on an
+# incoherent pair rather than failing later on a per-request basis.
+#
+# ── THE SHARED NETWORK ───────────────────────────────────────────────────────
+#
+# `xi-net` is external so the two stacks can start in either order and still
+# resolve each other by service name. See the note in docker-compose.identity.yml
+# for why an auto-created per-project network would defeat the whole split.
+#
+# NEITHER API PUBLISHES A HOST PORT. The three edges are the only way in.
+# ═════════════════════════════════════════════════════════════════════════════
+
+x-edge-build: &edge-build
+  context: .
+  dockerfile: apps/edge/Dockerfile
+
+x-web-build: &web-build
+  context: .
+  dockerfile: apps/web/Dockerfile
+
+services:
+  tokenization-api:
+    build: { context: ., dockerfile: apps/api/Dockerfile }
+    environment:
+      PORT: "4000"
+      NODE_ENV: production
+      DATABASE_URL: "file:/data/tokenization.db"
+      ENABLED_DOMAINS: tokenization
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET — e.g. openssl rand -hex 32}
+      DID_MASTER_KEY: ${DID_MASTER_KEY:?Set DID_MASTER_KEY — organization DID seeds are encrypted with it}
+      CORS_ORIGINS: ${TOKENIZATION_WEB_ORIGINS:-http://localhost:8100,http://localhost:8101,http://localhost:8102}
+      CHAIN_STRICT: ${CHAIN_STRICT:-0}
+      LOGIN_RATE_LIMIT_MAX: ${LOGIN_RATE_LIMIT_MAX:-200}
+      MARKET_ESCROW_ACCOUNT: ${MARKET_ESCROW_ACCOUNT:-0x000000000000000000000000000000000000E5C0}
+      PLATFORM_FEE_ACCOUNT: ${PLATFORM_FEE_ACCOUNT:-0x000000000000000000000000000000000000FEE5}
+      MST_RPC_URL: ${MST_RPC_URL:-}
+      MST_OPERATOR_KEY: ${MST_OPERATOR_KEY:-}
+      BESU_RPC_URL: ${BESU_RPC_URL:-}
+      BESU_OPERATOR_KEY: ${BESU_OPERATOR_KEY:-}
+      # Do the PEOPLE in this deployment carry DIDs? Organizations always do —
+      # their DID signs membership credentials and anchors to the registry — but
+      # a tokenization deployment that has no use for verifiable credentials can
+      # run its users as ordinary accounts. See apps/api/src/env.ts.
+      SUBJECT_IDENTIFIERS: ${SUBJECT_IDENTIFIERS:-did}
+      # The seam between the products, and OPTIONAL. Unset means this stack runs
+      # alone. Set BOTH or the API refuses to boot. It points at identity-api
+      # directly rather than at an edge: this is service-to-service traffic with
+      # an identity:assert peer key, and /identity/assertions is on no persona's
+      # allowlist precisely so no browser can reach it.
+      IDENTITY_SERVICE_URL: ${IDENTITY_SERVICE_URL:-}
+      IDENTITY_SERVICE_KEY: ${IDENTITY_SERVICE_KEY:-}
+    volumes: [tokenization-data:/data]
+    networks: [xi-net]
+    restart: unless-stopped
+
+  tokenization-issuer-edge:
+    build: { <<: *edge-build, args: { PERSONA: tokenization-issuer } }
+    ports: ["${TOKENIZATION_ISSUER_API_PORT:-4120}:80"]
+    depends_on: [tokenization-api]
+    networks: [xi-net]
+    restart: unless-stopped
+
+  tokenization-marketplace-edge:
+    build: { <<: *edge-build, args: { PERSONA: tokenization-marketplace } }
+    ports: ["${TOKENIZATION_MARKETPLACE_API_PORT:-4121}:80"]
+    depends_on: [tokenization-api]
+    networks: [xi-net]
+    restart: unless-stopped
+
+  tokenization-admin-edge:
+    build: { <<: *edge-build, args: { PERSONA: tokenization-admin } }
+    ports: ["${TOKENIZATION_ADMIN_API_PORT:-4122}:80"]
+    depends_on: [tokenization-api]
+    networks: [xi-net]
+    restart: unless-stopped
+
+  tokenization-issuer-web:
+    build:
+      <<: *web-build
+      args:
+        VITE_API_URL: ${TOKENIZATION_ISSUER_API_URL:-http://localhost:4120}
+        VITE_APP_PERSONA: tokenization-issuer
+    ports: ["${TOKENIZATION_ISSUER_WEB_PORT:-8100}:80"]
+    depends_on: [tokenization-issuer-edge]
+    networks: [xi-net]
+    restart: unless-stopped
+
+  tokenization-marketplace-web:
+    build:
+      <<: *web-build
+      args:
+        VITE_API_URL: ${TOKENIZATION_MARKETPLACE_API_URL:-http://localhost:4121}
+        VITE_APP_PERSONA: tokenization-marketplace
+    ports: ["${TOKENIZATION_MARKETPLACE_WEB_PORT:-8101}:80"]
+    depends_on: [tokenization-marketplace-edge]
+    networks: [xi-net]
+    restart: unless-stopped
+
+  tokenization-admin-web:
+    build:
+      <<: *web-build
+      args:
+        VITE_API_URL: ${TOKENIZATION_ADMIN_API_URL:-http://localhost:4122}
+        VITE_APP_PERSONA: tokenization-admin
+    ports: ["${TOKENIZATION_ADMIN_WEB_PORT:-8102}:80"]
+    depends_on: [tokenization-admin-edge]
+    networks: [xi-net]
+    restart: unless-stopped
+
+volumes:
+  tokenization-data:
+
+networks:
+  xi-net:
+    external: true

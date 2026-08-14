@@ -196,6 +196,7 @@ export function unavailableIdentityAssertions(reason: string): IdentityAssertion
  * domain), so the ordering here never has to arbitrate between them.
  */
 export function selectIdentityAssertions(config: {
+  subjectIdentifiers?: "did" | "plain";
   /** The domains this deployment serves. Contains "identity" ⇒ it owns the credential store. */
   enabledDomains: readonly string[];
   serviceUrl?: string;
@@ -205,6 +206,17 @@ export function selectIdentityAssertions(config: {
   credentials: CredentialRepository;
   fetchImpl?: typeof fetch;
 }): IdentityAssertions {
+  // PLAIN IDENTIFIERS FIRST. With no subject DIDs there is nothing to assert
+  // about, and the reason has to say so: the alternative is a gate that refuses
+  // every holder while reporting that some identity service was unreachable.
+  // env.ts already refuses `plain` together with a configured service, so this
+  // cannot shadow a working remote — it only names the local truth.
+  if (config.subjectIdentifiers === "plain") {
+    return unavailableIdentityAssertions(
+      "this deployment runs users as ordinary accounts (SUBJECT_IDENTIFIERS=plain) — they hold no credentials, " +
+        "so a use case requiring a verified identity cannot be satisfied here",
+    );
+  }
   if (config.serviceUrl && config.serviceKey) {
     return httpIdentityAssertions({
       baseUrl: config.serviceUrl,

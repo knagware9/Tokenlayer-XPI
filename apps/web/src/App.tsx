@@ -4,6 +4,8 @@ import { useAuth } from "./auth.js";
 import { useRoute } from "./router.js";
 import { ApprovalsPanel } from "./components/ApprovalsPanel.js";
 import { AppShell, type NavItem } from "./components/AppShell.js";
+import { activePersona, landingView, narrowToPersona } from "./lib/persona.js";
+import { PersonaHome } from "./components/PersonaHome.js";
 import { AssetManagement, isInvoiceUseCase } from "./components/AssetManagement.js";
 import { Dashboard } from "./components/Dashboard.js";
 import { Developers } from "./components/Developers.js";
@@ -40,7 +42,11 @@ export function App(): JSX.Element {
   const [useCases, setUseCases] = useState<UseCase[]>([]);
   const [view, setView] = useState<string>("dashboard");
   const [enabledDomains, setEnabledDomains] = useState<DomainKey[]>(DOMAIN_KEYS);
-  const [activeDomain, setActiveDomain] = useState<DomainKey>(() => loadActiveDomain(DOMAIN_KEYS));
+  // A persona app serves ONE product, so its domain is not a user preference —
+  // pinning it also means a persona container pointed at a both-domains API
+  // cannot open on the other product with its switcher hidden.
+  const [activeDomain, setActiveDomain] = useState<DomainKey>(
+    () => (activePersona()?.domain as DomainKey | undefined) ?? loadActiveDomain(DOMAIN_KEYS));
   // The credential use case this desk operates, loaded only for an identity-domain
   // desk user (drives the Issue Credentials surface). Null otherwise.
   const [deskCredUC, setDeskCredUC] = useState<CredentialUseCase | null>(null);
@@ -102,7 +108,10 @@ export function App(): JSX.Element {
   if (!token || !user) {
     if (routeKey === "signup") return <Signup />;
     if (routeKey === "login") return <Login />;
-    return <Home />;
+    // A persona build shows ITS OWN front door — which product, which app, and
+    // what this audience does here. Every container used to serve the shared
+    // tokenization pitch, identity ones included.
+    return activePersona() ? <PersonaHome /> : <Home />;
   }
 
   const isPlatform = user.role === "PlatformAdmin";
@@ -136,7 +145,15 @@ export function App(): JSX.Element {
   // Investors get the dedicated portal experience instead of the operator console —
   // plus My Profile and My Credentials, so a Buyer holder can reach their credentials
   // and their verification-request inbox (otherwise the holder side is unreachable).
-  if (user.role === "Buyer") {
+  //
+  // A SELF-SERVICE PERSONA takes this branch whatever the role. The Marketplace
+  // container is the investor app and the Wallet container is the holder app, for
+  // whoever signs in — choosing by role instead gave a PlatformAdmin on the
+  // Marketplace the PLATFORM console's nav, which the persona filter then
+  // intersected down to "My Profile" and "Logout". The nav below is still
+  // narrowed by AppShell, so the Wallet keeps only its credentials surface and
+  // never renders the portfolio its edge would refuse anyway.
+  if (user.role === "Buyer" || activePersona()?.shell === "self-service") {
     const items: NavItem[] = [
       { id: "portfolio", label: "Portfolio", icon: "coins" },
       { id: "offerings", label: "Offerings", icon: "spark" },
@@ -145,10 +162,16 @@ export function App(): JSX.Element {
     ];
     const buyerTab: "offerings" | "portfolio" | "activity" =
       view === "offerings" ? "offerings" : view === "transactions" ? "activity" : "portfolio";
-    const activeId = ["portfolio", "offerings", "transactions", "profile", "credentials"].includes(view) ? view : "portfolio";
+    // The landing view has to survive persona narrowing: "portfolio" is not a
+    // Wallet surface, and opening there would render a panel whose data the
+    // holder edge refuses.
+    const fallback = landingView(narrowToPersona(items, activePersona()), activePersona(), "portfolio");
+    const activeId = ["portfolio", "offerings", "transactions", "profile", "credentials"].includes(view) ? view : fallback;
     const panel =
       view === "profile" ? <MyProfile onSelect={setView} />
       : view === "credentials" ? <MyIdentity />
+      : activeId === "credentials" ? <MyIdentity />
+      : activeId === "profile" ? <MyProfile onSelect={setView} />
       : <InvestorPortal useCases={useCases} tab={buyerTab} onTabChange={(t) => setView(t === "activity" ? "transactions" : t)} />;
     return <AppShell items={items} active={activeId} onSelect={handleSelect}>{panel}</AppShell>;
   }

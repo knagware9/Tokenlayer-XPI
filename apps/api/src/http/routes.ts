@@ -618,7 +618,13 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     };
   });
 
-  app.get("/config", { schema: S.config, ...auth }, async () => ({ domains: deps.enabledDomains }));
+  app.get("/config", { schema: S.config, ...auth }, async () => ({
+    domains: deps.enabledDomains,
+    // The console hides its DID and credential surfaces when there are none —
+    // ADDITIVE, and declared in the response schema or fast-json-stringify would
+    // drop it on the way out.
+    subjectIdentifiers: deps.subjectIdentifiers ?? "did",
+  }));
 
   // --- passwordless device login keys -------------------------------------
   app.post("/me/login-keys", { schema: S.enrollLoginKey, ...auth }, async (request, reply) => {
@@ -3519,6 +3525,16 @@ export function registerRoutes(app: FastifyInstance, deps: AppDeps, sharedPrinci
     // the assertion asks about one Identity has never seen. Where this deployment
     // DOES own identity it mints its own, and accepting a caller's would be a way
     // to point a wallet at someone else's verified identity.
+    // PLAIN IDENTIFIERS. Both fields ask this deployment to do something with a
+    // subject DID, and there are none here. Refusing is the difference between a
+    // named 400 and a user who looks KYC-approved while holding nothing.
+    if ((deps.subjectIdentifiers ?? "did") === "plain" && (b.did || b.kyc)) {
+      return reply.code(400).send({
+        error: "SUBJECT_IDENTIFIERS_PLAIN",
+        message: "this deployment runs users as ordinary accounts (SUBJECT_IDENTIFIERS=plain) — " +
+          "it issues no DIDs and no credentials, so 'did' and 'kyc' cannot be honoured",
+      });
+    }
     if (b.did && deps.enabledDomains.includes("identity")) {
       return reply.code(400).send({
         error: "DID_NOT_ACCEPTED",

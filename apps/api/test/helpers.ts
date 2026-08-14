@@ -44,7 +44,7 @@ export const TEST_MARKET_ESCROW = "0xcd3B766CCDd6AE721141F452C550Ca635964ce71";
 /** A second seeded PlatformAdmin (test-only) — the SoD checker for null-scope / brand-new-use-case onboarding proposals the sole admin proposes. */
 export const PLATFORM_ADMIN_2 = { email: "admin2@tokenlayer.dev", password: "admin123" } as const;
 
-export interface TestAppOptions { loginRateLimitMax?: number; apiKeyRateLimitMax?: number; apiKeyFailedAttemptMax?: number; apiKeyReserveIntervalMs?: number; platformFeeAccount?: string; marketEscrowAccount?: string; trustedKycIssuers?: string[]; devIssuerSeed?: string; isProduction?: boolean; didMasterConfigured?: boolean; registry?: IdentityRegistry; enabledDomains?: string[]; brandLogoPruneGraceMs?: number }
+export interface TestAppOptions { loginRateLimitMax?: number; apiKeyRateLimitMax?: number; apiKeyFailedAttemptMax?: number; apiKeyReserveIntervalMs?: number; platformFeeAccount?: string; marketEscrowAccount?: string; trustedKycIssuers?: string[]; devIssuerSeed?: string; isProduction?: boolean; didMasterConfigured?: boolean; registry?: IdentityRegistry; enabledDomains?: string[]; subjectIdentifiers?: "did" | "plain"; brandLogoPruneGraceMs?: number }
 
 /**
  * The app plus the repositories tests need to reach directly — used where a
@@ -119,7 +119,7 @@ export async function buildTestAppWithRepos(opts: TestAppOptions = {}): Promise<
     // single app instance, not secrecy.
     secretBox: createSecretBox("22".repeat(32)),
     keystore, didMasterConfigured: opts.didMasterConfigured ?? true,
-    challenges: createMemoryChallengeStore(), loginKeys, qrLogin: createMemoryQrLoginStore(), publicWebUrl: "http://localhost:5173", enabledDomains: opts.enabledDomains ?? ["tokenization", "identity"], trustedKycIssuers: opts.trustedKycIssuers,
+    challenges: createMemoryChallengeStore(), loginKeys, qrLogin: createMemoryQrLoginStore(), publicWebUrl: "http://localhost:5173", enabledDomains: opts.enabledDomains ?? ["tokenization", "identity"], subjectIdentifiers: opts.subjectIdentifiers, trustedKycIssuers: opts.trustedKycIssuers,
     devIssuerSeed: opts.devIssuerSeed, isProduction: opts.isProduction,
     currencies: loadCurrencies(), jwtSecret: "test-secret", publicApiUrl: "http://test.local/api/v1",
     loginRateLimitMax: opts.loginRateLimitMax ?? 100000,

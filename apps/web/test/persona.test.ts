@@ -116,3 +116,35 @@ describe("every persona's own surfaces survive its own narrowing", () => {
     expect(landingView(items, persona, "nowhere")).toBe(persona.defaultView);
   });
 });
+
+describe("which console a persona app renders", () => {
+  // The bug: the shell was chosen by ROLE, so a PlatformAdmin signing in to the
+  // Marketplace got the platform console's nav intersected down to two entries.
+  // The container is the investor app whoever signs in.
+  it("the two public-facing apps are self-service; the four staff apps are consoles", () => {
+    expect(resolvePersona("tokenization-marketplace")?.shell).toBe("self-service");
+    expect(resolvePersona("identity-holder")?.shell).toBe("self-service");
+    for (const key of ["identity-issuer", "identity-verifier", "tokenization-issuer", "tokenization-admin"]) {
+      expect(resolvePersona(key)?.shell, key).toBe("console");
+    }
+  });
+
+  it("a Wallet lands on its credentials, not on a portfolio it cannot load", () => {
+    // The self-service branch offers portfolio/offerings/transactions. For the
+    // Wallet none of those survive narrowing, and opening on one would render a
+    // panel whose data the holder edge refuses.
+    const holder = resolvePersona("identity-holder");
+    const investorNav = nav("portfolio", "offerings", "transactions", "profile", "credentials", "logout");
+    expect(narrowToPersona(investorNav, holder).map((i) => i.id)).toEqual(["profile", "credentials", "logout"]);
+    expect(landingView(narrowToPersona(investorNav, holder), holder, "portfolio")).toBe("credentials");
+  });
+
+  it("a Marketplace keeps the whole investor surface", () => {
+    const market = resolvePersona("tokenization-marketplace");
+    const investorNav = nav("portfolio", "offerings", "transactions", "profile", "credentials", "logout");
+    // `credentials` is identity's and its edge refuses it — so it must NOT survive.
+    expect(narrowToPersona(investorNav, market).map((i) => i.id))
+      .toEqual(["portfolio", "offerings", "transactions", "profile", "logout"]);
+    expect(landingView(narrowToPersona(investorNav, market), market, "portfolio")).toBe("portfolio");
+  });
+});

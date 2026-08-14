@@ -1,0 +1,125 @@
+# ═════════════════════════════════════════════════════════════════════════════
+# THE IDENTITY STACK — one API, three audience apps.
+#
+#   bash scripts/stack-up.sh identity          (or: identity + tokenization)
+#
+#   identity-api ────┬── identity-issuer-edge   ── identity-issuer-web    :8090
+#   (identity-data)  ├── identity-verifier-edge ── identity-verifier-web  :8091
+#                    └── identity-holder-edge   ── identity-holder-web    :8092
+#
+# THIS FILE STANDS ALONE. Bring it up with nothing else running and you have a
+# working digital-identity product: authorities issue, relying parties verify,
+# people hold. It has no dependency on tokenization in either direction — the
+# arrow between the products points the other way, and only at runtime (the
+# tokenization API asks THIS one whether a subject holds a credential).
+#
+# ── THE SHARED NETWORK ───────────────────────────────────────────────────────
+#
+# `xi-net` is declared external so the two stacks can be started in either
+# order, from separate directories, or on separate schedules, and still find
+# each other by service name. Create it once:
+#
+#   docker network create xi-net
+#
+# scripts/stack-up.sh does that for you. Declaring it external rather than
+# letting compose auto-create a per-project network is the whole reason these
+# two files can be independent: an auto-created network is named after the
+# project, so tokenization-api would resolve `identity-api` only when both lived
+# in the same compose project — which is exactly the coupling being removed.
+#
+# NEITHER API PUBLISHES A HOST PORT. The three edges are the only way in.
+# ═════════════════════════════════════════════════════════════════════════════
+
+x-edge-build: &edge-build
+  context: .
+  dockerfile: apps/edge/Dockerfile
+
+x-web-build: &web-build
+  context: .
+  dockerfile: apps/web/Dockerfile
+
+services:
+  identity-api:
+    build: { context: ., dockerfile: apps/api/Dockerfile }
+    environment:
+      PORT: "4000"
+      NODE_ENV: production
+      DATABASE_URL: "file:/data/identity.db"
+      ENABLED_DOMAINS: identity
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET — e.g. openssl rand -hex 32}
+      DID_MASTER_KEY: ${DID_MASTER_KEY:?Set DID_MASTER_KEY — custodial DID seeds are encrypted with it}
+      # Every persona web app that talks to this product, and no others.
+      CORS_ORIGINS: ${IDENTITY_WEB_ORIGINS:-http://localhost:8090,http://localhost:8091,http://localhost:8092}
+      CHAIN_STRICT: ${CHAIN_STRICT:-0}
+      LOGIN_RATE_LIMIT_MAX: ${LOGIN_RATE_LIMIT_MAX:-200}
+      REGISTRY_CHAIN_ID: ${REGISTRY_CHAIN_ID:-}
+      MST_RPC_URL: ${MST_RPC_URL:-}
+      MST_OPERATOR_KEY: ${MST_OPERATOR_KEY:-}
+      BESU_RPC_URL: ${BESU_RPC_URL:-}
+      BESU_OPERATOR_KEY: ${BESU_OPERATOR_KEY:-}
+      TRUSTED_KYC_ISSUERS: ${TRUSTED_KYC_ISSUERS:-}
+      DEV_KYC_ISSUER_SEED: ${DEV_KYC_ISSUER_SEED:-}
+    volumes: [identity-data:/data]
+    networks: [xi-net]
+    restart: unless-stopped
+
+  identity-issuer-edge:
+    build: { <<: *edge-build, args: { PERSONA: identity-issuer } }
+    ports: ["${IDENTITY_ISSUER_API_PORT:-4110}:80"]
+    depends_on: [identity-api]
+    networks: [xi-net]
+    restart: unless-stopped
+
+  identity-verifier-edge:
+    build: { <<: *edge-build, args: { PERSONA: identity-verifier } }
+    ports: ["${IDENTITY_VERIFIER_API_PORT:-4111}:80"]
+    depends_on: [identity-api]
+    networks: [xi-net]
+    restart: unless-stopped
+
+  identity-holder-edge:
+    build: { <<: *edge-build, args: { PERSONA: identity-holder } }
+    ports: ["${IDENTITY_HOLDER_API_PORT:-4112}:80"]
+    depends_on: [identity-api]
+    networks: [xi-net]
+    restart: unless-stopped
+
+  identity-issuer-web:
+    build:
+      <<: *web-build
+      args:
+        VITE_API_URL: ${IDENTITY_ISSUER_API_URL:-http://localhost:4110}
+        VITE_APP_PERSONA: identity-issuer
+    ports: ["${IDENTITY_ISSUER_WEB_PORT:-8090}:80"]
+    depends_on: [identity-issuer-edge]
+    networks: [xi-net]
+    restart: unless-stopped
+
+  identity-verifier-web:
+    build:
+      <<: *web-build
+      args:
+        VITE_API_URL: ${IDENTITY_VERIFIER_API_URL:-http://localhost:4111}
+        VITE_APP_PERSONA: identity-verifier
+    ports: ["${IDENTITY_VERIFIER_WEB_PORT:-8091}:80"]
+    depends_on: [identity-verifier-edge]
+    networks: [xi-net]
+    restart: unless-stopped
+
+  identity-holder-web:
+    build:
+      <<: *web-build
+      args:
+        VITE_API_URL: ${IDENTITY_HOLDER_API_URL:-http://localhost:4112}
+        VITE_APP_PERSONA: identity-holder
+    ports: ["${IDENTITY_HOLDER_WEB_PORT:-8092}:80"]
+    depends_on: [identity-holder-edge]
+    networks: [xi-net]
+    restart: unless-stopped
+
+volumes:
+  identity-data:
+
+networks:
+  xi-net:
+    external: true

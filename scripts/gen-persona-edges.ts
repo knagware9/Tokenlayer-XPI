@@ -92,7 +92,15 @@ export function emittedRules(persona: PersonaDef): EmittedRule[] {
   return rules.map((r) => ({
     regex: toRegex(r.prefix, !!r.exact),
     // NOT r.methods — see the ordering trap above.
-    methods: personaMethodsFor(persona, r.prefix),
+    // OPTIONS rides along on every rule. A browser preflights any request
+    // carrying an Authorization header, and a preflight the edge refuses comes
+    // back without Access-Control-Allow-Origin, so the browser blocks the REAL
+    // request and reports it as a CORS failure — an error naming neither the
+    // persona boundary nor the missing method. Node's fetch sends no preflight,
+    // which is why the whole e2e passed against six apps no browser could use.
+    // OPTIONS is transport, not permission: it reveals only which methods are
+    // allowed, and a route absent from this allowlist is still default-denied.
+    methods: [...personaMethodsFor(persona, r.prefix), "OPTIONS" as HttpMethod],
     prefix: r.prefix,
     why: r.why,
   }));
@@ -129,9 +137,10 @@ export function renderConfig(persona: PersonaDef): string {
     // `limit_except` is nginx's purpose-built method guard; `error_page 403 =404`
     // turns its refusal into the same 404 an unlisted path gets, so probing the
     // edge cannot distinguish "wrong method here" from "not served here".
-    const guard = r.methods.length === 5
-      ? ""
-      : `\n    limit_except ${r.methods.join(" ")} { deny all; }\n    error_page 403 =404 @denied;`;
+    // Always emitted, even when it permits everything: an explicit list is what
+    // someone auditing this file reads, and the special case that skipped it was
+    // where the missing OPTIONS hid.
+    const guard = `\n    limit_except ${r.methods.join(" ")} { deny all; }\n    error_page 403 =404 @denied;`;
     return `  # ${r.prefix} — ${r.why}
   location ~ "${r.regex}" {${guard}
     # Through a VARIABLE so nginx resolves the upstream at request time, not at

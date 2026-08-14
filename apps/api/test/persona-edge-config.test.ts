@@ -106,6 +106,36 @@ describe("nginx's decision equals personaAllows, route for route", () => {
     expect(edgeDecision(market, "POST", "/api/v1/assets")).toBe("deny");
   });
 
+  it("OPTIONS is admitted wherever anything is — or no browser can use these apps", async () => {
+    // THE BUG THIS PINS. A browser preflights any request carrying an
+    // Authorization header. The first version of these configs permitted only
+    // the persona's real methods, so every preflight was refused, the response
+    // carried no Access-Control-Allow-Origin, and the browser blocked the real
+    // request — reporting a CORS error that names neither the persona boundary
+    // nor the missing method. The whole live e2e passed regardless, because
+    // Node's fetch sends no preflight. Six apps, none of them usable.
+    const patterns = await surfacePatterns();
+    const broken: string[] = [];
+    for (const persona of PERSONAS) {
+      for (const pattern of patterns) {
+        const reachable = METHODS.some((m) => personaAllows(persona, m, pattern));
+        if (!reachable) continue;
+        if (edgeDecision(persona, "OPTIONS", toUrl(pattern)) !== "allow") {
+          broken.push(`${persona.key}: OPTIONS ${pattern}`);
+        }
+      }
+    }
+    expect(broken, `preflight refused on routes the persona can use:\n  ${broken.slice(0, 15).join("\n  ")}`).toEqual([]);
+  }, 60_000);
+
+  it("but a route the persona does NOT have still refuses its preflight", () => {
+    // Otherwise the fix above would have quietly opened every path to OPTIONS,
+    // turning the edge into a method-enumeration oracle for routes it refuses.
+    const holder = PERSONAS.find((p) => p.key === "identity-holder")!;
+    expect(edgeDecision(holder, "OPTIONS", "/api/v1/orgs/o1/users")).toBe("deny");
+    expect(edgeDecision(holder, "OPTIONS", "/api/v1/assets")).toBe("deny");
+  });
+
   it("specifically: a wallet's /me does not become /me/portfolio at the edge either", () => {
     const holder = PERSONAS.find((p) => p.key === "identity-holder")!;
     expect(edgeDecision(holder, "GET", "/api/v1/me")).toBe("allow");

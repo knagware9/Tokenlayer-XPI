@@ -79,6 +79,17 @@ async function onboardSingle(deps: AppDeps, proposer: Actor, pl: OnboardUserPayl
     // not hold that key and must never be able to sign as the holder. It also
     // issues no KycCredential — that is the identity product's act, and the
     // route refuses `did` together with `kyc` so the two cannot be confused.
+    // PLAIN IDENTIFIERS: this deployment's users are ordinary accounts. No
+    // custodial seed is minted and no credential is issued, because there is no
+    // subject DID to issue one to. The route refuses `did` and `kyc` up front,
+    // so reaching here with either would be a bug rather than a request.
+    if ((deps.subjectIdentifiers ?? "did") === "plain") {
+      await deps.audit.append({
+        actorId: proposer.id, action: "user-onboarded" as LifecycleAction,
+        payload: { userId: created.id, email: pl.email, role: pl.role, did: null, kyc: null },
+      });
+      return;
+    }
     let did: string;
     if (pl.did) {
       did = pl.did;
