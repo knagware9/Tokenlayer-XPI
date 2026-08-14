@@ -240,7 +240,7 @@ describe("the try-it button cannot fire a mutating route", () => {
     // the UI is precisely the bug: the path is what carries the danger. The
     // component must reach for `tryItAllowed`, which cannot be called without
     // one. Asserted on the source because there is no DOM here to render into.
-    const tsx = readFileSync(fileURLToPath(new URL("../src/components/ApiReference.tsx", import.meta.url)), "utf8");
+    const tsx = readFileSync(fileURLToPath(new URL("../src/components/shared/ApiReference.tsx", import.meta.url)), "utf8");
     expect(tsx).toContain("tryItAllowed(route)");
     expect(
       /\bcanTryIt\s*\(/.test(tsx),

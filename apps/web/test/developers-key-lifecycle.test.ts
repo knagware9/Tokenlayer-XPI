@@ -8,7 +8,7 @@
  * asserted below is the logic those renders delegate to.
  */
 import { describe, expect, it } from "vitest";
-import { EMPTY_KEY_DRAFT, canRotate, checkKeyDraft } from "../src/components/Developers.js";
+import { EMPTY_KEY_DRAFT, canRotate, checkKeyDraft } from "../src/components/shared/Developers.js";
 import { confirmNavigation, setNavGuard } from "../src/lib/nav-guard.js";
 
 describe("canRotate", () => {

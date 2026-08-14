@@ -15,7 +15,7 @@ import {
   canSendTest,
   checkWebhookDraft,
   subscribableEventTypes,
-} from "../src/components/Webhooks.js";
+} from "../src/components/shared/Webhooks.js";
 import { EVENT_TYPES, type EventType, type OrgCapabilities } from "../src/types.js";
 
 const IDENTITY_ONLY: OrgCapabilities = { domains: ["identity"], roles: ["Issuer", "Holder", "Verifier"] };
