@@ -11,7 +11,8 @@
     "api:dev": "pnpm --filter @tokenlayer/api dev",
     "web:dev": "pnpm --filter @tokenlayer/web dev",
     "chain:node": "pnpm --filter @tokenlayer/contracts node",
-    "demo": "pnpm --filter @tokenlayer/api demo"
+    "demo": "pnpm --filter @tokenlayer/api demo",
+    "gen:persona-edges": "tsx scripts/gen-persona-edges.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
