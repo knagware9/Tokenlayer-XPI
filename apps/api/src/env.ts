@@ -143,6 +143,21 @@ export interface Env {
    * deployment means nothing can answer, and `requireVerifiedIdentity` use cases
    * refuse loudly rather than quietly denying every holder.
    */
+  /**
+   * Do the PEOPLE in this deployment carry DIDs?
+   *
+   *   "did"    onboarding mints a custodial DID per user (and a KycCredential
+   *            when asked), exactly as before. The default, so nothing changes
+   *            for an existing deployment.
+   *   "plain"  users are ordinary accounts with an id, an email and a role.
+   *            No custodial seed, no credential, nothing to present.
+   *
+   * ORGANIZATIONS ALWAYS CARRY A DID whichever this is. An org's DID signs its
+   * members' credentials and is what the on-chain registry trusts; dropping it
+   * would take the platform's own issuer identity with it, which is a different
+   * and much larger decision than "our users are not credential holders".
+   */
+  subjectIdentifiers: "did" | "plain";
   identityServiceUrl?: string;
   /** A peer API key on the identity service holding the `identity:assert` scope. */
   identityServiceKey?: string;
@@ -237,6 +252,18 @@ export const env: Env = {
     if (parsed.length === 0) { if (raw.length) console.warn("[env] ENABLED_DOMAINS had no known domains — defaulting to both"); return known; }
     return parsed; // empty/all-unknown ⇒ both (never zero)
   })(),
+  subjectIdentifiers: (() => {
+    const raw = (process.env.SUBJECT_IDENTIFIERS ?? "did").trim().toLowerCase();
+    if (raw === "did" || raw === "plain") return raw;
+    // NOT a silent default. Misreading "none" or "off" as "did" would hand every
+    // user a custodial seed in a deployment whose operator asked for the
+    // opposite, and nothing would say so.
+    throw new Error(
+      `SUBJECT_IDENTIFIERS must be 'did' or 'plain'; got ${JSON.stringify(process.env.SUBJECT_IDENTIFIERS)}. ` +
+        "'did' mints a custodial DID per user; 'plain' gives users ordinary accounts. " +
+        "Organizations carry a DID either way.",
+    );
+  })(),
   identityServiceUrl: process.env.IDENTITY_SERVICE_URL?.trim() || undefined,
   identityServiceKey: process.env.IDENTITY_SERVICE_KEY?.trim() || undefined,
   identityServiceTimeoutMs: process.env.IDENTITY_SERVICE_TIMEOUT_MS
@@ -282,6 +309,41 @@ if (env.identityServiceUrl && env.enabledDomains.includes("identity")) {
       "One deployment cannot both own credentials and delegate them: the desk would write here " +
       "while the compliance gate reads there. Set ENABLED_DOMAINS=tokenization to delegate, " +
       "or unset IDENTITY_SERVICE_URL/IDENTITY_SERVICE_KEY to answer locally.",
+  );
+}
+
+/**
+ * The identity PRODUCT issues credentials to subjects. Subjects with no DID
+ * cannot hold one, so a deployment that serves identity with plain identifiers
+ * is asking for a credential registry with nobody to put in it — and the failure
+ * would arrive as a confusing 400 at the first issuance rather than here.
+ */
+if (env.subjectIdentifiers === "plain" && env.enabledDomains.includes("identity")) {
+  throw new Error(
+    "SUBJECT_IDENTIFIERS=plain, but this deployment runs the 'identity' domain, whose whole business is " +
+      "issuing credentials to subjects — and a subject with no DID cannot hold one. " +
+      "Set SUBJECT_IDENTIFIERS=did, or drop 'identity' from ENABLED_DOMAINS.",
+  );
+}
+
+/**
+ * Delegating identity means asking another service whether THIS deployment's
+ * users hold a credential. With plain identifiers there is no DID to ask about,
+ * so every such question would be asked of `undefined` and answered "no" —
+ * a gate that refuses everyone, for a reason nobody could see.
+ */
+if (env.subjectIdentifiers === "plain" && env.identityServiceUrl) {
+  throw new Error(
+    "SUBJECT_IDENTIFIERS=plain, but IDENTITY_SERVICE_URL is set. There would be no subject DID to ask about: " +
+      "every verified-identity check would refuse. Set SUBJECT_IDENTIFIERS=did to link an identity deployment, " +
+      "or unset IDENTITY_SERVICE_URL/IDENTITY_SERVICE_KEY to run tokenization alone.",
+  );
+}
+
+if (env.subjectIdentifiers === "plain") {
+  console.log(
+    "[identity] SUBJECT_IDENTIFIERS=plain — users are ordinary accounts (no custodial DIDs, no credentials). " +
+      "Organizations still carry a DID. Use cases requiring a verified identity cannot be satisfied here.",
   );
 }
 

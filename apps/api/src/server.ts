@@ -79,6 +79,7 @@ async function main(): Promise<void> {
   // WHERE "is this holder verified?" is answered on THIS deployment — the local
   // credential store, a remote Identity service, or nowhere (and it says so).
   const identity = selectIdentityAssertions({
+    subjectIdentifiers: env.subjectIdentifiers,
     enabledDomains: env.enabledDomains,
     serviceUrl: env.identityServiceUrl,
     serviceKey: env.identityServiceKey,
@@ -153,6 +154,7 @@ async function main(): Promise<void> {
     qrLogin: createMemoryQrLoginStore(),
     publicWebUrl: env.publicWebUrl,
     enabledDomains: env.enabledDomains,
+    subjectIdentifiers: env.subjectIdentifiers,
     trustedKycIssuers: env.trustedKycIssuers,
     devIssuerSeed: env.devKycIssuerSeed,
     currencies: loadCurrencies(),

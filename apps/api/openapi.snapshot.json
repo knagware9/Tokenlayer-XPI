@@ -981,7 +981,7 @@
         "parameters": [],
         "requestBody": false,
         "responses": {
-          "200": "{domains}",
+          "200": "{domains,subjectIdentifiers}",
           "401": "#Error"
         }
       }

@@ -898,6 +898,12 @@ export const S: Record<string, FastifySchema> = {
             items: { type: "string", enum: ["tokenization", "identity"] },
             description: "The product domains this deployment serves. Routes of an absent domain are not mounted.",
           },
+          subjectIdentifiers: {
+            type: "string", enum: ["did", "plain"],
+            description:
+              "Whether the PEOPLE in this deployment carry DIDs. `did` (the default) mints a custodial DID per user; " +
+              "`plain` runs users as ordinary accounts with no DID and no credentials. Organizations carry a DID either way.",
+          },
         },
         required: ["domains"],
       },
