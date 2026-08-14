@@ -28,6 +28,10 @@
 # in the same compose project — which is exactly the coupling being removed.
 #
 # NEITHER API PUBLISHES A HOST PORT. The three edges are the only way in.
+#
+# One API serves all three personas here, and the reason is recorded where
+# someone would go to change it: see "WHY EACH PRODUCT KEEPS ONE API" at the top
+# of packages/core/src/personas.ts.
 # ═════════════════════════════════════════════════════════════════════════════
 
 x-edge-build: &edge-build
