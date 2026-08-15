@@ -109,18 +109,41 @@ log "Building images and starting the stack…"
 "${COMPOSE[@]}" up -d --build
 
 # --- 4. wait for health -----------------------------------------------------
+# SIZED FOR THE COLD BOOT, NOT THE WARM ONE. On an existing volume the API
+# answers in seconds; on an EMPTY one it first deploys the identity registries
+# and every seeded use case to the real chains before it starts listening, which
+# is minutes of on-chain work. The old ceiling of 60×2s ≈ 2min sat right in the
+# middle of that: `make deploy` on a fresh volume reported "API did not become
+# healthy" while the API was mid-deploy, and came up fine moments later — a
+# failure message for a stack that was working.
+#
+# Six minutes is deliberately far past any observed cold boot (~3-4min here).
+# The cost of the higher ceiling is paid ONLY when something is genuinely
+# broken, and waiting longer for a real failure is much cheaper than a false one.
+API_HEALTH_TRIES=180 # × 2s ≈ 6 minutes
 log "Waiting for the API (login endpoint)…"
-for i in $(seq 1 60); do
+for i in $(seq 1 $API_HEALTH_TRIES); do
   code=$(curl -s -m 3 -o /dev/null -w '%{http_code}' -X POST "http://localhost:${API_PORT}/api/v1/auth/login" \
-          -H 'Content-Type: application/json' -d "{\"email\":\"${ADMIN_EMAIL}\",\"password\":\"${ADMIN_PASS}\"}" 2>/dev/null || echo 000)
+          -H 'Content-Type: application/json' -d "{\"email\":\"${ADMIN_EMAIL}\",\"password\":\"${ADMIN_PASS}\"}" 2>/dev/null) || true
+  # `%{http_code}` ALREADY prints 000 when the connection fails, so the old
+  # `|| echo 000` fallback concatenated a second one: "last HTTP 000000". The
+  # `|| true` is still required — under `set -e` curl's non-zero exit would
+  # otherwise abort the deploy on the first attempt, before the API can start.
+  code=${code:-000}
   if [[ "$code" == "200" ]]; then log "API healthy ✓"; break; fi
-  [[ $i -eq 60 ]] && die "API did not become healthy (last HTTP $code) — check: ${COMPOSE[*]} logs api"
+  # A heartbeat, because a silent six-minute wait is indistinguishable from a
+  # hang and invites someone to kill a deploy that is simply working.
+  (( i % 15 == 0 )) && log "  …still waiting ($((i * 2))s; a first boot deploys contracts on-chain — last HTTP $code)"
+  if [[ $i -eq $API_HEALTH_TRIES ]]; then
+    die "API did not become healthy after $((API_HEALTH_TRIES * 2))s (last HTTP $code) — check: ${COMPOSE[*]} logs api"
+  fi
   sleep 2
 done
 
 log "Waiting for the web dashboard…"
 for i in $(seq 1 30); do
-  code=$(curl -s -m 3 -o /dev/null -w '%{http_code}' "http://localhost:${WEB_PORT}/" 2>/dev/null || echo 000)
+  code=$(curl -s -m 3 -o /dev/null -w '%{http_code}' "http://localhost:${WEB_PORT}/" 2>/dev/null) || true
+  code=${code:-000}
   if [[ "$code" == "200" ]]; then log "Web healthy ✓"; break; fi
   [[ $i -eq 30 ]] && die "Web did not become healthy (last HTTP $code)"
   sleep 2
