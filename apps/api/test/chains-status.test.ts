@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildChainRegistry } from "../src/chains.js";
+import { buildChainRegistry } from "../src/shared/chains.js";
 import { auth, buildTestApp, loginAs, V1 } from "./helpers.js";
 
 // A dev-only throwaway key (hardhat account #1) — never used on a live network here.

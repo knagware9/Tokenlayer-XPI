@@ -36,9 +36,9 @@ import type { CredentialAnchor, DidRegistration, OnChainCredentialStatus } from 
 import { SANDBOX_CHAIN_ID, type UseCaseDefinition } from "@tokenlayer/core";
 import bcrypt from "bcryptjs";
 import { describe, expect, it } from "vitest";
-import { mintSecret } from "../src/api-keys.js";
+import { mintSecret } from "../src/shared/api-keys.js";
 import type { AppDeps } from "../src/context.js";
-import type { IdentityRegistry } from "../src/registry.js";
+import type { IdentityRegistry } from "../src/identity/registry.js";
 import { FakeAnchor, fakeRegistry } from "./fake-anchor.js";
 import { auth, buildTestAppWithRepos, loginAs, PLATFORM_ADMIN_2, V1, type TestAppHandle } from "./helpers.js";
 

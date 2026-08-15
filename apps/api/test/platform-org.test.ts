@@ -5,9 +5,9 @@
  * trust issuers via the on-chain DidRegistry permanently reject this org.
  */
 import { describe, expect, it } from "vitest";
-import { createKeystore } from "../src/keystore.js";
+import { createKeystore } from "../src/shared/keystore.js";
 import { MemoryOrganizationRepository } from "../src/persistence/memory.js";
-import { ensurePlatformIssuerOrg } from "../src/platform-org.js";
+import { ensurePlatformIssuerOrg } from "../src/shared/platform-org.js";
 import { FakeAnchor, fakeRegistry } from "./fake-anchor.js";
 
 function makeDeps(anchor: FakeAnchor) {

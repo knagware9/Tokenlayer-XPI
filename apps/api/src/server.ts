@@ -1,15 +1,15 @@
 import { CREDENTIAL_TEMPLATES, RbacPolicy, type OrgType } from "@tokenlayer/core";
 import { buildApp } from "./app.js";
-import { buildChainRegistry } from "./chains.js";
+import { buildChainRegistry } from "./shared/chains.js";
 import type { AppDeps } from "./context.js";
 import { createEngine } from "./context.js";
-import { loadCurrencies } from "./currencies.js";
+import { loadCurrencies } from "./tokenization/currencies.js";
 import { env } from "./env.js";
-import { selectIdentityAssertions } from "./identity-assertions.js";
-import { createMemoryChallengeStore } from "./identity-challenges.js";
-import { createMemoryQrLoginStore } from "./qr-login-sessions.js";
-import { createKeystore } from "./keystore.js";
-import { ensureNamedOrg, ensurePlatformIssuerOrg, ensureUserWallet, provisionOrgMemberIdentities, provisionPlatformOperatorIdentities } from "./platform-org.js";
+import { selectIdentityAssertions } from "./identity/identity-assertions.js";
+import { createMemoryChallengeStore } from "./identity/identity-challenges.js";
+import { createMemoryQrLoginStore } from "./identity/qr-login-sessions.js";
+import { createKeystore } from "./shared/keystore.js";
+import { ensureNamedOrg, ensurePlatformIssuerOrg, ensureUserWallet, provisionOrgMemberIdentities, provisionPlatformOperatorIdentities } from "./shared/platform-org.js";
 import {
   PrismaAccountRepository,
   PrismaApiKeyRepository,
@@ -35,9 +35,9 @@ import {
   PrismaWebhookDeliveryRepository,
   PrismaWebhookEndpointRepository,
 } from "./persistence/prisma.js";
-import { resolveIdentityRegistry } from "./registry.js";
-import { seedDefaults } from "./seed.js";
-import { seedUseCases } from "./use-cases.js";
+import { resolveIdentityRegistry } from "./identity/registry.js";
+import { seedDefaults } from "./shared/seed.js";
+import { seedUseCases } from "./tokenization/use-cases.js";
 import { createHttpSender, startDispatcher } from "./webhooks/dispatcher.js";
 import { createSecretBox } from "./webhooks/secret-box.js";
 

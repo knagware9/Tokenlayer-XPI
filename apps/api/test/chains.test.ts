@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildChainRegistry } from "../src/chains.js";
+import { buildChainRegistry } from "../src/shared/chains.js";
 
 // A dev-only throwaway key (hardhat account #1) — never used on a live network here.
 const KEY = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";

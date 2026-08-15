@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { describe, expect, it } from "vitest";
 import { auth, buildTestApp, issueAsset, loginAs, onboardUser, PLATFORM_ADMIN_2, V1 } from "./helpers.js";
 import { FakeAnchor, fakeRegistry } from "./fake-anchor.js";
-import { PLATFORM_ORG_NAME } from "../src/platform-org.js";
+import { PLATFORM_ORG_NAME } from "../src/shared/platform-org.js";
 
 describe("platform issuer org", () => {
   it("is seeded at boot: verifier type, verified, has a did:key", async () => {

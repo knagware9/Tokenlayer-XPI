@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { describe, expect, it } from "vitest";
-import { resolveDid } from "../src/did-resolver.js";
+import { resolveDid } from "../src/identity/did-resolver.js";
 import { generateDidKey } from "@tokenlayer/core";
 import { FakeAnchor, fakeRegistry } from "./fake-anchor.js";
 import { auth, buildTestApp, loginAs, V1 } from "./helpers.js";

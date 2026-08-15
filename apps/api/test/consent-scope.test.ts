@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import { describe, expect, it } from "vitest";
-import { mintSecret } from "../src/api-keys.js";
+import { mintSecret } from "../src/shared/api-keys.js";
 import { auth, buildTestAppWithRepos, V1, type TestAppHandle } from "./helpers.js";
 
 /**

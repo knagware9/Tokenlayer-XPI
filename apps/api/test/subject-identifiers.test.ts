@@ -140,7 +140,7 @@ describe("the identity gate under plain identifiers", () => {
     // The wrong answer here is "not verified": a gate that refuses everyone
     // while reporting that some identity service was down sends the operator
     // looking for a network problem that does not exist.
-    const { selectIdentityAssertions } = await import("../src/identity-assertions.js");
+    const { selectIdentityAssertions } = await import("../src/identity/identity-assertions.js");
     const assertions = selectIdentityAssertions({
       subjectIdentifiers: "plain",
       enabledDomains: ["tokenization"],

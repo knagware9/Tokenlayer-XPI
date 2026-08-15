@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AUTO_QR_PLACEMENT, certificatePageSize, type CertificateFieldPlacement, type CertificateFieldRef } from "@tokenlayer/core";
-import { certificateDrawList, type DrawOp } from "../src/certificate-artwork.js";
+import { certificateDrawList, type DrawOp } from "../src/identity/certificate-artwork.js";
 
 const PAGE = certificatePageSize(1600, 900); // landscape
 const values = new Map<CertificateFieldRef, string>([

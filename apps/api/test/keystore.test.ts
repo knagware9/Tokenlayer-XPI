@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { decodeJwt, publicKeyFromDidKey, verifyJwtSignature } from "@tokenlayer/core";
-import { createKeystore } from "../src/keystore.js";
+import { createKeystore } from "../src/shared/keystore.js";
 
 const MASTER = "11".repeat(32); // 32 bytes of 0x11, hex
 

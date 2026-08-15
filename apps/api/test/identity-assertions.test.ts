@@ -33,7 +33,7 @@ import {
   localIdentityAssertions,
   selectIdentityAssertions,
   unavailableIdentityAssertions,
-} from "../src/identity-assertions.js";
+} from "../src/identity/identity-assertions.js";
 import { MemoryCredentialRepository } from "../src/persistence/memory.js";
 import type { CredentialRecord } from "../src/persistence/types.js";
 import { auth, buildTestAppWithRepos, loginAs, V1, type TestAppHandle } from "./helpers.js";

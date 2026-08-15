@@ -1,14 +1,14 @@
 import { RbacPolicy } from "@tokenlayer/core";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.js";
-import { buildChainRegistry } from "../src/chains.js";
+import { buildChainRegistry } from "../src/shared/chains.js";
 import type { AppDeps } from "../src/context.js";
 import { createEngine } from "../src/context.js";
-import { loadCurrencies } from "../src/currencies.js";
-import { createMemoryChallengeStore } from "../src/identity-challenges.js";
-import { createKeystore } from "../src/keystore.js";
+import { loadCurrencies } from "../src/tokenization/currencies.js";
+import { createMemoryChallengeStore } from "../src/identity/identity-challenges.js";
+import { createKeystore } from "../src/shared/keystore.js";
 import { createSecretBox } from "../src/webhooks/secret-box.js";
-import { createMemoryQrLoginStore } from "../src/qr-login-sessions.js";
+import { createMemoryQrLoginStore } from "../src/identity/qr-login-sessions.js";
 import {
   MemoryAccountRepository,
   MemoryApiKeyRepository,
@@ -33,10 +33,10 @@ import {
   MemoryWebhookDeliveryRepository,
   MemoryWebhookEndpointRepository,
 } from "../src/persistence/memory.js";
-import { ensurePlatformIssuerOrg } from "../src/platform-org.js";
-import type { IdentityRegistry } from "../src/registry.js";
-import { DEFAULT_USERS, seedDefaults } from "../src/seed.js";
-import { seedUseCases } from "../src/use-cases.js";
+import { ensurePlatformIssuerOrg } from "../src/shared/platform-org.js";
+import type { IdentityRegistry } from "../src/identity/registry.js";
+import { DEFAULT_USERS, seedDefaults } from "../src/shared/seed.js";
+import { seedUseCases } from "../src/tokenization/use-cases.js";
 
 /** Demo market escrow used by tests unless a test explicitly overrides it (pass `marketEscrowAccount: undefined` to disable the market). */
 export const TEST_MARKET_ESCROW = "0xcd3B766CCDd6AE721141F452C550Ca635964ce71";

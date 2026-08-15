@@ -1,12 +1,12 @@
 import { LifecycleEngine, RbacPolicy, type UseCaseSource } from "@tokenlayer/core";
-import { RepositoryAuditSink } from "./audit-sink.js";
-import type { ChainRegistry } from "./chains.js";
-import { createComplianceProvider } from "./compliance-provider.js";
-import { localIdentityAssertions, type IdentityAssertions } from "./identity-assertions.js";
-import type { Currency } from "./currencies.js";
-import type { ChallengeStore } from "./identity-challenges.js";
-import type { Keystore } from "./keystore.js";
-import type { QrLoginStore } from "./qr-login-sessions.js";
+import { RepositoryAuditSink } from "./shared/audit-sink.js";
+import type { ChainRegistry } from "./shared/chains.js";
+import { createComplianceProvider } from "./tokenization/compliance-provider.js";
+import { localIdentityAssertions, type IdentityAssertions } from "./identity/identity-assertions.js";
+import type { Currency } from "./tokenization/currencies.js";
+import type { ChallengeStore } from "./identity/identity-challenges.js";
+import type { Keystore } from "./shared/keystore.js";
+import type { QrLoginStore } from "./identity/qr-login-sessions.js";
 import type {
   AccountRepository,
   ApiKeyRepository,
@@ -31,7 +31,7 @@ import type {
   WebhookDeliveryRepository,
   WebhookEndpointRepository,
 } from "./persistence/types.js";
-import type { IdentityRegistry } from "./registry.js";
+import type { IdentityRegistry } from "./identity/registry.js";
 import type { SecretBox } from "./webhooks/secret-box.js";
 
 export interface AppDeps {

@@ -1,7 +1,7 @@
 import { deflateSync, inflateSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { certificatePageSize } from "@tokenlayer/core";
-import { artworkDimensions, certificateDrawList, drawCertificate } from "../src/certificate-artwork.js";
+import { artworkDimensions, certificateDrawList, drawCertificate } from "../src/identity/certificate-artwork.js";
 import { buildTestApp, loginAs, onboardUser, V1, auth } from "./helpers.js";
 
 /**

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildTestApp, loginAs, onboardUser, V1, auth } from "./helpers.js";
-import { certificateStatusBanner, humanizeKey } from "../src/certificate.js";
+import { certificateStatusBanner, humanizeKey } from "../src/identity/certificate.js";
 
 // Seed a credential use case with two types: one certificate-enabled, one not.
 async function seedUseCase(app: Awaited<ReturnType<typeof buildTestApp>>, admin: string, key = "domicile-cert") {
