@@ -159,8 +159,22 @@ export interface AuditAnchorRecord {
 
 export interface AuditAnchorRepository {
   create(input: Omit<AuditAnchorRecord, "id" | "createdAt">): Promise<AuditAnchorRecord>;
-  /** The most recent anchor for the asset (highest seq), or null if never anchored. */
+  /**
+   * The most recent anchor (highest seq; oldest first at equal seq), or null.
+   *
+   * The tie-break is load-bearing, not tidiness. An asset can hold SEVERAL
+   * anchors at one seq, and taking "whichever row the database returned first"
+   * meant a later anchor could displace the original attestation — so a rewrite
+   * plus a re-anchor could read as consistent. Oldest-wins makes the FIRST
+   * attestation the one that speaks, and no later write can unseat it.
+   */
   latest(assetId: string): Promise<AuditAnchorRecord | null>;
+  /**
+   * EVERY anchor for the asset. Verification checks all of them: a chain is
+   * only consistent if it still agrees with every attestation ever made about
+   * it, not merely the newest one.
+   */
+  list(assetId: string): Promise<AuditAnchorRecord[]>;
 }
 
 /** A writable use-case store. Also satisfies the engine's UseCaseSource. */

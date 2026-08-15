@@ -263,10 +263,30 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     // here would spend real gas writing live audit heads to a real ledger.
     const { items } = await deps.assets.list({ useCaseKey, useCaseKeys: await modeVisibleUseCaseKeys(request) }, { limit: 1000 });
     const anchored: { assetId: string; seq: number; txHash: string }[] = [];
+    const unchanged: { assetId: string; seq: number }[] = [];
+    const refused: { assetId: string; seq: number; reason: string }[] = [];
     for (const a of items) {
       const chain = await assetChain(a.id);
       if (chain.length === 0) continue;
       const head = chain[chain.length - 1]!;
+      // ANCHORING AT AN ALREADY-ANCHORED SEQ IS NOT A ROUTINE RE-ANCHOR.
+      // Every call used to append a row unconditionally, so an unchanged head
+      // accumulated duplicate anchors — and if the head at that seq had CHANGED,
+      // the new row was a fresh on-chain attestation that the rewritten history
+      // was genuine. Anchoring is the one thing that catches a fully consistent
+      // rewrite; it must not be usable to bless one.
+      const existing = (await deps.auditAnchors.list(a.id)).filter((x) => x.seq === head.seq);
+      if (existing.length > 0) {
+        if (existing.every((x) => x.hash === head.hash)) {
+          unchanged.push({ assetId: a.id, seq: head.seq });   // nothing moved: no tx, no row, no gas
+        } else {
+          // The head at an anchored seq differs from what was attested. That is
+          // the tamper signal itself — report it, never overwrite it.
+          refused.push({ assetId: a.id, seq: head.seq, reason: "ANCHOR_MISMATCH" });
+          request.log.warn({ assetId: a.id, seq: head.seq }, "refusing to re-anchor: head differs from the existing anchor at this seq");
+        }
+        continue;
+      }
       try {
         const receipt = await deps.chains.resolveAdapter(a.chainId).anchor({ id: a.id, chainId: a.chainId, contractRef: a.contractRef }, head.hash);
         const rec = await deps.auditAnchors.create({ assetId: a.id, seq: head.seq, hash: head.hash, txHash: receipt.txHash, chainId: a.chainId });
@@ -275,7 +295,7 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
         request.log.error({ err, assetId: a.id }, "audit anchor failed for asset — skipped (best-effort)");
       }
     }
-    return { anchored };
+    return { anchored, unchanged, refused };
   });
 
 
