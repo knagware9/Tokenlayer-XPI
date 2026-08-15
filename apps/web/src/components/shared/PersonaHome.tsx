@@ -38,7 +38,18 @@ export function PersonaHome(): JSX.Element | null {
             {/* The persona's own name, beside the product mark. Someone with
                 several of these open needs to tell the tabs apart. */}
             <span className="hidden sm:inline text-white/30" aria-hidden="true">/</span>
-            <span className="hidden sm:inline text-sm text-white/70 truncate">{copy.product} · {persona.label}</span>
+            {/* THE PERSONA ALONE, not "XI Identity · Issuer Console". The product
+                is already said twice on this screen — by the wordmark to the
+                left and by the eyebrow above the headline — and repeating it
+                here cost the part that is NOT redundant. With three controls in
+                the header there was no room, so the label truncated to "XI
+                Ide…", naming the product and hiding the persona: precisely
+                backwards, since every one of these six apps shares the product
+                and differs only by audience.
+                The full "XI Identity · Issuer Console" still names the browser
+                TAB (main.tsx) and the footer, where several apps are open at
+                once and the product actually distinguishes them. */}
+            <span className="hidden sm:inline text-sm text-white/70 truncate">{persona.label}</span>
           </div>
           {/* `shrink-0` IS LOAD-BEARING. Without it this group is squeezed below
               its content width on a phone and the buttons render ON TOP of the
@@ -58,12 +69,20 @@ export function PersonaHome(): JSX.Element | null {
               Login
             </button>
             {copy.publicSignup && (
-              // Hidden on a phone, NOT dropped: the hero below carries the same
+              // Hidden below `lg`, NOT dropped: the hero below carries the same
               // "Register your organization" button, so nothing becomes
               // unreachable — the widest control just stops competing for a
-              // 375px header it cannot fit in.
+              // header it cannot share.
+              //
+              // `lg` rather than `sm` because the squeeze does not end at phone
+              // width. Measured at 692px: this button and its neighbours take
+              // 429 of 692, leaving the persona label 52px for the 95px it
+              // needs — so "Issuer Console" still truncated to "Issuer…" on any
+              // half-width window. The label is the one thing here that says
+              // which of the six apps you are looking at; it should be the last
+              // to go, not the first.
               <button onClick={() => navigate("signup")}
-                className="hidden sm:inline-block text-sm font-medium text-ink bg-brand-400 hover:bg-brand-300 px-4 py-1.5 rounded-lg transition-colors">
+                className="hidden lg:inline-block text-sm font-medium text-ink bg-brand-400 hover:bg-brand-300 px-4 py-1.5 rounded-lg transition-colors">
                 Register your organization
               </button>
             )}
