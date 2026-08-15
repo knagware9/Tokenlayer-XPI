@@ -26,7 +26,7 @@
  * always has, which is what keeps the single-container and two-container
  * topologies working unchanged.
  */
-import { PERSONAS, personaByKey, type WebPersona } from "../personas.js";
+import { PERSONAS, personaByKey, type WebPersona } from "../../personas.js";
 
 export type { WebPersona as PersonaDef };
 

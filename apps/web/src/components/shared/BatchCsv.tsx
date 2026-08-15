@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { ApiError } from "../../api.js";
-import { parseCsv } from "../../lib/csv.js";
+import { parseCsv } from "../../lib/shared/csv.js";
 
 // ============================================================================
 // BatchCsv — a generic "upload a CSV, review it, submit as one batch

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../../api.js";
 import { useAuth } from "../../auth.js";
-import { withoutStalePlacements } from "../../lib/certificate-layout.js";
-import { SANDBOX_IMMUTABLE_NOTE, modeBlurb, modeLabel, modeTone } from "../../lib/modes.js";
+import { withoutStalePlacements } from "../../lib/identity/certificate-layout.js";
+import { SANDBOX_IMMUTABLE_NOTE, modeBlurb, modeLabel, modeTone } from "../../lib/shared/modes.js";
 import type { CertificateFieldPlacement, CredentialTypeSpec, CredentialUseCase, HolderPolicy, IssuerBinding, Organization, OrgType, UseCaseTemplate, VerifierBinding } from "../../types.js";
 import { CertificateDesigner } from "./CertificateDesigner.js";
 import { SchemaFieldEditor, fieldsToSchema, type FieldKind, type FieldRow } from "../shared/SchemaFieldEditor.js";

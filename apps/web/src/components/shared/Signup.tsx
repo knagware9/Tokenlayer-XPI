@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ApiError, api } from "../../api.js";
-import { DOMAIN_LABELS, ROLE_LABELS, fullCapabilities, toggleCapability, validateEnvelope } from "../../lib/capabilities.js";
+import { DOMAIN_LABELS, ROLE_LABELS, fullCapabilities, toggleCapability, validateEnvelope } from "../../lib/shared/capabilities.js";
 import { useRoute } from "../../router.js";
 import { ORG_DOMAINS, ORG_OPERATING_ROLES, type CompanyCategory, type OrgCapabilities, type OrgDomain, type OrgOperatingRole, type OrgType } from "../../types.js";
 import { Logo } from "./Logo.js";

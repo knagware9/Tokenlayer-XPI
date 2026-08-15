@@ -14,7 +14,7 @@
  * condition happens to be checked first.
  */
 import { describe, expect, it } from "vitest";
-import { beneficiariesOf, countsFor, groupByScheme, matchesQuery, nameFrom, schemesRunBy, statusOf } from "../src/lib/schemes.js";
+import { beneficiariesOf, countsFor, groupByScheme, matchesQuery, nameFrom, schemesRunBy, statusOf } from "../src/lib/identity/schemes.js";
 import type { CredentialUseCase, IssuedCredential } from "../src/types.js";
 
 const NOW = Date.parse("2026-08-13T00:00:00.000Z");

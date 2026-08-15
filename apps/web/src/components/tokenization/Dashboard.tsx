@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../../api.js";
 import { useAuth } from "../../auth.js";
 import { useRoute } from "../../router.js";
-import { SANDBOX_EXCLUDED_NOTE } from "../../lib/modes.js";
+import { SANDBOX_EXCLUDED_NOTE } from "../../lib/shared/modes.js";
 import type { AnalyticsSummary } from "../../types.js";
 import { AreaChart } from "../charts/AreaChart.js";
 import { BarChart } from "../charts/BarChart.js";

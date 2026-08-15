@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ApiError, api } from "../../api.js";
 import { useAuth } from "../../auth.js";
-import { explorerTxUrl } from "../../lib/explorers.js";
+import { explorerTxUrl } from "../../lib/shared/explorers.js";
 import type { ChainInfo, CredentialStatusInfo, HeldCredential } from "../../types.js";
 import { Pill } from "../shared/ui.js";
 

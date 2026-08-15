@@ -7,8 +7,8 @@
  * reader clicks, the edge 404s, and the product looks broken rather than narrow.
  */
 import { describe, expect, it } from "vitest";
-import { landingFor } from "../src/lib/persona-landing.js";
-import { resolvePersona } from "../src/lib/persona.js";
+import { landingFor } from "../src/lib/shared/persona-landing.js";
+import { resolvePersona } from "../src/lib/shared/persona.js";
 import { PERSONAS } from "../src/personas.js";
 
 describe("every persona has a front door that names itself", () => {

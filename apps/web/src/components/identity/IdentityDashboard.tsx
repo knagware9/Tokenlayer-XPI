@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../../api.js";
 import { useAuth } from "../../auth.js";
-import { SANDBOX_EXCLUDED_NOTE } from "../../lib/modes.js";
+import { SANDBOX_EXCLUDED_NOTE } from "../../lib/shared/modes.js";
 import type { DerivedCredentialStatus, IdentityDashboardData } from "../../types.js";
 import { SectionHeader } from "../shared/ui.js";
 

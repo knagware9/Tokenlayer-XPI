@@ -38,7 +38,7 @@ import {
   responseMediaTypes,
   tryItAllowed,
   withQuery,
-} from "../../lib/openapi.js";
+} from "../../lib/shared/openapi.js";
 import { Card, CopyBlock, EmptyState, Pill, Skeleton } from "./ui.js";
 
 const METHOD_TONE: Record<string, string> = {

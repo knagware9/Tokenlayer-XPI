@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { brandCssVars } from "../src/lib/branding.js";
+import { brandCssVars } from "../src/lib/shared/branding.js";
 
 describe("brandCssVars", () => {
   it("returns nothing for a session with no accent — the platform palette stands", () => {

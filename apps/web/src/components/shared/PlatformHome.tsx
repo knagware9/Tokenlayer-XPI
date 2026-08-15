@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api, ApiError } from "../../api.js";
 import { useAuth } from "../../auth.js";
 import { useRoute } from "../../router.js";
-import { SANDBOX_LEDGER_NOTE, chainChoicesFor, checkUseCaseDraft, modeLabel, modeOf, modeTone } from "../../lib/modes.js";
+import { SANDBOX_LEDGER_NOTE, chainChoicesFor, checkUseCaseDraft, modeLabel, modeOf, modeTone } from "../../lib/shared/modes.js";
 import type { ChainInfo, ContractCode, UseCase } from "../../types.js";
 import { ApprovalsPanel } from "./ApprovalsPanel.js";
 import { ContractCodeView } from "../tokenization/ContractCodeView.js";

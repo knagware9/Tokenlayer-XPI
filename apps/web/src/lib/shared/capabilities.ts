@@ -6,7 +6,7 @@
  * the wording can never drift apart. The two visual treatments stay in their
  * own components; only the data is shared.
  */
-import { ORG_DOMAINS, ORG_OPERATING_ROLES, type OrgCapabilities, type OrgDomain, type OrgOperatingRole } from "../types.js";
+import { ORG_DOMAINS, ORG_OPERATING_ROLES, type OrgCapabilities, type OrgDomain, type OrgOperatingRole } from "../../types.js";
 
 export const DOMAIN_LABELS: Record<OrgDomain, string> = {
   tokenization: "Tokenization",

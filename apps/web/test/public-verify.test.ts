@@ -17,7 +17,7 @@
  * alone. A single badge cannot carry both facts without lying about one.
  */
 import { describe, expect, it } from "vitest";
-import { credentialIdFrom, provenanceOf, verdictOf } from "../src/lib/public-verify.js";
+import { credentialIdFrom, provenanceOf, verdictOf } from "../src/lib/identity/public-verify.js";
 import type { CredentialStatusInfo } from "../src/types.js";
 
 const status = (over: Partial<CredentialStatusInfo> = {}): CredentialStatusInfo => ({

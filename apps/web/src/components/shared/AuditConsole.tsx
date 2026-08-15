@@ -22,7 +22,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, describeApiError } from "../../api.js";
 import { useAuth } from "../../auth.js";
-import { activityCsv, atEnd } from "../../lib/activity-log.js";
+import { activityCsv, atEnd } from "../../lib/shared/activity-log.js";
 import type { DomainKey } from "../../domains.js";
 import { EVENT_TYPES, type PlatformEvent } from "../../types.js";
 import { IntegrityPanel } from "./IntegrityPanel.js";

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "../../api.js";
 import { useAuth } from "../../auth.js";
-import { getOrCreateDeviceKey } from "../../lib/device-wallet.js";
+import { getOrCreateDeviceKey } from "../../lib/shared/device-wallet.js";
 import type { LoginKeyInfo } from "../../types.js";
 import { Card, SectionHeader } from "./ui.js";
 

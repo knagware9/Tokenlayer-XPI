@@ -11,7 +11,7 @@
  * something to chase spends the reviewer's attention on nothing.
  */
 import { describe, expect, it } from "vitest";
-import { GRACE_MS, healthOf, liveScopes, STALE_AFTER_MS, summarize } from "../src/lib/key-hygiene.js";
+import { GRACE_MS, healthOf, liveScopes, STALE_AFTER_MS, summarize } from "../src/lib/shared/key-hygiene.js";
 import type { ApiKeyView } from "../src/types.js";
 
 const NOW = Date.parse("2026-08-13T00:00:00.000Z");

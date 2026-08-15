@@ -4,7 +4,7 @@
  * Both live here rather than in the component because both are things an
  * auditor relies on being exactly right, and neither needs a browser to check.
  */
-import type { PlatformEvent } from "../types.js";
+import type { PlatformEvent } from "../../types.js";
 
 /**
  * One CSV field, quoted when it has to be.

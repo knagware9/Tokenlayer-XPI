@@ -8,7 +8,7 @@ import {
   removePlacement,
   stalePlacementFields,
   withoutStalePlacements,
-} from "../src/lib/certificate-layout.js";
+} from "../src/lib/identity/certificate-layout.js";
 import { DEFAULT_QR_WIDTH, MAX_CERTIFICATE_PLACEMENTS, type CertificateFieldPlacement } from "../src/types.js";
 
 const CLAIMS = ["fullName", "district"];

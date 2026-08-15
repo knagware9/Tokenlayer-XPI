@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError, api } from "../../api.js";
 import { useAuth } from "../../auth.js";
-import { clampAccent } from "../../lib/branding.js";
-import { DOMAIN_LABELS, ROLE_LABELS, fullCapabilities, isOrgOperatingRole, orgRoleEnabled, toggleCapability, validateEnvelope } from "../../lib/capabilities.js";
+import { clampAccent } from "../../lib/shared/branding.js";
+import { DOMAIN_LABELS, ROLE_LABELS, fullCapabilities, isOrgOperatingRole, orgRoleEnabled, toggleCapability, validateEnvelope } from "../../lib/shared/capabilities.js";
 import { ORG_DOMAINS, ORG_OPERATING_ROLES, type CompanyCategory, type CredentialStatusInfo, type DidDocument, type KybDocumentRef, type OrgCapabilities, type OrgDomain, type OrgMember, type OrgOperatingRole, type OrgType, type Organization, type Role } from "../../types.js";
 import { useOrgLogo } from "./AppShell.js";
 import { CredentialsPanel } from "../identity/CredentialsPanel.js";

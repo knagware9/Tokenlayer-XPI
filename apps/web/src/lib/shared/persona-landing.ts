@@ -12,7 +12,7 @@
  * landing page is a contract with the reader, and "issue credentials" on the
  * Wallet's front door would be a lie the container itself enforces.
  */
-import type { WebPersona } from "../personas.js";
+import type { WebPersona } from "../../personas.js";
 
 export interface PersonaLanding {
   /** The product line, shown as an eyebrow above the title. */

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../api.js";
 import { useAuth } from "../../auth.js";
-import { withoutStalePlacements } from "../../lib/certificate-layout.js";
+import { withoutStalePlacements } from "../../lib/identity/certificate-layout.js";
 import type { CertificateFieldPlacement, CredentialUseCase } from "../../types.js";
 import { CertificateDesigner } from "./CertificateDesigner.js";
 import { Card, SectionHeader } from "../shared/ui.js";

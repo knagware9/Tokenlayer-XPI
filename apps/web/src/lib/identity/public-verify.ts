@@ -8,7 +8,7 @@
  * portal exists to avoid: a reader would take "green" to mean "independently
  * confirmed" when it may mean nothing of the sort.
  */
-import type { CredentialStatusInfo } from "../types.js";
+import type { CredentialStatusInfo } from "../../types.js";
 
 /**
  * Pull a credential id out of whatever the user actually pasted.

@@ -14,7 +14,7 @@ import {
   type CertificateFieldPlacement,
   type CertificateFieldRef,
   type CertificateFixedField,
-} from "../types.js";
+} from "../../types.js";
 
 /** Just the part of a DOMRect this module needs, so tests need no DOM. */
 export interface CanvasBox { left: number; top: number; width: number; height: number }

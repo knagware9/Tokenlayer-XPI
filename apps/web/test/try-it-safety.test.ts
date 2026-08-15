@@ -55,7 +55,7 @@ import {
   mutatingGetReason,
   normalizeRoutePath,
   tryItAllowed,
-} from "../src/lib/openapi.js";
+} from "../src/lib/shared/openapi.js";
 
 // ONE FILE PER PRODUCT since routes.ts was split. Read the folder, not a list:
 // a family added later is covered the day it appears.
