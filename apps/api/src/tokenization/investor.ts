@@ -7,7 +7,7 @@
 import { splitProRata } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { createFold, amountOf } from "./holders.js";
-import type { AssetRecord, AuditEntryRecord } from "../persistence/types.js";
+import type { AssetRecord, AuditEntryRecord } from "../persistence/types/index.js";
 
 export interface Holding {
   assetId: string; name: string; symbol: string; useCaseKey: string; chainId: string;

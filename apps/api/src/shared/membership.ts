@@ -7,7 +7,7 @@
 import { randomUUID } from "node:crypto";
 import type { Role } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
-import type { OrganizationRecord, UserRecord } from "../persistence/types.js";
+import type { OrganizationRecord, UserRecord } from "../persistence/types/index.js";
 
 type MembershipDeps = Pick<AppDeps, "keystore" | "users" | "credentials">;
 

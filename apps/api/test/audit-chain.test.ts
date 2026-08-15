@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { MemoryAuditRepository } from "../src/persistence/memory.js";
+import { MemoryAuditRepository } from "../src/persistence/memory/index.js";
 import { verifyChain, type ChainEntry } from "@tokenlayer/core";
 
 function toChain(items: { seq?: number; prevHash?: string; hash?: string; assetId?: string; actorId: string; action: string; payload: Record<string, unknown>; txHash?: string; chainId?: string; createdAt: string }[]): ChainEntry[] {

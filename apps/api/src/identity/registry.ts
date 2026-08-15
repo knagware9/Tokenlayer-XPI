@@ -20,7 +20,7 @@
  */
 import { supportsCredentialAnchor, type CredentialAnchor } from "@tokenlayer/adapters";
 import type { ChainRegistry } from "../shared/chains.js";
-import type { RegistryDeploymentRepository } from "../persistence/types.js";
+import type { RegistryDeploymentRepository } from "../persistence/types/index.js";
 
 export interface IdentityRegistry {
   chainId: string;

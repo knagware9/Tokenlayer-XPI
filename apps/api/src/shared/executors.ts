@@ -13,7 +13,7 @@ import type { AppDeps } from "../context.js";
 import { emitEvent, ownerOrgOfUseCase } from "./events.js";
 import { foldAsset } from "../tokenization/holders.js";
 import { contextOf } from "../http/support.js";
-import type { AssetRecord, CashflowRecord } from "../persistence/types.js";
+import type { AssetRecord, CashflowRecord } from "../persistence/types/index.js";
 
 export class CodedError extends Error {
   constructor(

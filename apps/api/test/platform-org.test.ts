@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { createKeystore } from "../src/shared/keystore.js";
-import { MemoryOrganizationRepository } from "../src/persistence/memory.js";
+import { MemoryOrganizationRepository } from "../src/persistence/memory/index.js";
 import { ensurePlatformIssuerOrg } from "../src/shared/platform-org.js";
 import { FakeAnchor, fakeRegistry } from "./fake-anchor.js";
 

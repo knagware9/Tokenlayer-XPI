@@ -44,7 +44,7 @@ import {
   MemoryVerificationRequestRepository,
   MemoryWebhookDeliveryRepository,
   MemoryWebhookEndpointRepository,
-} from "../persistence/memory.js";
+} from "../persistence/memory/index.js";
 import { DEFAULT_ACCOUNTS, seedDefaults } from "../shared/seed.js";
 import { seedUseCases } from "../tokenization/use-cases.js";
 

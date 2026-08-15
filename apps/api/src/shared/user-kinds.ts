@@ -11,7 +11,7 @@ import type { TokenClaims } from "../http/support.js";
 import { PLATFORM_ORG_NAME } from "./platform-org.js";
 import { isSandboxUseCase } from "./sandbox.js";
 import type { ProposalKindHandler } from "./proposal-kinds.js";
-import type { ProposalRecord } from "../persistence/types.js";
+import type { ProposalRecord } from "../persistence/types/index.js";
 
 /** PlatformAdmin always; a UseCaseAdmin of the SAME use case. Never null-matches. */
 const userScopedView = async (_deps: AppDeps, claims: TokenClaims, p: ProposalRecord): Promise<boolean> =>

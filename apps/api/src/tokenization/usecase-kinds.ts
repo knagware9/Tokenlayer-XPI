@@ -11,7 +11,7 @@ import type { AppDeps } from "../context.js";
 import { coded } from "../shared/executors.js";
 import type { TokenClaims } from "../http/support.js";
 import type { ProposalKindHandler } from "../shared/proposal-kinds.js";
-import type { ProposalRecord } from "../persistence/types.js";
+import type { ProposalRecord } from "../persistence/types/index.js";
 import { deployAndCreateUseCase } from "./use-cases.js";
 import { namespaceHolding } from "../shared/usecase-namespace.js";
 

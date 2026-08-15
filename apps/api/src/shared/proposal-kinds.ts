@@ -17,7 +17,7 @@ import { issueUsecaseCredentialBatchKind, issueUsecaseCredentialKind } from "../
 import { coded, executeCashflowCore, executeIssueActivation, runGatedAction } from "./executors.js";
 import type { TokenClaims } from "../http/support.js";
 import { scopedToCaller } from "../http/support.js";
-import type { ProposalRecord } from "../persistence/types.js";
+import type { ProposalRecord } from "../persistence/types/index.js";
 import { orgCapabilityChangeKind } from "./org-kinds.js";
 import { onboardUserBatchKind, onboardUserKind, revokeUserIdentityKind } from "./user-kinds.js";
 import { createUseCaseKind } from "../tokenization/usecase-kinds.js";

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MemoryCredentialRepository, MemoryOrganizationRepository, MemoryUserRepository } from "../src/persistence/memory.js";
+import { MemoryCredentialRepository, MemoryOrganizationRepository, MemoryUserRepository } from "../src/persistence/memory/index.js";
 
 describe("MemoryOrganizationRepository", () => {
   it("creates, finds, lists, and updates status/verified", async () => {

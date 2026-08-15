@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MemoryCredentialRepository } from "../src/persistence/memory.js";
+import { MemoryCredentialRepository } from "../src/persistence/memory/index.js";
 
 describe("credential record carries credentialUseCaseKey", () => {
   it("round-trips the new field through the repo", async () => {

@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { normalizeUseCaseDefinition, type UseCaseContract, type UseCaseDefinition } from "@tokenlayer/core";
 import { coded } from "../shared/executors.js";
-import type { UseCaseRepository } from "../persistence/types.js";
+import type { UseCaseRepository } from "../persistence/types/index.js";
 
 /** Absolute path to the repo's declarative use-case config directory. */
 const USE_CASE_DIR = fileURLToPath(new URL("../../../../config/use-cases", import.meta.url));

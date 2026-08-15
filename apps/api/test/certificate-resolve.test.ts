@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { certificateSubjectName, resolveCertificateFields } from "../src/identity/certificate-fields.js";
-import type { CredentialRecord } from "../src/persistence/types.js";
+import type { CredentialRecord } from "../src/persistence/types/index.js";
 import type { CredentialTypeSpec } from "@tokenlayer/core";
 
 const spec: CredentialTypeSpec = {

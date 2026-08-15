@@ -1,5 +1,5 @@
 import type { AuditRecord, AuditSink } from "@tokenlayer/core";
-import type { AuditRepository } from "../persistence/types.js";
+import type { AuditRepository } from "../persistence/types/index.js";
 
 /** Bridges the engine's AuditSink to a persistence-layer AuditRepository. */
 export class RepositoryAuditSink implements AuditSink {

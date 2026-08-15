@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { endpointMatches } from "../src/webhooks/matching.js";
 import { createSecretBox } from "../src/webhooks/secret-box.js";
 import { SIGNATURE_TOLERANCE_SECONDS, signPayload, signatureHeader, verifySignature } from "../src/webhooks/signing.js";
-import type { EventRecord, WebhookEndpointRecord } from "../src/persistence/types.js";
+import type { EventRecord, WebhookEndpointRecord } from "../src/persistence/types/index.js";
 
 const SECRET = "whsec_test_0123456789abcdef";
 const BODY = JSON.stringify({ id: "evt_1", type: "credential.issued" });

@@ -24,7 +24,7 @@
  * expiry is testable at the boundary instead of only by waiting.
  */
 import { PolicyError } from "@tokenlayer/core";
-import type { CredentialRecord, CredentialRepository } from "../persistence/types.js";
+import type { CredentialRecord, CredentialRepository } from "../persistence/types/index.js";
 
 /**
  * Has this credential passed its expiry?

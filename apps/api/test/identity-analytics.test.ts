@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computeIdentityDashboard, derivedCredentialStatus } from "../src/identity/identity-analytics.js";
-import type { CredentialRecord, VerificationRequestRecord } from "../src/persistence/types.js";
+import type { CredentialRecord, VerificationRequestRecord } from "../src/persistence/types/index.js";
 import type { CredentialUseCaseDefinition } from "@tokenlayer/core";
 
 const NOW = "2026-08-06T12:00:00.000Z";

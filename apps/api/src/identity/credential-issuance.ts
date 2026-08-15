@@ -14,7 +14,7 @@ import { SANDBOX_CHAIN_ID } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { emitEvent } from "../shared/events.js";
 import { coded } from "../shared/executors.js";
-import type { CredentialRecord, OrganizationRecord } from "../persistence/types.js";
+import type { CredentialRecord, OrganizationRecord } from "../persistence/types/index.js";
 import { isSandboxCredential, writableRegistry } from "../shared/sandbox.js";
 
 export interface IssueCredentialArgs {

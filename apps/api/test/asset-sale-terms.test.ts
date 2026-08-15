@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { MemoryAssetRepository } from "../src/persistence/memory.js";
+import { MemoryAssetRepository } from "../src/persistence/memory/index.js";
 
 const base = {
   id: "a1", useCaseKey: "carbon-credit", name: "X", symbol: "X", chainId: "fabric",

@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import bcrypt from "bcryptjs";
 import type { Role } from "@tokenlayer/core";
-import type { AccountRepository, CashRepository, UserRepository } from "../persistence/types.js";
+import type { AccountRepository, CashRepository, UserRepository } from "../persistence/types/index.js";
 
 export interface SeedUser {
   email: string;
@@ -128,7 +128,7 @@ export async function seedDefaults(
 
 // CLI entry: `tsx src/shared/seed.ts` seeds the Prisma database.
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  const { PrismaUserRepository, PrismaAccountRepository, PrismaCashRepository, prisma } = await import("../persistence/prisma.js");
+  const { PrismaUserRepository, PrismaAccountRepository, PrismaCashRepository, prisma } = await import("../persistence/prisma/index.js");
   await seedDefaults(new PrismaUserRepository(), new PrismaAccountRepository(), new PrismaCashRepository());
   await prisma.$disconnect();
   console.log("Seeded default users and accounts.");

@@ -7,7 +7,7 @@ import {
   MemoryEventRepository,
   MemoryWebhookDeliveryRepository,
   MemoryWebhookEndpointRepository,
-} from "../src/persistence/memory.js";
+} from "../src/persistence/memory/index.js";
 import type { AppDeps } from "../src/context.js";
 
 /**

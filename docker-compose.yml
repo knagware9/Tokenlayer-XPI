@@ -30,6 +30,14 @@ services:
       # dev-only issuer seed enabling POST /identity/mint for the demo. From .env.
       TRUSTED_KYC_ISSUERS: ${TRUSTED_KYC_ISSUERS:-}
       DEV_KYC_ISSUER_SEED: ${DEV_KYC_ISSUER_SEED:-}
+      # Organizations hold custodial DID seeds, encrypted at rest under this
+      # key. REQUIRED, like the split stacks require it, and not defaulted to
+      # empty: an unset key does not degrade the platform gracefully, it makes
+      # every organization — and so every credential, registry anchor and
+      # corporate signup — fail at creation. `make deploy` generates one into
+      # .env when absent. Never rotate it for a deployment that already has
+      # organizations; the seeds are unrecoverable under a new key.
+      DID_MASTER_KEY: ${DID_MASTER_KEY:?Set DID_MASTER_KEY — organization DID seeds are encrypted with it (make deploy generates one)}
     volumes:
       - api-data:/data
     ports:

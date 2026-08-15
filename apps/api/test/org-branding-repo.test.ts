@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { MemoryOrganizationRepository } from "../src/persistence/memory.js";
-import type { OrganizationRepository } from "../src/persistence/types.js";
+import { MemoryOrganizationRepository } from "../src/persistence/memory/index.js";
+import type { OrganizationRepository } from "../src/persistence/types/index.js";
 
 /**
  * Parity, exercised against the MEMORY repo here. The prisma repo cannot be

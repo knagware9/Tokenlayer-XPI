@@ -1,4 +1,4 @@
-import type { DocumentRepository, DocumentSummary } from "../persistence/types.js";
+import type { DocumentRepository, DocumentSummary } from "../persistence/types/index.js";
 
 /** Minimal structured-error logger — the Fastify `request.log` shape, same
  *  contract as `executors.ts`'s `Logger` and `events.ts`'s `EmitLogger`. */

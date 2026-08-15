@@ -5,7 +5,7 @@
  * dashboard fold the audit stream identically. Pure — no I/O; every input is a
  * plain audit-entry array. All token math is BigInt over integer strings.
  */
-import type { AuditEntryRecord } from "../persistence/types.js";
+import type { AuditEntryRecord } from "../persistence/types/index.js";
 
 /** Read an integer-string field from an audit payload; missing/invalid → 0n. */
 export function amountOf(payload: Record<string, unknown>, field: string): bigint {

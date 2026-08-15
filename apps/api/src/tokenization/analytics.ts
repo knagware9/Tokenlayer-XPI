@@ -6,7 +6,7 @@
  * integer strings; outputs are decimal strings (never floats).
  */
 import { amountOf, collectPositiveHolders, foldAsset, type AssetState } from "./holders.js";
-import type { AssetRecord, AuditEntryRecord } from "../persistence/types.js";
+import type { AssetRecord, AuditEntryRecord } from "../persistence/types/index.js";
 
 export interface AnalyticsInput {
   scope: "platform" | "use-case";

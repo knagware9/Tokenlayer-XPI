@@ -20,7 +20,7 @@ import { MemoryAccountRepository, MemoryApiKeyRepository, MemoryAssetRepository,
   MemoryStagedInvoiceRepository,
   MemoryWebhookDeliveryRepository,
   MemoryWebhookEndpointRepository,
-  MemoryCredentialUseCaseRepository, MemoryCredentialUseCaseTemplateRepository, MemoryUseCaseRepository, MemoryUserRepository, MemoryVerificationRequestRepository } from "../persistence/memory.js";
+  MemoryCredentialUseCaseRepository, MemoryCredentialUseCaseTemplateRepository, MemoryUseCaseRepository, MemoryUserRepository, MemoryVerificationRequestRepository } from "../persistence/memory/index.js";
 import { seedDefaults } from "../shared/seed.js";
 import { seedUseCases } from "../tokenization/use-cases.js";
 

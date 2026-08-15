@@ -11,7 +11,7 @@ import { coded } from "../shared/executors.js";
 import { issueCredentialFor } from "./credential-issuance.js";
 import type { TokenClaims } from "../http/support.js";
 import type { ProposalKindHandler } from "../shared/proposal-kinds.js";
-import type { ProposalRecord } from "../persistence/types.js";
+import type { ProposalRecord } from "../persistence/types/index.js";
 
 const orgScopedView = async (_deps: AppDeps, claims: TokenClaims, p: ProposalRecord): Promise<boolean> =>
   claims.role === "PlatformAdmin" || (claims.role === "OrgAdmin" && !!p.orgId && claims.orgId === p.orgId);

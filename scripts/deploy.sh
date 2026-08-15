@@ -55,6 +55,24 @@ else
   log ".env present with JWT_SECRET ✓"
 fi
 
+# --- 1b. and a DID master key, on the same terms -----------------------------
+# Organizations hold CUSTODIAL DID seeds, encrypted at rest under this key, so
+# the API refuses to create one without it. The combined stack was the only
+# topology that never supplied it — both split compose files require it — which
+# left `make deploy` serving a platform that 500s the moment anyone registers
+# a company. Generated here for the same reason JWT_SECRET is.
+#
+# APPEND-ONLY, NEVER REGENERATED. Rotating this key orphans every seed already
+# encrypted under the old one: the organizations survive in the database and
+# can no longer sign anything. That is why the branch below only fires when the
+# line is absent, and why it writes to .env rather than exporting for one run.
+if ! grep -q '^DID_MASTER_KEY=..' .env; then
+  log "DID_MASTER_KEY missing in .env — appending a generated one"
+  echo "DID_MASTER_KEY=$(openssl rand -hex 32)" >> .env
+else
+  log ".env present with DID_MASTER_KEY ✓"
+fi
+
 # --- 2. compose file set ----------------------------------------------------
 COMPOSE=(docker compose -f docker-compose.yml)
 
