@@ -17,6 +17,25 @@ const login = async (e, p) => (await call("POST", "/auth/login", { email: e, pas
 
 const platform = await login("admin@tokenlayer.dev", "admin123");
 if (!platform) { console.error("platform login failed"); process.exit(2); }
+
+// ── THE PRECONDITION THIS SCRIPT CANNOT ASSUME ──────────────────────────────
+// Every trust check below reads the on-chain DID registry. With no registry
+// deployed, NOTHING is trusted — so the script reports three confident
+// UNTRUSTED_ISSUER failures that look like a policy bug and are really a
+// missing environment variable. Worse, the negative case ("an untrusted issuer
+// is rejected") then passes for the wrong reason, because with no registry
+// every issuer is untrusted. Ask first, and say what is missing.
+const registry = (await call("GET", "/registry", null, platform)).json;
+if (!registry) {
+  console.log("\n⊘ SKIPPED — no on-chain DID registry is deployed, so issuer trust cannot be evaluated.");
+  console.log("  This script needs a real EVM chain. Start one and point the API at it:");
+  console.log("    make besu-up");
+  console.log("    BESU_RPC_URL=http://localhost:8545 BESU_OPERATOR_KEY=0x<qbft-genesis-key> pnpm --filter @tokenlayer/api start");
+  console.log("  (the dev QBFT key is in apps/api/.env.example — never use it on a real network)");
+  process.exit(2);
+}
+console.log(`   registry live on chain '${registry.chainId}' — DidRegistry ${String(registry.didRegistry ?? registry.address).slice(0, 12)}…\n`);
+
 const mkOrg = async (name, orgType) => (await call("POST", "/orgs", { name, orgType }, platform)).json;
 const mkMember = async (orgId, email, role, pw) => (await call("POST", `/orgs/${orgId}/users`, { email, password: pw, role }, platform)).json;
 
@@ -69,11 +88,28 @@ ok(c2?.checks?.notRevoked === false, "after revocation, notRevoked is false (liv
 ok(c2?.checks?.signature === true, "the signature STILL verifies — only revocation changed", c2?.checks);
 ok(v2.json?.valid === false, "the overall presentation is now invalid", { valid: v2.json?.valid });
 
-console.log("\n== 6) An untrusted issuer is rejected — a self-signed VC never gets in ==");
-// (structural: the holder can only consent to credentials THEY hold, all issued by
-// registered orgs, so an untrusted issuer can't reach the verify path — proven by
-// the trust check being live in step 4. Recorded for completeness.)
-ok(true, "trust is enforced at verify (issuer must be registered + active on-chain)");
+console.log("\n== 6) Trust comes from the CHAIN — asked both ways, against the registry itself ==");
+// This section used to be `ok(true, ...)` with a comment explaining why it was
+// safe to assume. An assertion that cannot fail is not a check: it passed on a
+// deployment with no registry at all, while sections 4 and 5 were failing for
+// exactly that reason. So ask the public resolver, and require BOTH answers.
+//
+// `source` is the load-bearing field. Any credential looks untrusted when the
+// registry is missing, so a one-sided "untrusted is rejected" test proves
+// nothing; only "this DID is trusted BECAUSE THE CHAIN SAYS SO, and that one is
+// not" distinguishes a working trust path from an absent one.
+const resolved = (await call("GET", `/dids/${encodeURIComponent(issuer.did)}/resolve`, null, null)).json;
+const meta = resolved?.didDocumentMetadata;
+ok(meta?.source === "chain", "the issuer's DID resolves FROM THE CHAIN, not from the local database", meta);
+ok(meta?.registered === true && meta?.active === true, "…and the chain reports it registered and active", meta);
+
+// The negative half: a syntactically valid did:key nobody ever registered. Same
+// resolver, same chain, opposite answer — which is what makes the positive one
+// mean something.
+const strangerDid = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+const stranger = (await call("GET", `/dids/${encodeURIComponent(strangerDid)}/resolve`, null, null)).json;
+ok(stranger?.didDocumentMetadata?.registered === false,
+  "an unregistered DID is reported NOT registered by the same on-chain lookup", stranger?.didDocumentMetadata);
 
 console.log(`\n${fails ? `❌ ${fails} CHECK(S) FAILED` : "✅ VERIFIER / PRESENTATION END-TO-END PASSED — request → consent → verify, on-chain issuer trust, live revocation"}`);
 process.exit(fails ? 1 : 0);
