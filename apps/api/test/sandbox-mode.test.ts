@@ -2,9 +2,9 @@ import { MockLedgerAdapter } from "@tokenlayer/adapters";
 import { SANDBOX_CHAIN_ID, type CredentialUseCaseDefinition, type ResourceMode, type UseCaseDefinition } from "@tokenlayer/core";
 import bcrypt from "bcryptjs";
 import { describe, expect, it } from "vitest";
-import { KEY_PREFIX_MARKERS, mintSecret, prefixOf } from "../src/api-keys.js";
-import { buildChainRegistry } from "../src/chains.js";
-import { emitEvent, type EmitInput } from "../src/events.js";
+import { KEY_PREFIX_MARKERS, mintSecret, prefixOf } from "../src/shared/api-keys.js";
+import { buildChainRegistry } from "../src/shared/chains.js";
+import { emitEvent, type EmitInput } from "../src/shared/events.js";
 import {
   MemoryApiKeyRepository,
   MemoryCredentialUseCaseRepository,

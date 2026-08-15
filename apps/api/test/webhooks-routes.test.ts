@@ -27,8 +27,8 @@ import bcrypt from "bcryptjs";
 import type { FastifyInstance } from "fastify";
 import { describe, expect, it } from "vitest";
 import type { Role } from "@tokenlayer/core";
-import { mintSecret } from "../src/api-keys.js";
-import { emitEvent } from "../src/events.js";
+import { mintSecret } from "../src/shared/api-keys.js";
+import { emitEvent } from "../src/shared/events.js";
 import { signatureHeader, verifySignature } from "../src/webhooks/signing.js";
 import { auth, buildTestAppWithRepos, loginAs, V1, type TestAppHandle } from "./helpers.js";
 

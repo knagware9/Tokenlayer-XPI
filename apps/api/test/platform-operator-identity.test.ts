@@ -5,9 +5,9 @@
  * are unchanged). The provisioning must be idempotent.
  */
 import { describe, expect, it } from "vitest";
-import { createKeystore } from "../src/keystore.js";
+import { createKeystore } from "../src/shared/keystore.js";
 import { MemoryCredentialRepository, MemoryOrganizationRepository, MemoryUserRepository } from "../src/persistence/memory.js";
-import { ensureNamedOrg, ensurePlatformIssuerOrg, ensureUserWallet, provisionOrgMemberIdentities, provisionPlatformOperatorIdentities } from "../src/platform-org.js";
+import { ensureNamedOrg, ensurePlatformIssuerOrg, ensureUserWallet, provisionOrgMemberIdentities, provisionPlatformOperatorIdentities } from "../src/shared/platform-org.js";
 import { MemoryAccountRepository } from "../src/persistence/memory.js";
 
 function makeDeps() {

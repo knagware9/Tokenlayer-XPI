@@ -32,7 +32,7 @@ docker compose up --build -d
 - **API:** http://localhost:4000 (Swagger UI at `/docs` is exposed only when `NODE_ENV` is not `production`; the container runs in production mode, so `/docs` is disabled there by design)
 
 Sign in with a seeded demo account, e.g. `carbon.admin@tokenlayer.dev` / `carbon123`
-(see `apps/api/src/seed.ts` for the full roster).
+(see `apps/api/src/shared/seed.ts` for the full roster).
 
 ## What the images do
 

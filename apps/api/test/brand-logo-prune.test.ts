@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MemoryDocumentRepository } from "../src/persistence/memory.js";
-import { BRAND_LOGO_PRUNE_GRACE_MS, pruneSupersededBrandLogos } from "../src/brand-logo-prune.js";
+import { BRAND_LOGO_PRUNE_GRACE_MS, pruneSupersededBrandLogos } from "../src/shared/brand-logo-prune.js";
 
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAAFElEQVR4nGP8z8Dwn4GBgYGJAQIABiAB/8s3lOgAAAAASUVORK5CYII=", "base64");
 

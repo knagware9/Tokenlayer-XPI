@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BRAND_LOGO_PRUNE_GRACE_MS } from "../src/brand-logo-prune.js";
+import { BRAND_LOGO_PRUNE_GRACE_MS } from "../src/shared/brand-logo-prune.js";
 
 /**
  * `BRAND_LOGO_PRUNE_GRACE_MS` is an operator-facing override for a SAFETY

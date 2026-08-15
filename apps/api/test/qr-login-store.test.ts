@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createMemoryQrLoginStore } from "../src/qr-login-sessions.js";
+import { createMemoryQrLoginStore } from "../src/identity/qr-login-sessions.js";
 
 describe("qr-login store", () => {
   it("start → authenticate → consume (once)", () => {

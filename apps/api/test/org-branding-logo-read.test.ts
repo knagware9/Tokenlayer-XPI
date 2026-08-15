@@ -2,7 +2,7 @@ import { sign as edSign } from "node:crypto";
 import { generateDidKey } from "@tokenlayer/core";
 import bcrypt from "bcryptjs";
 import { describe, expect, it } from "vitest";
-import { mintSecret } from "../src/api-keys.js";
+import { mintSecret } from "../src/shared/api-keys.js";
 import { auth, buildTestAppWithRepos, loginAs, V1, type TestAppHandle } from "./helpers.js";
 
 const ROUNDS = 4;

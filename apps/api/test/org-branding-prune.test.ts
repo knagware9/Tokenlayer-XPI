@@ -1,8 +1,8 @@
 import bcrypt from "bcryptjs";
 import { describe, expect, it } from "vitest";
 import { auth, buildTestAppWithRepos, loginAs, V1, type TestAppHandle } from "./helpers.js";
-import { PLATFORM_ORG_NAME } from "../src/platform-org.js";
-import { BRAND_LOGO_PRUNE_GRACE_MS } from "../src/brand-logo-prune.js";
+import { PLATFORM_ORG_NAME } from "../src/shared/platform-org.js";
+import { BRAND_LOGO_PRUNE_GRACE_MS } from "../src/shared/brand-logo-prune.js";
 
 const ROUNDS = 4;
 const PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAAFElEQVR4nGP8z8Dwn4GBgYGJAQIABiAB/8s3lOgAAAAASUVORK5CYII=";

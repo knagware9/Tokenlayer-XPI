@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { CredentialAnchor, DidRegistration, OnChainCredentialStatus } from "@tokenlayer/adapters";
-import type { IdentityRegistry } from "../src/registry.js";
+import type { IdentityRegistry } from "../src/identity/registry.js";
 
 const hash = (s: string): string => "0x" + createHash("sha256").update(s).digest("hex");
 

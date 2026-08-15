@@ -13,12 +13,12 @@ import { RbacPolicy } from "@tokenlayer/core";
 import type { FastifyInstance } from "fastify";
 import { describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
-import { buildChainRegistry } from "../src/chains.js";
+import { buildChainRegistry } from "../src/shared/chains.js";
 import type { AppDeps } from "../src/context.js";
 import { createEngine } from "../src/context.js";
-import { loadCurrencies } from "../src/currencies.js";
-import { createMemoryChallengeStore } from "../src/identity-challenges.js";
-import { createKeystore } from "../src/keystore.js";
+import { loadCurrencies } from "../src/tokenization/currencies.js";
+import { createMemoryChallengeStore } from "../src/identity/identity-challenges.js";
+import { createKeystore } from "../src/shared/keystore.js";
 import { createSecretBox } from "../src/webhooks/secret-box.js";
 import {
   MemoryAccountRepository,
@@ -44,11 +44,11 @@ import {
   MemoryWebhookDeliveryRepository,
   MemoryWebhookEndpointRepository,
 } from "../src/persistence/memory.js";
-import { ensurePlatformIssuerOrg } from "../src/platform-org.js";
-import { createMemoryQrLoginStore } from "../src/qr-login-sessions.js";
-import type { IdentityRegistry } from "../src/registry.js";
-import { seedDefaults } from "../src/seed.js";
-import { seedUseCases } from "../src/use-cases.js";
+import { ensurePlatformIssuerOrg } from "../src/shared/platform-org.js";
+import { createMemoryQrLoginStore } from "../src/identity/qr-login-sessions.js";
+import type { IdentityRegistry } from "../src/identity/registry.js";
+import { seedDefaults } from "../src/shared/seed.js";
+import { seedUseCases } from "../src/tokenization/use-cases.js";
 import { FakeAnchor, fakeRegistry } from "./fake-anchor.js";
 import { auth, buildTestApp, loginAs, onboardUser, TEST_MARKET_ESCROW, V1 } from "./helpers.js";
 

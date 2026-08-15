@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { certificatePageSize } from "@tokenlayer/core";
-import { certificateDrawList } from "../src/certificate-artwork.js";
-import { certificateLogoDocumentId } from "../src/certificate-fields.js";
+import { certificateDrawList } from "../src/identity/certificate-artwork.js";
+import { certificateLogoDocumentId } from "../src/identity/certificate-fields.js";
 import { auth, buildTestAppWithRepos, loginAs, onboardUser, V1, type TestAppHandle } from "./helpers.js";
 
 // ---------------------------------------------------------------------------

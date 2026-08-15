@@ -1,6 +1,6 @@
 import { describe, expect, it, afterEach } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { computeAnalytics, type AnalyticsInput } from "../src/analytics.js";
+import { computeAnalytics, type AnalyticsInput } from "../src/tokenization/analytics.js";
 import type { AssetRecord, AuditEntryRecord } from "../src/persistence/types.js";
 import { buildTestApp, loginAs, auth, ACCOUNTS, V1 } from "./helpers.js";
 

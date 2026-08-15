@@ -27,4 +27,4 @@ ENV NODE_ENV=production
 EXPOSE 4000
 
 # Apply schema, idempotently seed, then start the server.
-CMD ["sh", "-c", "pnpm exec prisma db push --skip-generate && pnpm exec tsx src/seed.ts && pnpm exec tsx src/server.ts"]
+CMD ["sh", "-c", "pnpm exec prisma db push --skip-generate && pnpm exec tsx src/shared/seed.ts && pnpm exec tsx src/server.ts"]

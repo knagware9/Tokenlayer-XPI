@@ -2,7 +2,7 @@ import { inflateSync } from "node:zlib";
 import bcrypt from "bcryptjs";
 import { describe, expect, it } from "vitest";
 import { certificatePageSize } from "@tokenlayer/core";
-import { mintSecret } from "../src/api-keys.js";
+import { mintSecret } from "../src/shared/api-keys.js";
 import { auth, buildTestAppWithRepos, loginAs, onboardUser, PLATFORM_ADMIN_2, V1, type TestAppHandle } from "./helpers.js";
 
 const TEST_ROUNDS = 4;

@@ -23,7 +23,7 @@ export const SANDBOX_CHAIN_ID = "sandbox";
 
 /**
  * The public markers a secret can carry — mirrors the API's
- * `KEY_PREFIX_MARKERS` (apps/api/src/api-keys.ts). Display-only: the server
+ * `KEY_PREFIX_MARKERS` (apps/api/src/shared/api-keys.ts). Display-only: the server
  * parses the real marker and refuses anything else, and it additionally checks
  * the mode the STRING claims against the mode on the ROW.
  *

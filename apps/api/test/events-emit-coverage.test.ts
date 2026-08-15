@@ -2,7 +2,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { EVENT_TYPES } from "@tokenlayer/core";
 import { describe, expect, it } from "vitest";
-import { emitEvent } from "../src/events.js";
+import { emitEvent } from "../src/shared/events.js";
 import {
   MemoryEventRepository,
   MemoryWebhookDeliveryRepository,

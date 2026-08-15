@@ -10,10 +10,10 @@
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push --skip-generate",
     "db:setup": "prisma generate && prisma db push --skip-generate",
-    "seed": "tsx src/seed.ts",
+    "seed": "tsx src/shared/seed.ts",
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
-    "demo": "tsx src/demo.ts"
+    "demo": "tsx src/dev/demo.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",

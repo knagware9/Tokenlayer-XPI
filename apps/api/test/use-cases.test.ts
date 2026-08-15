@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { UseCaseDefinition } from "@tokenlayer/core";
-import { loadDefaultUseCaseDefinitions, seedUseCases } from "../src/use-cases.js";
+import { loadDefaultUseCaseDefinitions, seedUseCases } from "../src/tokenization/use-cases.js";
 import type { UseCaseRepository } from "../src/persistence/types.js";
 
 describe("loadDefaultUseCaseDefinitions", () => {
