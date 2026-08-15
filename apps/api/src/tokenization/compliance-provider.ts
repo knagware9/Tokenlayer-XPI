@@ -11,7 +11,7 @@
 import type { AssetRef, ComplianceProvider } from "@tokenlayer/core";
 import { firstAcquisitionOf, holderCountOf } from "./holders.js";
 import { IDENTITY_CREDENTIAL_TYPE, type IdentityAssertions } from "../identity/identity-assertions.js";
-import type { AccountRepository, AuditRepository, UserRepository } from "../persistence/types.js";
+import type { AccountRepository, AuditRepository, UserRepository } from "../persistence/types/index.js";
 
 export interface ComplianceProviderDeps {
   audit: AuditRepository;

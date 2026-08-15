@@ -30,7 +30,7 @@ import type {
   VerificationRequestRepository,
   WebhookDeliveryRepository,
   WebhookEndpointRepository,
-} from "./persistence/types.js";
+} from "./persistence/types/index.js";
 import type { IdentityRegistry } from "./identity/registry.js";
 import type { SecretBox } from "./webhooks/secret-box.js";
 

@@ -4,7 +4,7 @@
  * behaviour — this predicate is the only thing standing between one org's events
  * and another org's endpoint.
  */
-import type { EventRecord, WebhookEndpointRecord } from "../persistence/types.js";
+import type { EventRecord, WebhookEndpointRecord } from "../persistence/types/index.js";
 
 /**
  * Does this endpoint receive this event?

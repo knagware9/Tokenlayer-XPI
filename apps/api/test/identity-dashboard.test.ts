@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { MemoryCredentialRepository, MemoryVerificationRequestRepository } from "../src/persistence/memory.js";
-import type { CredentialRecord } from "../src/persistence/types.js";
+import { MemoryCredentialRepository, MemoryVerificationRequestRepository } from "../src/persistence/memory/index.js";
+import type { CredentialRecord } from "../src/persistence/types/index.js";
 import { auth, buildTestApp, loginAs, onboardUser, V1 } from "./helpers.js";
 
 const cred = (id: string, over: Partial<CredentialRecord> = {}): CredentialRecord => ({

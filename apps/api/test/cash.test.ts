@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { MemoryCashRepository } from "../src/persistence/memory.js";
+import { MemoryCashRepository } from "../src/persistence/memory/index.js";
 
 describe("MemoryCashRepository", () => {
   it("credits and reports balances", async () => {

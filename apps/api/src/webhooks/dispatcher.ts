@@ -55,7 +55,7 @@
  * worker.
  */
 import { randomUUID } from "node:crypto";
-import type { EventRepository, WebhookDeliveryRepository, WebhookEndpointRepository } from "../persistence/types.js";
+import type { EventRepository, WebhookDeliveryRepository, WebhookEndpointRepository } from "../persistence/types/index.js";
 import type { SecretBox } from "./secret-box.js";
 import { signatureHeader } from "./signing.js";
 import { checkUrl, type UrlGuardOptions } from "./url-guard.js";

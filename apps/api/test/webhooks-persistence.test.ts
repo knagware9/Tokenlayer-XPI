@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MemoryEventRepository, MemoryWebhookDeliveryRepository, MemoryWebhookEndpointRepository } from "../src/persistence/memory.js";
+import { MemoryEventRepository, MemoryWebhookDeliveryRepository, MemoryWebhookEndpointRepository } from "../src/persistence/memory/index.js";
 
 const endpointInput = {
   orgId: "org1", url: "https://example.test/hook", description: null,

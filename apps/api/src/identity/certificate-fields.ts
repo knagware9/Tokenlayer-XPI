@@ -4,7 +4,7 @@
  * two cannot disagree about who the holder is.
  */
 import type { CertificateFieldRef, CredentialTypeSpec } from "@tokenlayer/core";
-import type { CredentialRecord } from "../persistence/types.js";
+import type { CredentialRecord } from "../persistence/types/index.js";
 
 /**
  * First non-blank of fullName / legalName / holderName, else the holder DID.

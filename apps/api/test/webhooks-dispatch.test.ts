@@ -13,7 +13,7 @@ import {
   MemoryEventRepository,
   MemoryWebhookDeliveryRepository,
   MemoryWebhookEndpointRepository,
-} from "../src/persistence/memory.js";
+} from "../src/persistence/memory/index.js";
 import {
   AUTO_DISABLE_AFTER,
   AUTO_DISABLE_MIN_AGE_MS,

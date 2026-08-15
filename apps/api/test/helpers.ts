@@ -32,7 +32,7 @@ import {
   MemoryVerificationRequestRepository,
   MemoryWebhookDeliveryRepository,
   MemoryWebhookEndpointRepository,
-} from "../src/persistence/memory.js";
+} from "../src/persistence/memory/index.js";
 import { ensurePlatformIssuerOrg } from "../src/shared/platform-org.js";
 import type { IdentityRegistry } from "../src/identity/registry.js";
 import { DEFAULT_USERS, seedDefaults } from "../src/shared/seed.js";

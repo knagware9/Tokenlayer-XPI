@@ -10,7 +10,7 @@ import { issueCredentialFor, revokeCredentialById } from "./credential-issuance.
 import { PLATFORM_ORG_NAME } from "../shared/platform-org.js";
 import type { TokenClaims } from "../http/support.js";
 import type { ProposalKindHandler } from "../shared/proposal-kinds.js";
-import type { ProposalRecord } from "../persistence/types.js";
+import type { ProposalRecord } from "../persistence/types/index.js";
 
 /** PlatformAdmin, or an OrgAdmin of the proposal's own org. Never null-matches. */
 const orgScopedView = async (_deps: AppDeps, claims: TokenClaims, p: ProposalRecord): Promise<boolean> =>

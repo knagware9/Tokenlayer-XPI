@@ -11,14 +11,14 @@ import {
   MemoryEventRepository,
   MemoryUseCaseRepository,
   MemoryWebhookEndpointRepository,
-} from "../src/persistence/memory.js";
+} from "../src/persistence/memory/index.js";
 import {
   rowToApiKey,
   rowToCredentialUseCase,
   rowToEvent,
   rowToUseCase,
   rowToWebhookEndpoint,
-} from "../src/persistence/prisma.js";
+} from "../src/persistence/prisma/index.js";
 import { auth, buildTestAppWithRepos, loginAs, V1, type TestAppHandle } from "./helpers.js";
 
 // NOTE: importing prisma.js constructs a PrismaClient at module load. That is a

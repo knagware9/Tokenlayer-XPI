@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MemoryVerificationRequestRepository } from "../src/persistence/memory.js";
+import { MemoryVerificationRequestRepository } from "../src/persistence/memory/index.js";
 
 const base = {
   verifierOrgId: "org_v", holderDid: "did:key:zH", requestedTypes: ["KycCredential"],

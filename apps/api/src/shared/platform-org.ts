@@ -7,7 +7,7 @@
 import { didKeyFromSeed, type OrgType } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { mintOrgMembership } from "./membership.js";
-import type { OrganizationRecord } from "../persistence/types.js";
+import type { OrganizationRecord } from "../persistence/types/index.js";
 
 export const PLATFORM_ORG_NAME = "TokenLayer Platform";
 

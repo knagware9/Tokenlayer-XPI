@@ -6,7 +6,7 @@
  * Mirrors the tokenization analytics.ts contract.
  */
 import type { CredentialUseCaseDefinition } from "@tokenlayer/core";
-import type { CredentialRecord, VerificationRequestRecord } from "../persistence/types.js";
+import type { CredentialRecord, VerificationRequestRecord } from "../persistence/types/index.js";
 
 /** One pill per credential. Precedence: rejected → revoked → expired → acceptance.
  *  Rejected is checked FIRST because ID-L's holder-reject revokes on-chain before

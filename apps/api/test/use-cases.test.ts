@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { UseCaseDefinition } from "@tokenlayer/core";
 import { loadDefaultUseCaseDefinitions, seedUseCases } from "../src/tokenization/use-cases.js";
-import type { UseCaseRepository } from "../src/persistence/types.js";
+import type { UseCaseRepository } from "../src/persistence/types/index.js";
 
 describe("loadDefaultUseCaseDefinitions", () => {
   // Regression: the loader must normalise (fill derived fields) — not just

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MemoryStagedInvoiceRepository } from "../src/persistence/memory.js";
+import { MemoryStagedInvoiceRepository } from "../src/persistence/memory/index.js";
 
 describe("MemoryStagedInvoiceRepository", () => {
   it("creates, finds by hash, lists by status, marks tokenized, removes", async () => {

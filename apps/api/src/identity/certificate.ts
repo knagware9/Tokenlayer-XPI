@@ -1,7 +1,7 @@
 import PDFDocument from "pdfkit";
 import QRCode from "qrcode";
 import { certificateSubjectName } from "./certificate-fields.js";
-import type { CredentialRecord } from "../persistence/types.js";
+import type { CredentialRecord } from "../persistence/types/index.js";
 import type { CredentialTypeSpec } from "@tokenlayer/core";
 
 export interface CertificateStatus { revoked: boolean; revokedAt: string | null; revokedReason: string | null; }

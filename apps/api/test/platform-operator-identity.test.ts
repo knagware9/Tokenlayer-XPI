@@ -6,9 +6,9 @@
  */
 import { describe, expect, it } from "vitest";
 import { createKeystore } from "../src/shared/keystore.js";
-import { MemoryCredentialRepository, MemoryOrganizationRepository, MemoryUserRepository } from "../src/persistence/memory.js";
+import { MemoryCredentialRepository, MemoryOrganizationRepository, MemoryUserRepository } from "../src/persistence/memory/index.js";
 import { ensureNamedOrg, ensurePlatformIssuerOrg, ensureUserWallet, provisionOrgMemberIdentities, provisionPlatformOperatorIdentities } from "../src/shared/platform-org.js";
-import { MemoryAccountRepository } from "../src/persistence/memory.js";
+import { MemoryAccountRepository } from "../src/persistence/memory/index.js";
 
 function makeDeps() {
   return {

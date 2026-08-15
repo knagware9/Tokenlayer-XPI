@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { invoiceFingerprint, validateMetadata, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
-import type { InvoiceSource, StagedInvoiceRecord } from "../persistence/types.js";
+import type { InvoiceSource, StagedInvoiceRecord } from "../persistence/types/index.js";
 
 const ERP_CSV = fileURLToPath(new URL("../../../../samples/erp/invoices.csv", import.meta.url));
 

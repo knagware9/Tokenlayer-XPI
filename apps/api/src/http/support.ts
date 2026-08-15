@@ -1,7 +1,7 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { PolicyError, scopeAllows, type Actor, type ApiScope, type AssetContext, type ResourceMode, type Role } from "@tokenlayer/core";
 import { cachedVerification, prefixOf, rememberVerification, secretMatches } from "../shared/api-keys.js";
-import type { ApiKeyRepository, AssetRecord, UserRecord, UserRepository } from "../persistence/types.js";
+import type { ApiKeyRepository, AssetRecord, UserRecord, UserRepository } from "../persistence/types/index.js";
 
 export interface TokenClaims {
   id: string;

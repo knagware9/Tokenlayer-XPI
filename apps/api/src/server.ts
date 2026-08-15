@@ -34,7 +34,7 @@ import {
   PrismaVerificationRequestRepository,
   PrismaWebhookDeliveryRepository,
   PrismaWebhookEndpointRepository,
-} from "./persistence/prisma.js";
+} from "./persistence/prisma/index.js";
 import { resolveIdentityRegistry } from "./identity/registry.js";
 import { seedDefaults } from "./shared/seed.js";
 import { seedUseCases } from "./tokenization/use-cases.js";

@@ -5,7 +5,7 @@ import bcrypt from "bcryptjs";
 import { describe, expect, it, vi } from "vitest";
 import { cachedVerification, invalidateVerifiedPrefix, mintSecret, rememberVerification, verifiedPrefixCacheStats } from "../src/shared/api-keys.js";
 import { requirePrincipal } from "../src/http/support.js";
-import { MemoryApiKeyRepository, MemoryUserRepository } from "../src/persistence/memory.js";
+import { MemoryApiKeyRepository, MemoryUserRepository } from "../src/persistence/memory/index.js";
 import { ACCOUNTS, auth, buildTestAppWithRepos, loginAs, onboardUser, V1, type TestAppHandle } from "./helpers.js";
 
 describe("MemoryApiKeyRepository", () => {

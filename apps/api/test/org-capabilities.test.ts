@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { describe, expect, it } from "vitest";
-import { MemoryOrganizationRepository } from "../src/persistence/memory.js";
+import { MemoryOrganizationRepository } from "../src/persistence/memory/index.js";
 import { auth, buildTestApp, loginAs, onboardUser, V1 } from "./helpers.js";
 
 describe("Organization.capabilities persistence (EN-A task A2)", () => {

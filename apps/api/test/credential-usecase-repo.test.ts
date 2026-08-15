@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CredentialUseCaseDefinition } from "@tokenlayer/core";
-import { MemoryCredentialUseCaseRepository } from "../src/persistence/memory.js";
+import { MemoryCredentialUseCaseRepository } from "../src/persistence/memory/index.js";
 
 const def: CredentialUseCaseDefinition = {
   key: "kyc-onboarding", name: "KYC Onboarding",

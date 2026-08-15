@@ -11,7 +11,7 @@ import type { AppDeps } from "../context.js";
 import { coded } from "./executors.js";
 import type { TokenClaims } from "../http/support.js";
 import type { ProposalKindHandler } from "./proposal-kinds.js";
-import type { ProposalRecord } from "../persistence/types.js";
+import type { ProposalRecord } from "../persistence/types/index.js";
 
 /** PlatformAdmin, or an OrgAdmin of the proposal's own org. Never null-matches. */
 const orgScopedView = async (_deps: AppDeps, claims: TokenClaims, p: ProposalRecord): Promise<boolean> =>
