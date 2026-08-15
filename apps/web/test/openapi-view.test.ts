@@ -40,7 +40,7 @@ import {
   type OpenApiDocument,
   type OpenApiOperation,
   type OpenApiPaths,
-} from "../src/lib/openapi.js";
+} from "../src/lib/shared/openapi.js";
 
 /** A key-callable route, shaped exactly as @fastify/swagger emits it: both
  * schemes as separate alternatives, empty scope arrays, and the scope stated in

@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import {
   addPlacement, clampFontSize, fieldLabel, movePlacement, paletteFields, removePlacement, stalePlacementFields,
-} from "../../lib/certificate-layout.js";
+} from "../../lib/identity/certificate-layout.js";
 import {
   MAX_CERTIFICATE_PLACEMENTS,
   type CertificateAlign,

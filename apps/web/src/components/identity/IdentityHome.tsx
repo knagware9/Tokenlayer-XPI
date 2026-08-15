@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../../api.js";
 import { useAuth } from "../../auth.js";
-import { canDesignCertificate } from "../../lib/certificate-access.js";
-import { modeLabel, modeOf, modeTone } from "../../lib/modes.js";
+import { canDesignCertificate } from "../../lib/identity/certificate-access.js";
+import { modeLabel, modeOf, modeTone } from "../../lib/shared/modes.js";
 import type { CredentialUseCase, Organization } from "../../types.js";
 import { CertificateDesignPanel } from "./CertificateDesignPanel.js";
 import { CredentialUseCaseBuilder } from "./CredentialUseCaseBuilder.js";

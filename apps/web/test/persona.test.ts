@@ -11,7 +11,7 @@
 import { describe, expect, it } from "vitest";
 import {
   landingView, narrowToPersona, personaConfigError, personaTitle, resolvePersona,
-} from "../src/lib/persona.js";
+} from "../src/lib/shared/persona.js";
 
 const nav = (...ids: string[]) => ids.map((id) => ({ id, label: id }));
 

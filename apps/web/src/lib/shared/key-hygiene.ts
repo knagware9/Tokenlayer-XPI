@@ -16,7 +16,7 @@
  * number an operator cannot reconstruct is a number they will either ignore or
  * over-trust. Nothing here says a key is unsafe; it says what is true of it.
  */
-import type { ApiKeyView } from "../types.js";
+import type { ApiKeyView } from "../../types.js";
 
 export type KeyHealth = "revoked" | "expired" | "never-used" | "stale" | "expiring" | "healthy";
 

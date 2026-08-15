@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "../../api.js";
 import { useAuth } from "../../auth.js";
-import { SANDBOX_IMMUTABLE_NOTE, chainChoicesFor, checkUseCaseDraft, modeBlurb, modeLabel, modeTone } from "../../lib/modes.js";
+import { SANDBOX_IMMUTABLE_NOTE, chainChoicesFor, checkUseCaseDraft, modeBlurb, modeLabel, modeTone } from "../../lib/shared/modes.js";
 import type { ChainInfo, ContractCode, Role, TokenStandard, UseCase } from "../../types.js";
 import { ContractCodeView } from "./ContractCodeView.js";
 import { familyIcon } from "./NetworksPanel.js";

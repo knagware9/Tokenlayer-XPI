@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../../api.js";
 import { useAuth } from "../../auth.js";
-import { modeBlurb, modeLabel, modeTone, SANDBOX_IMMUTABLE_NOTE } from "../../lib/modes.js";
+import { modeBlurb, modeLabel, modeTone, SANDBOX_IMMUTABLE_NOTE } from "../../lib/shared/modes.js";
 import type { OrgType, ProvisionResult, TemplateParam, UseCaseTemplateMeta } from "../../types.js";
 import { Card, EmptyState, Pill, SectionHeader, Skeleton } from "../shared/ui.js";
 

@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../api.js";
-import { activePersona, landingView, narrowToPersona } from "../../lib/persona.js";
+import { activePersona, landingView, narrowToPersona } from "../../lib/shared/persona.js";
 import { useAuth } from "../../auth.js";
 import type { DomainDef, DomainKey } from "../../domains.js";
-import { brandCssVars } from "../../lib/branding.js";
+import { brandCssVars } from "../../lib/shared/branding.js";
 import { Logo } from "./Logo.js";
 import { Icon, type IconName } from "./ui.js";
 

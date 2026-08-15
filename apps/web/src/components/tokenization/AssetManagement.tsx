@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "../../auth.js";
-import { SANDBOX_LEDGER_NOTE, modeLabel, modeOf, modeTone } from "../../lib/modes.js";
+import { SANDBOX_LEDGER_NOTE, modeLabel, modeOf, modeTone } from "../../lib/shared/modes.js";
 import { can } from "../../rbac.js";
 import type { ChainInfo, UseCase } from "../../types.js";
 import { Pill } from "../shared/ui.js";

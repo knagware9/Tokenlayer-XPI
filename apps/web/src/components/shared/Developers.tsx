@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { API_BASE, ApiError, api } from "../../api.js";
 import { useAuth } from "../../auth.js";
-import { isOrgOperatingRole, orgRoleEnabled } from "../../lib/capabilities.js";
-import { HEALTH_LABEL, HEALTH_NOTE, healthOf, liveScopes, summarize, type KeyHealth } from "../../lib/key-hygiene.js";
-import { KEY_MARKERS, keyMarker, modeLabel, modeTone, type ResourceMode } from "../../lib/modes.js";
-import { confirmNavigation, setNavGuard } from "../../lib/nav-guard.js";
+import { isOrgOperatingRole, orgRoleEnabled } from "../../lib/shared/capabilities.js";
+import { HEALTH_LABEL, HEALTH_NOTE, healthOf, liveScopes, summarize, type KeyHealth } from "../../lib/shared/key-hygiene.js";
+import { KEY_MARKERS, keyMarker, modeLabel, modeTone, type ResourceMode } from "../../lib/shared/modes.js";
+import { confirmNavigation, setNavGuard } from "../../lib/shared/nav-guard.js";
 import { API_SCOPES, type ApiKeyView, type ApiScope, type OrgCapabilities, type Organization, type Role } from "../../types.js";
 import { ApiReference } from "./ApiReference.js";
 import { Guides } from "./Guides.js";

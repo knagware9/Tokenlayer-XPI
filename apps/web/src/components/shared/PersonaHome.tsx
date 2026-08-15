@@ -12,8 +12,8 @@
 import type { JSX } from "react";
 import { useRoute } from "../../router.js";
 import { Logo, LogoMark } from "./Logo.js";
-import { activePersona } from "../../lib/persona.js";
-import { landingFor } from "../../lib/persona-landing.js";
+import { activePersona } from "../../lib/shared/persona.js";
+import { landingFor } from "../../lib/shared/persona-landing.js";
 
 export function PersonaHome(): JSX.Element | null {
   const { navigate } = useRoute();

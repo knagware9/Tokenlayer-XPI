@@ -27,7 +27,7 @@
  */
 import { useEffect, useState } from "react";
 import { api, describeApiError } from "../../api.js";
-import { credentialIdFrom, provenanceOf, verdictOf } from "../../lib/public-verify.js";
+import { credentialIdFrom, provenanceOf, verdictOf } from "../../lib/identity/public-verify.js";
 import { useRoute } from "../../router.js";
 import type { CredentialStatusInfo, DidResolution } from "../../types.js";
 import { Logo } from "../shared/Logo.js";

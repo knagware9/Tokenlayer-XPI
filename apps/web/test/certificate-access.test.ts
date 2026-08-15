@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canDesignCertificate } from "../src/lib/certificate-access.js";
+import { canDesignCertificate } from "../src/lib/identity/certificate-access.js";
 
 const useCase = (ownerOrgId: string | null | undefined) => ({ ownerOrgId }) as never;
 

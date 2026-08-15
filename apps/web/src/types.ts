@@ -1,4 +1,4 @@
-import type { ResourceMode } from "./lib/modes.js";
+import type { ResourceMode } from "./lib/shared/modes.js";
 
 export type Role = "PlatformAdmin" | "OrgAdmin" | "UseCaseAdmin" | "Issuer" | "Trader" | "Buyer" | "Auditor" | "Holder" | "Verifier";
 

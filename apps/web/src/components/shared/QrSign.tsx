@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api, ApiError } from "../../api.js";
-import { getOrCreateDeviceKey, hasDeviceKey } from "../../lib/device-wallet.js";
+import { getOrCreateDeviceKey, hasDeviceKey } from "../../lib/shared/device-wallet.js";
 import { Logo } from "./Logo.js";
 import { Icon } from "./ui.js";
 

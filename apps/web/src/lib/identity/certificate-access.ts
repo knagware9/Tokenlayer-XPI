@@ -1,4 +1,4 @@
-import type { CredentialUseCase, Role } from "../types.js";
+import type { CredentialUseCase, Role } from "../../types.js";
 
 /**
  * May this user open the certificate designer for this credential use case?

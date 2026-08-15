@@ -27,11 +27,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, describeApiError } from "../../api.js";
 import { useAuth } from "../../auth.js";
 // `csvField` is shared with the activity log: one CSV escaping, tested once.
-import { csvField } from "../../lib/activity-log.js";
+import { csvField } from "../../lib/shared/activity-log.js";
 import {
   beneficiariesOf, countsFor, groupByScheme, matchesQuery, schemesRunBy, statusOf,
   type BeneficiaryRow, type BeneficiaryStatus, type SchemeCounts,
-} from "../../lib/schemes.js";
+} from "../../lib/identity/schemes.js";
 import type { CredentialUseCase, IssuedCredential, Organization } from "../../types.js";
 import { Card, EmptyState, Pill, SectionHeader, StatCard } from "../shared/ui.js";
 

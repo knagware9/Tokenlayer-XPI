@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "../../api.js";
 import { useAuth } from "../../auth.js";
-import { SANDBOX_LEDGER_NOTE, modeLabel, modeOf, modeTone } from "../../lib/modes.js";
+import { SANDBOX_LEDGER_NOTE, modeLabel, modeOf, modeTone } from "../../lib/shared/modes.js";
 import type { ChainInfo, InvoiceRowResult, StagedInvoice, TokenizeResult, UseCase } from "../../types.js";
 import { Card, EmptyState, Pill, SectionHeader } from "../shared/ui.js";
-import { parseCsv } from "../../lib/csv.js";
+import { parseCsv } from "../../lib/shared/csv.js";
 
 // ============================================================================
 // Invoice Register — the server-side staging table for the invoice use case.

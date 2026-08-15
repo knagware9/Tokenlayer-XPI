@@ -1,6 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { activePersona } from "./lib/persona.js";
+import { activePersona } from "./lib/shared/persona.js";
 import { App } from "./App.js";
 import { AuthProvider } from "./auth.js";
 import { RouterProvider } from "./router.js";

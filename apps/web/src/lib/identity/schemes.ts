@@ -17,7 +17,7 @@
  * the identity dashboard and the certificate renderer use — a beneficiary must
  * not be counted "active" in one screen and "lapsed" in another.
  */
-import type { CredentialUseCase, IssuedCredential } from "../types.js";
+import type { CredentialUseCase, IssuedCredential } from "../../types.js";
 
 export type BeneficiaryStatus = "revoked" | "pending" | "rejected" | "expired" | "active";
 

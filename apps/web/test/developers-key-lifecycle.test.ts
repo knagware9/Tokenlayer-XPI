@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { EMPTY_KEY_DRAFT, canRotate, checkKeyDraft } from "../src/components/shared/Developers.js";
-import { confirmNavigation, setNavGuard } from "../src/lib/nav-guard.js";
+import { confirmNavigation, setNavGuard } from "../src/lib/shared/nav-guard.js";
 
 describe("canRotate", () => {
   it("offers rotation for an active key", () => {

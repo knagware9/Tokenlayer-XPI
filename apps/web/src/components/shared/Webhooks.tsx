@@ -1,9 +1,9 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { ApiError, api } from "../../api.js";
 import { useAuth } from "../../auth.js";
-import { orgDomainEnabled } from "../../lib/capabilities.js";
-import { modeBlurb, modeLabel, modeTone, type ResourceMode } from "../../lib/modes.js";
-import { setNavGuard } from "../../lib/nav-guard.js";
+import { orgDomainEnabled } from "../../lib/shared/capabilities.js";
+import { modeBlurb, modeLabel, modeTone, type ResourceMode } from "../../lib/shared/modes.js";
+import { setNavGuard } from "../../lib/shared/nav-guard.js";
 import {
   EVENT_DESCRIPTIONS,
   EVENT_TYPES,

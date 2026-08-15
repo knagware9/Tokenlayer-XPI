@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BRAND_STOPS, brandRamp, clampAccent, contrastRatio, relativeLuminance } from "../src/lib/branding.js";
+import { BRAND_STOPS, brandRamp, clampAccent, contrastRatio, relativeLuminance } from "../src/lib/shared/branding.js";
 
 describe("contrastRatio", () => {
   it("is 21 for black on white and 1 for a colour on itself", () => {

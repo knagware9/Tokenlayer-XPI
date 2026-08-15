@@ -14,7 +14,7 @@
  * polls a quiet log forever or stops one page early and calls it the end.
  */
 import { describe, expect, it } from "vitest";
-import { activityCsv, atEnd, csvField } from "../src/lib/activity-log.js";
+import { activityCsv, atEnd, csvField } from "../src/lib/shared/activity-log.js";
 import type { PlatformEvent } from "../src/types.js";
 
 const event = (over: Partial<PlatformEvent> = {}): PlatformEvent => ({

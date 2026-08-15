@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../../api.js";
 import { useAuth } from "../../auth.js";
 import { useRoute } from "../../router.js";
-import { getOrCreateDeviceKey, hasDeviceKey } from "../../lib/device-wallet.js";
+import { getOrCreateDeviceKey, hasDeviceKey } from "../../lib/shared/device-wallet.js";
 import { Logo, LogoMark } from "./Logo.js";
 import { Icon, type IconName } from "./ui.js";
 

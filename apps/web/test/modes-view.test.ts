@@ -22,7 +22,7 @@ import {
   modeOf,
   modeTone,
   sandboxChainsValid,
-} from "../src/lib/modes.js";
+} from "../src/lib/shared/modes.js";
 import type { ChainInfo } from "../src/types.js";
 
 /** The catalog as `GET /chains` really returns it — four real-or-absent
