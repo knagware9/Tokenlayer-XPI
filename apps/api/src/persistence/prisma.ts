@@ -360,8 +360,15 @@ export class PrismaAuditAnchorRepository implements AuditAnchorRepository {
     return toAuditAnchor(r);
   }
   async latest(assetId: string): Promise<AuditAnchorRecord | null> {
-    const r = await prisma.auditAnchor.findFirst({ where: { assetId }, orderBy: { seq: "desc" } });
+    // `orderBy: { seq: "desc" }` alone is a TIE when an asset carries more than
+    // one anchor at a seq, and SQL does not promise which row wins. Observed in
+    // the wild: three anchors at seq 4, the first genuine and two written after
+    // a tamper. Oldest-wins at equal seq — see AuditAnchorRepository.latest.
+    const r = await prisma.auditAnchor.findFirst({ where: { assetId }, orderBy: [{ seq: "desc" }, { createdAt: "asc" }] });
     return r ? toAuditAnchor(r) : null;
+  }
+  async list(assetId: string): Promise<AuditAnchorRecord[]> {
+    return (await prisma.auditAnchor.findMany({ where: { assetId }, orderBy: [{ seq: "asc" }, { createdAt: "asc" }] })).map(toAuditAnchor);
   }
 }
 

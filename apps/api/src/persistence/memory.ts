@@ -482,8 +482,20 @@ export class MemoryAuditAnchorRepository implements AuditAnchorRepository {
     return { ...rec };
   }
   async latest(assetId: string): Promise<AuditAnchorRecord | null> {
-    const matches = this.rows.filter((r) => r.assetId === assetId).sort((a, b) => b.seq - a.seq);
+    // Highest seq, then OLDEST — see the note on AuditAnchorRepository.latest.
+    // `sort((a,b) => b.seq - a.seq)` alone left same-seq rows in insertion order
+    // by luck of the sort's stability, which is exactly the ambiguity that let a
+    // post-tamper anchor answer for a pre-tamper one.
+    const matches = this.rows
+      .filter((r) => r.assetId === assetId)
+      // createdAt is an ISO-8601 STRING here, which compares correctly as text.
+      // Two anchors written in the same millisecond tie, and Array#sort is
+      // stable, so insertion order settles it — still oldest-first.
+      .sort((a, b) => b.seq - a.seq || (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
     return matches.length ? { ...matches[0]! } : null;
+  }
+  async list(assetId: string): Promise<AuditAnchorRecord[]> {
+    return this.rows.filter((r) => r.assetId === assetId).map((r) => ({ ...r }));
   }
 }
 

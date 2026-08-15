@@ -483,11 +483,18 @@ export function buildRouteContext(app: FastifyInstance, deps: AppDeps, sharedPri
     const chain = await assetChain(assetId);
     const base = verifyChain(assetId, chain);
     const anchor = await deps.auditAnchors.latest(assetId);
-    let anchorConsistent = true;
-    if (anchor) {
-      const at = chain.find((e) => e.seq === anchor.seq);
-      anchorConsistent = !!at && auditEntryHash(at.prevHash, at.fields) === anchor.hash;
-    }
+    // EVERY ANCHOR, not just the newest. Checking only the latest left a way
+    // through: rewrite the chain consistently, perform one more real action so
+    // the head advances, then anchor. The new anchor sits at a higher seq, the
+    // old attestation is never consulted again, and the rewrite reads as clean
+    // — while `verifyChain` is fooled by construction, since a full rewrite is
+    // internally perfect. The anchors are the ONLY witnesses to what the chain
+    // said before, so all of them must still agree with it.
+    const anchors = await deps.auditAnchors.list(assetId);
+    const anchorConsistent = anchors.every((a) => {
+      const at = chain.find((e) => e.seq === a.seq);
+      return !!at && auditEntryHash(at.prevHash, at.fields) === a.hash;
+    });
     return { assetId, valid: base.valid, count: base.count, head: base.head, brokenAt: base.brokenAt, reason: base.reason ?? null, lastAnchor: anchor ? { seq: anchor.seq, hash: anchor.hash, txHash: anchor.txHash, chainId: anchor.chainId, at: anchor.createdAt } : null, anchorConsistent };
   }
 
