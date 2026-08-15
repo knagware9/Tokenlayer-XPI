@@ -53,7 +53,21 @@ console.log("\n== 3) Approve (checker) → the VC is issued ==");
 const done = await call("POST", `/proposals/${req.json.proposal.id}/approve`, {}, t2);
 ok(done.json?.proposal?.status === "executed", "the second admin approved → executed", done.json?.proposal);
 const subjTok = await login(sub, "subject1");
-const creds = (await call("GET", "/me/credentials", null, subjTok)).json ?? [];
+// `?? []` DOES NOT DEFEND THIS. A refusal body is an object, not null, so the
+// default never fires and the next line dies with "creds.find is not a
+// function" — a TypeError naming a JavaScript builtin instead of the actual
+// cause. That cause is usually the topology: /me/credentials is a WALLET route,
+// and pointing this script at a persona edge that does not serve it (the
+// identity-issuer edge, deliberately) returns PERSONA_ROUTE_NOT_ALLOWED.
+const credsRes = await call("GET", "/me/credentials", null, subjTok);
+const creds = credsRes.json;
+if (!Array.isArray(creds)) {
+  console.error(`\n⊘ GET /me/credentials returned ${credsRes.status}, not a list: ${JSON.stringify(creds).slice(0, 200)}`);
+  console.error("  This script needs ONE API that serves every role. Against the split");
+  console.error("  persona edges, /me/credentials lives only on the wallet edge — point");
+  console.error(`  API= at a combined deployment (ENABLED_DOMAINS=tokenization,identity). Currently: ${API}`);
+  process.exit(2);
+}
 const kyc = creds.find((c) => c.type.includes("KycCredential"));
 ok(kyc && kyc.claims.country === "IN" && kyc.revoked === false, "the subject holds a valid KycCredential", creds.map((c) => c.type));
 ok(kyc?.issuerDid === org.did, "issued BY the verifier org's parent DID", { iss: kyc?.issuerDid, org: org.did });

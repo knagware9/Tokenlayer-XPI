@@ -78,11 +78,19 @@ export async function seedUseCases(
   repo: UseCaseRepository,
   wiring?: {
     availableChainIds: ReadonlySet<string>;
+    /**
+     * Chains with NO durable state — their ledger lives in this process's memory
+     * and is empty again the moment it restarts. See `redeployOnSimulatedChains`.
+     */
+    simulatedChainIds?: ReadonlySet<string>;
     deploy: (def: UseCaseDefinition, chainId: string) => Promise<UseCaseContract>;
   },
 ): Promise<void> {
   for (const def of loadDefaultUseCaseDefinitions()) {
-    if (await repo.has(def.key)) continue;
+    if (await repo.has(def.key)) {
+      if (wiring) await redeployOnSimulatedChains(repo, def, wiring);
+      continue;
+    }
     let contracts: Record<string, UseCaseContract> = {};
     if (wiring) {
       contracts = await deployUseCaseContracts(def, wiring.availableChainIds, wiring.deploy);
@@ -92,4 +100,61 @@ export async function seedUseCases(
     }
     await repo.create({ ...def, contracts });
   }
+}
+
+/**
+ * A DEPLOYMENT RECORD ON A SIMULATED CHAIN DOES NOT SURVIVE A RESTART.
+ *
+ * The database remembers that `invoice-tokenization` has a contract on `fabric`.
+ * The simulated Fabric adapter does not — its ledger is a Map in this process,
+ * and a restart empties it. Seeding used to `continue` on any existing use case,
+ * so nothing ever told the adapter again, and the two drifted apart silently.
+ *
+ * What that costs is a long way from where it happened. The next issue or
+ * allowlist call fails inside the adapter with `simulated: unknown asset
+ * 'fabric:invoice-tokenization'`, surfaced to the caller as a flat
+ * REQUEST_FAILED — a use case that worked yesterday, on a deployment nobody
+ * changed, with an error naming neither the restart nor the chain. In compose it
+ * is worse than a dev annoyance: the API runs `restart: unless-stopped`, so an
+ * ordinary container restart quietly breaks every simulated-chain use case.
+ *
+ * Redeploying is the honest repair because on these chains a deploy IS the
+ * registration and nothing is lost by repeating it — unlike a real chain, where
+ * redeploying would burn gas and orphan the live contract. So this is scoped to
+ * chains the registry reports as `mode: "simulated"`, and every other chain's
+ * recorded contract is left exactly as it is.
+ */
+async function redeployOnSimulatedChains(
+  repo: UseCaseRepository,
+  def: UseCaseDefinition,
+  wiring: {
+    availableChainIds: ReadonlySet<string>;
+    simulatedChainIds?: ReadonlySet<string>;
+    deploy: (def: UseCaseDefinition, chainId: string) => Promise<UseCaseContract>;
+  },
+): Promise<void> {
+  const simulated = wiring.simulatedChainIds;
+  if (!simulated || simulated.size === 0) return;
+
+  // The STORED definition, not the config file: an operator may have edited this
+  // use case, and re-deriving its contracts must not quietly revert those edits.
+  const existing = await repo.get(def.key).catch(() => null);
+  if (!existing) return;
+
+  const targets = existing.allowedChainIds.filter((c) => simulated.has(c) && wiring.availableChainIds.has(c));
+  if (targets.length === 0) return;
+
+  const contracts: Record<string, UseCaseContract> = { ...(existing.contracts ?? {}) };
+  let changed = false;
+  for (const chainId of targets) {
+    try {
+      contracts[chainId] = await wiring.deploy(existing, chainId);
+      changed = true;
+    } catch (err) {
+      // Best-effort, exactly like the first-time path: a simulated chain that
+      // cannot re-register is left as it was rather than crashing boot.
+      console.warn(`[use-cases] re-register of '${existing.key}' on simulated chain '${chainId}' failed: ${(err as Error).message}`);
+    }
+  }
+  if (changed) await repo.update(existing.key, { ...existing, contracts });
 }

@@ -108,6 +108,10 @@ async function main(): Promise<void> {
   if (env.enabledDomains.includes("tokenization")) {
     await seedUseCases(useCases, {
       availableChainIds: new Set(chains.list().map((c) => c.id)),
+      // Simulated chains keep their ledger in memory, so a recorded deployment on
+      // one is stale the moment this process restarts — seedUseCases re-registers
+      // those, and only those. See redeployOnSimulatedChains.
+      simulatedChainIds: new Set(chains.list().filter((c) => c.mode === "simulated").map((c) => c.id)),
       deploy: (def, chainId) => engine.deployUseCaseContract(def, chainId),
     });
   }
