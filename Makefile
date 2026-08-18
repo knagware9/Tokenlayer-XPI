@@ -23,6 +23,15 @@ deploy-sim: ## Deploy on simulated ledgers only (no external chain)
 deploy-split: ## Deploy the two products as separate stacks, each with its three audience apps
 	bash scripts/stack-up.sh identity tokenization
 
+deploy-shared: ## Shared prerequisites only — secrets, the xi-net network (add BESU=1 for the chain)
+	bash deploy/shared.sh $(if $(BESU),--besu,)
+
+deploy-identity: ## Deploy the IDENTITY product alone (add BESU=1 for on-chain anchoring)
+	bash deploy/identity.sh $(if $(BESU),--besu,)
+
+deploy-tokenization: ## Deploy the TOKENIZATION product (BESU=1 for the real chain, IDENTITY=1 to link the credential gate)
+	bash deploy/tokenization.sh $(if $(BESU),--besu,) $(if $(IDENTITY),--with-identity,)
+
 verify: ## Smoke test: issue + buy, assert real on-chain contract
 	./scripts/verify.sh --besu
 
