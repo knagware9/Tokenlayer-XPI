@@ -16,10 +16,44 @@ network the identity seam crosses, and the chain both products anchor on.
 ## Usage
 
 ```bash
-bash deploy/identity.sh --besu                      # identity, on the real chain
-bash deploy/tokenization.sh                         # tokenization, standalone
-bash deploy/tokenization.sh --besu --with-identity  # both, linked
+bash deploy/identity.sh --chain=besu                          # anchor on local Besu
+bash deploy/identity.sh --chain=mst                           # anchor on the MST testnet
+bash deploy/tokenization.sh --chain=besu,mst,fabric           # mint on all three
+bash deploy/tokenization.sh --chain=besu --with-identity      # linked to identity
 ```
+
+## Choosing the ledger
+
+`--chain=` takes `besu`, `mst`, `fabric`, or a comma-separated list. Omit it and
+every ledger is simulated.
+
+| | What it is | Prepared by `shared.sh` |
+|---|---|---|
+| `besu` | **Real.** Vendored 5-node QBFT, chainId 1337 | Starts the nodes, waits for block production, attaches `besu-node1` to `xi-net` |
+| `mst` | **Real.** Public testnet, chainId 91562037 | Verifies `MST_*` credentials and probes the RPC's chainId |
+| `fabric` | **Simulated in containers** | Selects it, and says plainly why it cannot be real here |
+
+Two constraints the flags enforce rather than document and hope:
+
+**Identity anchors on EVM only.** The DID and VC registries are Solidity
+contracts and `CredentialAnchor` exists solely on the EVM adapter, so
+`identity.sh --chain=fabric` is *refused*. `identity.sh` also sets
+`REGISTRY_CHAIN_ID` to the first EVM chain you named, so `--chain=mst` anchors
+on MST without a second flag. Tokenization has no such limit — a use case names
+its own chain, so all three are valid targets at once.
+
+**Fabric cannot be real in a container.** Neither split compose file passes
+`FABRIC_*` through, and the profile `make fabric-up` emits binds host localhost
+ports with `asLocalhost: true`. Real Fabric needs the host API:
+`make fabric-up && ./scripts/api-fabric.sh`.
+
+### Why `besu-node1` gets attached to `xi-net`
+
+The vendored nodes run on their own `besu-network`; the split APIs run on
+`xi-net`. Before this, the two could not reach each other, so a split deployment
+had **no Besu at all** — the chain was absent, which the app reports honestly
+and which looks like a mystery from the outside. `shared.sh` connects the two
+(idempotently) whenever you select `besu`.
 
 Every script is idempotent — re-running brings the stack to the same state
 rather than duplicating anything.

@@ -43,8 +43,9 @@ Start with `./scripts/deploy.sh` (add `--sim` for simulated ledgers only).
 | Tokenization · Marketplace | http://localhost:8101 | http://localhost:4121 |
 | Tokenization · Platform Admin | http://localhost:8102 | http://localhost:4122 |
 
-Start with `bash deploy/identity.sh` and/or `bash deploy/tokenization.sh`
-(see `deploy/README.md`). Neither API publishes a host port of its own — the
+Start with `bash deploy/identity.sh --chain=besu` and/or
+`bash deploy/tokenization.sh --chain=besu` — `--chain=` takes `besu`, `mst`,
+`fabric` or a list (see `deploy/README.md`). Neither API publishes a host port of its own — the
 edges above are the only way in, and each serves only its persona's routes.
 
 ## Logins

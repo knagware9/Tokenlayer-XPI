@@ -2,9 +2,16 @@
 # ============================================================================
 # DEPLOY THE TOKENIZATION PRODUCT — issuer desk, marketplace, platform admin.
 #
-#   bash deploy/tokenization.sh                  # STANDALONE
-#   bash deploy/tokenization.sh --besu           # …on the real Besu chain
-#   bash deploy/tokenization.sh --with-identity  # …linked to the identity stack
+#   bash deploy/tokenization.sh                       # STANDALONE, all simulated
+#   bash deploy/tokenization.sh --chain=besu           # mint on local Besu
+#   bash deploy/tokenization.sh --chain=mst            # mint on the MST testnet
+#   bash deploy/tokenization.sh --chain=besu,mst,fabric # several at once
+#   bash deploy/tokenization.sh --chain=besu --with-identity
+#
+# UNLIKE IDENTITY, TOKENIZATION TAKES ANY LEDGER — a use case names the chain it
+# deploys to, so besu, mst and fabric are all valid targets and several can be
+# live at once. Only `fabric` carries a caveat: containerised it is simulated
+# (see deploy/shared.sh).
 #
 # THE LINK IS OPTIONAL AND ONE-WAY. Tokenization asks identity a single
 # question — does this DID hold a valid KycCredential — and only a DID crosses
@@ -27,7 +34,9 @@ for a in "$@"; do
   esac
 done
 
-bash deploy/shared.sh ${PASS[@]+"${PASS[@]}"}
+# SOURCED, not run: a subprocess cannot export BESU_RPC_URL back to us, and
+# without it the stack boots with the chain absent.
+. deploy/shared.sh ${PASS[@]+"${PASS[@]}"}
 say "handing off to scripts/stack-up.sh…"
 if [ "$WITH_IDENTITY" = 1 ]; then
   # Naming BOTH stacks is what mints the identity:assert peer key and wires the
@@ -45,4 +54,5 @@ echo "  Platform Admin    http://localhost:${TOKENIZATION_ADMIN_WEB_PORT:-8102} 
 [ "$WITH_IDENTITY" = 1 ] \
   && echo "  Identity seam     linked — credential gates are enforceable" \
   || echo -e "  ${Y}Identity seam     NOT linked — 'requireVerifiedIdentity' use cases will refuse${N}"
+echo "  Ledgers           ${SHARED_CHAINS:-none — all simulated}"
 echo "  Logins            docs/demo-credentials.md"
