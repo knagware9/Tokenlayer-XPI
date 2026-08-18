@@ -47,13 +47,23 @@ its own chain, so all three are valid targets at once.
 ports with `asLocalhost: true`. Real Fabric needs the host API:
 `make fabric-up && ./scripts/api-fabric.sh`.
 
-### Why `besu-node1` gets attached to `xi-net`
+### How Besu reaches a split stack
 
-The vendored nodes run on their own `besu-network`; the split APIs run on
-`xi-net`. Before this, the two could not reach each other, so a split deployment
-had **no Besu at all** — the chain was absent, which the app reports honestly
-and which looks like a mystery from the outside. `shared.sh` connects the two
-(idempotently) whenever you select `besu`.
+The vendored validators run on their own `besu-network`; the split APIs run on
+`xi-net`. Before this they could not reach each other, so a split deployment had
+**no Besu at all** — `BESU_RPC_URL` was unset and the chain was simply absent,
+which the app reports honestly and which looks like a mystery from outside.
+
+The fix is declarative: `docker-compose.<stack>.besu.yml` attaches that stack's
+API to `besu-network` and supplies the RPC URL, and `scripts/stack-up.sh` applies
+it when you pass `--chain=besu`. So the wiring is identical whether you arrive
+through `deploy/`, through `stack-up.sh`, or through `make deploy-split`.
+
+**The app joins the chain's network, not the reverse.** An earlier version did
+`docker network connect xi-net besu-node1` from `shared.sh`. It worked, but only
+for deployments that came through that one script, and it reached into the
+chain's own topology to do it — the validators are peers of each other and
+should not acquire a dependency on an application network.
 
 Every script is idempotent — re-running brings the stack to the same state
 rather than duplicating anything.

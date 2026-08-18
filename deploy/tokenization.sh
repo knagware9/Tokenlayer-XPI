@@ -41,9 +41,9 @@ say "handing off to scripts/stack-up.sh…"
 if [ "$WITH_IDENTITY" = 1 ]; then
   # Naming BOTH stacks is what mints the identity:assert peer key and wires the
   # seam. Starting them separately leaves tokenization standalone.
-  bash scripts/stack-up.sh identity tokenization
+  bash scripts/stack-up.sh identity tokenization ${SHARED_CHAINS:+--chain=$(echo "$SHARED_CHAINS" | tr " " ",")}
 else
-  bash scripts/stack-up.sh tokenization
+  bash scripts/stack-up.sh tokenization ${SHARED_CHAINS:+--chain=$(echo "$SHARED_CHAINS" | tr " " ",")}
 fi
 
 echo

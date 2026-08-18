@@ -1,0 +1,35 @@
+# ============================================================================
+# BESU FOR THE SPLIT tokenization STACK — an overlay, applied by
+# `scripts/stack-up.sh --chain=besu`.
+#
+#   docker compose -p xi-tokenization \
+#     -f docker-compose.tokenization.yml -f docker-compose.tokenization.besu.yml up -d
+#
+# WHY AN OVERLAY AND NOT A DEFAULT. "Real or absent, never mocked" is the rule
+# for EVM chains, and it cuts both ways: a stack that always carried
+# BESU_RPC_URL would try to reach a chain nobody started, and every deployment
+# without Besu would carry a permanently failing connection. Selecting the
+# ledger is a deployment decision, so it is a file you opt into.
+#
+# THE APP JOINS BESU'S NETWORK, NOT THE REVERSE. `besu-network` is declared
+# with an explicit `name:` in docker-compose.besu-nodes.yml, so it is a stable
+# address from any project. Attaching the API to it (rather than dragging the
+# validators onto xi-net) leaves the chain's own topology untouched — the nodes
+# are peers of each other and should not depend on an application network.
+# ============================================================================
+services:
+  tokenization-api:
+    environment:
+      BESU_RPC_URL: ${BESU_RPC_URL:-http://besu-node1:8545}
+      # The vendored QBFT dev operator, already committed in
+      # docker-compose.besu.yml for the combined stack. A well-known key for a
+      # local chain — NEVER a production credential.
+      BESU_OPERATOR_KEY: ${BESU_OPERATOR_KEY:-0x8f2a55949038a9610f50fb23b5883af3b4ecb3c3bb792cbcefbd1542c692be63}
+    # BOTH networks listed deliberately: a compose override replaces this
+    # sequence rather than appending to it, so omitting xi-net here would cut
+    # the API off from its own edges.
+    networks: [xi-net, besu-network]
+
+networks:
+  besu-network:
+    external: true

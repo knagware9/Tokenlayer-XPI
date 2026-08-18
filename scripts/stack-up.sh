@@ -4,6 +4,14 @@
 #   bash scripts/stack-up.sh identity                  # identity alone
 #   bash scripts/stack-up.sh tokenization              # tokenization alone
 #   bash scripts/stack-up.sh identity tokenization     # both, linked
+#   bash scripts/stack-up.sh tokenization --chain=besu # …on the vendored chain
+#
+# --chain=besu ADDS THE BESU OVERLAY. Without it a split stack has no EVM chain
+# at all: the validators live on `besu-network` and the APIs on `xi-net`, so the
+# chain is simply ABSENT — reported honestly by the app, and baffling from the
+# outside. The overlay attaches the API to besu-network and supplies the RPC
+# URL. Start the nodes first (deploy/shared.sh --chain=besu, or
+# docker compose -f docker-compose.besu-nodes.yml up -d).
 #
 # Each stack is a separate compose project on a shared external network, so they
 # can be started in either order, stopped independently, and run on different
@@ -25,15 +33,25 @@ NETWORK="xi-net"
 ID_COMPOSE="docker compose -p xi-identity -f docker-compose.identity.yml"
 TOK_COMPOSE="docker compose -p xi-tokenization -f docker-compose.tokenization.yml"
 
-WANT_IDENTITY=0; WANT_TOKENIZATION=0
+WANT_IDENTITY=0; WANT_TOKENIZATION=0; WANT_BESU=0
 for arg in "$@"; do
   case "$arg" in
     identity) WANT_IDENTITY=1;;
     tokenization) WANT_TOKENIZATION=1;;
-    *) die "unknown stack '$arg' — expected 'identity' and/or 'tokenization'";;
+    # Chains are named here so `make deploy-split` and the deploy/ scripts reach
+    # the same wiring. Only besu needs an overlay: mst is remote (env alone) and
+    # fabric is simulated in containers.
+    --chain=*) case ",${arg#--chain=}," in *,besu,*) WANT_BESU=1;; esac;;
+    --besu) WANT_BESU=1;;
+    *) die "unknown argument '$arg' — expected 'identity', 'tokenization' and/or --chain=<besu|mst|fabric>";;
   esac
 done
 [ $# -gt 0 ] || die "name at least one stack: identity, tokenization, or both"
+
+if [ "$WANT_BESU" = 1 ]; then
+  ID_COMPOSE="$ID_COMPOSE -f docker-compose.identity.besu.yml"
+  TOK_COMPOSE="$TOK_COMPOSE -f docker-compose.tokenization.besu.yml"
+fi
 
 command -v docker >/dev/null || die "docker is not on PATH"
 

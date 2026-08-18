@@ -46,7 +46,7 @@ fi
 say "handing off to scripts/stack-up.sh…"
 # DELEGATED, NOT REIMPLEMENTED. stack-up.sh owns the peer-key lifecycle and the
 # volume-age check deciding whether a stored key is still valid.
-bash scripts/stack-up.sh identity
+bash scripts/stack-up.sh identity ${SHARED_CHAINS:+--chain=$(echo "$SHARED_CHAINS" | tr " " ",")}
 
 echo
 echo -e "${G}✅ IDENTITY IS UP${N}"

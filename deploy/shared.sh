@@ -116,14 +116,12 @@ case "$chain" in
   DESTROYS all chain history and is deliberately left to a human."
     say "besu — producing blocks ✓ ($first → $h)"
 
-    # THE NODES LIVE ON THEIR OWN NETWORK. Without this the split stacks cannot
-    # reach them at all: besu-node1 is on 'besu-network', the APIs are on
-    # 'xi-net', and the chain is simply ABSENT — which the app reports honestly
-    # but which looks like a configuration mystery from the outside. Idempotent.
-    if ! docker inspect besu-node1 --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' | grep -q "$NETWORK"; then
-      say "besu — attaching besu-node1 to '$NETWORK' so containerised stacks can reach it"
-      docker network connect "$NETWORK" besu-node1
-    fi
+    # REACHABILITY IS DECLARED, NOT PATCHED IN. The validators live on their own
+    # 'besu-network' and the APIs on 'xi-net'; docker-compose.<stack>.besu.yml
+    # attaches each API to besu-network, which stack-up.sh applies when the
+    # caller names --chain=besu. Doing it here with `docker network connect`
+    # worked, but only for deployments that came through THIS script — the same
+    # stack raised by `make deploy-split` still had no chain.
     export BESU_RPC_URL="${BESU_RPC_URL:-http://besu-node1:8545}"
     # The vendored QBFT dev operator, already committed in docker-compose.besu.yml.
     # A well-known test key for a local chain — NEVER a production credential.
