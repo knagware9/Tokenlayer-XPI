@@ -118,10 +118,18 @@ export async function waitForReceipt(
 ): Promise<{ blockNumber?: number } | null> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), timeoutMs); });
+  const pending = tx.wait(confirmations);
   try {
-    return (await Promise.race([tx.wait(confirmations), timeout])) as { blockNumber?: number } | null;
+    return (await Promise.race([pending, timeout])) as { blockNumber?: number } | null;
   } finally {
     if (timer) clearTimeout(timer);
+    // If the timeout won the race, `pending` is abandoned but still in flight —
+    // Promise.race does not cancel the loser. Its eventual outcome no longer
+    // matters to THIS call (the confirmer resolves the transaction later via
+    // getReceipt), but if it rejects with nothing listening, Node reports an
+    // unhandled rejection. Attach a no-op catch so a late failure is swallowed
+    // deliberately, not accidentally.
+    void pending.catch(() => {});
   }
 }
 
@@ -283,7 +291,12 @@ export class EvmLedgerAdapter implements LedgerAdapter, CredentialAnchor {
    */
   async getReceipt(txHash: string): Promise<{ blockNumber?: number; status?: number } | null> {
     const r = await this.provider.getTransactionReceipt(txHash);
-    return r ? { blockNumber: r.blockNumber, status: Number(r.status ?? 1) } : null;
+    if (!r) return null;
+    // A mined receipt with no `status` field is itself an unresolved outcome —
+    // never default it to 1 (success). The governing rule of this whole change
+    // is that "unknown" must never read as "confirmed ok"; defaulting here would
+    // let a genuinely ambiguous receipt sail through as a success.
+    return { blockNumber: r.blockNumber, status: r.status == null ? undefined : Number(r.status) };
   }
 
   /** Serialised single transaction (the common case for one-shot operations). */
