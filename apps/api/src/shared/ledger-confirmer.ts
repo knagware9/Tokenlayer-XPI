@@ -14,6 +14,7 @@ import { randomUUID } from "node:crypto";
 import type { LedgerTransactionRepository } from "../persistence/types/index.js";
 
 const STALE_CLAIM_MS = 60_000;
+const BASE_BACKOFF_MS = 5_000;
 
 export interface ConfirmerOptions {
   workerId: string;
@@ -56,16 +57,15 @@ export async function runConfirmerOnce(
       await deps.ledgerTransactions.settle(claimed.id, { status: "unknown", error: error ?? `no receipt after ${maxAttempts} polls` });
       continue;
     }
-    // NO GROWING DELAY HERE — deliberately, unlike the dispatcher's exponential
-    // BACKOFF_MS. That backoff exists to protect a THIRD PARTY'S server from a
-    // retry storm; a receipt poll hits our own chain RPC, and the throttle that
-    // matters is already `startConfirmer`'s poll interval (`intervalMs`, default
-    // 5s) — the row becomes due again on the very next tick, not sooner. Adding
-    // a second, independently-growing delay on top would only fight the
-    // interval's own pacing, and — because each tick's `now` is the wall-clock
-    // instant it fires — could not be expressed as a plain unit test at all
-    // without a fake clock.
-    await deps.ledgerTransactions.defer(claimed.id, opts.now, opts.now, error);
+    // GROWING DELAY, deliberately mirroring the dispatcher's exponential
+    // BACKOFF_MS. A stalled chain must not be re-polled every tick for every
+    // outstanding row forever — that hammers the RPC endpoint exactly the way
+    // the dispatcher's backoff exists to prevent for a webhook endpoint. The
+    // interval alone (`startConfirmer`'s `intervalMs`) is not a substitute: it
+    // bounds the FLOOR between polls, not the growth of an individual row's
+    // wait as it keeps coming up empty.
+    const backoff = BASE_BACKOFF_MS * 2 ** claimed.attempts;
+    await deps.ledgerTransactions.defer(claimed.id, new Date(nowMs + backoff).toISOString(), opts.now, error);
   }
 }
 
