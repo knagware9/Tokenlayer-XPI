@@ -608,3 +608,55 @@ export interface WebhookDeliveryRepository {
   update(id: string, patch: Partial<Pick<WebhookDeliveryRecord, "status" | "attempts" | "nextAttemptAt" | "lastAttemptAt" | "responseStatus" | "responseError" | "durationMs" | "claimedAt" | "claimedBy">>): Promise<WebhookDeliveryRecord>;
 }
 
+export type LedgerTxStatus = "pending" | "confirmed" | "failed" | "unknown";
+export type LedgerTxKind = "deploy" | "mint" | "transfer" | "burn" | "freeze" | "allow" | "anchor";
+
+export interface LedgerTransactionRecord {
+  id: string;
+  chainId: string;
+  txHash: string;
+  kind: LedgerTxKind;
+  amount: string | null;
+  assetId: string | null;
+  credentialId: string | null;
+  status: LedgerTxStatus;
+  attempts: number;
+  nextAttemptAt: string;
+  lastAttemptAt: string | null;
+  claimedAt: string | null;
+  claimedBy: string | null;
+  blockNumber: number | null;
+  error: string | null;
+  submittedAt: string;
+  confirmedAt: string | null;
+}
+
+export interface LedgerTransactionSettlement {
+  status: LedgerTxStatus;
+  blockNumber?: number;
+  confirmedAt?: string;
+  error?: string;
+}
+
+export interface LedgerTransactionRepository {
+  /** Idempotent on (chainId, txHash): re-recording the same submission returns the existing row. */
+  record(input: {
+    chainId: string; txHash: string; kind: LedgerTxKind; amount?: string | null;
+    assetId?: string | null; credentialId?: string | null; submittedAt: string;
+  }): Promise<LedgerTransactionRecord>;
+  findById(id: string): Promise<LedgerTransactionRecord | null>;
+  /** Confirmed mints minus confirmed burns for one asset — the believed supply. */
+  settledSupply(assetId: string): Promise<string>;
+  /** Due = (pending|unknown) and nextAttemptAt <= now, oldest first. */
+  listDue(now: string, limit: number): Promise<LedgerTransactionRecord[]>;
+  /** CAS claim, mirroring WebhookDeliveryRepository.claim — null if another worker won. */
+  claim(id: string, workerId: string, now: string): Promise<LedgerTransactionRecord | null>;
+  /** Claims left behind by a crashed worker. Returns how many were released. */
+  reclaimStale(before: string): Promise<number>;
+  /** Outstanding (pending|unknown) rows for one asset, oldest first. */
+  listByAsset(assetId: string): Promise<LedgerTransactionRecord[]>;
+  settle(id: string, settlement: LedgerTransactionSettlement): Promise<LedgerTransactionRecord>;
+  /** Records one more failed poll and backs off. */
+  defer(id: string, nextAttemptAt: string, now: string, error?: string): Promise<LedgerTransactionRecord>;
+}
+

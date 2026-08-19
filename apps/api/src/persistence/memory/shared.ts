@@ -9,7 +9,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { id, now, paginate } from "./common.js";
 import { auditEntryHash, auditGenesis } from "@tokenlayer/core";
 import type { OrgCapabilities, ResourceMode } from "@tokenlayer/core";
-import type { ApiKeyCreateInput, ApiKeyRecord, ApiKeyRepository, AuditAnchorRecord, AuditAnchorRepository, AuditEntryRecord, AuditRepository, BrandingPatch, CashflowRepository, CredentialRecord, CredentialRepository, DocumentPurpose, DocumentRecord, DocumentRepository, DocumentSummary, EventAppendInput, EventRecord, EventRepository, LoginKeyRecord, LoginKeyRepository, OrgStatus, OrganizationRecord, OrganizationRepository, Page, Paged, ProposalApproval, ProposalRecord, ProposalRepository, RegistryDeploymentRecord, RegistryDeploymentRepository, UserKind, UserRecord, UserRepository, WebhookDeliveryRecord, WebhookDeliveryRepository, WebhookEndpointCreateInput, WebhookEndpointRecord, WebhookEndpointRepository } from "../types/index.js";
+import type { ApiKeyCreateInput, ApiKeyRecord, ApiKeyRepository, AuditAnchorRecord, AuditAnchorRepository, AuditEntryRecord, AuditRepository, BrandingPatch, CashflowRepository, CredentialRecord, CredentialRepository, DocumentPurpose, DocumentRecord, DocumentRepository, DocumentSummary, EventAppendInput, EventRecord, EventRepository, LedgerTransactionRecord, LedgerTransactionRepository, LedgerTransactionSettlement, LedgerTxKind, LoginKeyRecord, LoginKeyRepository, OrgStatus, OrganizationRecord, OrganizationRepository, Page, Paged, ProposalApproval, ProposalRecord, ProposalRepository, RegistryDeploymentRecord, RegistryDeploymentRepository, UserKind, UserRecord, UserRepository, WebhookDeliveryRecord, WebhookDeliveryRepository, WebhookEndpointCreateInput, WebhookEndpointRecord, WebhookEndpointRepository } from "../types/index.js";
 
 export class MemoryUserRepository implements UserRepository {
   private readonly byId = new Map<string, UserRecord>();
@@ -594,5 +594,96 @@ export class MemoryWebhookDeliveryRepository implements WebhookDeliveryRepositor
       if (v !== undefined) Object.assign(rec, { [k]: v });
     }
     return { ...rec };
+  }
+}
+
+export class MemoryLedgerTransactionRepository implements LedgerTransactionRepository {
+  private readonly byId = new Map<string, LedgerTransactionRecord>();
+
+  async record(input: {
+    chainId: string; txHash: string; kind: LedgerTxKind; amount?: string | null;
+    assetId?: string | null; credentialId?: string | null; submittedAt: string;
+  }): Promise<LedgerTransactionRecord> {
+    const existing = [...this.byId.values()].find((r) => r.chainId === input.chainId && r.txHash === input.txHash);
+    if (existing) return { ...existing };
+    const rec: LedgerTransactionRecord = {
+      id: id("ltx"), chainId: input.chainId, txHash: input.txHash, kind: input.kind,
+      amount: input.amount ?? null,
+      assetId: input.assetId ?? null, credentialId: input.credentialId ?? null,
+      status: "pending", attempts: 0, nextAttemptAt: input.submittedAt, lastAttemptAt: null,
+      claimedAt: null, claimedBy: null, blockNumber: null, error: null,
+      submittedAt: input.submittedAt, confirmedAt: null,
+    };
+    this.byId.set(rec.id, rec);
+    return { ...rec };
+  }
+
+  async findById(txId: string): Promise<LedgerTransactionRecord | null> {
+    const r = this.byId.get(txId);
+    return r ? { ...r } : null;
+  }
+
+  async listDue(nowIso: string, limit: number): Promise<LedgerTransactionRecord[]> {
+    // createdAt/nextAttemptAt are ISO STRINGS here, so compare as strings —
+    // calling .getTime() on them throws, and only with 2+ rows.
+    return [...this.byId.values()]
+      .filter((r) => (r.status === "pending" || r.status === "unknown") && !r.claimedAt && r.nextAttemptAt <= nowIso)
+      .sort((a, b) => (a.submittedAt < b.submittedAt ? -1 : a.submittedAt > b.submittedAt ? 1 : 0))
+      .slice(0, limit)
+      .map((r) => ({ ...r }));
+  }
+
+  async claim(txId: string, workerId: string, nowIso: string): Promise<LedgerTransactionRecord | null> {
+    const r = this.byId.get(txId);
+    if (!r || r.claimedAt) return null;
+    if (r.status !== "pending" && r.status !== "unknown") return null;
+    r.claimedAt = nowIso; r.claimedBy = workerId;
+    return { ...r };
+  }
+
+  async reclaimStale(before: string): Promise<number> {
+    let n = 0;
+    for (const r of this.byId.values()) {
+      if (r.claimedAt && r.claimedAt < before) { r.claimedAt = null; r.claimedBy = null; n++; }
+    }
+    return n;
+  }
+
+  async listByAsset(assetId: string): Promise<LedgerTransactionRecord[]> {
+    return [...this.byId.values()]
+      .filter((r) => r.assetId === assetId && (r.status === "pending" || r.status === "unknown"))
+      .sort((a, b) => (a.submittedAt < b.submittedAt ? -1 : a.submittedAt > b.submittedAt ? 1 : 0))
+      .map((r) => ({ ...r }));
+  }
+
+  async settledSupply(assetId: string): Promise<string> {
+    // BigInt, not Number: token amounts routinely exceed 2^53 and a float here
+    // would silently round the very quantity being reconciled.
+    let total = 0n;
+    for (const r of this.byId.values()) {
+      if (r.assetId !== assetId || r.status !== "confirmed" || !r.amount) continue;
+      if (r.kind === "mint") total += BigInt(r.amount);
+      if (r.kind === "burn") total -= BigInt(r.amount);
+    }
+    return total.toString();
+  }
+
+  async settle(txId: string, s: LedgerTransactionSettlement): Promise<LedgerTransactionRecord> {
+    const r = this.byId.get(txId);
+    if (!r) throw new Error(`unknown ledger transaction '${txId}'`);
+    r.status = s.status;
+    r.blockNumber = s.blockNumber ?? r.blockNumber;
+    r.confirmedAt = s.confirmedAt ?? null;
+    r.error = s.error ?? null;
+    r.claimedAt = null; r.claimedBy = null;
+    return { ...r };
+  }
+
+  async defer(txId: string, nextAttemptAt: string, nowIso: string, error?: string): Promise<LedgerTransactionRecord> {
+    const r = this.byId.get(txId);
+    if (!r) throw new Error(`unknown ledger transaction '${txId}'`);
+    r.attempts += 1; r.nextAttemptAt = nextAttemptAt; r.lastAttemptAt = nowIso;
+    r.error = error ?? r.error; r.claimedAt = null; r.claimedBy = null;
+    return { ...r };
   }
 }

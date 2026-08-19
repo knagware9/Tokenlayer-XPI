@@ -23,6 +23,7 @@ import {
   PrismaCashRepository,
   PrismaDocumentRepository,
   PrismaEventRepository,
+  PrismaLedgerTransactionRepository,
   PrismaListingRepository,
   PrismaLoginKeyRepository,
   PrismaRegistryDeploymentRepository,
@@ -68,6 +69,7 @@ async function main(): Promise<void> {
   const events = new PrismaEventRepository();
   const webhookEndpoints = new PrismaWebhookEndpointRepository();
   const webhookDeliveries = new PrismaWebhookDeliveryRepository();
+  const ledgerTransactions = new PrismaLedgerTransactionRepository();
   const keystore = createKeystore(env.didMasterKey);
   // Demo users/accounts (with predictable passwords) are seeded only outside
   // production. The ROSTER is seeded on every deployment — it is how anyone logs
@@ -145,6 +147,7 @@ async function main(): Promise<void> {
     events,
     webhookEndpoints,
     webhookDeliveries,
+    ledgerTransactions,
     webhooksAllowInsecure: env.webhooksAllowInsecure,
     // ONE box, shared by the registration routes (which seal a freshly minted
     // secret) and the dispatcher below (which opens it to sign). A DEDICATED key

@@ -20,6 +20,7 @@ import type {
   CredentialUseCaseTemplateRepository,
   DocumentRepository,
   EventRepository,
+  LedgerTransactionRepository,
   ListingRepository,
   LoginKeyRepository,
   OrganizationRepository,
@@ -61,6 +62,8 @@ export interface AppDeps {
   events: EventRepository;
   webhookEndpoints: WebhookEndpointRepository;
   webhookDeliveries: WebhookDeliveryRepository;
+  /** The durable record of every chain write — see ledger-transactions-repo.test.ts. */
+  ledgerTransactions: LedgerTransactionRepository;
   /**
    * Dev/demo only: permits an http:// webhook endpoint on loopback. REQUIRED,
    * not optional, so that every construction site has to state its posture —

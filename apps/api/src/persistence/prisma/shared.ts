@@ -10,7 +10,7 @@ import { prisma } from "./client.js";
 import { auditEntryHash, auditGenesis } from "@tokenlayer/core";
 import type { LifecycleAction, OrgCapabilities, ResourceMode, Role } from "@tokenlayer/core";
 import type { OrgType } from "../types/index.js";
-import type { ApiKeyCreateInput, ApiKeyRecord, ApiKeyRepository, AuditAnchorRecord, AuditAnchorRepository, AuditEntryRecord, AuditRepository, BrandingPatch, CompanyProfile, CredentialRecord, CredentialRepository, DocumentPurpose, DocumentRecord, DocumentRepository, DocumentSummary, EventAppendInput, EventRecord, EventRepository, KycDetails, KycStatus, LoginKeyRecord, LoginKeyRepository, OrgStatus, OrganizationRecord, OrganizationRepository, Page, Paged, ProposalApproval, ProposalRecord, ProposalRepository, RegistryDeploymentRecord, RegistryDeploymentRepository, UserKind, UserRecord, UserRepository, WebhookDeliveryRecord, WebhookDeliveryRepository, WebhookEndpointCreateInput, WebhookEndpointRecord, WebhookEndpointRepository } from "../types/index.js";
+import type { ApiKeyCreateInput, ApiKeyRecord, ApiKeyRepository, AuditAnchorRecord, AuditAnchorRepository, AuditEntryRecord, AuditRepository, BrandingPatch, CompanyProfile, CredentialRecord, CredentialRepository, DocumentPurpose, DocumentRecord, DocumentRepository, DocumentSummary, EventAppendInput, EventRecord, EventRepository, KycDetails, KycStatus, LedgerTransactionRecord, LedgerTransactionRepository, LedgerTransactionSettlement, LedgerTxKind, LedgerTxStatus, LoginKeyRecord, LoginKeyRepository, OrgStatus, OrganizationRecord, OrganizationRepository, Page, Paged, ProposalApproval, ProposalRecord, ProposalRepository, RegistryDeploymentRecord, RegistryDeploymentRepository, UserKind, UserRecord, UserRepository, WebhookDeliveryRecord, WebhookDeliveryRepository, WebhookEndpointCreateInput, WebhookEndpointRecord, WebhookEndpointRepository } from "../types/index.js";
 
 const toUser = (r: {
   id: string;
@@ -734,5 +734,118 @@ export class PrismaWebhookDeliveryRepository implements WebhookDeliveryRepositor
         ...(patch.claimedBy !== undefined ? { claimedBy: patch.claimedBy } : {}),
       },
     }));
+  }
+}
+
+const toLedgerTx = (r: {
+  id: string; chainId: string; txHash: string; kind: string; amount: string | null; assetId: string | null;
+  credentialId: string | null; status: string; attempts: number; nextAttemptAt: Date;
+  lastAttemptAt: Date | null; claimedAt: Date | null; claimedBy: string | null;
+  blockNumber: number | null; error: string | null; submittedAt: Date; confirmedAt: Date | null;
+}): LedgerTransactionRecord => ({
+  id: r.id, chainId: r.chainId, txHash: r.txHash, kind: r.kind as LedgerTxKind, amount: r.amount,
+  assetId: r.assetId, credentialId: r.credentialId, status: r.status as LedgerTxStatus,
+  attempts: r.attempts, nextAttemptAt: r.nextAttemptAt.toISOString(),
+  lastAttemptAt: r.lastAttemptAt ? r.lastAttemptAt.toISOString() : null,
+  claimedAt: r.claimedAt ? r.claimedAt.toISOString() : null, claimedBy: r.claimedBy,
+  blockNumber: r.blockNumber, error: r.error,
+  submittedAt: r.submittedAt.toISOString(),
+  confirmedAt: r.confirmedAt ? r.confirmedAt.toISOString() : null,
+});
+
+export class PrismaLedgerTransactionRepository implements LedgerTransactionRepository {
+  async record(input: {
+    chainId: string; txHash: string; kind: LedgerTxKind; amount?: string | null;
+    assetId?: string | null; credentialId?: string | null; submittedAt: string;
+  }): Promise<LedgerTransactionRecord> {
+    const row = await prisma.ledgerTransaction.upsert({
+      where: { chainId_txHash: { chainId: input.chainId, txHash: input.txHash } },
+      update: {},
+      create: {
+        chainId: input.chainId, txHash: input.txHash, kind: input.kind, amount: input.amount ?? null,
+        assetId: input.assetId ?? null, credentialId: input.credentialId ?? null,
+        status: "pending", submittedAt: new Date(input.submittedAt),
+        nextAttemptAt: new Date(input.submittedAt),
+      },
+    });
+    return toLedgerTx(row);
+  }
+
+  async findById(id: string): Promise<LedgerTransactionRecord | null> {
+    const row = await prisma.ledgerTransaction.findUnique({ where: { id } });
+    return row ? toLedgerTx(row) : null;
+  }
+
+  async listDue(now: string, limit: number): Promise<LedgerTransactionRecord[]> {
+    const rows = await prisma.ledgerTransaction.findMany({
+      where: { status: { in: ["pending", "unknown"] }, claimedAt: null, nextAttemptAt: { lte: new Date(now) } },
+      orderBy: { submittedAt: "asc" }, take: limit,
+    });
+    return rows.map(toLedgerTx);
+  }
+
+  async claim(id: string, workerId: string, now: string): Promise<LedgerTransactionRecord | null> {
+    // CAS: the WHERE carries claimedAt:null, so a loser updates 0 rows.
+    const res = await prisma.ledgerTransaction.updateMany({
+      where: { id, claimedAt: null, status: { in: ["pending", "unknown"] } },
+      data: { claimedAt: new Date(now), claimedBy: workerId },
+    });
+    if (res.count === 0) return null;
+    return this.findById(id);
+  }
+
+  async reclaimStale(before: string): Promise<number> {
+    const res = await prisma.ledgerTransaction.updateMany({
+      where: { claimedAt: { lt: new Date(before) } },
+      data: { claimedAt: null, claimedBy: null },
+    });
+    return res.count;
+  }
+
+  async listByAsset(assetId: string): Promise<LedgerTransactionRecord[]> {
+    const rows = await prisma.ledgerTransaction.findMany({
+      where: { assetId, status: { in: ["pending", "unknown"] } },
+      orderBy: { submittedAt: "asc" },
+    });
+    return rows.map(toLedgerTx);
+  }
+
+  async settledSupply(assetId: string): Promise<string> {
+    const rows = await prisma.ledgerTransaction.findMany({
+      where: { assetId, status: "confirmed", kind: { in: ["mint", "burn"] } },
+      select: { kind: true, amount: true },
+    });
+    // BigInt, not Number: a float would silently round the quantity being reconciled.
+    let total = 0n;
+    for (const r of rows) {
+      if (!r.amount) continue;
+      total += r.kind === "mint" ? BigInt(r.amount) : -BigInt(r.amount);
+    }
+    return total.toString();
+  }
+
+  async settle(id: string, s: LedgerTransactionSettlement): Promise<LedgerTransactionRecord> {
+    const row = await prisma.ledgerTransaction.update({
+      where: { id },
+      data: {
+        status: s.status,
+        blockNumber: s.blockNumber ?? undefined,
+        confirmedAt: s.confirmedAt ? new Date(s.confirmedAt) : null,
+        error: s.error ?? null, claimedAt: null, claimedBy: null,
+      },
+    });
+    return toLedgerTx(row);
+  }
+
+  async defer(id: string, nextAttemptAt: string, now: string, error?: string): Promise<LedgerTransactionRecord> {
+    const row = await prisma.ledgerTransaction.update({
+      where: { id },
+      data: {
+        attempts: { increment: 1 }, nextAttemptAt: new Date(nextAttemptAt),
+        lastAttemptAt: new Date(now), error: error ?? undefined,
+        claimedAt: null, claimedBy: null,
+      },
+    });
+    return toLedgerTx(row);
   }
 }
