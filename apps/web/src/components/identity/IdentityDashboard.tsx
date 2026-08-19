@@ -24,25 +24,39 @@ function StatusPill({ status }: { status: DerivedCredentialStatus }): JSX.Elemen
   return <span className={`inline-block rounded-full border px-2 py-0.5 text-[11px] font-medium ${m.pill}`}>{m.label}</span>;
 }
 
-function Tile({ label, value, tone }: { label: string; value: number; tone?: string }): JSX.Element {
+function Tile({ label, value, tone, stagger }: { label: string; value: number; tone?: string; stagger?: number }): JSX.Element {
   return (
-    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-4">
-      <div className={`text-2xl font-semibold tabular-nums ${tone ?? "text-slate-900"}`}>{value.toLocaleString()}</div>
-      <div className="text-xs text-slate-500 mt-0.5">{label}</div>
+    <div
+      className={`bg-white rounded-2xl border border-slate-200/80 shadow-sm p-4 animate-slide-up ${stagger ? `stagger-${stagger}` : ""}`}
+    >
+      <div className={`text-2xl font-bold tabular-nums font-display ${tone ?? "text-slate-900"}`}>{value.toLocaleString()}</div>
+      <div className="text-[11px] font-semibold uppercase tracking-widest text-slate-400 mt-1">{label}</div>
     </div>
   );
 }
 
-/** Dependency-free vertical mini bar strip (one bar per day). */
 function ActivityStrip({ days }: { days: { date: string; issued: number }[] }): JSX.Element {
   const max = Math.max(1, ...days.map((d) => d.issued));
   return (
-    <div className="flex items-end gap-[3px] h-16" title="Credentials issued per day">
-      {days.map((d) => (
-        <div key={d.date} className="flex-1 rounded-t bg-brand-500/70 min-w-[3px]"
-          style={{ height: `${Math.max(d.issued > 0 ? 8 : 2, (d.issued / max) * 100)}%` }}
-          title={`${d.date}: ${d.issued}`} />
-      ))}
+    <div className="flex items-end gap-[3px] h-20" title="Credentials issued per day" aria-label="Activity chart">
+      {days.map((d, i) => {
+        const pct = Math.max(d.issued > 0 ? 10 : 3, (d.issued / max) * 100);
+        return (
+          <div
+            key={d.date}
+            className="flex-1 rounded-t min-w-[3px] animate-bar-grow"
+            style={{
+              height: `${pct}%`,
+              background: d.issued > 0
+                ? `linear-gradient(to top, rgb(var(--brand-600)), rgb(var(--brand-400)))`
+                : "rgb(226 232 230)",
+              animationDelay: `${i * 0.012}s`,
+              transformOrigin: "bottom",
+            }}
+            title={`${d.date}: ${d.issued}`}
+          />
+        );
+      })}
     </div>
   );
 }
@@ -102,39 +116,43 @@ export function IdentityDashboard(): JSX.Element {
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
-        <Tile label="Issued" value={t.issued} />
-        <Tile label="Accepted" value={t.accepted} tone="text-emerald-600" />
-        <Tile label="Pending acceptance" value={t.pendingAcceptance} tone="text-amber-600" />
-        <Tile label="Changes requested" value={t.changesRequested} tone="text-rose-600" />
-        <Tile label="Rejected by holder" value={t.rejectedByHolder} tone="text-slate-600" />
-        <Tile label="Revoked" value={t.revoked} tone="text-red-600" />
-        <Tile label="Expired" value={t.expired} tone="text-slate-500" />
+        <Tile label="Issued" value={t.issued} stagger={1} />
+        <Tile label="Accepted" value={t.accepted} tone="text-emerald-600" stagger={2} />
+        <Tile label="Pending" value={t.pendingAcceptance} tone="text-amber-600" stagger={3} />
+        <Tile label="Changes req." value={t.changesRequested} tone="text-rose-600" stagger={4} />
+        <Tile label="Rejected" value={t.rejectedByHolder} tone="text-slate-600" stagger={5} />
+        <Tile label="Revoked" value={t.revoked} tone="text-red-600" stagger={6} />
+        <Tile label="Expired" value={t.expired} tone="text-slate-400" stagger={7} />
       </div>
 
       <div className="grid lg:grid-cols-2 gap-4">
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5">
-          <h2 className="font-semibold text-slate-900 text-sm mb-3">Issued — last 30 days</h2>
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 animate-slide-up stagger-2">
+          <h2 className="font-bold text-slate-900 text-sm mb-4 font-display">Issued — last 30 days</h2>
           <ActivityStrip days={data.activity} />
         </div>
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5">
-          <h2 className="font-semibold text-slate-900 text-sm mb-3">Verification activity</h2>
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 animate-slide-up stagger-3">
+          <h2 className="font-bold text-slate-900 text-sm mb-4 font-display">Verification activity</h2>
           <div className="grid grid-cols-3 gap-3 text-center">
-            {([["Pending", data.verification.pending], ["Awaiting verify", data.verification.consented],
-               ["Verified valid", data.verification.verifiedValid], ["Verified invalid", data.verification.verifiedInvalid],
-               ["Rejected", data.verification.rejected], ["Expired", data.verification.expired]] as const)
-              .map(([label, v]) => (
-                <div key={label}>
-                  <div className="text-lg font-semibold tabular-nums text-slate-900">{v}</div>
-                  <div className="text-[11px] text-slate-500">{label}</div>
-                </div>
-              ))}
+            {([
+              ["Pending",        data.verification.pending,       "text-amber-600"],
+              ["Awaiting verify",data.verification.consented,     "text-sky-600"],
+              ["Verified valid", data.verification.verifiedValid, "text-emerald-600"],
+              ["Verified inv.",  data.verification.verifiedInvalid,"text-red-600"],
+              ["Rejected",       data.verification.rejected,      "text-slate-500"],
+              ["Expired",        data.verification.expired,       "text-slate-400"],
+            ] as const).map(([label, v, tone]) => (
+              <div key={label} className="flex flex-col gap-0.5">
+                <div className={`text-xl font-bold tabular-nums font-display ${tone}`}>{v}</div>
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</div>
+              </div>
+            ))}
           </div>
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-3">
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-3 animate-slide-up stagger-4">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="font-semibold text-slate-900 text-sm mr-auto">Credential status board</h2>
+          <h2 className="font-bold text-slate-900 text-sm mr-auto font-display">Credential status board</h2>
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search holder…"
             className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs" />
           <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}
@@ -164,32 +182,32 @@ export function IdentityDashboard(): JSX.Element {
         )}
         <div className="overflow-x-auto rounded-lg border border-slate-200">
           <table className="w-full text-xs">
-            <thead className="text-[11px] text-slate-500 bg-slate-50 uppercase tracking-wide">
+            <thead className="text-[10px] text-slate-400 bg-slate-50/80 uppercase tracking-widest">
               <tr>
-                <th className="text-left font-medium px-3 py-2">Holder</th>
-                <th className="text-left font-medium px-3 py-2">Credential</th>
-                <th className="text-left font-medium px-3 py-2">Use case</th>
-                <th className="text-left font-medium px-3 py-2">Issued</th>
-                <th className="text-left font-medium px-3 py-2">Expires</th>
-                <th className="text-left font-medium px-3 py-2">Status</th>
+                <th className="text-left font-semibold px-3 py-2.5">Holder</th>
+                <th className="text-left font-semibold px-3 py-2.5">Credential</th>
+                <th className="text-left font-semibold px-3 py-2.5">Use case</th>
+                <th className="text-left font-semibold px-3 py-2.5">Issued</th>
+                <th className="text-left font-semibold px-3 py-2.5">Expires</th>
+                <th className="text-left font-semibold px-3 py-2.5">Status</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.credentialId} className="border-t border-slate-100">
-                  <td className="px-3 py-1.5 text-slate-700">{r.holderLabel}</td>
-                  <td className="px-3 py-1.5 text-slate-700">{r.type}</td>
-                  <td className="px-3 py-1.5 text-slate-500">{r.useCaseName}</td>
-                  <td className="px-3 py-1.5 text-slate-500">{new Date(r.issuedAt).toLocaleDateString()}</td>
-                  <td className="px-3 py-1.5 text-slate-500">{r.expiresAt ? new Date(r.expiresAt).toLocaleDateString() : "—"}</td>
-                  <td className="px-3 py-1.5">
+                <tr key={r.credentialId} className="border-t border-slate-100 hover:bg-slate-50/70 transition-colors">
+                  <td className="px-3 py-2 text-slate-700 font-medium text-xs">{r.holderLabel}</td>
+                  <td className="px-3 py-2 text-slate-700 text-xs">{r.type}</td>
+                  <td className="px-3 py-2 text-slate-400 text-xs">{r.useCaseName}</td>
+                  <td className="px-3 py-2 text-slate-400 text-xs font-data">{new Date(r.issuedAt).toLocaleDateString()}</td>
+                  <td className="px-3 py-2 text-slate-400 text-xs font-data">{r.expiresAt ? new Date(r.expiresAt).toLocaleDateString() : "—"}</td>
+                  <td className="px-3 py-2">
                     <StatusPill status={r.status} />
-                    {r.acceptanceNote && <div className="text-[11px] text-rose-600 mt-0.5">{r.acceptanceNote}</div>}
+                    {r.acceptanceNote && <div className="text-[11px] text-rose-500 mt-0.5">{r.acceptanceNote}</div>}
                   </td>
                 </tr>
               ))}
               {rows.length === 0 && (
-                <tr><td colSpan={6} className="px-3 py-4 text-center text-slate-400">No credentials match.</td></tr>
+                <tr><td colSpan={6} className="px-3 py-6 text-center text-slate-400 text-xs">No credentials match.</td></tr>
               )}
             </tbody>
           </table>

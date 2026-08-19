@@ -1,3 +1,6 @@
+/* Bricolage Grotesque (headings) · Manrope (body) · JetBrains Mono (data/code) */
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700;12..96,800&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -5,8 +8,8 @@
 :root {
   color-scheme: light;
 
-  /* EN-E defaults = the XI Tokenize palette these stops used to hardcode. */
-  --brand-50: 233 249 244;    /* #e9f9f4 */
+  /* XI Tokenize brand palette — overridable per-org (EN-E) */
+  --brand-50:  233 249 244;   /* #e9f9f4 */
   --brand-100: 205 238 230;   /* #cdeee6 */
   --brand-400: 26 200 169;    /* #1AC8A9 */
   --brand-500: 18 179 154;    /* #12b39a */
@@ -14,18 +17,152 @@
   --brand-700: 10 111 93;     /* #0a6f5d */
 }
 
+/* ─── Base typography ─────────────────────────────────────────────────────── */
 body {
-  @apply bg-[#EFF8F4] text-slate-800 antialiased;
+  @apply antialiased text-slate-800;
+  font-family: 'Manrope', 'Segoe UI', system-ui, sans-serif;
+  background-color: #EFF8F4;
+  background-image:
+    radial-gradient(circle at 1px 1px, #c5ddd6 1px, transparent 0);
+  background-size: 24px 24px;
 }
 
+h1, h2, h3, h4, h5 {
+  font-family: 'Bricolage Grotesque', system-ui, sans-serif;
+  letter-spacing: -0.01em;
+}
+
+.font-display {
+  font-family: 'Bricolage Grotesque', system-ui, sans-serif;
+}
+
+.font-data {
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+}
+
+/* ─── Keyframes ───────────────────────────────────────────────────────────── */
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes shimmer {
+  from { background-position: -200% center; }
+  to   { background-position:  200% center; }
+}
+
+@keyframes pulse-ring {
+  0%   { box-shadow: 0 0 0 0   rgb(var(--brand-500) / 0.45); }
+  70%  { box-shadow: 0 0 0 8px rgb(var(--brand-500) / 0);    }
+  100% { box-shadow: 0 0 0 0   rgb(var(--brand-500) / 0);    }
+}
+
+@keyframes bar-grow {
+  from { transform: scaleY(0); transform-origin: bottom; }
+  to   { transform: scaleY(1); transform-origin: bottom; }
+}
+
+@keyframes count-in {
+  from { opacity: 0; transform: scale(0.88); }
+  to   { opacity: 1; transform: scale(1);    }
+}
+
+/* ─── Animation utilities ─────────────────────────────────────────────────── */
+.animate-slide-up   { animation: slide-up  0.38s cubic-bezier(.16,1,.3,1) both; }
+.animate-fade-in    { animation: fade-in   0.25s ease both; }
+.animate-bar-grow   { animation: bar-grow  0.6s cubic-bezier(.16,1,.3,1) both; }
+.animate-count-in   { animation: count-in  0.4s cubic-bezier(.16,1,.3,1) both; }
+.animate-pulse-ring { animation: pulse-ring 2.2s ease-in-out infinite; }
+
+/* Stagger helpers — apply to siblings inside a .stagger-children parent or manually */
+.stagger-1 { animation-delay: 0.04s; }
+.stagger-2 { animation-delay: 0.09s; }
+.stagger-3 { animation-delay: 0.14s; }
+.stagger-4 { animation-delay: 0.19s; }
+.stagger-5 { animation-delay: 0.24s; }
+.stagger-6 { animation-delay: 0.29s; }
+.stagger-7 { animation-delay: 0.34s; }
+
+/* ─── Component layer ─────────────────────────────────────────────────────── */
 @layer components {
+  /* Form controls */
   .input {
-    @apply w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500;
+    @apply w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm
+           placeholder:text-slate-400 shadow-sm
+           focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-400
+           transition duration-150;
+    font-family: inherit;
   }
+
   .select {
-    @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500;
+    @apply w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm
+           focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-400
+           transition duration-150;
+    font-family: inherit;
   }
+
+  /* Buttons */
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-2
+           text-sm font-semibold border transition duration-150
+           disabled:opacity-40 disabled:cursor-not-allowed select-none focus-visible:outline-none
+           focus-visible:ring-2 focus-visible:ring-brand-500/50;
+    font-family: inherit;
+  }
+
+  .btn-primary {
+    @apply btn bg-brand-600 text-white border-brand-700
+           hover:bg-brand-700 active:scale-[.98] shadow-sm hover:shadow;
+  }
+
+  .btn-ghost {
+    @apply btn bg-white text-slate-700 border-slate-200
+           hover:bg-slate-50 hover:border-slate-300 shadow-sm;
+  }
+
+  .btn-ink {
+    @apply btn bg-white/10 text-white border-white/20
+           hover:bg-white/15 active:scale-[.98];
+  }
+
+  /* Legacy alias — used throughout the app */
   .btn-sm {
-    @apply rounded-md px-2.5 py-1 text-xs font-medium border transition disabled:opacity-40 disabled:cursor-not-allowed;
+    @apply inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium border
+           transition duration-150 disabled:opacity-40 disabled:cursor-not-allowed;
+    font-family: inherit;
+  }
+
+  /* Metric highlight shimmer (for large stat numbers) */
+  .metric-shimmer {
+    background: linear-gradient(
+      90deg,
+      rgb(var(--brand-600)) 0%,
+      rgb(var(--brand-400)) 50%,
+      rgb(var(--brand-600)) 100%
+    );
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Card surface — used for overrides where Tailwind alone is verbose */
+  .card-surface {
+    @apply bg-white rounded-2xl border border-slate-200/80 shadow-sm;
+  }
+
+  .card-surface-ink {
+    @apply bg-ink rounded-2xl border border-ink-700 shadow-md;
   }
 }
+
+/* ─── Scrollbar ───────────────────────────────────────────────────────────── */
+::-webkit-scrollbar       { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { @apply rounded-full bg-slate-300; }
+::-webkit-scrollbar-thumb:hover { @apply bg-slate-400; }

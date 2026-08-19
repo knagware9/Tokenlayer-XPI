@@ -128,11 +128,18 @@ export function AppShell({
       <button
         key={item.id}
         onClick={() => onSelect(item.id)}
-        className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-          isActive ? "bg-white/10 text-white" : "text-slate-300 hover:text-white hover:bg-white/5"
+        className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm transition-all duration-150 relative ${
+          isActive
+            ? "bg-white/12 text-white font-semibold"
+            : "text-slate-400 hover:text-white hover:bg-white/6 font-medium"
         }`}
+        style={{ fontFamily: "'Manrope', system-ui, sans-serif" }}
       >
-        <Icon name={item.icon} className={`w-5 h-5 shrink-0 ${isActive ? "text-brand-400" : ""}`} />
+        {/* Active left-accent bar */}
+        {isActive && (
+          <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-full bg-brand-400" aria-hidden="true" />
+        )}
+        <Icon name={item.icon} className={`w-4.5 h-4.5 shrink-0 transition-colors ${isActive ? "text-brand-400" : "text-slate-500 group-hover:text-slate-300"}`} />
         <span className="truncate">{item.label}</span>
       </button>
     );
@@ -144,7 +151,7 @@ export function AppShell({
     // sets nothing and leaves the :root defaults standing.
     <div className="flex min-h-screen" style={brandCssVars(user?.brandAccent) as React.CSSProperties}>
       {/* Fixed, always-visible left navigation — static on every screen size. */}
-      <aside className="w-64 shrink-0 bg-ink border-r border-ink-700 flex flex-col sticky top-0 h-screen">
+      <aside className="w-64 shrink-0 bg-ink border-r border-ink-700/60 flex flex-col sticky top-0 h-screen" style={{ backgroundImage: "radial-gradient(ellipse at top left, #1a3d37 0%, #0E2B26 60%)" }}>
         <div className="px-4 h-16 flex items-center gap-3 shrink-0 min-w-0">
           <Logo onDark size={orgLogo ? 26 : 30} />
           {orgLogo && (
@@ -160,16 +167,19 @@ export function AppShell({
             other would offer a product this container's edge does not proxy. */}
         {!persona && domains && domains.length > 1 && activeDomain && onDomainChange && (
           <div className="px-3 pt-1 pb-2">
-            <div className="flex gap-1 rounded-lg bg-white/5 p-1">
+            <div className="flex gap-1 rounded-xl bg-white/5 p-1 border border-white/8">
               {domains.map((d) => (
                 <button
                   key={d.key}
                   onClick={() => onDomainChange(d.key)}
-                  className={`flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors ${
-                    activeDomain === d.key ? "bg-white/10 text-white" : "text-slate-400 hover:text-white"
+                  className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-semibold transition-all duration-150 ${
+                    activeDomain === d.key
+                      ? "bg-brand-500/20 text-brand-300 ring-1 ring-brand-400/30"
+                      : "text-slate-400 hover:text-white hover:bg-white/6"
                   }`}
+                  style={{ fontFamily: "'Manrope', system-ui, sans-serif" }}
                 >
-                  <Icon name={d.icon} className="w-4 h-4 shrink-0" />
+                  <Icon name={d.icon} className="w-3.5 h-3.5 shrink-0" />
                   <span className="truncate">{d.label}</span>
                 </button>
               ))}
@@ -187,17 +197,17 @@ export function AppShell({
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0">
-        <div className="h-14 border-b border-slate-200 flex items-center justify-end px-6 gap-4">
-          <div className="text-xs font-medium text-slate-600 truncate">{user?.email}</div>
+        <div className="h-14 border-b border-slate-200/80 bg-white/50 backdrop-blur-sm flex items-center justify-end px-6 gap-3">
+          <div className="text-xs font-medium text-slate-500 truncate" style={{ fontFamily: "'Manrope', system-ui, sans-serif" }}>{user?.email}</div>
           {user?.role && (
-            <span className="hidden sm:inline-flex items-center gap-1.5 text-[11px] font-medium text-brand-400 bg-brand-400/10 border border-brand-400/25 rounded-full px-2.5 py-1 whitespace-nowrap">
-              <span className="w-1.5 h-1.5 rounded-full bg-brand-400" aria-hidden="true" />
+            <span className="hidden sm:inline-flex items-center gap-1.5 text-[11px] font-semibold text-brand-600 bg-brand-50 border border-brand-200/60 rounded-full px-2.5 py-1 whitespace-nowrap" style={{ fontFamily: "'Manrope', system-ui, sans-serif" }}>
+              <span className="w-1.5 h-1.5 rounded-full bg-brand-500 animate-pulse" aria-hidden="true" />
               {user.role}
             </span>
           )}
         </div>
-        <main className="flex-1 bg-slate-50">
-          <div className="max-w-6xl mx-auto px-6 py-6">{children}</div>
+        <main className="flex-1" style={{ fontFamily: "'Manrope', system-ui, sans-serif" }}>
+          <div className="max-w-6xl mx-auto px-6 py-7">{children}</div>
         </main>
       </div>
     </div>

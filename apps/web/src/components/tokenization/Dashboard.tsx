@@ -121,10 +121,10 @@ export function Dashboard({ useCaseKey }: { useCaseKey?: string }): JSX.Element 
       {sandboxControl}
       {/* headline cards — click to drill into the matching breakdown */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <Stat icon="coins" label="Tokenized value" value={fmtMoney(t.valueByCurrency)} sub={`${t.assets} assets · ${t.useCases} use case${t.useCases === 1 ? "" : "s"}`} onClick={() => scrollTo(data.scope === "platform" ? "dash-usecases" : "dash-ledger")} />
-        <Stat icon="spark" label="Total supply" value={fmtInt(t.supply)} sub="minted − burned" onClick={() => scrollTo("dash-ledger")} />
-        <Stat icon="users" label="Holders" value={String(t.holders)} sub="distinct accounts" onClick={() => scrollTo(data.scope === "platform" ? "dash-usecases" : "dash-ledger")} />
-        <Stat icon="arrow" label={`Traded (${data.activity.length}d)`} value={fmtMoney(t.tradedByCurrency)} sub={`${t.trades} trade${t.trades === 1 ? "" : "s"}`} onClick={() => scrollTo("dash-recent")} />
+        <Stat icon="coins" label="Tokenized value" value={fmtMoney(t.valueByCurrency)} sub={`${t.assets} assets · ${t.useCases} use case${t.useCases === 1 ? "" : "s"}`} onClick={() => scrollTo(data.scope === "platform" ? "dash-usecases" : "dash-ledger")} stagger={1} />
+        <Stat icon="spark" label="Total supply" value={fmtInt(t.supply)} sub="minted − burned" onClick={() => scrollTo("dash-ledger")} stagger={2} />
+        <Stat icon="users" label="Holders" value={String(t.holders)} sub="distinct accounts" onClick={() => scrollTo(data.scope === "platform" ? "dash-usecases" : "dash-ledger")} stagger={3} />
+        <Stat icon="arrow" label={`Traded (${data.activity.length}d)`} value={fmtMoney(t.tradedByCurrency)} sub={`${t.trades} trade${t.trades === 1 ? "" : "s"}`} onClick={() => scrollTo("dash-recent")} stagger={4} />
       </div>
 
       <div className="grid lg:grid-cols-2 gap-4">
@@ -147,27 +147,31 @@ export function Dashboard({ useCaseKey }: { useCaseKey?: string }): JSX.Element 
           <Card title="By use case">
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
-                <thead className="text-slate-400 text-[10px] uppercase tracking-wide">
+                <thead className="text-[10px] text-slate-400 bg-slate-50/80 uppercase tracking-widest">
                   <tr>
-                    <th className="text-left py-1.5">Use case</th>
-                    <th className="text-left">Ledger</th>
-                    <th className="text-right">Supply</th>
-                    <th className="text-right">Holders</th>
-                    <th className="text-right">Value</th>
+                    <th className="text-left font-semibold px-3 py-2.5">Use case</th>
+                    <th className="text-left font-semibold px-3 py-2.5">Ledger</th>
+                    <th className="text-right font-semibold px-3 py-2.5">Supply</th>
+                    <th className="text-right font-semibold px-3 py-2.5">Holders</th>
+                    <th className="text-right font-semibold px-3 py-2.5">Value</th>
                   </tr>
                 </thead>
                 <tbody>
                   {data.byUseCase.map((u) => (
-                    <tr key={u.useCaseKey} onClick={() => navigate(`/${u.useCaseKey}`)} title={`Open ${u.name}`} className="border-t border-slate-100 cursor-pointer hover:bg-slate-50">
-                      <td className="py-1.5">
-                        {u.name} <span className="text-slate-400">{u.symbol}</span>
+                    <tr key={u.useCaseKey} onClick={() => navigate(`/${u.useCaseKey}`)} title={`Open ${u.name}`}
+                      className="border-t border-slate-100 cursor-pointer hover:bg-slate-50/70 transition-colors">
+                      <td className="px-3 py-2.5 font-medium text-slate-800">
+                        {u.name} <span className="font-normal text-slate-400">{u.symbol}</span>
                       </td>
-                      <td>
-                        <span style={{ color: colorFor(u.chainId) }}>●</span> {u.chainId}
+                      <td className="px-3 py-2.5">
+                        <span className="inline-flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: colorFor(u.chainId) }} />
+                          <span className="text-slate-600">{u.chainId}</span>
+                        </span>
                       </td>
-                      <td className="text-right tabular-nums">{fmtInt(u.supply)}</td>
-                      <td className="text-right tabular-nums">{u.holders}</td>
-                      <td className="text-right">{fmtMoney(u.valueByCurrency)}</td>
+                      <td className="px-3 py-2.5 text-right font-data tabular-nums text-slate-700">{fmtInt(u.supply)}</td>
+                      <td className="px-3 py-2.5 text-right font-data tabular-nums text-slate-700">{u.holders}</td>
+                      <td className="px-3 py-2.5 text-right text-slate-600">{fmtMoney(u.valueByCurrency)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -183,25 +187,38 @@ export function Dashboard({ useCaseKey }: { useCaseKey?: string }): JSX.Element 
         </Card>
         <div id="dash-recent" className="scroll-mt-4">
           <Card title="Recent activity">
-            <ol className="space-y-1.5">
+            <ol className="space-y-0 divide-y divide-slate-100">
               {data.recent.slice(0, 8).map((e, i) => {
                 const clickable = !!e.useCaseKey;
+                const ACTION_COLORS: Record<string, string> = {
+                  mint: "bg-emerald-50 text-emerald-700 border-emerald-200/70",
+                  burn: "bg-red-50 text-red-700 border-red-200/70",
+                  transfer: "bg-sky-50 text-sky-700 border-sky-200/70",
+                  issue: "bg-brand-50 text-brand-700 border-brand-200/70",
+                };
+                const actionStyle = ACTION_COLORS[e.action.toLowerCase()] ?? "bg-slate-100 text-slate-600 border-slate-200";
                 return (
                   <li
                     key={`${e.at}-${e.assetId}-${i}`}
                     onClick={clickable ? () => navigate(`/${e.useCaseKey}`) : undefined}
                     title={clickable ? `Open ${e.assetName}` : undefined}
-                    className={`flex items-start gap-2 text-xs rounded px-1 -mx-1 ${clickable ? "cursor-pointer hover:bg-slate-50" : ""}`}
+                    className={`flex items-center gap-3 py-2.5 first:pt-0 last:pb-0 text-xs ${clickable ? "cursor-pointer hover:bg-slate-50/80 -mx-2 px-2 rounded-lg transition-colors" : ""}`}
                   >
-                    <span className="mt-0.5 w-16 shrink-0 text-[10px] font-semibold text-brand-600 uppercase">{e.action}</span>
-                    <span className="flex-1 text-slate-600">
-                      <span className="text-slate-800">{e.assetName}</span> · {e.summary}
+                    <span className={`shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${actionStyle}`}>
+                      {e.action}
                     </span>
-                    <span className="text-[10px] text-slate-400">{new Date(e.at).toLocaleDateString()}</span>
+                    <span className="flex-1 min-w-0 text-slate-600 truncate">
+                      <span className="font-semibold text-slate-800">{e.assetName}</span>
+                      <span className="text-slate-400"> · </span>
+                      {e.summary}
+                    </span>
+                    <span className="font-data text-[10px] text-slate-400 shrink-0">{new Date(e.at).toLocaleDateString()}</span>
                   </li>
                 );
               })}
-              {data.recent.length === 0 && <li className="text-xs text-slate-400">No activity yet.</li>}
+              {data.recent.length === 0 && (
+                <li className="text-xs text-slate-400 py-4 text-center">No activity yet.</li>
+              )}
             </ol>
           </Card>
         </div>
@@ -210,10 +227,13 @@ export function Dashboard({ useCaseKey }: { useCaseKey?: string }): JSX.Element 
   );
 }
 
-/** A StatCard that keeps the old drill-down click behavior. */
-function Stat({ icon, label, value, sub, onClick }: { icon: IconName; label: string; value: string; sub?: string; onClick?: () => void }): JSX.Element {
+function Stat({ icon, label, value, sub, onClick, stagger }: { icon: IconName; label: string; value: string; sub?: string; onClick?: () => void; stagger?: number }): JSX.Element {
   return (
-    <button type="button" onClick={onClick} className="text-left w-full cursor-pointer transition hover:-translate-y-0.5">
+    <button
+      type="button"
+      onClick={onClick}
+      className={`text-left w-full cursor-pointer transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md rounded-2xl animate-slide-up ${stagger ? `stagger-${stagger}` : ""}`}
+    >
       <StatCard icon={icon} label={label} value={value} sub={sub} />
     </button>
   );

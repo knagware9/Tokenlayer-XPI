@@ -3,6 +3,11 @@ export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
+      fontFamily: {
+        display: ["'Bricolage Grotesque'", "system-ui", "sans-serif"],
+        body:    ["'Manrope'",             "system-ui", "sans-serif"],
+        data:    ["'JetBrains Mono'",      "'Fira Code'", "ui-monospace", "monospace"],
+      },
       colors: {
         // EN-E: each stop reads a CSS custom property so an organization's
         // shell can override the palette without a single component changing.
