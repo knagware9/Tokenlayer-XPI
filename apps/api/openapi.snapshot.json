@@ -57,6 +57,7 @@
       "id",
       "metadata",
       "name",
+      "settlement",
       "status",
       "symbol",
       "tokenStandard",
