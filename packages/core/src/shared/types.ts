@@ -124,6 +124,9 @@ export interface LedgerAdapter {
 
   /** Anchor an off-ledger hash (e.g. an audit chain head) on-ledger for tamper-evidence. */
   anchor(ref: AssetRef, hash: string): Promise<TxReceipt>;
+
+  /** EVM chains only: resolve a submitted transaction. Absent on simulated adapters. */
+  getReceipt?(txHash: string): Promise<{ blockNumber?: number; status?: number } | null>;
 }
 
 /** Minimal JSON-Schema subset used to describe issuance metadata. */

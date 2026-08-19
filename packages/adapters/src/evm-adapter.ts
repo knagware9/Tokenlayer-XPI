@@ -102,6 +102,29 @@ export interface EvmArtifact {
   bytecode: string;
 }
 
+/**
+ * Await a receipt for at most `timeoutMs`.
+ *
+ * RETURNS NULL ON TIMEOUT, THROWS ON REVERT. The two outcomes are different
+ * facts and lead to opposite decisions: a revert is final and the operator must
+ * not retry blindly, while a timeout means the transaction may still land and
+ * re-sending it would double-issue. Collapsing them into one error is how a
+ * stalled chain becomes a data-integrity incident.
+ */
+export async function waitForReceipt(
+  tx: { wait: (c?: number) => Promise<unknown> },
+  confirmations: number,
+  timeoutMs: number,
+): Promise<{ blockNumber?: number } | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), timeoutMs); });
+  try {
+    return (await Promise.race([tx.wait(confirmations), timeout])) as { blockNumber?: number } | null;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /** Gas pricing strategy. "zero" suits free-gas networks like Besu IBFT/dev. */
 export type GasMode = "auto" | "zero";
 
@@ -119,6 +142,8 @@ export interface EvmAdapterConfig {
   gas?: GasMode;
   /** Confirmations to await per transaction (1 for instant-finality dev chains). */
   confirmations?: number;
+  /** How long to await a receipt before returning the hash unconfirmed. Default 30s. */
+  confirmationTimeoutMs?: number;
 }
 
 /**
@@ -141,6 +166,7 @@ export class EvmLedgerAdapter implements LedgerAdapter, CredentialAnchor {
   private readonly registries?: { didRegistry: EvmArtifact; vcRegistry: EvmArtifact };
   private readonly gas: GasMode;
   private readonly confirmations: number;
+  private readonly confirmationTimeoutMs: number;
   private queue: Promise<unknown> = Promise.resolve();
 
   // ERC-3643 assets deploy a real T-REX suite; these track them per token address.
@@ -157,6 +183,7 @@ export class EvmLedgerAdapter implements LedgerAdapter, CredentialAnchor {
     this.registries = config.registryArtifacts;
     this.gas = config.gas ?? "auto";
     this.confirmations = config.confirmations ?? 1;
+    this.confirmationTimeoutMs = config.confirmationTimeoutMs ?? 30_000;
   }
 
   /** Boot-time probe: verifies the RPC answers and reports the operator account. */
@@ -241,8 +268,22 @@ export class EvmLedgerAdapter implements LedgerAdapter, CredentialAnchor {
     build: (overrides: Record<string, unknown>) => Promise<{ hash: string; wait: (c?: number) => Promise<unknown> }>,
   ): Promise<TxReceipt> {
     const tx = await build(this.gasOverrides());
-    const receipt = (await tx.wait(this.confirmations)) as { blockNumber?: number } | null;
+    const receipt = await waitForReceipt(tx, this.confirmations, this.confirmationTimeoutMs);
+    // No blockNumber means "submitted, not yet known" — never "failed".
     return { txHash: tx.hash, chainId: this.chainId, blockNumber: receipt?.blockNumber, timestamp: new Date().toISOString() };
+  }
+
+  /**
+   * The receipt for a hash, or null when the chain does not have one yet.
+   *
+   * NULL IS NOT FAILURE. A transaction the chain has not mined yet and a
+   * transaction that reverted are different facts with opposite remedies, so
+   * "no receipt" is reported as absence and a revert is reported as
+   * `status: 0`.
+   */
+  async getReceipt(txHash: string): Promise<{ blockNumber?: number; status?: number } | null> {
+    const r = await this.provider.getTransactionReceipt(txHash);
+    return r ? { blockNumber: r.blockNumber, status: Number(r.status ?? 1) } : null;
   }
 
   /** Serialised single transaction (the common case for one-shot operations). */
