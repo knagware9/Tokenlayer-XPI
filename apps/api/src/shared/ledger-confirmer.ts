@@ -11,6 +11,7 @@
  * recorded as failed is a mint someone re-issues.
  */
 import { randomUUID } from "node:crypto";
+import { LEDGER_UNKNOWN_RETRY_MS } from "../persistence/types/index.js";
 import type { LedgerTransactionRepository } from "../persistence/types/index.js";
 
 const STALE_CLAIM_MS = 60_000;
@@ -54,7 +55,16 @@ export async function runConfirmerOnce(
       continue;
     }
     if (claimed.attempts + 1 >= maxAttempts) {
-      await deps.ledgerTransactions.settle(claimed.id, { status: "unknown", error: error ?? `no receipt after ${maxAttempts} polls` });
+      // RULING AA: an `unknown` row is the OLDEST thing in the table and
+      // `listDue` is oldest-first with a limit, so leaving it perpetually due
+      // lets 25 of them fill every page and starve mints submitted seconds ago.
+      // Still retried — a transaction that mines tomorrow must still be found —
+      // just no longer at the front of the queue.
+      await deps.ledgerTransactions.settle(claimed.id, {
+        status: "unknown",
+        error: error ?? `no receipt after ${maxAttempts} polls`,
+        nextAttemptAt: new Date(nowMs + LEDGER_UNKNOWN_RETRY_MS).toISOString(),
+      });
       continue;
     }
     // GROWING DELAY, deliberately mirroring the dispatcher's exponential

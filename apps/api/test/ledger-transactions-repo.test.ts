@@ -83,4 +83,50 @@ describe("LedgerTransactionRepository", () => {
     await repo.settle(other.id, { status: "confirmed", blockNumber: 1, confirmedAt: "2026-08-18T10:00:02.000Z" });
     expect((await repo.listByAsset("a1")).map((r) => r.txHash)).toEqual(["0x1"]);
   });
+
+  it("a fresh pending row is still returned by listDue when the table is full of unknown rows", async () => {
+    // RULING AA: `listDue` is submittedAt-ASC with a limit of 25, and an
+    // `unknown` row is both perpetually due and the OLDEST thing in the table.
+    // Thirty of them fill every page forever, so a mint submitted a moment ago
+    // is never polled and never confirms — the register's `settlement` stays
+    // "pending" on work the chain finished. Settling to `unknown` therefore
+    // pushes the row's next attempt well out.
+    const repo = new MemoryLedgerTransactionRepository();
+    for (let i = 0; i < 30; i++) {
+      const old = await repo.record({ ...base, txHash: `0xold${i}`, submittedAt: `2026-08-18T10:00:${String(i).padStart(2, "0")}.000Z` });
+      await repo.settle(old.id, { status: "unknown", error: "no receipt after 10 polls", nextAttemptAt: "2026-08-18T11:00:00.000Z" });
+    }
+    const fresh = await repo.record({ ...base, txHash: "0xfresh", submittedAt: "2026-08-18T10:30:00.000Z" });
+
+    const due = await repo.listDue("2026-08-18T10:31:00.000Z", 25);
+    expect(due.map((r) => r.id)).toContain(fresh.id);
+  });
+
+  it("settling to unknown defers the row even when the caller names no next attempt", async () => {
+    // The repository, not just the confirmer, holds the rule — a second caller
+    // settling `unknown` cannot reintroduce the starvation by omission.
+    const repo = new MemoryLedgerTransactionRepository();
+    const rec = await repo.record({ ...base, submittedAt: "2026-08-18T10:00:00.000Z" });
+    const out = await repo.settle(rec.id, { status: "unknown", error: "no receipt" });
+    expect(Date.parse(out.nextAttemptAt)).toBeGreaterThan(Date.parse(rec.nextAttemptAt));
+    expect(await repo.listDue(rec.nextAttemptAt, 25)).toEqual([]);
+  });
+
+  it("counts rows by status, including the failed ones listByAsset hides", async () => {
+    // What makes a reverted mint visible (settlementStatus) and what tells an
+    // asset with no history apart from one that settled to zero (reconcile).
+    const repo = new MemoryLedgerTransactionRepository();
+    expect(await repo.countsByStatus("nobody")).toEqual({ pending: 0, confirmed: 0, failed: 0, unknown: 0 });
+
+    const reverted = await repo.record({ ...base, txHash: "0xr", kind: "mint", amount: "500", submittedAt: at0 });
+    await repo.settle(reverted.id, { status: "failed", blockNumber: 4, error: "reverted" });
+    const good = await repo.record({ ...base, txHash: "0xg", kind: "mint", amount: "500", submittedAt: at0 });
+    await repo.settle(good.id, { status: "confirmed", blockNumber: 5, confirmedAt: at0 });
+    await repo.record({ ...base, txHash: "0xp2", kind: "mint", amount: "500", submittedAt: at0 });
+
+    expect(await repo.countsByStatus("a1")).toEqual({ pending: 1, confirmed: 1, failed: 1, unknown: 0 });
+    // The failed row is invisible to listByAsset — which is exactly why a
+    // separate read was needed rather than counting what that returns.
+    expect((await repo.listByAsset("a1")).map((r) => r.txHash)).toEqual(["0xp2"]);
+  });
 });

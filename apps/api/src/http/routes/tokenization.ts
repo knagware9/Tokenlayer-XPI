@@ -527,7 +527,15 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
       // asset happened to be issued first — assetId: null, or the row would
       // permanently (and falsely) claim to belong to asset #1. An asset's own
       // outstanding state is carried by its own mint row, not this one.
-      await recordSubmission(deps, "deploy", { txHash: result.txHash, chainId, timestamp: new Date().toISOString() }, { assetId: null });
+      // GUARDED ON A NON-EMPTY HASH. An ERC-3643 issuance deploys a whole T-REX
+      // suite over many transactions and reports no single hash (`txHash: ""`,
+      // see EvmLedgerAdapter.deployAsset). Recording that would key one row on
+      // (chainId, "") which every subsequent T-REX asset on the chain would
+      // collide into — one unresolvable row standing for all of them. No row is
+      // the honest outcome: we have no hash to be recoverable by.
+      if (result.txHash) {
+        await recordSubmission(deps, "deploy", { txHash: result.txHash, chainId, timestamp: new Date().toISOString() }, { assetId: null });
+      }
       await deps.assets.create({
         id,
         useCaseKey: bUseCaseKey,

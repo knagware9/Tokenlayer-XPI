@@ -638,11 +638,31 @@ export interface LedgerTransactionRecord {
   confirmedAt: string | null;
 }
 
+/**
+ * How long an `unknown` row waits before anyone looks at it again.
+ *
+ * RULING AA: `listDue` is `submittedAt ASC LIMIT 25`, and an `unknown` row is
+ * both perpetually due and — being the oldest thing in the table — always at
+ * the front of that queue. Twenty-five of them fill every page forever, and a
+ * mint submitted this second is never polled at all. An hour is chosen to make
+ * `unknown` rows cheap stragglers rather than a permanent head-of-line block:
+ * they are still retried (a transaction that mines a day later must still be
+ * picked up), just not at the expense of live work.
+ */
+export const LEDGER_UNKNOWN_RETRY_MS = 3_600_000;
+
 export interface LedgerTransactionSettlement {
   status: LedgerTxStatus;
   blockNumber?: number;
   confirmedAt?: string;
   error?: string;
+  /**
+   * When this row should next be considered due. Callers that own a clock
+   * (the confirmer) pass it explicitly so the schedule is deterministic; both
+   * repositories apply `LEDGER_UNKNOWN_RETRY_MS` themselves when a row is
+   * settled `unknown` without one, so no caller can reintroduce the starvation.
+   */
+  nextAttemptAt?: string;
 }
 
 export interface LedgerTransactionRepository {
@@ -662,6 +682,18 @@ export interface LedgerTransactionRepository {
   reclaimStale(before: string): Promise<number>;
   /** Outstanding (pending|unknown) rows for one asset, oldest first. */
   listByAsset(assetId: string): Promise<LedgerTransactionRecord[]>;
+  /**
+   * Row counts for one asset, by status — EVERY status, including the ones
+   * `listByAsset` deliberately hides.
+   *
+   * Two questions need it, and neither can be answered by the outstanding rows
+   * alone. A reverted mint settles `failed`, which `listByAsset` excludes, so
+   * the asset read back as `active` and reconciliation saw believed 0 against
+   * chain 0 and reported nothing — the original bug, reproduced for reverts.
+   * And an all-zero result is its own fact: an asset issued before this table
+   * existed has no rows at all, which is "we have no record", not "zero mints".
+   */
+  countsByStatus(assetId: string): Promise<Record<LedgerTxStatus, number>>;
   settle(id: string, settlement: LedgerTransactionSettlement): Promise<LedgerTransactionRecord>;
   /** Records one more failed poll and backs off. */
   defer(id: string, nextAttemptAt: string, now: string, error?: string): Promise<LedgerTransactionRecord>;

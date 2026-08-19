@@ -9,7 +9,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { id, now, paginate } from "./common.js";
 import { auditEntryHash, auditGenesis } from "@tokenlayer/core";
 import type { OrgCapabilities, ResourceMode } from "@tokenlayer/core";
-import type { ApiKeyCreateInput, ApiKeyRecord, ApiKeyRepository, AuditAnchorRecord, AuditAnchorRepository, AuditEntryRecord, AuditRepository, BrandingPatch, CashflowRepository, CredentialRecord, CredentialRepository, DocumentPurpose, DocumentRecord, DocumentRepository, DocumentSummary, EventAppendInput, EventRecord, EventRepository, LedgerTransactionRecord, LedgerTransactionRepository, LedgerTransactionSettlement, LedgerTxKind, LoginKeyRecord, LoginKeyRepository, OrgStatus, OrganizationRecord, OrganizationRepository, Page, Paged, ProposalApproval, ProposalRecord, ProposalRepository, RegistryDeploymentRecord, RegistryDeploymentRepository, UserKind, UserRecord, UserRepository, WebhookDeliveryRecord, WebhookDeliveryRepository, WebhookEndpointCreateInput, WebhookEndpointRecord, WebhookEndpointRepository } from "../types/index.js";
+import { LEDGER_UNKNOWN_RETRY_MS } from "../types/index.js";
+import type { ApiKeyCreateInput, ApiKeyRecord, ApiKeyRepository, AuditAnchorRecord, AuditAnchorRepository, AuditEntryRecord, AuditRepository, BrandingPatch, CashflowRepository, CredentialRecord, CredentialRepository, DocumentPurpose, DocumentRecord, DocumentRepository, DocumentSummary, EventAppendInput, EventRecord, EventRepository, LedgerTransactionRecord, LedgerTransactionRepository, LedgerTransactionSettlement, LedgerTxKind, LedgerTxStatus, LoginKeyRecord, LoginKeyRepository, OrgStatus, OrganizationRecord, OrganizationRepository, Page, Paged, ProposalApproval, ProposalRecord, ProposalRepository, RegistryDeploymentRecord, RegistryDeploymentRepository, UserKind, UserRecord, UserRepository, WebhookDeliveryRecord, WebhookDeliveryRepository, WebhookEndpointCreateInput, WebhookEndpointRecord, WebhookEndpointRepository } from "../types/index.js";
 
 export class MemoryUserRepository implements UserRepository {
   private readonly byId = new Map<string, UserRecord>();
@@ -661,6 +662,14 @@ export class MemoryLedgerTransactionRepository implements LedgerTransactionRepos
       .map((r) => ({ ...r }));
   }
 
+  async countsByStatus(assetId: string): Promise<Record<LedgerTxStatus, number>> {
+    // Every status is named up front, so an asset with no rows reads as four
+    // explicit zeros rather than an object whose missing keys are undefined.
+    const counts: Record<LedgerTxStatus, number> = { pending: 0, confirmed: 0, failed: 0, unknown: 0 };
+    for (const r of this.byId.values()) if (r.assetId === assetId) counts[r.status] += 1;
+    return counts;
+  }
+
   async settledSupply(assetId: string): Promise<string> {
     // BigInt, not Number: token amounts routinely exceed 2^53 and a float here
     // would silently round the very quantity being reconciled.
@@ -680,6 +689,11 @@ export class MemoryLedgerTransactionRepository implements LedgerTransactionRepos
     r.blockNumber = s.blockNumber ?? r.blockNumber;
     r.confirmedAt = s.confirmedAt ?? null;
     r.error = s.error ?? null;
+    // RULING AA: an `unknown` row keeps its old (already-past) nextAttemptAt and
+    // is therefore due forever, at the FRONT of `listDue`'s oldest-first page.
+    // Push it out so it cannot crowd out freshly submitted work.
+    if (s.nextAttemptAt) r.nextAttemptAt = s.nextAttemptAt;
+    else if (s.status === "unknown") r.nextAttemptAt = new Date(Date.now() + LEDGER_UNKNOWN_RETRY_MS).toISOString();
     r.claimedAt = null; r.claimedBy = null;
     return { ...r };
   }

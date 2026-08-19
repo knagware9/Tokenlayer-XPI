@@ -84,13 +84,20 @@ export async function resolveIdentityRegistry(opts: {
     // past the `supportsCredentialAnchor` guard above, so a real EVM adapter is
     // guaranteed to have it here, but treat it as absent rather than crash if
     // some future adapter satisfies CredentialAnchor without exposing bytecode.
+    // BOTH registries, not just the DID one. They are deployed together and a
+    // re-genesis wipes both, but they are two independent addresses: checking
+    // one and inferring the other is a check that answers the wrong question —
+    // it would keep serving a dead `vcRegistry` for as long as the DID address
+    // happened to hold code, and every credential anchored there would go
+    // nowhere.
+    const codeProvider = { getCode: (a: string) => adapter.getCode!(a) };
     const live = adapter.getCode
-      ? await registryIsLive({ getCode: (a) => adapter.getCode!(a) }, existing.didRegistry)
+      ? (await registryIsLive(codeProvider, existing.didRegistry)) && (await registryIsLive(codeProvider, existing.vcRegistry))
       : false;
     if (live) {
       return { chainId: opts.chainId, didRegistry: existing.didRegistry, vcRegistry: existing.vcRegistry, deployTxHash: existing.deployTxHash, anchor: adapter };
     }
-    log(`[registry] stored ${opts.chainId} registries hold no bytecode (re-genesis?) — redeploying`);
+    log(`[registry] stored ${opts.chainId} registries do not both hold bytecode (re-genesis?) — redeploying`);
   }
   try {
     const d = await adapter.deployRegistries();

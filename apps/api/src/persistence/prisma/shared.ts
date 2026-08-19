@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 import { prisma } from "./client.js";
 import { auditEntryHash, auditGenesis } from "@tokenlayer/core";
 import type { LifecycleAction, OrgCapabilities, ResourceMode, Role } from "@tokenlayer/core";
+import { LEDGER_UNKNOWN_RETRY_MS } from "../types/index.js";
 import type { OrgType } from "../types/index.js";
 import type { ApiKeyCreateInput, ApiKeyRecord, ApiKeyRepository, AuditAnchorRecord, AuditAnchorRepository, AuditEntryRecord, AuditRepository, BrandingPatch, CompanyProfile, CredentialRecord, CredentialRepository, DocumentPurpose, DocumentRecord, DocumentRepository, DocumentSummary, EventAppendInput, EventRecord, EventRepository, KycDetails, KycStatus, LedgerTransactionRecord, LedgerTransactionRepository, LedgerTransactionSettlement, LedgerTxKind, LedgerTxStatus, LoginKeyRecord, LoginKeyRepository, OrgStatus, OrganizationRecord, OrganizationRepository, Page, Paged, ProposalApproval, ProposalRecord, ProposalRepository, RegistryDeploymentRecord, RegistryDeploymentRepository, UserKind, UserRecord, UserRepository, WebhookDeliveryRecord, WebhookDeliveryRepository, WebhookEndpointCreateInput, WebhookEndpointRecord, WebhookEndpointRepository } from "../types/index.js";
 
@@ -817,6 +818,19 @@ export class PrismaLedgerTransactionRepository implements LedgerTransactionRepos
     return rows.map(toLedgerTx);
   }
 
+  async countsByStatus(assetId: string): Promise<Record<LedgerTxStatus, number>> {
+    // Tallied in JS rather than by `groupBy`, matching `settledSupply` just
+    // below: the row count per asset is small, and one shape of query keeps the
+    // two backends' answers obviously identical.
+    const rows = await prisma.ledgerTransaction.findMany({ where: { assetId }, select: { status: true } });
+    const counts: Record<LedgerTxStatus, number> = { pending: 0, confirmed: 0, failed: 0, unknown: 0 };
+    for (const r of rows) {
+      const status = r.status as LedgerTxStatus;
+      if (status in counts) counts[status] += 1;
+    }
+    return counts;
+  }
+
   async settledSupply(assetId: string): Promise<string> {
     const rows = await prisma.ledgerTransaction.findMany({
       where: { assetId, status: "confirmed", kind: { in: ["mint", "burn"] } },
@@ -839,6 +853,14 @@ export class PrismaLedgerTransactionRepository implements LedgerTransactionRepos
         blockNumber: s.blockNumber ?? undefined,
         confirmedAt: s.confirmedAt ? new Date(s.confirmedAt) : null,
         error: s.error ?? null, claimedAt: null, claimedBy: null,
+        // RULING AA, exactly as in the memory twin: an `unknown` row would
+        // otherwise keep a nextAttemptAt already in the past and sit at the head
+        // of `listDue`'s oldest-first page forever, starving new submissions.
+        ...(s.nextAttemptAt
+          ? { nextAttemptAt: new Date(s.nextAttemptAt) }
+          : s.status === "unknown"
+            ? { nextAttemptAt: new Date(Date.now() + LEDGER_UNKNOWN_RETRY_MS) }
+            : {}),
       },
     });
     return toLedgerTx(row);

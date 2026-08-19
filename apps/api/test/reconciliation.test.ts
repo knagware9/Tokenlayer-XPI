@@ -158,6 +158,33 @@ describe("reconcile", () => {
     expect(report.drifted[0]?.reason).toBe("settlement-outstanding");
   });
 
+  it("says we have NO RECORD for an asset that predates the ledger table, instead of asserting drift", async () => {
+    // RULING Z. An asset issued before this branch has no ledger rows at all,
+    // so its derived belief is 0 against a real chain supply — and calling that
+    // `supply-mismatch` reports every pre-existing asset as drifted, forever.
+    // `believedSupply` here is the REAL derivation (settledSupply over zero
+    // rows), not a stub, because the whole point is that 0 and "never recorded"
+    // are indistinguishable from the number alone.
+    const { deps, ledgerTransactions } = await setup(new ScriptedAdapter("besu", async () => "3000"));
+    const report = await reconcile(deps, actor, { believedSupply: (id) => ledgerTransactions.settledSupply(id) });
+    expect(report.drifted).toHaveLength(1);
+    expect(report.drifted[0]).toMatchObject({ assetId: "a1", believedSupply: "0", chainSupply: "3000", outstanding: 0, reason: "no-ledger-record" });
+  });
+
+  it("still reports supply-mismatch once the asset HAS records — a settled zero is not the same as no record", async () => {
+    // The boundary: one confirmed mint and one confirmed burn net to 0, which
+    // is a belief the ledger genuinely supports. Disagreement with the chain
+    // there is a real discrepancy to investigate, not missing history.
+    const { deps, ledgerTransactions } = await setup(new ScriptedAdapter("besu", async () => "3000"));
+    const minted = await ledgerTransactions.record({ chainId: "besu", txHash: "0xm", kind: "mint", amount: "500", assetId: "a1", submittedAt: "2026-08-18T10:00:00.000Z" });
+    await ledgerTransactions.settle(minted.id, { status: "confirmed", blockNumber: 1, confirmedAt: "2026-08-18T10:00:01.000Z" });
+    const burned = await ledgerTransactions.record({ chainId: "besu", txHash: "0xb", kind: "burn", amount: "500", assetId: "a1", submittedAt: "2026-08-18T10:00:02.000Z" });
+    await ledgerTransactions.settle(burned.id, { status: "confirmed", blockNumber: 2, confirmedAt: "2026-08-18T10:00:03.000Z" });
+
+    const report = await reconcile(deps, actor, { believedSupply: (id) => ledgerTransactions.settledSupply(id) });
+    expect(report.drifted[0]).toMatchObject({ believedSupply: "0", chainSupply: "3000", reason: "supply-mismatch" });
+  });
+
   it("pages through every asset rather than stopping at the first page", async () => {
     // RULING R: a single-page read silently drops whatever lies past it — a
     // report that says "checked: 1, drifted: 0" while a second asset was never

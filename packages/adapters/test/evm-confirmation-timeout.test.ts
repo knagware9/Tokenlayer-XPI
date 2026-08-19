@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { TokenStandard } from "@tokenlayer/core";
-import { EvmLedgerAdapter, waitForReceipt, type EvmArtifact } from "../src/evm-adapter.js";
+import { awaitDeployment, DeploymentTimeoutError, EvmLedgerAdapter, waitForReceipt, type EvmArtifact } from "../src/evm-adapter.js";
 import { HARDHAT_OPERATOR_KEY } from "../src/testing/local-chain.js";
 
 describe("bounded confirmation", () => {
@@ -20,6 +20,54 @@ describe("bounded confirmation", () => {
   it("returns null — not a throw — when the wait exceeds the budget", async () => {
     const never = { hash: "0xbbb", wait: () => new Promise<never>(() => {}) };
     expect(await waitForReceipt(never, 1, 50)).toBeNull();
+  });
+
+  it("a deployment that never confirms FAILS LOUDLY, naming the transaction hash", async () => {
+    // `sendTx` was bounded; `waitForDeployment()` was not, and it is reached
+    // synchronously from POST /use-cases/:key/deploy and POST /assets — so the
+    // browser still spun forever on a stalled chain.
+    //
+    // AND IT THROWS, unlike waitForReceipt. A deployment has no honest half
+    // answer: the caller needs the contract ADDRESS, so returning "submitted,
+    // outcome unknown" would mean persisting an asset that points at a contract
+    // which may not exist. The hash is in the message because it is the only
+    // thing that makes the deploy recoverable rather than blindly repeated.
+    const never = {
+      waitForDeployment: () => new Promise<never>(() => {}),
+      deploymentTransaction: () => ({ hash: "0xdeploy123" }),
+    };
+    await expect(awaitDeployment(never, 50, "deploy of 'Gold' on chain 'besu'")).rejects.toThrow(DeploymentTimeoutError);
+    await expect(awaitDeployment(never, 50, "deploy of 'Gold' on chain 'besu'")).rejects.toThrow(/0xdeploy123/);
+  });
+
+  it("a deployment that confirms in time simply resolves", async () => {
+    const ok = { waitForDeployment: async () => ({}), deploymentTransaction: () => ({ hash: "0xok" }) };
+    await expect(awaitDeployment(ok, 1000, "deploy")).resolves.toBeUndefined();
+  });
+
+  it("propagates a genuine deployment revert rather than reporting it as a timeout", async () => {
+    const reverted = {
+      waitForDeployment: async () => { throw new Error("execution reverted"); },
+      deploymentTransaction: () => ({ hash: "0xbad" }),
+    };
+    await expect(awaitDeployment(reverted, 1000, "deploy")).rejects.toThrow("execution reverted");
+  });
+
+  it("does not leave an unhandled rejection when an abandoned deployment later rejects", async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const lateReject = {
+        waitForDeployment: () => new Promise<never>((_r, reject) => setTimeout(() => reject(new Error("late deploy failure")), 30)),
+        deploymentTransaction: () => ({ hash: "0xlate" }),
+      };
+      await expect(awaitDeployment(lateReject, 5, "deploy")).rejects.toThrow(DeploymentTimeoutError);
+      await new Promise((r) => setTimeout(r, 60));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
   });
 
   it("propagates a genuine revert rather than swallowing it as a timeout", async () => {

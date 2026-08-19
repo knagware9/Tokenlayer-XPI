@@ -133,6 +133,62 @@ export async function waitForReceipt(
   }
 }
 
+/**
+ * A deployment whose confirmation never arrived within the bound.
+ *
+ * Carries the `txHash` because that hash is the ONLY thing that makes the
+ * deploy recoverable: an operator can look it up, see whether the contract
+ * landed, and decide. A bare "timed out" would leave them with a chain to
+ * search and no key to search it by, and the obvious guess — deploy again —
+ * is how one asset becomes two contracts.
+ */
+export class DeploymentTimeoutError extends Error {
+  constructor(
+    readonly what: string,
+    readonly txHash: string,
+    readonly timeoutMs: number,
+  ) {
+    super(
+      `${what} did not confirm within ${timeoutMs}ms. Deploy transaction ${txHash || "(hash unavailable)"} may still be mining — ` +
+        "check it on-chain before redeploying, or the same contract will be deployed twice.",
+    );
+    this.name = "DeploymentTimeoutError";
+  }
+}
+
+/**
+ * Await a contract deployment for at most `timeoutMs`, then FAIL LOUDLY.
+ *
+ * DELIBERATELY UNLIKE `waitForReceipt`, WHICH RETURNS NULL. A send that has not
+ * confirmed still yields a usable fact (the hash) and the confirmer resolves it
+ * later, so a bounded wait can degrade to "submitted, outcome unknown". A
+ * deployment cannot: the caller needs the contract ADDRESS to persist an asset
+ * or a registry, and there is no honest half-answer. So the only two acceptable
+ * outcomes are an address or an error — never a hang (the browser spinning
+ * forever on a stalled chain is failure #2 of the spec) and never a
+ * half-constructed asset row pointing at a contract that may not exist.
+ */
+export async function awaitDeployment(
+  contract: { waitForDeployment: () => Promise<unknown>; deploymentTransaction: () => { hash: string } | null },
+  timeoutMs: number,
+  what: string,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<"timeout">((resolve) => { timer = setTimeout(() => resolve("timeout"), timeoutMs); });
+  // One promise for both the race and the late-rejection guard: `settled`
+  // inherits `waitForDeployment()`'s rejection, so catching on `settled` alone
+  // leaves nothing unhandled if the timeout wins and the deploy fails later.
+  const settled = contract.waitForDeployment().then(() => "confirmed" as const);
+  try {
+    if ((await Promise.race([settled, timeout])) === "timeout") {
+      throw new DeploymentTimeoutError(what, contract.deploymentTransaction()?.hash ?? "", timeoutMs);
+    }
+  } finally {
+    if (timer) clearTimeout(timer);
+    void settled.catch(() => {});
+  }
+}
+
 /** Gas pricing strategy. "zero" suits free-gas networks like Besu IBFT/dev. */
 export type GasMode = "auto" | "zero";
 
@@ -330,7 +386,9 @@ export class EvmLedgerAdapter implements LedgerAdapter, CredentialAnchor {
       const factory = new ContractFactory(artifact.abi, artifact.bytecode, this.signer);
       const contract = await factory.deploy(spec.name, spec.symbol, spec.allowlistEnabled, this.gasOverrides());
       const tx = contract.deploymentTransaction();
-      await contract.waitForDeployment();
+      // BOUNDED, because this is reached synchronously from POST /use-cases/:key/deploy
+      // and POST /assets: an unbounded wait here is the browser spinning forever.
+      await awaitDeployment(contract, this.confirmationTimeoutMs, `deploy of '${spec.name}' (${spec.tokenStandard}) on chain '${this.chainId}'`);
       this.kind.set(await contract.getAddress(), "plain");
       return { contractRef: await contract.getAddress(), txHash: tx?.hash ?? "" };
     });
@@ -438,10 +496,14 @@ export class EvmLedgerAdapter implements LedgerAdapter, CredentialAnchor {
       const { didRegistry, vcRegistry } = this.requireRegistryArtifacts();
       const didFactory = new ContractFactory(didRegistry.abi, didRegistry.bytecode, this.signer);
       const did = await didFactory.deploy(this.gasOverrides());
-      await did.waitForDeployment();
+      // BOUNDED for the same reason as deployAsset — and here the throw is also
+      // the CORRECT boot behaviour: `resolveIdentityRegistry` catches any failure
+      // and degrades to UNANCHORED, so a stalled chain delays boot by the
+      // confirmation timeout rather than wedging it forever.
+      await awaitDeployment(did, this.confirmationTimeoutMs, `DID registry deploy on chain '${this.chainId}'`);
       const vcFactory = new ContractFactory(vcRegistry.abi, vcRegistry.bytecode, this.signer);
       const vc = await vcFactory.deploy(this.gasOverrides());
-      await vc.waitForDeployment();
+      await awaitDeployment(vc, this.confirmationTimeoutMs, `VC registry deploy on chain '${this.chainId}'`);
       return {
         didRegistry: await did.getAddress(),
         vcRegistry: await vc.getAddress(),

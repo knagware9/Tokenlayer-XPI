@@ -119,7 +119,11 @@ async function dispatchGatedAction(
   switch (action) {
     case "mint":
       receipt = isNft ? await deps.engine.mintToken(actor, ctx, b.to!, b.tokenId!, b.uri) : await deps.engine.mint(actor, ctx, b.to!, b.amount!);
-      await recordSubmission(deps, "mint", receipt, { assetId: asset.id, amount: b.amount ?? null });
+      // AN NFT MINT CARRIES `tokenId`, NEVER `amount`. Recording null here left
+      // `settledSupply` at 0 for every non-fungible asset while `totalSupply`
+      // returned the token count, so reconciliation reported supply-mismatch on
+      // all of them. One mintToken call is exactly one token.
+      await recordSubmission(deps, "mint", receipt, { assetId: asset.id, amount: isNft ? "1" : (b.amount ?? null) });
       return receipt;
     case "transfer":
       receipt = isNft ? await deps.engine.transferToken(actor, ctx, b.from!, b.to!, b.tokenId!) : await deps.engine.transfer(actor, ctx, b.from!, b.to!, b.amount!);
@@ -127,7 +131,9 @@ async function dispatchGatedAction(
       return receipt;
     case "burn":
       receipt = isNft ? await deps.engine.burnToken(actor, ctx, b.tokenId!) : await deps.engine.burn(actor, ctx, b.from!, b.amount!);
-      await recordSubmission(deps, "burn", receipt, { assetId: asset.id, amount: b.amount ?? null });
+      // Mirror of the mint above — one burnToken call removes exactly one token,
+      // and a null here would leave believed supply permanently over-stated.
+      await recordSubmission(deps, "burn", receipt, { assetId: asset.id, amount: isNft ? "1" : (b.amount ?? null) });
       return receipt;
     case "freeze":
       receipt = await deps.engine.setFrozen(actor, ctx, b.account!, true);

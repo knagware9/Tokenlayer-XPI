@@ -71,6 +71,14 @@ describe("the confirmer", () => {
     // The distinction is load-bearing: `failed` says the chain reverted it,
     // which would send an operator to re-mint a transaction that may still land.
     expect(out?.status).not.toBe("failed");
+    // RULING AA: and it is pushed OUT of the due queue on the way. `listDue` is
+    // oldest-first with a limit, and these rows are the oldest in the table —
+    // left perpetually due, twenty-five of them starve every new mint. The loop
+    // above ends by advancing the clock one more day, so the pass that actually
+    // settled this row saw `nowMs` minus that final day.
+    const lastPassNow = nowMs - 24 * 60 * 60_000;
+    expect(Date.parse(out!.nextAttemptAt)).toBeGreaterThan(lastPassNow);
+    expect(await ledgerTransactions.listDue(new Date(lastPassNow + 60_000).toISOString(), 25)).toEqual([]);
   });
 
   it("backs off with a growing delay — a stalled chain is not re-polled every tick", async () => {

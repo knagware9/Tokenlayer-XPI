@@ -297,8 +297,10 @@ export const tokenizationSchemas: Record<string, FastifySchema> = {
     description:
       "Requires the `assets:read` scope, further restricted to PlatformAdmin and Auditor: this rolls up every use " +
       "case, so it is a whole-platform read rather than a scoped one. Read-only by design — a mismatch can mean a " +
-      "transaction still settling (`settlement-outstanding`), a chain we could not reach (`chain-unreadable`), or " +
-      "a genuine discrepancy (`supply-mismatch`), and each demands a different response, none of them automatic.",
+      "transaction still settling (`settlement-outstanding`), a chain we could not reach (`chain-unreadable`), an " +
+      "asset we hold no transaction record for at all (`no-ledger-record` — typically one issued before the ledger " +
+      "table existed, where believed supply is 0 only because nothing was recorded), or a genuine discrepancy " +
+      "(`supply-mismatch`), and each demands a different response, none of them automatic.",
     response: {
       200: {
         type: "object", additionalProperties: true,
@@ -314,7 +316,7 @@ export const tokenizationSchemas: Record<string, FastifySchema> = {
                 believedSupply: { type: ["string", "null"] },
                 chainSupply: { type: ["string", "null"] },
                 outstanding: { type: "integer" },
-                reason: { type: "string", enum: ["settlement-outstanding", "chain-unreadable", "supply-mismatch"] },
+                reason: { type: "string", enum: ["settlement-outstanding", "chain-unreadable", "no-ledger-record", "supply-mismatch"] },
               },
               required: ["assetId", "chainId", "believedSupply", "chainSupply", "outstanding", "reason"],
             },

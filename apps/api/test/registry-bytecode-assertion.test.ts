@@ -194,7 +194,12 @@ describe("resolveIdentityRegistry — dead-registry redeploy", () => {
 
   it("keeps the live stored registry as-is without redeploying", async () => {
     const adapter = new ScriptedRegistryAdapter("besu");
+    // BOTH addresses hold code, matching what a real live deployment looks
+    // like — the two registries are deployed together. The fixture used to set
+    // only the DID one, which passed only because the check looked at only the
+    // DID one.
     adapter.codeByAddress.set("0xlive-did", "0x6080604052");
+    adapter.codeByAddress.set("0xlive-vc", "0x6080604052");
     const deployments = new MemoryRegistryDeploymentRepository();
     await deployments.create({ chainId: "besu", didRegistry: "0xlive-did", vcRegistry: "0xlive-vc", deployTxHash: "0xlive-deploy" });
 
@@ -207,5 +212,27 @@ describe("resolveIdentityRegistry — dead-registry redeploy", () => {
 
     expect(adapter.deployCount).toBe(0);
     expect(result?.didRegistry).toBe("0xlive-did");
+  });
+
+  it("redeploys when the VC registry is gone even though the DID registry survives", async () => {
+    // A re-genesis wipes both, but they are two independent addresses and the
+    // liveness check has to ask about both. Checking only the DID registry
+    // would keep serving a vcRegistry that holds no code, and every credential
+    // "anchored" there would be anchored nowhere.
+    const adapter = new ScriptedRegistryAdapter("besu");
+    adapter.codeByAddress.set("0xhalf-did", "0x6080604052"); // 0xhalf-vc holds nothing
+    const deployments = new MemoryRegistryDeploymentRepository();
+    await deployments.create({ chainId: "besu", didRegistry: "0xhalf-did", vcRegistry: "0xhalf-vc", deployTxHash: "0xhalf-deploy" });
+
+    const result = await resolveIdentityRegistry({
+      chainId: "besu",
+      chains: fakeChains(adapter),
+      deployments,
+      log: () => {},
+    });
+
+    expect(adapter.deployCount).toBe(1);
+    expect(result?.vcRegistry).toBe("0xnew-vc-1");
+    expect(result?.didRegistry).toBe("0xnew-did-1");
   });
 });
