@@ -20,6 +20,7 @@ import { isSupportedCurrency } from "../../tokenization/currencies.js";
 import { renderContractCode } from "../../tokenization/contract-code.js";
 import { deployAndCreateUseCase } from "../../tokenization/use-cases.js";
 import { computeAnalytics } from "../../tokenization/analytics.js";
+import { reconcile } from "../../tokenization/reconciliation.js";
 import { computeIdentityDashboard } from "../../identity/identity-analytics.js";
 import { issueCredentialFor, revokeCredentialById } from "../../identity/credential-issuance.js";
 import { namespaceHolding } from "../../shared/usecase-namespace.js";
@@ -244,6 +245,19 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     return { assets: results.length, verified: results.filter((r) => r.valid && r.anchorConsistent).length, tampered, anchoredAssets: results.filter((r) => r.lastAnchor).length };
   });
 
+  app.get("/reconciliation", { schema: S.reconciliation, ...authScoped("assets:read") }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    // Reconciliation compares believed state against the chain across every use
+    // case, so it is a whole-platform read: restrict it to the two roles whose
+    // job that is, rather than letting any assets:read principal see everything.
+    if (claims.role !== "PlatformAdmin" && claims.role !== "Auditor") return notFound(reply, "not found");
+    return reconcile(deps, actorOf(request), {
+      // DERIVED from confirmed transactions, not asserted by the register. An
+      // asset row has no supply column, and inventing one would just move the
+      // unchecked claim somewhere else.
+      believedSupply: (assetId) => deps.ledgerTransactions.settledSupply(assetId),
+    });
+  });
 
   // EN-B: DELIBERATELY UNSCOPED. Anchoring writes the audit head on-chain but
   // creates no authority and discloses nothing — it is an integrity operation

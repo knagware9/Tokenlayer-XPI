@@ -245,6 +245,40 @@ export const sharedSchemas: Record<string, FastifySchema> = {
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403) },
   },
 
+  reconciliation: {
+    tags: ["Audit"], summary: "Compare believed register supply against on-chain supply, per asset", security: eitherCredential,
+    description:
+      "Requires the `assets:read` scope, further restricted to PlatformAdmin and Auditor: this rolls up every use " +
+      "case, so it is a whole-platform read rather than a scoped one. Read-only by design — a mismatch can mean a " +
+      "transaction still settling (`settlement-outstanding`), a chain we could not reach (`chain-unreadable`), or " +
+      "a genuine discrepancy (`supply-mismatch`), and each demands a different response, none of them automatic.",
+    response: {
+      200: {
+        type: "object",
+        properties: {
+          checked: { type: "integer" },
+          drifted: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                assetId: { type: "string" },
+                chainId: { type: "string" },
+                believedSupply: { type: ["string", "null"] },
+                chainSupply: { type: ["string", "null"] },
+                outstanding: { type: "integer" },
+                reason: { type: "string", enum: ["settlement-outstanding", "chain-unreadable", "supply-mismatch"] },
+              },
+              required: ["assetId", "chainId", "believedSupply", "chainSupply", "outstanding", "reason"],
+            },
+          },
+        },
+        required: ["checked", "drifted"],
+      },
+      ...errs(401, 404),
+    },
+  },
+
   createOrg: {
     tags: ["Organizations"], summary: "Create an organization + parent DID (PlatformAdmin)", security: eitherCredential,
     description:

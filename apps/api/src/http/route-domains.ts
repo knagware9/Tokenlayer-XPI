@@ -92,6 +92,9 @@ const RULES: ReadonlyArray<readonly [string, RouteDomain]> = [
   // VCs on a chain too, so `/chains` is not tokenization's alone.
   ["/proposals", "shared"],
   ["/audit", "shared"],
+  // Believed-vs-chain supply, across every use case — same platform-wide
+  // integrity family as /audit, not owned by either product alone.
+  ["/reconciliation", "shared"],
   ["/documents", "shared"],
   ["/events", "shared"],
   ["/chains", "shared"],
