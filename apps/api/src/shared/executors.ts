@@ -7,12 +7,13 @@
  * payer resolution + scoping); these cores re-validate the data-dependent
  * guards (open listings, funds, holders) at execution time.
  */
-import type { Actor } from "@tokenlayer/core";
+import type { Actor, TxReceipt } from "@tokenlayer/core";
 import { splitProRata } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { emitEvent, ownerOrgOfUseCase } from "./events.js";
 import { foldAsset } from "../tokenization/holders.js";
 import { contextOf } from "../http/support.js";
+import { recordSubmission } from "./ledger-transactions.js";
 import type { AssetRecord, CashflowRecord } from "../persistence/types/index.js";
 
 export class CodedError extends Error {
@@ -61,8 +62,12 @@ export async function executeIssueActivation(
   if (p.initialSupply && p.treasury) {
     const ctx = contextOf(asset);
     const useCase = await deps.useCases.get(asset.useCaseKey);
-    if (useCase.compliance.allowlist) await deps.engine.setAllowed(actor, ctx, p.treasury, true);
-    await deps.engine.mint(actor, ctx, p.treasury, p.initialSupply);
+    if (useCase.compliance.allowlist) {
+      const allowReceipt = await deps.engine.setAllowed(actor, ctx, p.treasury, true);
+      await recordSubmission(deps, "allow", allowReceipt, { assetId: asset.id });
+    }
+    const mintReceipt = await deps.engine.mint(actor, ctx, p.treasury, p.initialSupply);
+    await recordSubmission(deps, "mint", mintReceipt, { assetId: asset.id, amount: p.initialSupply });
   }
   await deps.assets.setStatus(asset.id, "active");
 }
@@ -107,15 +112,31 @@ async function dispatchGatedAction(
   asset: AssetRecord,
   action: string,
   b: Record<string, string>,
-): Promise<{ txHash: string }> {
+): Promise<TxReceipt> {
   const ctx = contextOf(asset);
   const isNft = asset.tokenType === "nonfungible";
+  let receipt: TxReceipt;
   switch (action) {
-    case "mint": return isNft ? deps.engine.mintToken(actor, ctx, b.to!, b.tokenId!, b.uri) : deps.engine.mint(actor, ctx, b.to!, b.amount!);
-    case "transfer": return isNft ? deps.engine.transferToken(actor, ctx, b.from!, b.to!, b.tokenId!) : deps.engine.transfer(actor, ctx, b.from!, b.to!, b.amount!);
-    case "burn": return isNft ? deps.engine.burnToken(actor, ctx, b.tokenId!) : deps.engine.burn(actor, ctx, b.from!, b.amount!);
-    case "freeze": return deps.engine.setFrozen(actor, ctx, b.account!, true);
-    case "unfreeze": return deps.engine.setFrozen(actor, ctx, b.account!, false);
+    case "mint":
+      receipt = isNft ? await deps.engine.mintToken(actor, ctx, b.to!, b.tokenId!, b.uri) : await deps.engine.mint(actor, ctx, b.to!, b.amount!);
+      await recordSubmission(deps, "mint", receipt, { assetId: asset.id, amount: b.amount ?? null });
+      return receipt;
+    case "transfer":
+      receipt = isNft ? await deps.engine.transferToken(actor, ctx, b.from!, b.to!, b.tokenId!) : await deps.engine.transfer(actor, ctx, b.from!, b.to!, b.amount!);
+      await recordSubmission(deps, "transfer", receipt, { assetId: asset.id, amount: b.amount ?? null });
+      return receipt;
+    case "burn":
+      receipt = isNft ? await deps.engine.burnToken(actor, ctx, b.tokenId!) : await deps.engine.burn(actor, ctx, b.from!, b.amount!);
+      await recordSubmission(deps, "burn", receipt, { assetId: asset.id, amount: b.amount ?? null });
+      return receipt;
+    case "freeze":
+      receipt = await deps.engine.setFrozen(actor, ctx, b.account!, true);
+      await recordSubmission(deps, "freeze", receipt, { assetId: asset.id });
+      return receipt;
+    case "unfreeze":
+      receipt = await deps.engine.setFrozen(actor, ctx, b.account!, false);
+      await recordSubmission(deps, "freeze", receipt, { assetId: asset.id });
+      return receipt;
     default: throw coded(400, "VALIDATION_ERROR", `unknown gated action '${action}'`);
   }
 }
@@ -169,7 +190,12 @@ export async function executeCashflowCore(
     }
     if (cf.kind === "redemption") {
       const ctx = contextOf(asset);
-      for (const [addr, bal] of balances) if (bal > 0n) await deps.engine.burn(actor, ctx, addr, bal.toString());
+      for (const [addr, bal] of balances) {
+        if (bal > 0n) {
+          const burnReceipt = await deps.engine.burn(actor, ctx, addr, bal.toString());
+          await recordSubmission(deps, "burn", burnReceipt, { assetId: asset.id, amount: bal.toString() });
+        }
+      }
       await deps.assets.setStatus(asset.id, "matured");
     }
     executed = await deps.cashflows.markExecuted(cf.id, new Date().toISOString());
