@@ -177,7 +177,6 @@ const STAFF_BASELINE: readonly PersonaRule[] = [
   { prefix: "/users/batch", methods: ["POST"], why: "CSV batch onboarding" },
   { prefix: "/proposals", methods: "ALL", why: "the maker-checker queue every gated action lands in" },
   { prefix: "/audit", methods: "ALL", why: "the hash-chained log and its anchoring" },
-  { prefix: "/reconciliation", methods: ["GET"], why: "believed-vs-chain supply, per asset, next to the audit console" },
   { prefix: "/events", methods: ["GET"], why: "the activity feed behind the audit console" },
   { prefix: "/documents", methods: "ALL", why: "upload and fetch supporting documents" },
 ];
@@ -273,6 +272,10 @@ export const PERSONAS: readonly PersonaDef[] = [
       { prefix: "/accounts", methods: ["GET"], why: "settlement accounts within its scope" },
       { prefix: "/currencies", methods: ["GET"], why: "the settlement-currency catalogue" },
       { prefix: "/analytics", methods: ["GET"], why: "its own issuance dashboard" },
+      // Reads tokenization-owned Asset data (deps.assets, deps.engine) — cannot
+      // sit in STAFF_BASELINE, or an identity-only deployment would expose it
+      // at its edge and then fail inside the handler on DOMAIN_NOT_ENABLED.
+      { prefix: "/reconciliation", methods: ["GET"], why: "believed-vs-chain supply, per asset, next to the audit console" },
     ],
   },
   {
@@ -315,6 +318,10 @@ export const PERSONAS: readonly PersonaDef[] = [
       { prefix: "/cash", methods: "ALL", why: "credit settlement accounts and read balances" },
       { prefix: "/currencies", methods: ["GET"], why: "the settlement-currency catalogue" },
       { prefix: "/analytics", methods: ["GET"], why: "the platform dashboard" },
+      // Reads tokenization-owned Asset data (deps.assets, deps.engine) — cannot
+      // sit in STAFF_BASELINE, or an identity-only deployment would expose it
+      // at its edge and then fail inside the handler on DOMAIN_NOT_ENABLED.
+      { prefix: "/reconciliation", methods: ["GET"], why: "believed-vs-chain supply, per asset, next to the audit console" },
     ],
   },
 ];
