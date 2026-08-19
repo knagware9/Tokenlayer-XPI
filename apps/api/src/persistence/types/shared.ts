@@ -365,6 +365,13 @@ export interface RegistryDeploymentRecord {
 export interface RegistryDeploymentRepository {
   get(chainId: string): Promise<RegistryDeploymentRecord | null>;
   create(input: Omit<RegistryDeploymentRecord, "createdAt">): Promise<RegistryDeploymentRecord>;
+  /**
+   * Create-or-REPLACE by `chainId` (the primary key). Needed for the redeploy
+   * path: `chainId` is `@id`, so a plain `create` over an existing row throws —
+   * swapping a stale registry for no registry at all. Never duplicates, never
+   * loses the row.
+   */
+  upsert(input: Omit<RegistryDeploymentRecord, "createdAt">): Promise<RegistryDeploymentRecord>;
 }
 
 export interface LoginKeyRecord {

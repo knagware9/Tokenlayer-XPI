@@ -447,6 +447,13 @@ export class PrismaRegistryDeploymentRepository implements RegistryDeploymentRep
   async create(input: Omit<RegistryDeploymentRecord, "createdAt">): Promise<RegistryDeploymentRecord> {
     return toRegistry(await prisma.registryDeployment.create({ data: input }));
   }
+  async upsert(input: Omit<RegistryDeploymentRecord, "createdAt">): Promise<RegistryDeploymentRecord> {
+    return toRegistry(await prisma.registryDeployment.upsert({
+      where: { chainId: input.chainId },
+      create: input,
+      update: input,
+    }));
+  }
 }
 
 export const rowToApiKey = (r: {

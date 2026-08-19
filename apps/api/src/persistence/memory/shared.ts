@@ -307,6 +307,11 @@ export class MemoryRegistryDeploymentRepository implements RegistryDeploymentRep
     this.byChain.set(rec.chainId, rec);
     return rec;
   }
+  async upsert(input: Omit<RegistryDeploymentRecord, "createdAt">): Promise<RegistryDeploymentRecord> {
+    const rec: RegistryDeploymentRecord = { ...input, createdAt: now() };
+    this.byChain.set(rec.chainId, rec);
+    return rec;
+  }
 }
 
 export class MemoryApiKeyRepository implements ApiKeyRepository {

@@ -127,6 +127,9 @@ export interface LedgerAdapter {
 
   /** EVM chains only: resolve a submitted transaction. Absent on simulated adapters. */
   getReceipt?(txHash: string): Promise<{ blockNumber?: number; status?: number } | null>;
+
+  /** EVM chains only: the deployed bytecode at `address`, or "0x" if none. Absent on simulated adapters. */
+  getCode?(address: string): Promise<string>;
 }
 
 /** Minimal JSON-Schema subset used to describe issuance metadata. */

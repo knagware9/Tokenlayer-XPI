@@ -299,6 +299,14 @@ export class EvmLedgerAdapter implements LedgerAdapter, CredentialAnchor {
     return { blockNumber: r.blockNumber, status: r.status == null ? undefined : Number(r.status) };
   }
 
+  /**
+   * The bytecode deployed at `address`, or `"0x"` if none. Reuses the provider
+   * this adapter already holds — never constructs a second one.
+   */
+  async getCode(address: string): Promise<string> {
+    return this.provider.getCode(address);
+  }
+
   /** Serialised single transaction (the common case for one-shot operations). */
   private send(
     build: (overrides: Record<string, unknown>) => Promise<{ hash: string; wait: (c?: number) => Promise<unknown> }>,
