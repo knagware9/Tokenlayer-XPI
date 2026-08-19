@@ -245,6 +245,7 @@ export const components: Record<string, unknown>[] = [
       tokenStandard: TOKEN_STANDARD,
       metadata: { type: "object", additionalProperties: true },
       status: { type: "string" },
+      settlement: { type: "string", enum: ["active", "pending", "failed"] },
       createdBy: { type: "string" },
       createdAt: { type: "string" },
       totalSupply: { type: "string", nullable: true },

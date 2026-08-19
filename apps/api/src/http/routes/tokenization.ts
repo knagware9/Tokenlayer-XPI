@@ -29,6 +29,7 @@ import { mintOrgMembership } from "../../shared/membership.js";
 import { ensurePlatformIssuerOrg, PLATFORM_ORG_NAME } from "../../shared/platform-org.js";
 import { computeActivity, computePortfolio } from "../../tokenization/investor.js";
 import { readErpInvoices, stageInvoice } from "../../tokenization/invoice-register.js";
+import { settlementStatus } from "../../tokenization/asset-settlement.js";
 import { assetBalancesOf, coded, CodedError, dropPayerShare, executeCashflowCore, executeIssueActivation, runGatedAction } from "../../shared/executors.js";
 import { recordSubmission } from "../../shared/ledger-transactions.js";
 import { proposalKind } from "../../shared/proposal-kinds.js";
@@ -769,7 +770,8 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
         const availableSupply = a.treasuryAccount
           ? await deps.engine.balanceOf(actor, ctx, a.treasuryAccount).catch(() => null)
           : null;
-        return { ...a, totalSupply, availableSupply };
+        const settlement = await settlementStatus(deps, a);
+        return { ...a, totalSupply, availableSupply, settlement };
       }),
     );
     return { data, pagination: { limit: q.limit, offset: q.offset, total } };
@@ -780,7 +782,8 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
     const asset = await scopedAsset(request, reply, "read");
     if (!asset) return reply;
     const totalSupply = await deps.engine.totalSupply(actorOf(request), contextOf(asset)).catch(() => null);
-    return { ...asset, totalSupply };
+    const settlement = await settlementStatus(deps, asset);
+    return { ...asset, totalSupply, settlement };
   });
 
 
