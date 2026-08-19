@@ -254,13 +254,13 @@ export const sharedSchemas: Record<string, FastifySchema> = {
       "a genuine discrepancy (`supply-mismatch`), and each demands a different response, none of them automatic.",
     response: {
       200: {
-        type: "object",
+        type: "object", additionalProperties: true,
         properties: {
           checked: { type: "integer" },
           drifted: {
             type: "array",
             items: {
-              type: "object",
+              type: "object", additionalProperties: true,
               properties: {
                 assetId: { type: "string" },
                 chainId: { type: "string" },

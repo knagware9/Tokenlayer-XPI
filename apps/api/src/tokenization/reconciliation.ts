@@ -33,36 +33,54 @@ export async function reconcile(
   actor: Actor,
   opts: { believedSupply: (assetId: string) => Promise<string | null>; limit?: number },
 ): Promise<ReconciliationReport> {
-  const { items } = await deps.assets.list({}, { limit: opts.limit ?? 500, offset: 0 });
+  // RULING R: `limit` is a PAGE size, not a cap on the report. A report that
+  // says "checked: 500, drifted: 0" while 200 assets past the first page went
+  // unexamined is a confident wrong answer — worse than no report, and exactly
+  // the failure this branch exists to end. So this pages through every asset:
+  // keep fetching with an advancing offset until `checked` has reached the
+  // repository's own `total`, or a page comes back short (fewer than asked
+  // for), which means there is nothing left even if `total` under-reports.
+  const pageSize = opts.limit ?? 500;
   const drifted: ReconciliationRow[] = [];
+  let checked = 0;
+  let offset = 0;
 
-  for (const asset of items) {
-    const outstanding = (await deps.ledgerTransactions.listByAsset(asset.id)).length;
-    const believed = await opts.believedSupply(asset.id);
+  for (;;) {
+    const { items, total } = await deps.assets.list({}, { limit: pageSize, offset });
+    if (items.length === 0) break;
 
-    let chainSupply: string | null = null;
-    let unreadable = false;
-    try {
-      // contextOf builds { ref: { id, chainId, contractRef }, useCaseKey } —
-      // the shape LifecycleEngine.totalSupply actually reads (ctx.ref.chainId).
-      // A hand-built flat object here would make resolveAdapter(undefined)
-      // throw for every asset, reporting the whole platform as unreachable.
-      chainSupply = await deps.engine.totalSupply(actor, contextOf(asset));
-    } catch {
-      unreadable = true;
+    for (const asset of items) {
+      checked += 1;
+      const outstanding = (await deps.ledgerTransactions.listByAsset(asset.id)).length;
+      const believed = await opts.believedSupply(asset.id);
+
+      let chainSupply: string | null = null;
+      let unreadable = false;
+      try {
+        // contextOf builds { ref: { id, chainId, contractRef }, useCaseKey } —
+        // the shape LifecycleEngine.totalSupply actually reads (ctx.ref.chainId).
+        // A hand-built flat object here would make resolveAdapter(undefined)
+        // throw for every asset, reporting the whole platform as unreachable.
+        chainSupply = await deps.engine.totalSupply(actor, contextOf(asset));
+      } catch {
+        unreadable = true;
+      }
+
+      if (!unreadable && chainSupply === believed) continue;
+
+      drifted.push({
+        assetId: asset.id,
+        chainId: asset.chainId,
+        believedSupply: believed,
+        chainSupply: unreadable ? null : chainSupply,
+        outstanding,
+        reason: outstanding > 0 ? "settlement-outstanding" : unreadable ? "chain-unreadable" : "supply-mismatch",
+      });
     }
 
-    if (!unreadable && chainSupply === believed) continue;
-
-    drifted.push({
-      assetId: asset.id,
-      chainId: asset.chainId,
-      believedSupply: believed,
-      chainSupply: unreadable ? null : chainSupply,
-      outstanding,
-      reason: outstanding > 0 ? "settlement-outstanding" : unreadable ? "chain-unreadable" : "supply-mismatch",
-    });
+    offset += items.length;
+    if (offset >= total || items.length < pageSize) break;
   }
 
-  return { checked: items.length, drifted };
+  return { checked, drifted };
 }

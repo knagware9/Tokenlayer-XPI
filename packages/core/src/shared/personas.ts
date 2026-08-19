@@ -177,6 +177,7 @@ const STAFF_BASELINE: readonly PersonaRule[] = [
   { prefix: "/users/batch", methods: ["POST"], why: "CSV batch onboarding" },
   { prefix: "/proposals", methods: "ALL", why: "the maker-checker queue every gated action lands in" },
   { prefix: "/audit", methods: "ALL", why: "the hash-chained log and its anchoring" },
+  { prefix: "/reconciliation", methods: ["GET"], why: "believed-vs-chain supply, per asset, next to the audit console" },
   { prefix: "/events", methods: ["GET"], why: "the activity feed behind the audit console" },
   { prefix: "/documents", methods: "ALL", why: "upload and fetch supporting documents" },
 ];

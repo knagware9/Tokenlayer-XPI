@@ -101,8 +101,8 @@ class ScriptedAdapter implements LedgerAdapter {
   }
 }
 
-/** One asset ("a1") on chain "besu", backed by `adapter` when present — absent means resolveAdapter throws, i.e. an unconfigured/unreachable chain. */
-async function setup(adapter: ScriptedAdapter | null) {
+/** One or more assets on chain "besu", backed by `adapter` when present — absent means resolveAdapter throws, i.e. an unconfigured/unreachable chain. */
+async function setup(adapter: ScriptedAdapter | null, assetIds: string[] = ["a1"]) {
   const assets = new MemoryAssetRepository();
   const ledgerTransactions = new MemoryLedgerTransactionRepository();
   const engine = new LifecycleEngine({
@@ -114,11 +114,13 @@ async function setup(adapter: ScriptedAdapter | null) {
     },
     audit: new NoopAudit(),
   });
-  await assets.create({
-    id: "a1", useCaseKey: "u", name: "Asset", symbol: "AST", chainId: "besu", contractRef: "0xC",
-    tokenType: "fungible", tokenStandard: "ERC-20", metadata: {}, status: "active", createdBy: "u1",
-    unitPrice: null, currency: null, treasuryAccount: null,
-  });
+  for (const id of assetIds) {
+    await assets.create({
+      id, useCaseKey: "u", name: "Asset", symbol: "AST", chainId: "besu", contractRef: "0xC",
+      tokenType: "fungible", tokenStandard: "ERC-20", metadata: {}, status: "active", createdBy: "u1",
+      unitPrice: null, currency: null, treasuryAccount: null,
+    });
+  }
   const deps = { assets, engine, ledgerTransactions };
   return { deps, ledgerTransactions };
 }
@@ -154,5 +156,16 @@ describe("reconcile", () => {
     const report = await reconcile(deps, actor, { believedSupply: async () => "510" });
     expect(report.drifted[0]?.outstanding).toBe(1);
     expect(report.drifted[0]?.reason).toBe("settlement-outstanding");
+  });
+
+  it("pages through every asset rather than stopping at the first page", async () => {
+    // RULING R: a single-page read silently drops whatever lies past it — a
+    // report that says "checked: 1, drifted: 0" while a second asset was never
+    // looked at is a confident wrong answer. `limit: 1` forces two assets into
+    // two pages; `checked` must still count both, not just the first page.
+    const { deps } = await setup(new ScriptedAdapter("besu", async () => "100"), ["a1", "a2"]);
+    const report = await reconcile(deps, actor, { believedSupply: async () => "100", limit: 1 });
+    expect(report.checked).toBe(2);
+    expect(report.drifted).toEqual([]);
   });
 });
