@@ -44,4 +44,20 @@ describe("recordSubmission", () => {
     }, { assetId: "a1" });
     expect(rec.status).toBe("confirmed");
   });
+
+  // RULING M: a row labelled "freeze" that was actually an unfreeze is a false
+  // record, same class of bug as an unconfirmed tx marked "active" — the kind
+  // recorded must match the direction of the setFrozen call, not just its family.
+  it("records a freeze as kind freeze and an unfreeze as kind unfreeze", async () => {
+    const ledgerTransactions = new MemoryLedgerTransactionRepository();
+    const freezeRec = await recordSubmission({ ledgerTransactions }, "freeze", {
+      txHash: "0x4", chainId: "besu", blockNumber: 3, timestamp: "2026-08-18T10:00:00.000Z",
+    }, { assetId: "a1" });
+    expect(freezeRec.kind).toBe("freeze");
+
+    const unfreezeRec = await recordSubmission({ ledgerTransactions }, "unfreeze", {
+      txHash: "0x5", chainId: "besu", blockNumber: 4, timestamp: "2026-08-18T10:00:00.000Z",
+    }, { assetId: "a1" });
+    expect(unfreezeRec.kind).toBe("unfreeze");
+  });
 });

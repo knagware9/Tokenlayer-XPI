@@ -520,8 +520,12 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
       // issuance receipt (issue() registers within an already-deployed
       // contract, it does not itself deploy) — record() is idempotent on
       // (chainId, txHash), so every asset issued into the same contract shares
-      // one row rather than fabricating a new "deploy" per asset.
-      await recordSubmission(deps, "deploy", { txHash: result.txHash, chainId, timestamp: new Date().toISOString() }, { assetId: id });
+      // one row rather than fabricating a new "deploy" per asset. RULING L: the
+      // deploy tx is a property of the USE-CASE CONTRACT, not of whichever
+      // asset happened to be issued first — assetId: null, or the row would
+      // permanently (and falsely) claim to belong to asset #1. An asset's own
+      // outstanding state is carried by its own mint row, not this one.
+      await recordSubmission(deps, "deploy", { txHash: result.txHash, chainId, timestamp: new Date().toISOString() }, { assetId: null });
       await deps.assets.create({
         id,
         useCaseKey: bUseCaseKey,

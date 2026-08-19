@@ -135,7 +135,7 @@ async function dispatchGatedAction(
       return receipt;
     case "unfreeze":
       receipt = await deps.engine.setFrozen(actor, ctx, b.account!, false);
-      await recordSubmission(deps, "freeze", receipt, { assetId: asset.id });
+      await recordSubmission(deps, "unfreeze", receipt, { assetId: asset.id });
       return receipt;
     default: throw coded(400, "VALIDATION_ERROR", `unknown gated action '${action}'`);
   }

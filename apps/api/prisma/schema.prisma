@@ -522,7 +522,7 @@ model LedgerTransaction {
   id            String    @id @default(cuid())
   chainId       String
   txHash        String
-  kind          String // deploy | mint | transfer | burn | freeze | allow | anchor
+  kind          String // deploy | mint | transfer | burn | freeze | unfreeze | allow | anchor
   // Units moved, for mint/transfer/burn. This is what makes believed supply
   // DERIVABLE (sum of confirmed mints minus confirmed burns) instead of a
   // number the register asserts and nothing can check.

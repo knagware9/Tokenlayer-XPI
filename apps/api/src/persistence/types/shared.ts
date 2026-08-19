@@ -609,7 +609,7 @@ export interface WebhookDeliveryRepository {
 }
 
 export type LedgerTxStatus = "pending" | "confirmed" | "failed" | "unknown";
-export type LedgerTxKind = "deploy" | "mint" | "transfer" | "burn" | "freeze" | "allow" | "anchor";
+export type LedgerTxKind = "deploy" | "mint" | "transfer" | "burn" | "freeze" | "unfreeze" | "allow" | "anchor";
 
 export interface LedgerTransactionRecord {
   id: string;
