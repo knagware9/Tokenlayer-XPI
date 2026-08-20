@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../../api.js";
 import { useAuth } from "../../auth.js";
-import { SANDBOX_EXCLUDED_NOTE } from "../../lib/shared/modes.js";
 import type { DerivedCredentialStatus, IdentityDashboardData } from "../../types.js";
 import { SectionHeader } from "../shared/ui.js";
 
@@ -68,17 +67,13 @@ export function IdentityDashboard(): JSX.Element {
   const [statusFilter, setStatusFilter] = useState<DerivedCredentialStatus | "all">("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
-  // EN-D2: sandbox credential use cases are out of this aggregate unless asked
-  // for, exactly as in `/analytics`. Same reasoning, same default, and the same
-  // reason the note below is always on screen rather than only when it bites.
-  const [includeSandbox, setIncludeSandbox] = useState(false);
 
   useEffect(() => {
     if (!token) return;
     setData(null);
     setError(null);
-    api.identityDashboard(token, includeSandbox).then(setData).catch(() => setError("Could not load the identity dashboard."));
-  }, [token, includeSandbox]);
+    api.identityDashboard(token).then(setData).catch(() => setError("Could not load the identity dashboard."));
+  }, [token]);
 
   const types = useMemo(() => (data ? [...new Set(data.board.map((r) => r.type))].sort() : []), [data]);
   const rows = useMemo(() => {
@@ -97,23 +92,6 @@ export function IdentityDashboard(): JSX.Element {
   return (
     <div className="space-y-5">
       <SectionHeader title="Identity Dashboard" description="Credential lifecycle and verification activity across your identity use cases." />
-
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-        <p className="text-slate-500">
-          {includeSandbox
-            ? "Sandbox credential use cases are INCLUDED in these figures. Simulated credentials are counted alongside real ones — do not report from this view."
-            : SANDBOX_EXCLUDED_NOTE}
-        </p>
-        <label className="flex items-center gap-2 text-slate-600 cursor-pointer shrink-0">
-          <input
-            type="checkbox"
-            checked={includeSandbox}
-            onChange={(e) => setIncludeSandbox(e.target.checked)}
-            className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-          />
-          Include sandbox
-        </label>
-      </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
         <Tile label="Issued" value={t.issued} stagger={1} />

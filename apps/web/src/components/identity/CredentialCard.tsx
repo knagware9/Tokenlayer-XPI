@@ -73,9 +73,7 @@ export function CredentialCard({ credential: c, status, onAcceptanceAction, chai
           )}
           {status && (status.anchored
             ? <Pill tone="info">anchored · {status.chainId}</Pill>
-            // EN-D2: a sandbox credential is unanchored BY DESIGN, so it must not
-            // wear the same pill as one whose anchor was meant to land and did not.
-            : status.source === "sandbox" ? <Pill tone="warn">sandbox · not anchored</Pill> : <Pill tone="muted">unanchored</Pill>)}
+            : <Pill tone="muted">unanchored</Pill>)}
         </div>
       </div>
       <div className="text-xs text-slate-600"><span className="font-medium text-slate-800">{issuerLabel(c)}</span></div>

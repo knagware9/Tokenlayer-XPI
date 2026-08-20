@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { api } from "../../api.js";
 import { useAuth } from "../../auth.js";
 import { useRoute } from "../../router.js";
-import { SANDBOX_EXCLUDED_NOTE } from "../../lib/shared/modes.js";
 import type { AnalyticsSummary } from "../../types.js";
 import { AreaChart } from "../charts/AreaChart.js";
 import { BarChart } from "../charts/BarChart.js";
@@ -33,18 +32,6 @@ export function Dashboard({ useCaseKey }: { useCaseKey?: string }): JSX.Element 
   const { navigate } = useRoute();
   const [data, setData] = useState<AnalyticsSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
-  /**
-   * EN-D2: the server leaves SANDBOX use cases out of `/analytics` unless asked
-   * for them by name. Every figure below is therefore smaller than the catalog
-   * a reader can see in Use Cases, and the difference is invisible without this
-   * — a silently-shrunken total is the reporting defect nobody catches, because
-   * the number still looks like a number.
-   *
-   * Off by default, matching the server: a real total is the one an operator is
-   * asking for, and the toggle exists so "where did my sandbox go?" has a
-   * one-click answer rather than a support ticket.
-   */
-  const [includeSandbox, setIncludeSandbox] = useState(false);
   const scrollTo = (id: string): void => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
 
   useEffect(() => {
@@ -52,10 +39,10 @@ export function Dashboard({ useCaseKey }: { useCaseKey?: string }): JSX.Element 
     setData(null);
     setError(null);
     api
-      .analytics(token, { ...(useCaseKey ? { useCaseKey } : {}), includeSandbox })
+      .analytics(token, { ...(useCaseKey ? { useCaseKey } : {}) })
       .then(setData)
       .catch(() => setError("Could not load analytics"));
-  }, [token, useCaseKey, includeSandbox]);
+  }, [token, useCaseKey]);
 
   if (error) return <Card><p className="text-sm text-red-600">{error}</p></Card>;
   if (!data)
@@ -70,42 +57,14 @@ export function Dashboard({ useCaseKey }: { useCaseKey?: string }): JSX.Element 
       </div>
     );
 
-  /**
-   * The scope note plus its toggle. Rendered in BOTH branches below, and the
-   * empty one is the branch that matters: an organization whose only work so far
-   * is in the sandbox otherwise reads "No assets yet" while its register is full
-   * of them, with nothing on the screen to suggest a second environment exists.
-   */
-  const sandboxControl = (
-    <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-      <p className="text-slate-500">
-        {includeSandbox
-          ? "Sandbox use cases are INCLUDED in these figures. Simulated assets are counted alongside real ones — do not report from this view."
-          : SANDBOX_EXCLUDED_NOTE}
-      </p>
-      <label className="flex items-center gap-2 text-slate-600 cursor-pointer shrink-0">
-        <input
-          type="checkbox"
-          checked={includeSandbox}
-          onChange={(e) => setIncludeSandbox(e.target.checked)}
-          className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
-        />
-        Include sandbox
-      </label>
-    </div>
-  );
-
   if (data.totals.assets === 0) {
     return (
       <div className="space-y-3">
-        {sandboxControl}
         <Card>
           <EmptyState
             icon="coins"
             title="No assets yet"
-            hint={includeSandbox
-              ? "Issue an asset to see cross-ledger analytics — supply, holders, value and trading activity."
-              : "Issue an asset to see cross-ledger analytics — supply, holders, value and trading activity. Sandbox use cases are not counted here; tick Include sandbox if your work so far is in the sandbox."}
+            hint="Issue an asset to see cross-ledger analytics — supply, holders, value and trading activity."
           />
         </Card>
       </div>
@@ -118,7 +77,6 @@ export function Dashboard({ useCaseKey }: { useCaseKey?: string }): JSX.Element 
 
   return (
     <div className="space-y-4">
-      {sandboxControl}
       {/* headline cards — click to drill into the matching breakdown */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <Stat icon="coins" label="Tokenized value" value={fmtMoney(t.valueByCurrency)} sub={`${t.assets} assets · ${t.useCases} use case${t.useCases === 1 ? "" : "s"}`} onClick={() => scrollTo(data.scope === "platform" ? "dash-usecases" : "dash-ledger")} stagger={1} />

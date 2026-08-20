@@ -1,9 +1,7 @@
 import { useState } from "react";
 import { useAuth } from "../../auth.js";
-import { SANDBOX_LEDGER_NOTE, modeLabel, modeOf, modeTone } from "../../lib/shared/modes.js";
 import { can } from "../../rbac.js";
 import type { ChainInfo, UseCase } from "../../types.js";
-import { Pill } from "../shared/ui.js";
 import { AssetDetail } from "./AssetDetail.js";
 import { AssetList } from "./AssetList.js";
 import { IssuePanel } from "./IssuePanel.js";
@@ -38,24 +36,12 @@ export function AssetManagement({ useCaseKey, useCases, chains }: { useCaseKey: 
   const issueUseCases = useCases.filter((u) => u.key === useCaseKey);
   const listKey = isPlatform ? useCaseKey : undefined;
 
-  // EN-D2: this screen is where supply, holders and contract addresses are read
-  // as facts about the world. If the ledger behind them is an in-memory map,
-  // that has to be on the screen and not only on the card that led here.
-  const activeUseCase = useCases.find((u) => u.key === useCaseKey);
-  const mode = modeOf(activeUseCase?.sandbox);
-
   if (selected) {
     return <AssetDetail assetId={selected} useCases={useCases} chains={chains} onBack={() => setSelected(null)} onChanged={() => setRefreshKey((k) => k + 1)} />;
   }
 
   return (
     <div>
-      {mode === "test" && (
-        <div className="mb-4 rounded-lg bg-amber-50 border border-amber-200 px-4 py-2.5 flex items-start gap-2.5">
-          <Pill tone={modeTone(mode)}>{modeLabel(mode)}</Pill>
-          <p className="text-xs text-amber-800">{SANDBOX_LEDGER_NOTE}</p>
-        </div>
-      )}
       <div className="flex gap-1 mb-5">
         {subs.map((s) => (
           <button
