@@ -263,7 +263,7 @@ export class EvmLedgerAdapter implements LedgerAdapter, CredentialAnchor {
   }
 
   private trexManager(): TrexManager {
-    this.trex ??= new TrexManager(this.signer, this.wallet, () => this.gasOverrides(), loadTrexArtifacts());
+    this.trex ??= new TrexManager(this.signer, this.wallet, () => this.gasOverrides(), loadTrexArtifacts(), this.confirmationTimeoutMs);
     return this.trex;
   }
 
