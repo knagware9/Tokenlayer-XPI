@@ -35,5 +35,5 @@ export PORT="${PORT:-4000}"
 export CORS_ORIGINS="${CORS_ORIGINS:-http://localhost:8080,http://localhost:5173}"
 
 echo "[api-fabric] fabric REAL via $FABRIC_IDENTITY@$FABRIC_CHANNEL/$FABRIC_CHAINCODE"
-pnpm --filter @tokenlayer/api exec prisma db push --skip-generate >/dev/null 2>&1 || true
+pnpm --filter @tokenlayer/api exec prisma db push --skip-generate --accept-data-loss >/dev/null 2>&1 || true
 exec pnpm api:dev
