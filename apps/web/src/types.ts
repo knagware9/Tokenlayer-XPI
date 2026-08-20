@@ -1,4 +1,3 @@
-import type { ResourceMode } from "./lib/shared/modes.js";
 
 export type Role = "PlatformAdmin" | "OrgAdmin" | "UseCaseAdmin" | "Issuer" | "Trader" | "Buyer" | "Auditor" | "Holder" | "Verifier";
 
@@ -158,18 +157,6 @@ export interface UseCase {
   roles: Role[];
   /** The organization that owns this use case. */
   ownerOrgId?: string | null;
-  /**
-   * EN-D2 test mode. A sandbox use case runs ONLY on the always-simulated
-   * `sandbox` chain, is invisible to a `tl_live_` key, and is left out of
-   * analytics and the invoice register unless asked for by name.
-   *
-   * OPTIONAL, and absent means LIVE: it is a column with a DB default, so it is
-   * missing from every row that predates EN-D2 — read it through `modeOf`
-   * (src/lib/modes.ts) rather than by hand. It is set at CREATION and never
-   * after (409 SANDBOX_IMMUTABLE); the supported way to a live copy is
-   * `POST /use-cases/:key/clone-to-live`.
-   */
-  sandbox?: boolean;
 }
 
 export interface Asset {
@@ -524,19 +511,6 @@ export interface ApiKeyView {
   revokedBy: string | null;
   createdBy: string;
   createdAt: string;
-  /**
-   * EN-D2: which environment this key acts in. A `test` key acts only on
-   * sandbox use cases and reads `tl_test_…`; a `live` one only on real ones.
-   *
-   * SENT ON EVERY KEY SINCE D2-8 — `apiKeyView` projects it and `ApiKeyView#`
-   * declares it, which are both required (fast-json-stringify strips whatever
-   * the schema does not name). Still OPTIONAL here, and only for the version
-   * skew this console cannot rule out: a browser tab left open across a deploy,
-   * or a build pointed at an older API. Absent is read as `live`, which is what
-   * the column's own default says, so the wrong guess is impossible rather than
-   * merely unlikely.
-   */
-  mode?: ResourceMode;
 }
 
 /**
@@ -637,17 +611,6 @@ export interface WebhookEndpoint {
   createdBy?: string;
   createdAt: string;
   lastDeliveryAt: string | null;
-  /**
-   * EN-D2: which stream this endpoint receives. A `test` endpoint hears ONLY
-   * sandbox events and a `live` one ONLY real ones — the two never cross, so a
-   * sandbox event can never reach a production handler. FIXED at registration.
-   *
-   * Unlike `ApiKeyView.mode` this is genuinely sent by the server (it is in the
-   * `WebhookEndpoint` response schema and `required` there), and the create
-   * route accepts it in the body. Typed optional all the same, so a row from an
-   * older API build renders as live rather than as a blank pill.
-   */
-  mode?: ResourceMode;
 }
 
 /** One queued/attempted delivery. Carries no payload — read that from /events. */
@@ -740,18 +703,15 @@ export interface IdentityRegistryInfo {
 }
 
 /** Revocation status of a credential (GET /credentials/:id/status — public, no auth).
- * `source` says where the answer came from: the chain registry, the database when
- * unanchored — or `sandbox` (EN-D2), which is NOT the database fallback: a sandbox
- * credential was never anchored and never will be, by design. */
+ * `source` says where the answer came from: the chain registry, or the database
+ * when unanchored. */
 export interface CredentialStatusInfo {
   id: string;
   revoked: boolean;
   revokedAt: string | null;
   reason: string | null;
   anchored: boolean;
-  source: "chain" | "database" | "sandbox";
-  /** True only for a credential issued in a SANDBOX use case (EN-D2): unanchored by design. */
-  sandbox?: boolean;
+  source: "chain" | "database";
   acceptance?: string;
   /** Present only when source === "chain". */
   chainId?: string;
@@ -848,9 +808,7 @@ export interface EligibleHolder { kind: "user" | "org"; id: string; label: strin
 export type IssuerBinding = { kind: "platform" } | { kind: "org"; orgId: string };
 export type HolderPolicy = { who: "any-onboarded" } | { who: "orgType"; orgTypes: string[] } | { who: "specific"; orgIds: string[] };
 export type VerifierBinding = { kind: "any" } | { kind: "orgs"; orgIds: string[] };
-/** `sandbox` is the Identity-domain twin of `UseCase.sandbox` — same optionality,
- *  same "absent means live" reading, same immutability after creation. */
-export interface CredentialUseCase { key: string; name: string; description?: string; credentialTypes: CredentialTypeSpec[]; issuer: IssuerBinding; holderPolicy: HolderPolicy; verifier: VerifierBinding; holderAcceptance?: boolean; ownerOrgId?: string | null; status?: string; sandbox?: boolean; }
+export interface CredentialUseCase { key: string; name: string; description?: string; credentialTypes: CredentialTypeSpec[]; issuer: IssuerBinding; holderPolicy: HolderPolicy; verifier: VerifierBinding; holderAcceptance?: boolean; ownerOrgId?: string | null; status?: string; }
 
 export type TemplateParamType = "text" | "number" | "enum" | "boolean";
 export interface TemplateParam { name: string; label: string; type: TemplateParamType; required: boolean; default?: string | number | boolean; options?: string[]; min?: number; max?: number; help?: string; }

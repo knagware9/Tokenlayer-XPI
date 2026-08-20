@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "../../api.js";
 import { useAuth } from "../../auth.js";
-import { SANDBOX_IMMUTABLE_NOTE, chainChoicesFor, checkUseCaseDraft, modeBlurb, modeLabel, modeTone } from "../../lib/shared/modes.js";
 import type { ChainInfo, ContractCode, Role, TokenStandard, UseCase } from "../../types.js";
 import { ContractCodeView } from "./ContractCodeView.js";
 import { familyIcon } from "./NetworksPanel.js";
@@ -150,22 +149,10 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
   const [description, setDescription] = useState("");
   const [standard, setStandard] = useState<TokenStandard>("ERC-20");
 
-  // Step 2 — Environment + ledgers.
+  // Step 2 — Ledgers.
   //
-  // THE ENVIRONMENT IS A CREATE-TIME CHOICE AND APPEARS NOWHERE ELSE. The
-  // server refuses to change `sandbox` on an existing use case (409
-  // SANDBOX_IMMUTABLE) because flipping it would reclassify everything already
-  // issued under it wholesale, so an edit control here would be an affordance
-  // the server refuses — the exact defect EN-B's review found twice. Where a use
-  // case already exists the console shows its environment as STATE and offers
-  // Clone to live instead (PlatformHome's use-case cards).
-  const [sandbox, setSandbox] = useState(false);
-  // Default to a live chain so there is a deployable target. Chosen from the
-  // LIVE choices, not the whole catalog: the sandbox chain is in `/chains` now,
-  // and seeding the allowlist with it would build a live use case the server
-  // refuses with 400 INVALID_SANDBOX_CHAINS.
-  const liveChoices = chainChoicesFor(false, chains);
-  const firstChain = (liveChoices.find((c) => c.available !== false) ?? liveChoices[0])?.id ?? "besu";
+  // Default to a connected chain so there is a deployable target.
+  const firstChain = (chains.find((c) => c.available !== false) ?? chains[0])?.id ?? "besu";
   const [allowedChainIds, setAllowedChainIds] = useState<string[]>([firstChain]);
   const [defaultChainId, setDefaultChainId] = useState(firstChain);
 
@@ -206,15 +193,14 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
   const symbolValid = /^[A-Z0-9]{1,6}$/.test(symbol);
   const step1Valid = name.trim().length > 0 && keyValid && !keyTaken && symbolValid;
 
-  // The ledgers this environment may be offered at all. Everything downstream —
-  // the picker, the review tiles, the code-preview tabs — reads this, so the two
-  // halves of the draft cannot drift into a combination the server refuses.
-  const chainChoices = chainChoicesFor(sandbox, chains);
+  // The ledgers this use case may be offered. Everything downstream — the
+  // picker, the review tiles, the code-preview tabs — reads this.
+  const chainChoices = chains;
   const hasLiveChain = allowedChainIds.some((id) => chainOf(id)?.available !== false);
   // THE ONE CHECK, shared with `create()` below — the step gate and the submit
   // gate must not be able to disagree about what a valid draft is.
-  const draftCheck = checkUseCaseDraft({ sandbox, allowedChainIds, defaultChainId });
-  const step2Valid = draftCheck.ok && hasLiveChain;
+  const chainsValid = allowedChainIds.length > 0 && allowedChainIds.includes(defaultChainId);
+  const step2Valid = chainsValid && hasLiveChain;
 
   const namedFields = fields.filter((f) => f.name.trim());
   const hasEmptyEnum = namedFields.some(
@@ -235,25 +221,6 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
   }
 
   // ---------- step 2 selection ----------
-  /**
-   * Switching environment REPLACES the ledger selection rather than filtering
-   * it. Keeping the previous picks would leave a live chain selected under a
-   * sandbox use case (or the reverse) — invisible in a picker that no longer
-   * renders it, and refused by the server at submit with an error about a chain
-   * the operator can no longer see.
-   */
-  function chooseEnvironment(next: boolean): void {
-    if (next === sandbox) return;
-    setSandbox(next);
-    const choices = chainChoicesFor(next, chains);
-    const seed = (choices.find((c) => c.available !== false) ?? choices[0])?.id;
-    setAllowedChainIds(seed ? [seed] : []);
-    setDefaultChainId(seed ?? "");
-    // Contract previews are per chain and the chains just changed underneath.
-    setPreviews({});
-    setPreviewTab(seed ?? "");
-  }
-
   function toggleChain(id: string): void {
     const next = allowedChainIds.includes(id) ? allowedChainIds.filter((x) => x !== id) : [...allowedChainIds, id];
     const kept = next.length ? next : [id];
@@ -313,13 +280,19 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
     setError(null);
     setOk(null);
     setNotice(null);
-    // THE ENVIRONMENT GATE, at the last moment before the wire. The step gate
-    // above reads the same check, but a draft can be reached by clicking back to
-    // step 2 and away again — and a mismatched pair is not a validation nicety:
-    // a live use case on the sandbox chain would give a real programme an
-    // in-memory register, and a sandbox one on Besu would mint real tokens.
-    const modeCheck = checkUseCaseDraft({ sandbox, allowedChainIds, defaultChainId });
-    if (!modeCheck.ok) { setError(modeCheck.message); setBusy(false); return; }
+    // THE LEDGER GATE, at the last moment before the wire. The step gate above
+    // reads the same check, but a draft can be reached by clicking back to step
+    // 2 and away again.
+    if (allowedChainIds.length === 0) {
+      setError("Select at least one ledger — a use case that may deploy nowhere cannot issue anything");
+      setBusy(false);
+      return;
+    }
+    if (!allowedChainIds.includes(defaultChainId)) {
+      setError("The default ledger must be one of the selected ledgers");
+      setBusy(false);
+      return;
+    }
     try {
       const complianceOut: UseCase["compliance"] = { allowlist, transferRestrictions };
       if (requireVerifiedIdentity) complianceOut.requireVerifiedIdentity = true;
@@ -344,11 +317,8 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
         description: description.trim() || undefined,
         tokenStandard: standard,
         tokenType,
-        // From the CHECK, not from state: the validated pair exists only on the
-        // ok arm, so a chain/mode mismatch has nothing to hand this call.
-        allowedChainIds: modeCheck.allowedChainIds,
-        defaultChainId: modeCheck.defaultChainId,
-        sandbox: modeCheck.sandbox,
+        allowedChainIds: [...allowedChainIds],
+        defaultChainId,
         metadataSchema: fieldsToSchema(fields),
         lifecycle,
         compliance: complianceOut,
@@ -359,17 +329,13 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
       const res = await api.createUseCase(token, def);
       if ("proposal" in res) {
         // 202: an OrgAdmin's request is gated — nothing is created until a PlatformAdmin approves.
-        setNotice(
-          `${modeLabel(modeCheck.mode)} use case submitted (${res.proposal.id.slice(0, 8)}…) — pending platform approval in Approvals.` +
-            (modeCheck.sandbox ? " Its environment is fixed once it is approved and cannot be changed afterwards." : ""),
-        );
+        setNotice(`Use case submitted (${res.proposal.id.slice(0, 8)}…) — pending platform approval in Approvals.`);
         reset();
       } else {
         const deployed = Object.keys(res.contracts ?? {});
         setOk(
-          `Created "${res.name}" (${res.symbol}, ${res.tokenStandard}) in the ${modeLabel(modeCheck.mode)} environment. ` +
-            (deployed.length ? `Contract deployed on: ${deployed.join(", ")}.` : "No contract deployed yet.") +
-            (modeCheck.sandbox ? " Nothing issued under it is real, and its environment cannot be changed — clone it to live when you are ready." : ""),
+          `Created "${res.name}" (${res.symbol}, ${res.tokenStandard}). ` +
+            (deployed.length ? `Contract deployed on: ${deployed.join(", ")}.` : "No contract deployed yet."),
         );
         reset();
         onCreated();
@@ -391,9 +357,6 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
     setSymbolTouched(false);
     setDescription("");
     setStandard("ERC-20");
-    // Back to LIVE, deliberately: the next use case an operator builds must not
-    // inherit "sandbox" from the last one without their choosing it again.
-    setSandbox(false);
     setAllowedChainIds([firstChain]);
     setDefaultChainId(firstChain);
     setFields([{ name: "issuer", kind: "string", required: true }]);
@@ -488,42 +451,7 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
 
           {step === 1 && (
             <div className="space-y-4">
-              <StepIntro title="Environment & ledgers" hint="Choose the environment first — it decides which ledgers this use case may ever deploy to. The starred chain is the default target for new assets." />
-
-              {/*
-                THE ENVIRONMENT CHOICE. Offered here and only here: the server
-                fixes `sandbox` at creation (409 SANDBOX_IMMUTABLE), so this
-                control has no edit counterpart anywhere in the console.
-              */}
-              <fieldset className="grid gap-3 sm:grid-cols-2">
-                <legend className="sr-only">Environment</legend>
-                {([false, true] as const).map((isSandbox) => {
-                  const mode = isSandbox ? "test" : "live";
-                  const selected = sandbox === isSandbox;
-                  return (
-                    <button
-                      key={mode}
-                      type="button"
-                      aria-pressed={selected}
-                      onClick={() => chooseEnvironment(isSandbox)}
-                      className={`text-left rounded-xl border p-4 transition ${
-                        selected
-                          ? isSandbox
-                            ? "border-amber-500 bg-amber-50/60 shadow-sm"
-                            : "border-brand-500 bg-brand-50/40 shadow-sm"
-                          : "border-slate-200 hover:border-brand-300"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-semibold text-slate-800">{modeLabel(mode)}</span>
-                        <Pill tone={modeTone(mode)}>{modeLabel(mode)}</Pill>
-                      </div>
-                      <p className="text-xs text-slate-500 mt-1">{modeBlurb(mode)}</p>
-                    </button>
-                  );
-                })}
-              </fieldset>
-              <p className="text-[11px] text-slate-400">{SANDBOX_IMMUTABLE_NOTE}</p>
+              <StepIntro title="Ledgers" hint="Choose which ledgers this use case may ever deploy to. The starred chain is the default target for new assets." />
 
               <div className="grid gap-3 sm:grid-cols-2">
                 {chainChoices.map((c) => {
@@ -577,27 +505,14 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
                   );
                 })}
               </div>
-              {chainChoices.length === 0 && (
-                <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-                  This deployment&rsquo;s chain catalog has no <span className="font-mono">sandbox</span> ledger, so a sandbox
-                  use case cannot be created here. Nothing else is offered on purpose — a sandbox use case that named a real
-                  chain would not be a sandbox at all.
-                </p>
-              )}
               {chainChoices.length > 0 && !hasLiveChain && (
                 <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                   Select at least one connected chain — assets cannot be issued until a ledger that is online is in the mix.
                 </p>
               )}
-              {/* The check's own message, so the reason a step is blocked is the
-                  same sentence the submit would have produced. */}
-              {!draftCheck.ok && (
-                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{draftCheck.message}</p>
-              )}
-              {sandbox && (
-                <p className="text-xs text-slate-500">
-                  The sandbox ledger is simulated and always will be: no environment variable promotes it to a real backend.
-                  Assets minted here have contract addresses and supply figures that are not on any chain.
+              {!chainsValid && allowedChainIds.length > 0 && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  The default ledger must be one of the selected ledgers.
                 </p>
               )}
             </div>
@@ -742,24 +657,12 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
             <div className="space-y-5">
               <StepIntro title="Review & create" hint="Everything the platform will provision — including the contract that deploys per ledger." />
 
-              {sandbox && (
-                <div className="rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs px-4 py-2">
-                  <strong className="font-semibold">This will be a sandbox use case.</strong> {modeBlurb("test")} Its
-                  environment is fixed at creation — the only way to a real copy is Clone to live, which carries the
-                  configuration and none of the data.
-                </div>
-              )}
-
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <SummaryTile label="Basics">
                   <div className="text-sm font-semibold text-slate-800">{name || "—"}</div>
                   <div className="text-xs text-slate-500">
                     {key} · {symbol} · {standard}
                   </div>
-                </SummaryTile>
-                <SummaryTile label="Environment">
-                  <Pill tone={modeTone(sandbox ? "test" : "live")}>{modeLabel(sandbox ? "test" : "live")}</Pill>
-                  <div className="text-xs text-slate-500 mt-1">{modeBlurb(sandbox ? "test" : "live")}</div>
                 </SummaryTile>
                 <SummaryTile label="Ledgers">
                   <div className="flex flex-wrap gap-1">
@@ -848,7 +751,7 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
                 disabled={busy || !canCreate}
                 className="rounded-lg bg-brand-600 text-white px-5 py-2 text-sm font-semibold hover:bg-brand-700 disabled:opacity-50"
               >
-                {busy ? "Creating…" : `Create ${modeLabel(sandbox ? "test" : "live").toLowerCase()} use case`}
+                {busy ? "Creating…" : "Create use case"}
               </button>
             )}
           </div>

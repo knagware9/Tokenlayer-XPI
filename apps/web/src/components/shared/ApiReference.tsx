@@ -582,8 +582,8 @@ function NoTryIt({ route, doc, baseUrl }: { route: RouteEntry; doc: OpenApiDocum
         <p className="text-xs text-slate-500">
           Interactive calls are read-only here: a documentation page should not issue a credential or move tokens against live
           data, and most mutations on this API answer <span className="font-mono">202</span> with a proposal into a real
-          maker-checker queue that a second person then has to clear. Sandbox keys — a test mode where a mutation is safe to try —
-          arrive with EN-D2; until then this snippet is deliberately something you run deliberately.
+          maker-checker queue that a second person then has to clear. This snippet is deliberately something you run yourself,
+          not something wired to a button here.
         </p>
       )}
       {cred.kind !== "public" && (

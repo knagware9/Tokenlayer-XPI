@@ -7,9 +7,7 @@
  * than any layout bug:
  *
  *   · calling an UNANCHORED record "confirmed on-chain", which would tell a
- *     verifier an independent ledger agreed when nothing of the sort happened;
- *   · calling a SANDBOX credential real. It is a rehearsal artefact that never
- *     had on-chain existence and never claimed any.
+ *     verifier an independent ledger agreed when nothing of the sort happened.
  *
  * So the verdict (is it in force?) and the provenance (who says so?) are
  * computed separately and asserted separately here — a revoked credential can
@@ -79,12 +77,6 @@ describe("the provenance — who is actually saying so?", () => {
     expect(p.detail).not.toMatch(/confirmed|verified by the ledger/i);
     expect(p.detail).toMatch(/nothing independent/i);
     expect(p.label).not.toBe(provenanceOf(status({ source: "chain" })).label);
-  });
-
-  it("sandbox: says outright that it is not a real credential", () => {
-    const p = provenanceOf(status({ source: "sandbox", sandbox: true, anchored: false }));
-    expect(p.label).toMatch(/not a real credential/i);
-    expect(p.detail).toMatch(/do not rely on it/i);
   });
 
   it("a REVOKED credential can still be chain-confirmed — the two answers are independent", () => {

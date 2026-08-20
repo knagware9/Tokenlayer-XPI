@@ -69,13 +69,6 @@ export function provenanceOf(s: CredentialStatusInfo): { tone: "ok" | "warn" | "
       detail: "Read from the credential registry contract on the ledger, not from this platform's database.",
     };
   }
-  if (s.source === "sandbox") {
-    return {
-      tone: "muted",
-      label: "Sandbox — not a real credential",
-      detail: "Issued in a rehearsal environment. It has no on-chain existence and never claimed any. Do not rely on it.",
-    };
-  }
   return {
     tone: "warn",
     label: "Platform record only",
