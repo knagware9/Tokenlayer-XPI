@@ -101,8 +101,17 @@ class ScriptedAdapter implements LedgerAdapter {
   }
 }
 
-/** One or more assets on chain "besu", backed by `adapter` when present — absent means resolveAdapter throws, i.e. an unconfigured/unreachable chain. */
-async function setup(adapter: ScriptedAdapter | null, assetIds: string[] = ["a1"]) {
+/**
+ * One or more assets on chain "besu", backed by `adapter` when present —
+ * absent means resolveAdapter throws, i.e. an unconfigured/unreachable chain.
+ *
+ * Each id gets its OWN contractRef by default (a dedicated contract), because
+ * that is what most of these tests mean to model — two id STRINGS sharing a
+ * contract only when a test explicitly asks for it via `{ id, contractRef }`,
+ * so an incidental shared default can never silently couple an unrelated test
+ * (e.g. the pagination test) to the grouping behaviour below.
+ */
+async function setup(adapter: ScriptedAdapter | null, assetIds: (string | { id: string; contractRef: string })[] = ["a1"]) {
   const assets = new MemoryAssetRepository();
   const ledgerTransactions = new MemoryLedgerTransactionRepository();
   const engine = new LifecycleEngine({
@@ -114,9 +123,10 @@ async function setup(adapter: ScriptedAdapter | null, assetIds: string[] = ["a1"
     },
     audit: new NoopAudit(),
   });
-  for (const id of assetIds) {
+  for (const spec of assetIds) {
+    const { id, contractRef } = typeof spec === "string" ? { id: spec, contractRef: `0xC${spec}` } : spec;
     await assets.create({
-      id, useCaseKey: "u", name: "Asset", symbol: "AST", chainId: "besu", contractRef: "0xC",
+      id, useCaseKey: "u", name: "Asset", symbol: "AST", chainId: "besu", contractRef,
       tokenType: "fungible", tokenStandard: "ERC-20", metadata: {}, status: "active", createdBy: "u1",
       unitPrice: null, currency: null, treasuryAccount: null,
     });
@@ -183,6 +193,79 @@ describe("reconcile", () => {
 
     const report = await reconcile(deps, actor, { believedSupply: (id) => ledgerTransactions.settledSupply(id) });
     expect(report.drifted[0]).toMatchObject({ believedSupply: "0", chainSupply: "3000", reason: "supply-mismatch" });
+  });
+
+  it("compares a SHARED contract in aggregate — neither member is drifted even though its own believed supply differs from the total", async () => {
+    // The regression this whole fix exists for: two assets minted into ONE
+    // contract (every fungible/NFT use case does this; only ERC-3643 gets a
+    // dedicated contract per asset). Believing 40 and 60 respectively is
+    // exactly right when the contract holds 100 in total — comparing EITHER
+    // asset's own number against the shared total would have called both
+    // "drifted" forever, which is what shipped and was found live against
+    // this platform's own smoke-test asset and a freshly tokenized invoice.
+    const { deps } = await setup(new ScriptedAdapter("besu", async () => "100"), [
+      { id: "a1", contractRef: "0xShared" },
+      { id: "a2", contractRef: "0xShared" },
+    ]);
+    const believed: Record<string, string> = { a1: "40", a2: "60" };
+    const report = await reconcile(deps, actor, { believedSupply: async (id) => believed[id]! });
+    expect(report.checked).toBe(2);
+    expect(report.drifted).toEqual([]);
+  });
+
+  it("a genuine mismatch on a shared contract is reported for every member with its own history, carrying the GROUP'S totals", async () => {
+    const { deps } = await setup(new ScriptedAdapter("besu", async () => "100"), [
+      { id: "a1", contractRef: "0xShared" },
+      { id: "a2", contractRef: "0xShared" },
+    ]);
+    const believed: Record<string, string> = { a1: "40", a2: "50" }; // sums to 90, not 100
+    const report = await reconcile(deps, actor, { believedSupply: async (id) => believed[id]! });
+    expect(report.drifted).toHaveLength(2);
+    for (const row of report.drifted) {
+      expect(row).toMatchObject({ believedSupply: "90", chainSupply: "100", reason: "supply-mismatch" });
+    }
+    expect(report.drifted.map((r) => r.assetId).sort()).toEqual(["a1", "a2"]);
+  });
+
+  it("reads totalSupply ONCE per shared contract, not once per asset on it", async () => {
+    let calls = 0;
+    const adapter = new ScriptedAdapter("besu", async () => {
+      calls += 1;
+      return "300";
+    });
+    const { deps } = await setup(adapter, [
+      { id: "a1", contractRef: "0xShared" },
+      { id: "a2", contractRef: "0xShared" },
+      { id: "a3", contractRef: "0xShared" },
+    ]);
+    await reconcile(deps, actor, { believedSupply: async () => "100" });
+    expect(calls).toBe(1);
+  });
+
+  it("a member with genuinely zero rows of its own still reads no-ledger-record, even inside a group whose aggregate matches", async () => {
+    // a1 has NO history at all; a2's one confirmed mint of 100 is the entire
+    // reason the group's 100-vs-100 total matches. a1's own claim is still
+    // "we have no record of this asset" — true regardless of what its sibling
+    // on the same contract explains — so it must not read as clean just
+    // because the group happened to add up.
+    const { deps, ledgerTransactions } = await setup(new ScriptedAdapter("besu", async () => "100"), [
+      { id: "a1", contractRef: "0xShared" },
+      { id: "a2", contractRef: "0xShared" },
+    ]);
+    const minted = await ledgerTransactions.record({ chainId: "besu", txHash: "0xm", kind: "mint", amount: "100", assetId: "a2", submittedAt: "2026-08-18T10:00:00.000Z" });
+    await ledgerTransactions.settle(minted.id, { status: "confirmed", blockNumber: 1, confirmedAt: "2026-08-18T10:00:01.000Z" });
+
+    const report = await reconcile(deps, actor, { believedSupply: (id) => ledgerTransactions.settledSupply(id) });
+    expect(report.drifted).toHaveLength(1);
+    expect(report.drifted[0]).toMatchObject({ assetId: "a1", believedSupply: "0", chainSupply: "100", reason: "no-ledger-record" });
+  });
+
+  it("a group of exactly one asset behaves exactly as a dedicated contract always did", async () => {
+    // The reduction that keeps ERC-3643/T-REX (one contract per asset) working
+    // unchanged: a lone member's "group total" IS its own believed supply.
+    const { deps } = await setup(new ScriptedAdapter("besu", async () => "0"));
+    const report = await reconcile(deps, actor, { believedSupply: async () => "510" });
+    expect(report.drifted[0]).toMatchObject({ assetId: "a1", believedSupply: "510", chainSupply: "0", reason: "supply-mismatch" });
   });
 
   it("pages through every asset rather than stopping at the first page", async () => {
