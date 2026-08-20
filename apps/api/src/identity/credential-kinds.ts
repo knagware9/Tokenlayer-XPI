@@ -46,10 +46,6 @@ export const issueCredentialKind: ProposalKindHandler = {
     await issueCredentialFor(ctx.deps, {
       issuerOrg: org, subjectDid: pl.subjectDid, type: pl.type, claims: pl.claims,
       validityDays: credentialTypeDef(pl.type).validityDays, proposalId: p.id,
-      // The CLOSED CATALOG has no use case and therefore no sandbox variant:
-      // this anchors on the platform's real registry, always. Stated rather
-      // than defaulted — the whole point of the required field.
-      sandbox: false,
     });
   },
 };

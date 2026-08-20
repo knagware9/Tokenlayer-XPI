@@ -30,9 +30,10 @@
  *    every authorization gate. `redact` is the belt to the call sites' braces;
  *    call sites must still pass only what they mean to publish.
  */
-import type { EventType, ResourceMode } from "@tokenlayer/core";
+import type { EventType } from "@tokenlayer/core";
 import { KEY_PREFIX_MARKER } from "./api-keys.js";
 import type { AppDeps } from "../context.js";
+import type { ResourceMode } from "../persistence/types/index.js";
 import { endpointMatches } from "../webhooks/matching.js";
 
 /**

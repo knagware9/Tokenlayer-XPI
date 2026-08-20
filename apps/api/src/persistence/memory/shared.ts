@@ -8,9 +8,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { id, now, paginate } from "./common.js";
 import { auditEntryHash, auditGenesis } from "@tokenlayer/core";
-import type { OrgCapabilities, ResourceMode } from "@tokenlayer/core";
+import type { OrgCapabilities } from "@tokenlayer/core";
 import { LEDGER_UNKNOWN_RETRY_MS } from "../types/index.js";
-import type { ApiKeyCreateInput, ApiKeyRecord, ApiKeyRepository, AuditAnchorRecord, AuditAnchorRepository, AuditEntryRecord, AuditRepository, BrandingPatch, CashflowRepository, CredentialRecord, CredentialRepository, DocumentPurpose, DocumentRecord, DocumentRepository, DocumentSummary, EventAppendInput, EventRecord, EventRepository, LedgerTransactionRecord, LedgerTransactionRepository, LedgerTransactionSettlement, LedgerTxKind, LedgerTxStatus, LoginKeyRecord, LoginKeyRepository, OrgStatus, OrganizationRecord, OrganizationRepository, Page, Paged, ProposalApproval, ProposalRecord, ProposalRepository, RegistryDeploymentRecord, RegistryDeploymentRepository, UserKind, UserRecord, UserRepository, WebhookDeliveryRecord, WebhookDeliveryRepository, WebhookEndpointCreateInput, WebhookEndpointRecord, WebhookEndpointRepository } from "../types/index.js";
+import type { ApiKeyCreateInput, ApiKeyRecord, ApiKeyRepository, AuditAnchorRecord, AuditAnchorRepository, AuditEntryRecord, AuditRepository, BrandingPatch, CashflowRepository, CredentialRecord, CredentialRepository, DocumentPurpose, DocumentRecord, DocumentRepository, DocumentSummary, EventAppendInput, EventRecord, EventRepository, LedgerTransactionRecord, LedgerTransactionRepository, LedgerTransactionSettlement, LedgerTxKind, LedgerTxStatus, LoginKeyRecord, LoginKeyRepository, OrgStatus, OrganizationRecord, OrganizationRepository, Page, Paged, ProposalApproval, ProposalRecord, ProposalRepository, RegistryDeploymentRecord, RegistryDeploymentRepository, ResourceMode, UserKind, UserRecord, UserRepository, WebhookDeliveryRecord, WebhookDeliveryRepository, WebhookEndpointCreateInput, WebhookEndpointRecord, WebhookEndpointRepository } from "../types/index.js";
 
 export class MemoryUserRepository implements UserRepository {
   private readonly byId = new Map<string, UserRecord>();

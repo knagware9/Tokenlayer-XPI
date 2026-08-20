@@ -5,7 +5,7 @@
  * `Credential` itself is SHARED, because organization membership is built on
  * verifiable credentials and both products need that.
  */
-import type { CredentialUseCaseDefinition, UseCaseTemplate, ResourceMode } from "@tokenlayer/core";
+import type { CredentialUseCaseDefinition, UseCaseTemplate } from "@tokenlayer/core";
 
 export interface CredentialUseCaseRepository {
   create(def: CredentialUseCaseDefinition): Promise<CredentialUseCaseDefinition>;

@@ -6,9 +6,21 @@
  * "everything else": a table is shared when BOTH products genuinely need it —
  * users, organizations, approvals, audit, events, API keys.
  */
-import type { Role, OrgType, OrgCapabilities, ResourceMode, LifecycleAction } from "@tokenlayer/core";
+import type { Role, OrgType, OrgCapabilities, LifecycleAction } from "@tokenlayer/core";
 
 export type { OrgType };
+
+/**
+ * "live"/"test" record label (EN-D2). No longer a `@tokenlayer/core` export —
+ * the mode-removal refactor deleted the route-layer gating and key-mode split
+ * that gave this its meaning (`packages/core/src/shared/modes.ts`, deleted).
+ * `EventRecord`, `ApiKeyRecord` and `WebhookEndpointRecord` still carry a
+ * `mode` column backed by this type until the column itself is dropped
+ * (tracked separately), so the type stays defined here, locally, purely to
+ * keep those three record shapes and `events.ts`'s `deriveMode` compiling —
+ * nothing outside `apps/api` sees it any more.
+ */
+export type ResourceMode = "live" | "test";
 
 export type KycStatus = "pending" | "approved" | "rejected";
 export interface KycDetails {

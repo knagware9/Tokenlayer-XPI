@@ -21,7 +21,7 @@ import { renderContractCode } from "../../tokenization/contract-code.js";
 import { deployAndCreateUseCase } from "../../tokenization/use-cases.js";
 import { computeAnalytics } from "../../tokenization/analytics.js";
 import { computeIdentityDashboard } from "../../identity/identity-analytics.js";
-import { issueLiveCredentialFor, revokeCredentialById } from "../../identity/credential-issuance.js";
+import { issueCredentialFor, revokeCredentialById } from "../../identity/credential-issuance.js";
 import { namespaceHolding } from "../../shared/usecase-namespace.js";
 import { emitEvent, ownerOrgOfUseCase } from "../../shared/events.js";
 import { mintOrgMembership } from "../../shared/membership.js";
@@ -749,7 +749,7 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
         // organization — it is refused to machine principals entirely
         // (`platformGovernanceRefused`), so its OrganizationCredential
         // anchors exactly as before.
-        const cred = await issueLiveCredentialFor(deps, { issuerOrg: platformOrg, subjectDid: org.did, type: "OrganizationCredential", claims: kybClaims, validityDays: credentialTypeDef("OrganizationCredential").validityDays, proposalId: null });
+        const cred = await issueCredentialFor(deps, { issuerOrg: platformOrg, subjectDid: org.did, type: "OrganizationCredential", claims: kybClaims, validityDays: credentialTypeDef("OrganizationCredential").validityDays, proposalId: null });
         issuerDid = platformOrg.did;
         orgCredentialId = cred.id;
       } catch (err) {

@@ -4,7 +4,7 @@
  * Everything `model-domains.ts` marks `"tokenization"`. An identity-only
  * deployment owns none of these tables and must never write one.
  */
-import type { TokenStandard, TokenType, LifecycleAction, ResourceMode, UseCaseDefinition, UseCaseSource } from "@tokenlayer/core";
+import type { TokenStandard, TokenType, LifecycleAction, UseCaseDefinition, UseCaseSource } from "@tokenlayer/core";
 import type { Paged, Page } from "./shared.js";
 
 export interface AssetRecord {
