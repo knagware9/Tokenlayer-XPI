@@ -8,19 +8,6 @@ import type { UseCaseRepository } from "../persistence/types/index.js";
 const USE_CASE_DIR = fileURLToPath(new URL("../../../../config/use-cases", import.meta.url));
 
 /**
- * Carry a use case's `sandbox` flag forward across an update unchanged.
- *
- * The persistence layer writes the column from whatever is on the incoming
- * definition (`raw.sandbox === true`), not from what is already stored, so an
- * update built from a body that never carries the field would silently flip
- * it to `false`. This is the one place that pin happens, so an update route
- * cannot forget it.
- */
-export function preserveUseCaseEnvironment(existing: UseCaseDefinition, incoming: UseCaseDefinition): UseCaseDefinition {
-  return { ...incoming, sandbox: existing.sandbox };
-}
-
-/**
  * Reads every *.json default use case from config/use-cases, validating and
  * filling derived fields (e.g. tokenType, which the JSON omits). Normalising
  * here — not just in UseCaseRegistry — matters because seedUseCases deploys

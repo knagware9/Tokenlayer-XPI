@@ -53,9 +53,6 @@ model ApiKey {
   revokedBy  String?
   createdBy  String
   createdAt  DateTime  @default(now())
-  // EN-D2: "live" | "test". A tl_test_ key acts only on sandbox use cases.
-  // Defaulting to "live" leaves every pre-EN-D2 key exactly as it was.
-  mode       String    @default("live")
 
   @@index([orgId])
 }
@@ -110,10 +107,6 @@ model UseCase {
   workflow         String   @default("{}") // JSON object: { approvals?: { [gatedOp]: requiredApprovals } }
   roles           String // JSON array
   ownerOrgId      String?  // owning organization id (null = legacy platform-owned)
-  // EN-D2: a sandbox use case lives only on the `sandbox` chain and is reachable
-  // only by a tl_test_ key. The DEFAULT is what makes this a zero-migration
-  // change — every row written before the column existed reads back as live.
-  sandbox         Boolean  @default(false)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 }
@@ -132,8 +125,6 @@ model CredentialUseCase {
   ownerOrgId      String?
   status          String   @default("active")
   holderAcceptance Boolean @default(false)
-  // EN-D2 — the Identity-domain twin of UseCase.sandbox. Same zero-migration default.
-  sandbox         Boolean  @default(false)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 }
@@ -439,9 +430,6 @@ model Event {
   subjectId  String? // the credential / asset / verification this is about
   data       String // JSON-encoded, redacted payload
   occurredAt DateTime @default(now())
-  // EN-D2: the mode of the use case this fact came from, denormalised so the
-  // stream can be filtered without a join. Defaults to "live".
-  mode       String   @default("live")
 
   @@index([orgId, seq])
   @@index([type])
@@ -482,9 +470,6 @@ model WebhookEndpoint {
   createdBy                String
   createdAt                DateTime  @default(now())
   lastDeliveryAt           DateTime?
-  // EN-D2: which stream this endpoint subscribes to. Defaults to "live", and is
-  // never updated in place — an endpoint cannot cross the sandbox boundary.
-  mode                     String    @default("live")
 
   @@index([orgId])
 }

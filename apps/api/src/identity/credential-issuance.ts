@@ -10,27 +10,10 @@
  * through `issueCredentialFor`, and it reads `deps.registry` directly.
  */
 import { randomUUID } from "node:crypto";
-import type { CredentialUseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { emitEvent } from "../shared/events.js";
 import { coded } from "../shared/executors.js";
 import type { CredentialRecord, OrganizationRecord } from "../persistence/types/index.js";
-
-/**
- * Carry a credential use case's `sandbox` flag forward across an update
- * unchanged.
- *
- * The persistence layer writes the column from whatever is on the incoming
- * definition (`raw.sandbox === true`), not from what is already stored, so an
- * update built from a body that never carries the field would silently flip
- * it to `false`. This is the one place that pin happens, so an update or
- * re-provision route cannot forget it.
- */
-export function preserveCredentialUseCaseEnvironment(
-  existing: CredentialUseCaseDefinition, incoming: CredentialUseCaseDefinition,
-): CredentialUseCaseDefinition {
-  return { ...incoming, sandbox: existing.sandbox };
-}
 
 export interface IssueCredentialArgs {
   issuerOrg: OrganizationRecord;

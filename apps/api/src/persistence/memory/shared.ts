@@ -10,7 +10,7 @@ import { id, now, paginate } from "./common.js";
 import { auditEntryHash, auditGenesis } from "@tokenlayer/core";
 import type { OrgCapabilities } from "@tokenlayer/core";
 import { LEDGER_UNKNOWN_RETRY_MS } from "../types/index.js";
-import type { ApiKeyCreateInput, ApiKeyRecord, ApiKeyRepository, AuditAnchorRecord, AuditAnchorRepository, AuditEntryRecord, AuditRepository, BrandingPatch, CashflowRepository, CredentialRecord, CredentialRepository, DocumentPurpose, DocumentRecord, DocumentRepository, DocumentSummary, EventAppendInput, EventRecord, EventRepository, LedgerTransactionRecord, LedgerTransactionRepository, LedgerTransactionSettlement, LedgerTxKind, LedgerTxStatus, LoginKeyRecord, LoginKeyRepository, OrgStatus, OrganizationRecord, OrganizationRepository, Page, Paged, ProposalApproval, ProposalRecord, ProposalRepository, RegistryDeploymentRecord, RegistryDeploymentRepository, ResourceMode, UserKind, UserRecord, UserRepository, WebhookDeliveryRecord, WebhookDeliveryRepository, WebhookEndpointCreateInput, WebhookEndpointRecord, WebhookEndpointRepository } from "../types/index.js";
+import type { ApiKeyCreateInput, ApiKeyRecord, ApiKeyRepository, AuditAnchorRecord, AuditAnchorRepository, AuditEntryRecord, AuditRepository, BrandingPatch, CashflowRepository, CredentialRecord, CredentialRepository, DocumentPurpose, DocumentRecord, DocumentRepository, DocumentSummary, EventAppendInput, EventRecord, EventRepository, LedgerTransactionRecord, LedgerTransactionRepository, LedgerTransactionSettlement, LedgerTxKind, LedgerTxStatus, LoginKeyRecord, LoginKeyRepository, OrgStatus, OrganizationRecord, OrganizationRepository, Page, Paged, ProposalApproval, ProposalRecord, ProposalRepository, RegistryDeploymentRecord, RegistryDeploymentRepository, UserKind, UserRecord, UserRepository, WebhookDeliveryRecord, WebhookDeliveryRepository, WebhookEndpointCreateInput, WebhookEndpointRecord, WebhookEndpointRepository } from "../types/index.js";
 
 export class MemoryUserRepository implements UserRepository {
   private readonly byId = new Map<string, UserRecord>();
@@ -334,9 +334,6 @@ export class MemoryApiKeyRepository implements ApiKeyRepository {
       lastUsedAt: null,
       revokedAt: null,
       revokedBy: null,
-      // The DB default, restated: an omitted mode is a LIVE key, so every key
-      // minted before EN-D2 keeps behaving exactly as it did.
-      mode: input.mode ?? "live",
     };
     this.byId.set(rec.id, rec);
     return rec;
@@ -422,20 +419,17 @@ export class MemoryEventRepository implements EventRepository {
       seq: this.nextSeq++,
       id: `evt_${randomUUID().replace(/-/g, "").slice(0, 20)}`,
       occurredAt: input.occurredAt ?? now(),
-      // The DB default, restated — see ApiKeyRecord.mode.
-      mode: input.mode ?? "live",
     };
     this.rows.push(rec);
     return this.clone(rec);
   }
   /**
    * `orgId: undefined` means EVERY org (PlatformAdmin); `orgId: null` means
-   * platform-scope rows only. `mode: undefined` means BOTH environments.
+   * platform-scope rows only.
    */
-  async listAfter(after: number, opts: { orgId?: string | null; type?: string; mode?: ResourceMode; limit: number }): Promise<EventRecord[]> {
+  async listAfter(after: number, opts: { orgId?: string | null; type?: string; limit: number }): Promise<EventRecord[]> {
     return this.rows
-      .filter((r) => r.seq > after && (opts.orgId === undefined || r.orgId === opts.orgId) && (!opts.type || r.type === opts.type)
-        && (opts.mode === undefined || r.mode === opts.mode))
+      .filter((r) => r.seq > after && (opts.orgId === undefined || r.orgId === opts.orgId) && (!opts.type || r.type === opts.type))
       .sort((a, b) => a.seq - b.seq)
       .slice(0, opts.limit)
       .map((r) => this.clone(r));
@@ -467,8 +461,6 @@ export class MemoryWebhookEndpointRepository implements WebhookEndpointRepositor
       deletedAt: null,
       createdAt: now(),
       lastDeliveryAt: null,
-      // The DB default, restated — see ApiKeyRecord.mode.
-      mode: input.mode ?? "live",
     };
     this.byId.set(rec.id, rec);
     return this.clone(rec);

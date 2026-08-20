@@ -83,14 +83,14 @@ export class MemoryUseCaseRepository implements UseCaseRepository {
     return [...this.byKey.values()];
   }
   async create(raw: UseCaseDefinition): Promise<UseCaseDefinition> {
-    const def = { ...normalizeUseCaseDefinition(raw), sandbox: raw.sandbox === true };
+    const def = normalizeUseCaseDefinition(raw);
     if (this.byKey.has(def.key)) throw new PolicyError("INVALID_USECASE", `use case '${def.key}' already exists`, { key: def.key });
     this.byKey.set(def.key, def);
     return def;
   }
   async update(key: string, raw: UseCaseDefinition): Promise<UseCaseDefinition> {
     if (!this.byKey.has(key)) throw new PolicyError("UNKNOWN_USECASE", `unknown use case '${key}'`, { key });
-    const def = { ...normalizeUseCaseDefinition({ ...raw, key }), sandbox: raw.sandbox === true };
+    const def = normalizeUseCaseDefinition({ ...raw, key });
     this.byKey.set(key, def);
     return def;
   }

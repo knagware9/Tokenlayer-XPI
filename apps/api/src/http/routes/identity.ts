@@ -21,7 +21,7 @@ import { renderContractCode } from "../../tokenization/contract-code.js";
 import { deployAndCreateUseCase } from "../../tokenization/use-cases.js";
 import { computeAnalytics } from "../../tokenization/analytics.js";
 import { computeIdentityDashboard } from "../../identity/identity-analytics.js";
-import { issueCredentialFor, preserveCredentialUseCaseEnvironment, revokeCredentialById } from "../../identity/credential-issuance.js";
+import { issueCredentialFor, revokeCredentialById } from "../../identity/credential-issuance.js";
 import { namespaceHolding } from "../../shared/usecase-namespace.js";
 import { emitEvent, ownerOrgOfUseCase } from "../../shared/events.js";
 import { mintOrgMembership } from "../../shared/membership.js";
@@ -339,7 +339,7 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
     const existing = await deps.credentialUseCases.get(key);
     if (!existing) return notFound(reply, "credential use case not found");
     const body = request.body as CredentialUseCaseDefinition;
-    const def = preserveCredentialUseCaseEnvironment(existing, { ...body, key });
+    const def = { ...body, key };
     const known = await referencedOrgs(def);
     try {
       validateCredentialUseCase(def, { orgExists: (id) => known.has(id) });
@@ -1012,7 +1012,7 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
       } catch (err) {
         return reply.code(400).send({ error: "INVALID_CREDENTIAL_USECASE", message: (err as Error).message });
       }
-      useCase = await deps.credentialUseCases.update(def.key, preserveCredentialUseCaseEnvironment(existing, { ...def, ownerOrgId: org.id }));
+      useCase = await deps.credentialUseCases.update(def.key, { ...def, ownerOrgId: org.id });
     } else {
       try {
         useCase = await createCredentialUseCaseFromDef(def, org.id, claims.id);

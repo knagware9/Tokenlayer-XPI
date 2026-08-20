@@ -124,7 +124,6 @@ interface UseCaseRow {
   workflow: string;
   roles: string;
   ownerOrgId: string | null;
-  sandbox: boolean;
 }
 
 /** Parse a JSON object column, tolerating null/empty/invalid → `{}`. */
@@ -158,8 +157,6 @@ export function rowToUseCase(r: UseCaseRow): UseCaseDefinition {
     ...(Object.keys(workflow).length > 0 ? { workflow: workflow as UseCaseDefinition["workflow"] } : {}),
     ownerOrgId: r.ownerOrgId ?? undefined,
     roles: JSON.parse(r.roles),
-    // Column, not derivation — the whole point of EN-D2's flag (see chains.ts).
-    sandbox: r.sandbox,
   });
 }
 
@@ -185,9 +182,6 @@ function useCaseToData(def: UseCaseDefinition) {
     workflow: JSON.stringify(def.workflow ?? {}),
     ownerOrgId: def.ownerOrgId ?? null,
     roles: JSON.stringify(def.roles),
-    // Written explicitly rather than left to the column default: the default
-    // exists for rows that predate the column, not for rows we are writing now.
-    sandbox: def.sandbox === true,
   };
 }
 

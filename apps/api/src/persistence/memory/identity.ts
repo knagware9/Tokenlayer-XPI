@@ -12,7 +12,7 @@ import type { CredentialUseCaseRepository, CredentialUseCaseTemplateRepository, 
 export class MemoryCredentialUseCaseRepository implements CredentialUseCaseRepository {
   private store = new Map<string, CredentialUseCaseDefinition>();
   async create(def: CredentialUseCaseDefinition): Promise<CredentialUseCaseDefinition> {
-    const rec = { ...def, sandbox: def.sandbox === true };
+    const rec = { ...def };
     this.store.set(rec.key, rec); return { ...rec };
   }
   async get(key: string): Promise<CredentialUseCaseDefinition | null> {
@@ -21,7 +21,7 @@ export class MemoryCredentialUseCaseRepository implements CredentialUseCaseRepos
   async has(key: string): Promise<boolean> { return this.store.has(key); }
   async list(): Promise<CredentialUseCaseDefinition[]> { return [...this.store.values()].map((d) => ({ ...d })); }
   async update(key: string, def: CredentialUseCaseDefinition): Promise<CredentialUseCaseDefinition> {
-    const rec = { ...def, sandbox: def.sandbox === true };
+    const rec = { ...def };
     this.store.set(key, rec); return { ...rec };
   }
 }

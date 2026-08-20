@@ -166,14 +166,6 @@ export interface UseCaseDefinition {
   description?: string;
   /** Owning organization id (null/undefined for legacy platform-owned use cases). */
   ownerOrgId?: string;
-  /**
-   * Legacy EN-D2 sandbox/test-mode marker. No longer enforced anywhere — the
-   * mode-removal refactor deleted the chain restriction, the key-mode split
-   * and every gate that read this field. It survives on the type only until
-   * the column itself is dropped. Optional on input — the persistence layer
-   * normalises an absent value to `false`.
-   */
-  sandbox?: boolean;
   tokenStandard: TokenStandard;
   /** Derived from tokenStandard; kept explicit for convenience. */
   tokenType: TokenType;

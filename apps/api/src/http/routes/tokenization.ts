@@ -19,7 +19,7 @@ import { artworkDimensions, certificateDrawList, drawCertificate } from "../../i
 import { certificateLogoDocumentId, resolveCertificateFields } from "../../identity/certificate-fields.js";
 import { isSupportedCurrency } from "../../tokenization/currencies.js";
 import { renderContractCode } from "../../tokenization/contract-code.js";
-import { deployAndCreateUseCase, preserveUseCaseEnvironment } from "../../tokenization/use-cases.js";
+import { deployAndCreateUseCase } from "../../tokenization/use-cases.js";
 import { computeAnalytics } from "../../tokenization/analytics.js";
 import { reconcile } from "../../tokenization/reconciliation.js";
 import { computeIdentityDashboard } from "../../identity/identity-analytics.js";
@@ -230,7 +230,6 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
       if (err instanceof PolicyError) return reply.code(400).send({ error: err.code, message: err.message });
       throw err;
     }
-    incoming = preserveUseCaseEnvironment(existing, incoming);
     // Once any contract is deployed, the contract-defining fields are immutable.
     if (hasDeployed) {
       if (incoming.tokenStandard !== existing.tokenStandard || incoming.symbol !== existing.symbol) {

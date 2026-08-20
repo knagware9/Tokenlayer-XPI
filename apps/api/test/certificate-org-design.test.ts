@@ -213,7 +213,7 @@ const design = (w: World, token: string, payload: unknown) =>
 
 const readBack = async (w: World) => {
   const res = await w.h.app.inject({ method: "GET", url: `${V1}/credential-use-cases/${w.key}`, headers: auth(w.platform) });
-  return res.json() as { credentialTypes: Array<{ name: string; certificate?: Record<string, unknown> }>; ownerOrgId?: string | null; issuer: { kind: string; orgId?: string }; sandbox?: boolean };
+  return res.json() as { credentialTypes: Array<{ name: string; certificate?: Record<string, unknown> }>; ownerOrgId?: string | null; issuer: { kind: string; orgId?: string } };
 };
 
 describe("PATCH /credential-use-cases/:key/certificate", () => {
@@ -358,7 +358,7 @@ describe("PATCH /credential-use-cases/:key/certificate", () => {
       credentialType: "CourseCompletion",
       placements: [{ field: "claim:fullName", x: 0.2, y: 0.2 }],
       // Every one of these is a field the definition PATCH would honour.
-      key: "hijacked", sandbox: true, ownerOrgId: "org_someone_else",
+      key: "hijacked", ownerOrgId: "org_someone_else",
       issuer: { kind: "platform" }, holderPolicy: { who: "specific", orgIds: [] },
       credentialTypes: [], name: "Renamed",
     });
@@ -366,7 +366,6 @@ describe("PATCH /credential-use-cases/:key/certificate", () => {
     const after = await readBack(w);
     expect(after.ownerOrgId).toBe(before.ownerOrgId);
     expect(after.issuer).toEqual(before.issuer);
-    expect(after.sandbox ?? false).toBe(before.sandbox ?? false);
     expect(after.credentialTypes.map((c) => c.name)).toEqual(before.credentialTypes.map((c) => c.name));
     expect((await w.h.app.inject({ method: "GET", url: `${V1}/credential-use-cases/hijacked`, headers: auth(w.platform) })).statusCode).toBe(404);
   });
