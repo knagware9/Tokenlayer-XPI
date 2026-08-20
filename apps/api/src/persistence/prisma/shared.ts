@@ -8,7 +8,7 @@
 import { createHash } from "node:crypto";
 import { prisma } from "./client.js";
 import { auditEntryHash, auditGenesis } from "@tokenlayer/core";
-import type { LifecycleAction, OrgCapabilities, ResourceMode, Role } from "@tokenlayer/core";
+import type { LifecycleAction, OrgCapabilities, Role } from "@tokenlayer/core";
 import { LEDGER_UNKNOWN_RETRY_MS } from "../types/index.js";
 import type { OrgType } from "../types/index.js";
 import type { ApiKeyCreateInput, ApiKeyRecord, ApiKeyRepository, AuditAnchorRecord, AuditAnchorRepository, AuditEntryRecord, AuditRepository, BrandingPatch, CompanyProfile, CredentialRecord, CredentialRepository, DocumentPurpose, DocumentRecord, DocumentRepository, DocumentSummary, EventAppendInput, EventRecord, EventRepository, KycDetails, KycStatus, LedgerTransactionRecord, LedgerTransactionRepository, LedgerTransactionSettlement, LedgerTxKind, LedgerTxStatus, LoginKeyRecord, LoginKeyRepository, OrgStatus, OrganizationRecord, OrganizationRepository, Page, Paged, ProposalApproval, ProposalRecord, ProposalRepository, RegistryDeploymentRecord, RegistryDeploymentRepository, UserKind, UserRecord, UserRepository, WebhookDeliveryRecord, WebhookDeliveryRepository, WebhookEndpointCreateInput, WebhookEndpointRecord, WebhookEndpointRepository } from "../types/index.js";
@@ -460,7 +460,7 @@ export class PrismaRegistryDeploymentRepository implements RegistryDeploymentRep
 export const rowToApiKey = (r: {
   id: string; orgId: string | null; userId: string; name: string; prefix: string; secretHash: string;
   scopes: string; expiresAt: Date | null; lastUsedAt: Date | null; revokedAt: Date | null;
-  revokedBy: string | null; createdBy: string; createdAt: Date; mode: string;
+  revokedBy: string | null; createdBy: string; createdAt: Date;
 }): ApiKeyRecord => ({
   id: r.id, orgId: r.orgId, userId: r.userId, name: r.name, prefix: r.prefix, secretHash: r.secretHash,
   scopes: JSON.parse(r.scopes) as string[],
@@ -468,7 +468,6 @@ export const rowToApiKey = (r: {
   lastUsedAt: r.lastUsedAt ? r.lastUsedAt.toISOString() : null,
   revokedAt: r.revokedAt ? r.revokedAt.toISOString() : null,
   revokedBy: r.revokedBy, createdBy: r.createdBy, createdAt: r.createdAt.toISOString(),
-  mode: r.mode as ResourceMode,
 });
 
 export class PrismaApiKeyRepository implements ApiKeyRepository {
@@ -478,7 +477,6 @@ export class PrismaApiKeyRepository implements ApiKeyRepository {
         orgId: input.orgId, userId: input.userId, name: input.name, prefix: input.prefix,
         secretHash: input.secretHash, scopes: JSON.stringify(input.scopes),
         expiresAt: input.expiresAt ? new Date(input.expiresAt) : null, createdBy: input.createdBy,
-        mode: input.mode ?? "live",
       },
     }));
   }
@@ -541,12 +539,11 @@ export class PrismaLoginKeyRepository implements LoginKeyRepository {
 
 export const rowToEvent = (r: {
   seq: number; id: string; type: string; orgId: string | null; useCaseKey: string | null;
-  subjectId: string | null; data: string; occurredAt: Date; mode: string;
+  subjectId: string | null; data: string; occurredAt: Date;
 }): EventRecord => ({
   seq: r.seq, id: r.id, type: r.type, orgId: r.orgId, useCaseKey: r.useCaseKey,
   subjectId: r.subjectId, data: JSON.parse(r.data) as Record<string, unknown>,
   occurredAt: r.occurredAt.toISOString(),
-  mode: r.mode as ResourceMode,
 });
 
 export class PrismaEventRepository implements EventRepository {
@@ -555,22 +552,20 @@ export class PrismaEventRepository implements EventRepository {
       data: {
         type: input.type, orgId: input.orgId, useCaseKey: input.useCaseKey, subjectId: input.subjectId,
         data: JSON.stringify(input.data),
-        mode: input.mode ?? "live",
         ...(input.occurredAt ? { occurredAt: new Date(input.occurredAt) } : {}),
       },
     }));
   }
   /**
    * `orgId: undefined` means EVERY org (PlatformAdmin); `orgId: null` means
-   * platform-scope rows only. `mode: undefined` means BOTH environments.
+   * platform-scope rows only.
    */
-  async listAfter(after: number, opts: { orgId?: string | null; type?: string; mode?: ResourceMode; limit: number }): Promise<EventRecord[]> {
+  async listAfter(after: number, opts: { orgId?: string | null; type?: string; limit: number }): Promise<EventRecord[]> {
     return (await prisma.event.findMany({
       where: {
         seq: { gt: after },
         ...(opts.orgId === undefined ? {} : { orgId: opts.orgId }),
         ...(opts.type ? { type: opts.type } : {}),
-        ...(opts.mode === undefined ? {} : { mode: opts.mode }),
       },
       orderBy: { seq: "asc" },
       take: opts.limit,
@@ -587,7 +582,7 @@ export const rowToWebhookEndpoint = (r: {
   useCaseKey: string | null; secretEncrypted: string; status: string; disabledReason: string | null;
   disabledAt: Date | null; consecutiveFailures: number; consecutiveGuardFailures: number;
   failingSince: Date | null; deletedAt: Date | null; createdBy: string;
-  createdAt: Date; lastDeliveryAt: Date | null; mode: string;
+  createdAt: Date; lastDeliveryAt: Date | null;
 }): WebhookEndpointRecord => ({
   id: r.id, orgId: r.orgId, url: r.url, description: r.description,
   eventTypes: JSON.parse(r.eventTypes) as string[],
@@ -600,7 +595,6 @@ export const rowToWebhookEndpoint = (r: {
   deletedAt: r.deletedAt ? r.deletedAt.toISOString() : null,
   createdBy: r.createdBy, createdAt: r.createdAt.toISOString(),
   lastDeliveryAt: r.lastDeliveryAt ? r.lastDeliveryAt.toISOString() : null,
-  mode: r.mode as ResourceMode,
 });
 
 export class PrismaWebhookEndpointRepository implements WebhookEndpointRepository {
@@ -610,7 +604,6 @@ export class PrismaWebhookEndpointRepository implements WebhookEndpointRepositor
         orgId: input.orgId, url: input.url, description: input.description,
         eventTypes: JSON.stringify(input.eventTypes), useCaseKey: input.useCaseKey,
         secretEncrypted: input.secretEncrypted, createdBy: input.createdBy,
-        mode: input.mode ?? "live",
       },
     }));
   }

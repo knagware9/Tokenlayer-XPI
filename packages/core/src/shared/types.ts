@@ -166,14 +166,6 @@ export interface UseCaseDefinition {
   description?: string;
   /** Owning organization id (null/undefined for legacy platform-owned use cases). */
   ownerOrgId?: string;
-  /**
-   * EN-D2 test mode. A sandbox use case may allow ONLY the sandbox chain and is
-   * reachable only by a `tl_test_` key; a live one may never allow it (see
-   * `sandboxChainsValid`). Optional on input — the persistence layer normalises
-   * an absent value to `false`, mirroring the DB default that makes this a
-   * zero-migration change for every row written before the column existed.
-   */
-  sandbox?: boolean;
   tokenStandard: TokenStandard;
   /** Derived from tokenStandard; kept explicit for convenience. */
   tokenType: TokenType;

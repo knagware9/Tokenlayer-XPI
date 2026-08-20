@@ -12,13 +12,11 @@
  * rather than pretty:
  *
  *   1. NEVER DRESS UP PROVENANCE. The status route answers with a `source` of
- *      `chain`, `database` or `sandbox`, and they mean genuinely different
- *      things: the chain confirmed it; only this platform's own record says so;
- *      or it is a rehearsal credential that never had on-chain existence and
- *      never claimed one. A page that rendered all three as a green tick would
- *      be the most damaging thing in the product — a verifier would believe an
- *      unanchored record had been independently confirmed. Each gets its own
- *      wording and its own colour.
+ *      `chain` or `database`, and they mean genuinely different things: the
+ *      chain confirmed it, or only this platform's own record says so. A page
+ *      that rendered both as a green tick would be the most damaging thing in
+ *      the product — a verifier would believe an unanchored record had been
+ *      independently confirmed. Each gets its own wording and its own colour.
  *   2. SAY WHAT IS ABSENT. The public route returns no claims and no holder, by
  *      design — the holder's data stays behind their consent in the
  *      presentation exchange. A reader who does not see a name might reasonably

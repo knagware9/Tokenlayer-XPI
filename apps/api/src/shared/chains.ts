@@ -6,10 +6,8 @@ import {
   EvmLedgerAdapter,
   FabricGatewayAdapter,
   FabricLedgerAdapter,
-  MockLedgerAdapter,
   loadArtifact,
 } from "@tokenlayer/adapters";
-import { SANDBOX_CHAIN_ID } from "@tokenlayer/core";
 import type { ChainFamily, LedgerAdapter, TokenStandard } from "@tokenlayer/core";
 
 const CHAINS_FILE = fileURLToPath(new URL("../../../../config/chains.json", import.meta.url));
@@ -105,8 +103,7 @@ function registryArtifacts(): { didRegistry: ReturnType<typeof loadArtifact>; vc
  * or ABSENT — there is no mock fallback. A `required` EVM chain (besu) aborts
  * startup when unconfigured, unless CHAIN_STRICT=0 (then it is absent, with a
  * loud warning — never simulated). Fabric/Canton run simulated until their
- * connection env upgrades them to real backends. The `sandbox` chain (EN-D2) is
- * the one exception to all of that: it is simulated unconditionally.
+ * connection env upgrades them to real backends.
  */
 export function buildChainRegistry(env: Env = process.env): ChainRegistry {
   const strict = env.CHAIN_STRICT !== "0";
@@ -123,24 +120,6 @@ export function buildChainRegistry(env: Env = process.env): ChainRegistry {
   let artifacts: Record<TokenStandard, ReturnType<typeof loadArtifact>> | null = null;
 
   for (const d of descriptors) {
-    if (d.id === SANDBOX_CHAIN_ID) {
-      // THE SANDBOX CHAIN IS SIMULATED UNCONDITIONALLY — it deliberately does
-      // NOT go through makeSimulatedOrReal, and reads no environment variable.
-      //
-      // For every other simulated-kind chain, `mode` is a function of deployment
-      // configuration: set FABRIC_CONNECTION_PROFILE and fabric is promoted to a
-      // real ledger. If the sandbox chain could be promoted the same way, a
-      // sandbox use case — whose whole contract is that nothing it does is real —
-      // would mint on a real ledger. And the mirror of that is just as bad: if
-      // sandbox-ness were DERIVED from `mode`, a chain that is quietly in-memory
-      // (an unconfigured fabric, say) would make a LIVE use case's register a
-      // fiction. Both directions are data-integrity failures, which is exactly
-      // why EN-D2 persists sandbox-ness as its own flag instead of deriving it
-      // from chain mode, and why this chain's mode is a constant.
-      adapters.set(d.id, new MockLedgerAdapter(d.id));
-      infos.push({ id: d.id, label: d.label, family: d.family, kind: "simulated", mode: "simulated", available: true, configured: true });
-      continue;
-    }
     if (d.kind === "simulated") {
       const { adapter, real } = makeSimulatedOrReal(d.id, d.family, env);
       adapters.set(d.id, adapter);

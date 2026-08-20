@@ -46,16 +46,6 @@ export const issueCredentialKind: ProposalKindHandler = {
     await issueCredentialFor(ctx.deps, {
       issuerOrg: org, subjectDid: pl.subjectDid, type: pl.type, claims: pl.claims,
       validityDays: credentialTypeDef(pl.type).validityDays, proposalId: p.id,
-      // EN-D2. The CLOSED CATALOG has no use case and therefore no sandbox
-      // variant: this anchors on the platform's real registry, always. Both
-      // doors are gated against `null` — `POST /credentials/requests` (draft)
-      // and `modeGateProposal` (approve, which is where the work happens) — and
-      // `modeGate` reads null as live, so a `tl_test_` key is refused at each.
-      // BOTH gates are needed and this comment used to claim the first alone
-      // sufficed while neither actually existed: the review found a test key
-      // drafting AND approving a live issuance here. Stated rather than
-      // defaulted — the whole point of the required field.
-      sandbox: false,
     });
   },
 };

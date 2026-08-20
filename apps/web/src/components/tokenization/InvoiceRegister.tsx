@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "../../api.js";
 import { useAuth } from "../../auth.js";
-import { SANDBOX_LEDGER_NOTE, modeLabel, modeOf, modeTone } from "../../lib/shared/modes.js";
 import type { ChainInfo, InvoiceRowResult, StagedInvoice, TokenizeResult, UseCase } from "../../types.js";
 import { Card, EmptyState, Pill, SectionHeader } from "../shared/ui.js";
 import { parseCsv } from "../../lib/shared/csv.js";
@@ -166,8 +165,6 @@ interface Props {
 export function InvoiceRegister({ useCase, chains }: Props): JSX.Element {
   const { token } = useAuth();
   const key = useCase.key;
-  const mode = modeOf(useCase.sandbox);
-  const isSandbox = mode === "test";
   const [rows, setRows] = useState<StagedInvoice[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -199,12 +196,7 @@ export function InvoiceRegister({ useCase, chains }: Props): JSX.Element {
   const reload = async (): Promise<void> => {
     if (!token) return;
     try {
-      // EN-D2: the register is the customer's record of REAL invoices, so the
-      // server leaves a sandbox use case's rows out unless asked for by name —
-      // and it answers with an EMPTY LIST rather than a refusal. Passing the use
-      // case's own flag is what stops a sandbox register rendering as "no
-      // invoices yet" when it is full of them.
-      const list = await api.invoices(token, key, undefined, isSandbox);
+      const list = await api.invoices(token, key);
       setRows(list);
       setError(null);
     } catch (err) {
@@ -302,17 +294,7 @@ export function InvoiceRegister({ useCase, chains }: Props): JSX.Element {
       <SectionHeader
         title="Invoice register"
         description="Stage invoices from a file upload, an ERP pull, or a manual entry — then select and tokenize them. The server fingerprints and de-duplicates every invoice."
-        actions={<Pill tone={modeTone(mode)}>{modeLabel(mode)}</Pill>}
       />
-
-      {/* The register is where a supply figure most looks like money, so the
-          environment is stated rather than pilled and left at that. */}
-      {isSandbox && (
-        <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-          <strong className="font-semibold">This is a sandbox register.</strong> {SANDBOX_LEDGER_NOTE} It is also excluded
-          from platform analytics, so tokenizing here moves no reported number.
-        </p>
-      )}
 
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">

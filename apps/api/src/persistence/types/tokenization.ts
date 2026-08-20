@@ -4,7 +4,7 @@
  * Everything `model-domains.ts` marks `"tokenization"`. An identity-only
  * deployment owns none of these tables and must never write one.
  */
-import type { TokenStandard, TokenType, LifecycleAction, ResourceMode, UseCaseDefinition, UseCaseSource } from "@tokenlayer/core";
+import type { TokenStandard, TokenType, LifecycleAction, UseCaseDefinition, UseCaseSource } from "@tokenlayer/core";
 import type { Paged, Page } from "./shared.js";
 
 export interface AssetRecord {
@@ -41,15 +41,6 @@ export interface AccountRecord {
 
 export interface AssetFilter {
   useCaseKey?: string;
-  /**
-   * EN-D2: an ALLOWLIST of use-case keys, ANDed with everything else here. The
-   * mode narrowing on the routes that select across every use case at once
-   * (`GET /assets`, `GET /audit/verify`, `POST /audit/anchor`, `GET /analytics`)
-   * rides in on this rather than filtering the result, so `total` and the page
-   * window both describe rows the caller may actually see. `undefined` means
-   * "every use case" — the pre-EN-D2 query, unchanged.
-   */
-  useCaseKeys?: string[];
   chainId?: string;
   status?: string;
 }

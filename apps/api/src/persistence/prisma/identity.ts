@@ -12,7 +12,7 @@ import type { CredentialUseCaseRepository, CredentialUseCaseTemplateRepository, 
 export function rowToCredentialUseCase(r: {
   key: string; name: string; description: string | null;
   credentialTypes: string; issuer: string; holderPolicy: string; verifier: string; ownerOrgId: string | null;
-  holderAcceptance: boolean; sandbox: boolean;
+  holderAcceptance: boolean;
 }): CredentialUseCaseDefinition {
   return {
     key: r.key, name: r.name, description: r.description ?? undefined,
@@ -20,10 +20,6 @@ export function rowToCredentialUseCase(r: {
     holderPolicy: JSON.parse(r.holderPolicy), verifier: JSON.parse(r.verifier),
     ownerOrgId: r.ownerOrgId,
     ...(r.holderAcceptance ? { holderAcceptance: true } : {}),
-    // Unlike holderAcceptance this is ALWAYS present: the memory repo normalises
-    // an absent sandbox to false, so omitting it here when false would be the
-    // exact memory/prisma divergence THE PARITY RULE forbids.
-    sandbox: r.sandbox,
   };
 }
 
@@ -33,8 +29,7 @@ export class PrismaCredentialUseCaseRepository implements CredentialUseCaseRepos
       key: def.key, name: def.name, description: def.description ?? null,
       credentialTypes: JSON.stringify(def.credentialTypes), issuer: JSON.stringify(def.issuer),
       holderPolicy: JSON.stringify(def.holderPolicy), verifier: JSON.stringify(def.verifier),
-      ownerOrgId: def.ownerOrgId ?? null, holderAcceptance: def.holderAcceptance ?? false,
-      sandbox: def.sandbox === true } });
+      ownerOrgId: def.ownerOrgId ?? null, holderAcceptance: def.holderAcceptance ?? false } });
     return rowToCredentialUseCase(r);
   }
   async get(key: string): Promise<CredentialUseCaseDefinition | null> {
@@ -50,8 +45,7 @@ export class PrismaCredentialUseCaseRepository implements CredentialUseCaseRepos
       name: def.name, description: def.description ?? null,
       credentialTypes: JSON.stringify(def.credentialTypes), issuer: JSON.stringify(def.issuer),
       holderPolicy: JSON.stringify(def.holderPolicy), verifier: JSON.stringify(def.verifier),
-      ownerOrgId: def.ownerOrgId ?? null, holderAcceptance: def.holderAcceptance ?? false,
-      sandbox: def.sandbox === true } });
+      ownerOrgId: def.ownerOrgId ?? null, holderAcceptance: def.holderAcceptance ?? false } });
     return rowToCredentialUseCase(r);
   }
 }

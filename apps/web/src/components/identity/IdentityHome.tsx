@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../../api.js";
 import { useAuth } from "../../auth.js";
 import { canDesignCertificate } from "../../lib/identity/certificate-access.js";
-import { modeLabel, modeOf, modeTone } from "../../lib/shared/modes.js";
 import type { CredentialUseCase, Organization } from "../../types.js";
 import { CertificateDesignPanel } from "./CertificateDesignPanel.js";
 import { CredentialUseCaseBuilder } from "./CredentialUseCaseBuilder.js";
@@ -155,26 +154,14 @@ export function IdentityHome(): JSX.Element {
         </Card>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {useCases.map((u) => {
-            const isSandbox = modeOf(u.sandbox) === "test";
-            return (
-            <Card key={u.key} className={`flex flex-col ${isSandbox ? "ring-1 ring-amber-300" : ""}`}>
+          {useCases.map((u) => (
+            <Card key={u.key} className="flex flex-col">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <div className="text-sm font-semibold text-slate-900 truncate">{u.name}</div>
                   <div className="text-xs text-slate-400">{u.key}</div>
                 </div>
-                {/* `GET /credential-use-cases` hands a human session BOTH
-                    environments (modeFilter(request, true)), so the card has to
-                    say which one this is rather than let the heading imply it. */}
-                {isSandbox && <Pill tone={modeTone("test")}>{modeLabel("test")}</Pill>}
               </div>
-              {isSandbox && (
-                <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mt-2">
-                  Credentials issued under this use case are for integration testing. They are excluded from the identity
-                  dashboard by default and are not real attestations about anyone.
-                </p>
-              )}
               {u.description && <p className="text-xs text-slate-500 mt-2 line-clamp-3">{u.description}</p>}
               <div className="flex flex-wrap items-center gap-1 mt-3">
                 {u.credentialTypes.map((ct) => (
@@ -206,8 +193,7 @@ export function IdentityHome(): JSX.Element {
               )}
               {canIssue(u) && expandedKey === u.key && <IssueUsecaseCredential useCase={u} onIssued={reload} />}
             </Card>
-            );
-          })}
+          ))}
         </div>
       )}
     </div>

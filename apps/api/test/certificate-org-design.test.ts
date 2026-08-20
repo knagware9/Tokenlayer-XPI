@@ -59,18 +59,18 @@ async function storeDoc(h: TestAppHandle, contentType: string, b64: string, owne
   return { id: d.id, sha256: d.sha256 };
 }
 
-/** An org-scoped API key of the given mode, bound to a service OrgAdmin. */
-async function orgKey(h: TestAppHandle, orgId: string, scopes: string[], mode: "live" | "test" = "live"): Promise<string> {
+/** An org-scoped API key bound to a service OrgAdmin. */
+async function orgKey(h: TestAppHandle, orgId: string, scopes: string[]): Promise<string> {
   const tag = Math.random().toString(36).slice(2, 10);
   const svc = await h.users.create({
     email: `svc-design-${tag}@tokenlayer.dev`, passwordHash: bcrypt.hashSync(`unguessable-${tag}`, TEST_ROUNDS),
     role: "OrgAdmin", useCaseKey: null, accountId: null, active: true, kycStatus: "approved",
     kyc: null, orgId, kind: "service",
   });
-  const minted = await mintSecret(TEST_ROUNDS, mode);
+  const minted = await mintSecret(TEST_ROUNDS);
   await h.apiKeys.create({
     orgId, userId: svc.id, name: `key ${tag}`, prefix: minted.prefix, secretHash: minted.hash,
-    scopes, expiresAt: null, createdBy: "test", mode,
+    scopes, expiresAt: null, createdBy: "test",
   });
   return minted.secret;
 }
@@ -213,7 +213,7 @@ const design = (w: World, token: string, payload: unknown) =>
 
 const readBack = async (w: World) => {
   const res = await w.h.app.inject({ method: "GET", url: `${V1}/credential-use-cases/${w.key}`, headers: auth(w.platform) });
-  return res.json() as { credentialTypes: Array<{ name: string; certificate?: Record<string, unknown> }>; ownerOrgId?: string | null; issuer: { kind: string; orgId?: string }; sandbox?: boolean };
+  return res.json() as { credentialTypes: Array<{ name: string; certificate?: Record<string, unknown> }>; ownerOrgId?: string | null; issuer: { kind: string; orgId?: string } };
 };
 
 describe("PATCH /credential-use-cases/:key/certificate", () => {
@@ -339,14 +339,6 @@ describe("PATCH /credential-use-cases/:key/certificate", () => {
     expect((await design(w, right, { credentialType: "CourseCompletion", placements: [] })).statusCode).toBe(200);
   });
 
-  it("a tl_test_ key may not design a LIVE use case", async () => {
-    const w = await world();
-    const testKey = await orgKey(w.h, w.orgId, ["usecases:provision"], "test");
-    const res = await design(w, testKey, { credentialType: "CourseCompletion", placements: [] });
-    expect(res.statusCode).toBe(403);
-    expect(res.json().error).toBe("WRONG_MODE");
-  });
-
   it("404s an unknown use case and an unknown credential type", async () => {
     const w = await world();
     const noKey = await w.h.app.inject({
@@ -366,7 +358,7 @@ describe("PATCH /credential-use-cases/:key/certificate", () => {
       credentialType: "CourseCompletion",
       placements: [{ field: "claim:fullName", x: 0.2, y: 0.2 }],
       // Every one of these is a field the definition PATCH would honour.
-      key: "hijacked", sandbox: true, ownerOrgId: "org_someone_else",
+      key: "hijacked", ownerOrgId: "org_someone_else",
       issuer: { kind: "platform" }, holderPolicy: { who: "specific", orgIds: [] },
       credentialTypes: [], name: "Renamed",
     });
@@ -374,7 +366,6 @@ describe("PATCH /credential-use-cases/:key/certificate", () => {
     const after = await readBack(w);
     expect(after.ownerOrgId).toBe(before.ownerOrgId);
     expect(after.issuer).toEqual(before.issuer);
-    expect(after.sandbox ?? false).toBe(before.sandbox ?? false);
     expect(after.credentialTypes.map((c) => c.name)).toEqual(before.credentialTypes.map((c) => c.name));
     expect((await w.h.app.inject({ method: "GET", url: `${V1}/credential-use-cases/hijacked`, headers: auth(w.platform) })).statusCode).toBe(404);
   });

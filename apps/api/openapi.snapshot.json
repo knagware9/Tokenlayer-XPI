@@ -35,7 +35,6 @@
       "expiresAt",
       "id",
       "lastUsedAt",
-      "mode",
       "name",
       "orgId",
       "prefix",
@@ -137,7 +136,6 @@
       "key",
       "name",
       "ownerOrgId",
-      "sandbox",
       "status",
       "verifier"
     ],
@@ -162,7 +160,6 @@
     "Event": [
       "data",
       "id",
-      "mode",
       "occurredAt",
       "orgId",
       "seq",
@@ -260,7 +257,6 @@
       "name",
       "roles",
       "saleTermsDefault",
-      "sandbox",
       "symbol",
       "tokenStandard",
       "tokenType"
@@ -309,7 +305,6 @@
       "failingSince",
       "id",
       "lastDeliveryAt",
-      "mode",
       "orgId",
       "status",
       "url",
@@ -359,7 +354,6 @@
         ],
         "parameters": [
           "query:days",
-          "query:includeSandbox",
           "query:useCaseKey"
         ],
         "requestBody": false,
@@ -1350,36 +1344,6 @@
         }
       }
     },
-    "/api/v1/credential-use-cases/{key}/clone-to-live": {
-      "post": {
-        "tags": [
-          "Credential Use Cases"
-        ],
-        "security": [
-          [
-            "apiKeyAuth"
-          ],
-          [
-            "bearerAuth"
-          ]
-        ],
-        "scopes": [
-          "usecases:provision"
-        ],
-        "parameters": [
-          "path:key!"
-        ],
-        "requestBody": true,
-        "responses": {
-          "201": "#CredentialUseCase",
-          "400": "#Error",
-          "401": "#Error",
-          "403": "#Error",
-          "404": "#Error",
-          "409": "#Error"
-        }
-      }
-    },
     "/api/v1/credential-use-cases/{key}/credentials": {
       "post": {
         "tags": [
@@ -1551,7 +1515,7 @@
         ],
         "requestBody": false,
         "responses": {
-          "200": "{acceptance,anchorChainId,anchorTxHash,anchored,chainId,id,reason,registry,revokeTxHash,revoked,revokedAt,sandbox,source,vcHash}",
+          "200": "{acceptance,anchorChainId,anchorTxHash,anchored,chainId,id,reason,registry,revokeTxHash,revoked,revokedAt,source,vcHash}",
           "404": "#Error"
         }
       }
@@ -1731,9 +1695,7 @@
         "scopes": [
           "credentials:read"
         ],
-        "parameters": [
-          "query:includeSandbox"
-        ],
+        "parameters": [],
         "requestBody": false,
         "responses": {
           "200": "{}",
@@ -3021,37 +2983,6 @@
         }
       }
     },
-    "/api/v1/use-cases/{key}/clone-to-live": {
-      "post": {
-        "tags": [
-          "Use Cases"
-        ],
-        "security": [
-          [
-            "apiKeyAuth"
-          ],
-          [
-            "bearerAuth"
-          ]
-        ],
-        "scopes": [
-          "usecases:provision"
-        ],
-        "parameters": [
-          "path:key!"
-        ],
-        "requestBody": true,
-        "responses": {
-          "201": "#UseCase",
-          "202": "{clonedFrom,key,proposal}",
-          "400": "#Error",
-          "401": "#Error",
-          "403": "#Error",
-          "404": "#Error",
-          "409": "#Error"
-        }
-      }
-    },
     "/api/v1/use-cases/{key}/code": {
       "get": {
         "tags": [
@@ -3124,7 +3055,6 @@
         ],
         "parameters": [
           "path:key!",
-          "query:includeSandbox",
           "query:status"
         ],
         "requestBody": false,

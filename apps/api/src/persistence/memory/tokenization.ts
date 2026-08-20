@@ -42,10 +42,6 @@ export class MemoryAssetRepository implements AssetRepository {
   async list(filter: AssetFilter = {}, page: Page = {}): Promise<Paged<AssetRecord>> {
     const matched = [...this.byId.values()]
       .filter((a) => (!filter.useCaseKey || a.useCaseKey === filter.useCaseKey))
-      // An allowlist, ANDed with the single-key filter above rather than
-      // replacing it: a scoped caller stays clamped to their own use case even
-      // when the mode narrowing also applies.
-      .filter((a) => (!filter.useCaseKeys || filter.useCaseKeys.includes(a.useCaseKey)))
       .filter((a) => (!filter.chainId || a.chainId === filter.chainId))
       .filter((a) => (!filter.status || a.status === filter.status))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -83,14 +79,14 @@ export class MemoryUseCaseRepository implements UseCaseRepository {
     return [...this.byKey.values()];
   }
   async create(raw: UseCaseDefinition): Promise<UseCaseDefinition> {
-    const def = { ...normalizeUseCaseDefinition(raw), sandbox: raw.sandbox === true };
+    const def = normalizeUseCaseDefinition(raw);
     if (this.byKey.has(def.key)) throw new PolicyError("INVALID_USECASE", `use case '${def.key}' already exists`, { key: def.key });
     this.byKey.set(def.key, def);
     return def;
   }
   async update(key: string, raw: UseCaseDefinition): Promise<UseCaseDefinition> {
     if (!this.byKey.has(key)) throw new PolicyError("UNKNOWN_USECASE", `unknown use case '${key}'`, { key });
-    const def = { ...normalizeUseCaseDefinition({ ...raw, key }), sandbox: raw.sandbox === true };
+    const def = normalizeUseCaseDefinition({ ...raw, key });
     this.byKey.set(key, def);
     return def;
   }

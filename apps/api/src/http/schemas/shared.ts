@@ -565,28 +565,12 @@ export const sharedSchemas: Record<string, FastifySchema> = {
     tags: ["API Keys"], summary: "Mint an org API key (secret returned once, never again)", security: humanOnly,
     description:
       "Session-only. An API key is refused with **403 `MACHINE_PRINCIPAL`** — minting a key is the one path by " +
-      "which a machine principal could widen itself, so only a human session may take it.\n\n" +
-      "`mode` picks the ENVIRONMENT the key acts in and defaults to `live`, so a caller that has never heard of the " +
-      "field mints exactly what it always did. A `test` key is returned as a `tl_test_…` secret and may act only on " +
-      "sandbox use cases. If `useCaseKey` is given, the two must agree: binding a `test` key to a live use case (or " +
-      "the reverse) is refused with **403 `WRONG_MODE`**, because such a key would be refused at every call it " +
-      "could ever make.",
+      "which a machine principal could widen itself, so only a human session may take it.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: {
       type: "object", additionalProperties: false, required: ["name", "role", "scopes"],
       properties: {
         name: { type: "string", minLength: 1 },
-        // ENUMERATED rather than a free string. The body is
-        // `additionalProperties: false`, which STRIPS an unknown field instead
-        // of refusing it — so before this existed a `mode` sent by an
-        // integrator was dropped and answered with a `tl_live_` secret. The
-        // enum is what makes `"sandbox"` (the word the console and the errors
-        // use for the environment) a 400 rather than a silent production
-        // credential.
-        mode: {
-          type: "string", enum: ["live", "test"],
-          description: "Environment for this key. Omitted = `live`. A `test` key mints a `tl_test_…` secret that acts only on sandbox use cases.",
-        },
         // Same enum as createMember: an out-of-rank role is a 403 from
         // canCreateOrgMember (authorization), not a 400 (validation).
         role: { type: "string", enum: ["PlatformAdmin", "OrgAdmin", "UseCaseAdmin", "Issuer", "Trader", "Buyer", "Auditor", "Holder", "Verifier"] },
@@ -604,7 +588,7 @@ export const sharedSchemas: Record<string, FastifySchema> = {
         type: "object", additionalProperties: true,
         properties: {
           key: { $ref: "ApiKeyView#" },
-          secret: { type: "string", description: "The full credential — `tl_live_…`, or `tl_test_…` when `mode` is `test` — returned HERE AND NOWHERE ELSE. Store it before acknowledging this call." },
+          secret: { type: "string", description: "The full credential — `tl_live_…` — returned HERE AND NOWHERE ELSE. Store it before acknowledging this call." },
         },
         required: ["key", "secret"],
       },
@@ -621,10 +605,7 @@ export const sharedSchemas: Record<string, FastifySchema> = {
   },
   rotateApiKey: {
     tags: ["API Keys"], summary: "Rotate an API key's secret (the old one dies immediately)", security: humanOnly,
-    description:
-      "Session-only. An API key is refused with **403 `MACHINE_PRINCIPAL`** — key lifecycle is a human act. " +
-      "Rotation PRESERVES the key's environment: a `test` key rotates to another `tl_test_…` secret, and there is " +
-      "no way to move a key between environments.",
+    description: "Session-only. An API key is refused with **403 `MACHINE_PRINCIPAL`** — key lifecycle is a human act.",
     params: { type: "object", required: ["id", "keyId"], properties: { id: { type: "string" }, keyId: { type: "string" } } },
     body: { type: "object", additionalProperties: false, properties: {} },
     response: {
@@ -666,9 +647,7 @@ export const sharedSchemas: Record<string, FastifySchema> = {
     tags: ["Webhooks"], summary: "Register a webhook endpoint (signing secret returned once, never again)", security: eitherCredential,
     description:
       "Requires the `webhooks:write` scope. The signing secret is returned in **this response only** and is never " +
-      "retrievable afterwards — store it before you acknowledge the call, or rotate to get a new one. `mode` picks " +
-      "which stream the endpoint joins and defaults to `live`; a `tl_test_` key may register only `test` endpoints " +
-      "and a `tl_live_` key only `live` ones (**403 `WRONG_MODE`**), while a human session may register either.",
+      "retrievable afterwards — store it before you acknowledge the call, or rotate to get a new one.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: {
       type: "object", additionalProperties: false, required: ["url", "eventTypes"],
@@ -679,13 +658,6 @@ export const sharedSchemas: Record<string, FastifySchema> = {
         // (400 UNKNOWN_EVENT_TYPE), so the catalog lives in exactly one place.
         eventTypes: { type: "array", items: { type: "string" } },
         useCaseKey: { type: "string" },
-        // Enumerated HERE, unlike eventTypes: there is no route-level validator
-        // for a mode and never will be — two values, closed, and a third one is
-        // a typo that must not be taken for "live".
-        mode: {
-          type: "string", enum: ["live", "test"],
-          description: "`live` (default) or `test`. FIXED at registration — an endpoint cannot be moved between streams afterwards.",
-        },
       },
     },
     response: {

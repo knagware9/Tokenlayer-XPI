@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../../api.js";
 import { useAuth } from "../../auth.js";
-import { modeBlurb, modeLabel, modeTone, SANDBOX_IMMUTABLE_NOTE } from "../../lib/shared/modes.js";
 import type { OrgType, ProvisionResult, TemplateParam, UseCaseTemplateMeta } from "../../types.js";
 import { Card, EmptyState, Pill, SectionHeader, Skeleton } from "../shared/ui.js";
 
@@ -76,20 +75,6 @@ export function ProvisionFromTemplate({ onDone }: { onDone?: () => void }): JSX.
   const [issuerOrgType, setIssuerOrgType] = useState<OrgType>("verifier");
   const [createDeskUsers, setCreateDeskUsers] = useState(true);
   const [deskEmailDomain, setDeskEmailDomain] = useState("");
-  /**
-   * EN-D2 (D2-8). THE PICKER THAT MAKES THE FLAG REACHABLE FOR AN ORG ADMIN.
-   * `CredentialUseCaseBuilder` has offered this since D2-7, but that wizard is
-   * PlatformAdmin-only (see IdentityHome) — an Org Admin's only route to a
-   * credential programme is this one, so without it here the sandbox is
-   * unreachable for exactly the tenant it exists for. The flag rides at the TOP
-   * LEVEL of the provisioning body: the server refuses the nested spelling
-   * (400 SANDBOX_MISPLACED) rather than dropping it.
-   *
-   * A creation-time choice only. The server fixes it (409 SANDBOX_IMMUTABLE),
-   * and a re-provision of an existing programme leaves the stored environment
-   * alone — so this control never appears on an edit surface.
-   */
-  const [sandbox, setSandbox] = useState(false);
 
   // Step 4 — preview + provision.
   const [preview, setPreview] = useState<unknown>(null);
@@ -176,7 +161,6 @@ export function ProvisionFromTemplate({ onDone }: { onDone?: () => void }): JSX.
       const r = await api.provisionUseCase(token, {
         templateKey: selected.key,
         params: typedParams,
-        sandbox,
         provisioning: {
           issuerOrgName: issuerOrgName.trim(),
           issuerOrgType,
@@ -278,47 +262,6 @@ export function ProvisionFromTemplate({ onDone }: { onDone?: () => void }): JSX.
                 {ORG_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
               </select>
             </div>
-            {/* THE ENVIRONMENT, offered here and nowhere else on this path —
-                the server fixes it at creation, so an edit control would be an
-                affordance it refuses. Same two cards, same words, as
-                CredentialUseCaseBuilder: one wizard calling it "Sandbox" and
-                another "Test" is how an operator ends up believing they have
-                two different things. */}
-            <div>
-              <span className="block text-xs font-medium text-slate-600 mb-2">Environment</span>
-              <div className="grid gap-3 sm:grid-cols-2">
-                {([false, true] as const).map((isSandbox) => {
-                  const mode = isSandbox ? "test" : "live";
-                  const selectedMode = sandbox === isSandbox;
-                  return (
-                    <button
-                      key={mode}
-                      type="button"
-                      aria-pressed={selectedMode}
-                      onClick={() => setSandbox(isSandbox)}
-                      className={`text-left rounded-xl border p-4 transition ${
-                        selectedMode
-                          ? isSandbox
-                            ? "border-amber-500 bg-amber-50/60 shadow-sm"
-                            : "border-brand-500 bg-brand-50/40 shadow-sm"
-                          : "border-slate-200 hover:border-brand-300"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-semibold text-slate-800">{modeLabel(mode)}</span>
-                        <Pill tone={modeTone(mode)}>{modeLabel(mode)}</Pill>
-                      </div>
-                      <p className="text-xs text-slate-500 mt-1">
-                        {isSandbox
-                          ? "Credentials issued under it are for integration testing. They are excluded from the identity dashboard and reachable only by a tl_test_ key or a signed-in person."
-                          : modeBlurb("live")}
-                      </p>
-                    </button>
-                  );
-                })}
-              </div>
-              <p className="text-[11px] text-slate-400 mt-1.5">{SANDBOX_IMMUTABLE_NOTE}</p>
-            </div>
             <label className="flex items-center gap-2 text-sm text-slate-700">
               <input type="checkbox" checked={createDeskUsers} onChange={(e) => setCreateDeskUsers(e.target.checked)} />
               Create Issuer / Holder / Verifier desk logins
@@ -350,15 +293,7 @@ export function ProvisionFromTemplate({ onDone }: { onDone?: () => void }): JSX.
               <div className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Will be created</div>
               <ul className="space-y-1 text-slate-700">
                 <li>• Organization <span className="font-medium">{issuerOrgName.trim() || "—"}</span> <span className="text-slate-400">({issuerOrgType})</span></li>
-                <li className="flex items-center gap-1.5">
-                  <span>• Credential use case from template <span className="font-medium">{selected.name}</span></span>
-                  <Pill tone={modeTone(sandbox ? "test" : "live")}>{modeLabel(sandbox ? "test" : "live")}</Pill>
-                </li>
-                {sandbox && (
-                  <li className="text-xs text-amber-700">
-                    Nothing issued under it is real, and its environment cannot be changed afterwards — clone it to live when you are ready.
-                  </li>
-                )}
+                <li>• Credential use case from template <span className="font-medium">{selected.name}</span></li>
                 {createDeskUsers && (
                   <li>• Issuer / Holder / Verifier logins{deskEmailDomain.trim() ? <> @{deskEmailDomain.trim()}</> : null}</li>
                 )}

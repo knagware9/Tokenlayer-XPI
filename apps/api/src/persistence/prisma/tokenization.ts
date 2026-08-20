@@ -55,11 +55,6 @@ export class PrismaAssetRepository implements AssetRepository {
       ...(filter.useCaseKey ? { useCaseKey: filter.useCaseKey } : {}),
       ...(filter.chainId ? { chainId: filter.chainId } : {}),
       ...(filter.status ? { status: filter.status } : {}),
-      // Under `AND`, deliberately. Spreading a second `useCaseKey` key at this
-      // level would OVERWRITE the single-key clamp above rather than intersect
-      // with it — silently widening a scoped caller's query the moment both
-      // filters are supplied, which is exactly what /analytics does.
-      ...(filter.useCaseKeys ? { AND: [{ useCaseKey: { in: filter.useCaseKeys } }] } : {}),
     };
     const [rows, total] = await Promise.all([
       prisma.asset.findMany({ where, orderBy: { createdAt: "desc" }, skip: page.offset ?? 0, take: page.limit }),
@@ -124,7 +119,6 @@ interface UseCaseRow {
   workflow: string;
   roles: string;
   ownerOrgId: string | null;
-  sandbox: boolean;
 }
 
 /** Parse a JSON object column, tolerating null/empty/invalid → `{}`. */
@@ -158,8 +152,6 @@ export function rowToUseCase(r: UseCaseRow): UseCaseDefinition {
     ...(Object.keys(workflow).length > 0 ? { workflow: workflow as UseCaseDefinition["workflow"] } : {}),
     ownerOrgId: r.ownerOrgId ?? undefined,
     roles: JSON.parse(r.roles),
-    // Column, not derivation — the whole point of EN-D2's flag (see chains.ts).
-    sandbox: r.sandbox,
   });
 }
 
@@ -185,9 +177,6 @@ function useCaseToData(def: UseCaseDefinition) {
     workflow: JSON.stringify(def.workflow ?? {}),
     ownerOrgId: def.ownerOrgId ?? null,
     roles: JSON.stringify(def.roles),
-    // Written explicitly rather than left to the column default: the default
-    // exists for rows that predate the column, not for rows we are writing now.
-    sandbox: def.sandbox === true,
   };
 }
 

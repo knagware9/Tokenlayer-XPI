@@ -6,7 +6,7 @@
  * "everything else": a table is shared when BOTH products genuinely need it —
  * users, organizations, approvals, audit, events, API keys.
  */
-import type { Role, OrgType, OrgCapabilities, ResourceMode, LifecycleAction } from "@tokenlayer/core";
+import type { Role, OrgType, OrgCapabilities, LifecycleAction } from "@tokenlayer/core";
 
 export type { OrgType };
 
@@ -414,24 +414,15 @@ export interface ApiKeyRecord {
   revokedBy: string | null;
   createdBy: string;
   createdAt: string;
-  /**
-   * EN-D2. `"test"` = a `tl_test_` key, which may act only on sandbox use cases;
-   * `"live"` = the ordinary key. Always concrete on a record — an omitted `mode`
-   * on create becomes `"live"`, matching the DB default that leaves every key
-   * minted before EN-D2 a live key. NEVER mutated after create: rotating or
-   * revoking a key cannot move it between the two worlds.
-   */
-  mode: ResourceMode;
 }
 
 /**
  * Lifecycle columns (`lastUsedAt`/`revokedAt`/`revokedBy`) are repo-managed and start null.
- * `mode` is optional and defaults to `"live"` — the zero-migration default. Named
- * so the interface and BOTH implementations share one definition: a per-class
- * restatement is how a signature silently drifts (and test files are not
- * typechecked here, so nothing else would notice).
+ * Named so the interface and BOTH implementations share one definition: a
+ * per-class restatement is how a signature silently drifts (and test files
+ * are not typechecked here, so nothing else would notice).
  */
-export type ApiKeyCreateInput = Omit<ApiKeyRecord, "id" | "createdAt" | "lastUsedAt" | "revokedAt" | "revokedBy" | "mode"> & { mode?: ResourceMode };
+export type ApiKeyCreateInput = Omit<ApiKeyRecord, "id" | "createdAt" | "lastUsedAt" | "revokedAt" | "revokedBy">;
 
 export interface ApiKeyRepository {
   create(input: ApiKeyCreateInput): Promise<ApiKeyRecord>;
@@ -477,29 +468,21 @@ export interface EventRecord {
   subjectId: string | null;
   data: Record<string, unknown>;
   occurredAt: string;
-  /**
-   * EN-D2. The mode of the use case this fact came from, denormalised onto the
-   * row so the stream can be filtered without a join (D2-5 does the filtering).
-   * `"live"` for everything emitted before EN-D2, via the DB default.
-   */
-  mode: ResourceMode;
 }
 
-/** `mode` is optional and defaults to `"live"` — the zero-migration default. */
-export type EventAppendInput = Omit<EventRecord, "seq" | "id" | "occurredAt" | "mode"> & { occurredAt?: string; mode?: ResourceMode };
+export type EventAppendInput = Omit<EventRecord, "seq" | "id" | "occurredAt"> & { occurredAt?: string };
 
 export interface EventRepository {
   append(input: EventAppendInput): Promise<EventRecord>;
   /**
    * Cursor read, seq-ascending. `orgId: undefined` = every org (PlatformAdmin).
    *
-   * `mode: undefined` = BOTH environments, which is what a human session reads;
-   * an API key narrows to its own. Filtering here rather than in the route is
-   * what keeps the documented cursor contract true — a post-fetch filter would
-   * return short (or empty) pages while rows remained, and `nextAfter` would
-   * have to be computed from rows the caller never saw.
+   * Filtering here rather than in the route is what keeps the documented
+   * cursor contract true — a post-fetch filter would return short (or empty)
+   * pages while rows remained, and `nextAfter` would have to be computed from
+   * rows the caller never saw.
    */
-  listAfter(after: number, opts: { orgId?: string | null; type?: string; mode?: ResourceMode; limit: number }): Promise<EventRecord[]>;
+  listAfter(after: number, opts: { orgId?: string | null; type?: string; limit: number }): Promise<EventRecord[]>;
   findById(id: string): Promise<EventRecord | null>;
 }
 
@@ -540,21 +523,12 @@ export interface WebhookEndpointRecord {
   createdBy: string;
   createdAt: string;
   lastDeliveryAt: string | null;
-  /**
-   * EN-D2. Which stream this endpoint subscribes to: a `"test"` endpoint hears
-   * only sandbox events and a `"live"` one only real ones. `"live"` for every
-   * endpoint registered before EN-D2, via the DB default. Deliberately ABSENT
-   * from `update`'s patch — an endpoint cannot be moved between streams, because
-   * the secret and delivery history would follow it across the boundary.
-   */
-  mode: ResourceMode;
 }
 
 /**
  * Lifecycle columns (`status`/`disabled*`/`consecutive*Failures`/`failingSince`/`deletedAt`/`lastDeliveryAt`) are repo-managed.
- * `mode` is optional and defaults to `"live"` — the zero-migration default.
  */
-export type WebhookEndpointCreateInput = Omit<WebhookEndpointRecord, "id" | "createdAt" | "status" | "disabledReason" | "disabledAt" | "consecutiveFailures" | "consecutiveGuardFailures" | "failingSince" | "deletedAt" | "lastDeliveryAt" | "mode"> & { mode?: ResourceMode };
+export type WebhookEndpointCreateInput = Omit<WebhookEndpointRecord, "id" | "createdAt" | "status" | "disabledReason" | "disabledAt" | "consecutiveFailures" | "consecutiveGuardFailures" | "failingSince" | "deletedAt" | "lastDeliveryAt">;
 
 export interface WebhookEndpointRepository {
   create(input: WebhookEndpointCreateInput): Promise<WebhookEndpointRecord>;
