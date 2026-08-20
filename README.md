@@ -174,8 +174,8 @@ reference and worked integrations — lives in the console under **Developers**.
   than written from memory.
 
 Two credentials travel in the same `Authorization: Bearer` header and are told apart by shape: a
-**human session** JWT from `POST /auth/login`, and an **organization API key** (`tl_live_…` /
-`tl_test_…`) shown once at creation and stored only as a hash.
+**human session** JWT from `POST /auth/login`, and an **organization API key** (`tl_live_…`)
+shown once at creation and stored only as a hash.
 
 ---
 
