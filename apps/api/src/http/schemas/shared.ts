@@ -245,6 +245,7 @@ export const sharedSchemas: Record<string, FastifySchema> = {
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403) },
   },
 
+
   createOrg: {
     tags: ["Organizations"], summary: "Create an organization + parent DID (PlatformAdmin)", security: eitherCredential,
     description:

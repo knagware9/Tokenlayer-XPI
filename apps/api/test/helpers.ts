@@ -23,6 +23,7 @@ import {
   MemoryCashRepository,
   MemoryDocumentRepository,
   MemoryEventRepository,
+  MemoryLedgerTransactionRepository,
   MemoryListingRepository,
   MemoryStagedInvoiceRepository,
   MemoryCredentialUseCaseRepository,
@@ -95,6 +96,7 @@ export async function buildTestAppWithRepos(opts: TestAppOptions = {}): Promise<
   const events = new MemoryEventRepository();
   const webhookEndpoints = new MemoryWebhookEndpointRepository();
   const webhookDeliveries = new MemoryWebhookDeliveryRepository();
+  const ledgerTransactions = new MemoryLedgerTransactionRepository();
   const loginKeys = new MemoryLoginKeyRepository();
   const keystore = createKeystore("11".repeat(32));
   // seedDefaults now creates the second PlatformAdmin (admin2@tokenlayer.dev) so
@@ -110,7 +112,7 @@ export async function buildTestAppWithRepos(opts: TestAppOptions = {}): Promise<
   // The suite makes many logins from one IP; raise the throttle unless a test opts into it.
   const deps: AppDeps = {
     useCases, credentialUseCases, credentialTemplates, rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents, cashflows, proposals,
-    organizations, credentials, verificationRequests, stagedInvoices, apiKeys, events, webhookEndpoints, webhookDeliveries,
+    organizations, credentials, verificationRequests, stagedInvoices, apiKeys, events, webhookEndpoints, webhookDeliveries, ledgerTransactions,
     // The harness never delivers anything (no dispatcher runs in tests); this is
     // the registration-time posture, and the secure default is the right one to
     // exercise by default.

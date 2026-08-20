@@ -57,6 +57,7 @@
       "id",
       "metadata",
       "name",
+      "settlement",
       "status",
       "symbol",
       "tokenStandard",
@@ -2861,6 +2862,31 @@
           "403": "#Error",
           "404": "#Error",
           "409": "#Error"
+        }
+      }
+    },
+    "/api/v1/reconciliation": {
+      "get": {
+        "tags": [
+          "Audit"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "assets:read"
+        ],
+        "parameters": [],
+        "requestBody": false,
+        "responses": {
+          "200": "{checked,drifted}",
+          "401": "#Error",
+          "404": "#Error"
         }
       }
     },

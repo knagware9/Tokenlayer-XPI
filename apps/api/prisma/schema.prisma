@@ -511,3 +511,39 @@ model WebhookDelivery {
   @@unique([endpointId, eventId])
   @@index([status, nextAttemptAt])
 }
+
+// A state-changing ledger call we have made, and what became of it.
+//
+// SUBMISSION AND CONFIRMATION ARE SEPARATE FACTS. Before this table the only
+// record of a mint was the Asset row, written optimistically; a transaction that
+// never mined left the register saying "active" while the chain held nothing.
+/// domain: shared
+model LedgerTransaction {
+  id            String    @id @default(cuid())
+  chainId       String
+  txHash        String
+  kind          String // deploy | mint | transfer | burn | freeze | unfreeze | allow | anchor
+  // Units moved, for mint/transfer/burn. This is what makes believed supply
+  // DERIVABLE (sum of confirmed mints minus confirmed burns) instead of a
+  // number the register asserts and nothing can check.
+  amount        String?
+  assetId       String?
+  credentialId  String?
+  // pending | confirmed | failed | unknown.
+  // `unknown` is NOT failure: it means submitted, outcome not yet known. Calling
+  // it failed is what leads to a re-mint and double-issuance.
+  status        String    @default("pending")
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now())
+  lastAttemptAt DateTime?
+  claimedAt     DateTime?
+  claimedBy     String?
+  blockNumber   Int?
+  error         String?
+  submittedAt   DateTime  @default(now())
+  confirmedAt   DateTime?
+
+  @@unique([chainId, txHash])
+  @@index([status, nextAttemptAt])
+  @@index([assetId])
+}

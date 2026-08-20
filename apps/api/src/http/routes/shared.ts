@@ -244,7 +244,6 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     return { assets: results.length, verified: results.filter((r) => r.valid && r.anchorConsistent).length, tampered, anchoredAssets: results.filter((r) => r.lastAnchor).length };
   });
 
-
   // EN-B: DELIBERATELY UNSCOPED. Anchoring writes the audit head on-chain but
   // creates no authority and discloses nothing — it is an integrity operation
   // whose only cost is gas, already bounded by the role gate below and the

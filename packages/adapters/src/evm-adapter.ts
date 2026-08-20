@@ -102,6 +102,93 @@ export interface EvmArtifact {
   bytecode: string;
 }
 
+/**
+ * Await a receipt for at most `timeoutMs`.
+ *
+ * RETURNS NULL ON TIMEOUT, THROWS ON REVERT. The two outcomes are different
+ * facts and lead to opposite decisions: a revert is final and the operator must
+ * not retry blindly, while a timeout means the transaction may still land and
+ * re-sending it would double-issue. Collapsing them into one error is how a
+ * stalled chain becomes a data-integrity incident.
+ */
+export async function waitForReceipt(
+  tx: { wait: (c?: number) => Promise<unknown> },
+  confirmations: number,
+  timeoutMs: number,
+): Promise<{ blockNumber?: number } | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), timeoutMs); });
+  const pending = tx.wait(confirmations);
+  try {
+    return (await Promise.race([pending, timeout])) as { blockNumber?: number } | null;
+  } finally {
+    if (timer) clearTimeout(timer);
+    // If the timeout won the race, `pending` is abandoned but still in flight —
+    // Promise.race does not cancel the loser. Its eventual outcome no longer
+    // matters to THIS call (the confirmer resolves the transaction later via
+    // getReceipt), but if it rejects with nothing listening, Node reports an
+    // unhandled rejection. Attach a no-op catch so a late failure is swallowed
+    // deliberately, not accidentally.
+    void pending.catch(() => {});
+  }
+}
+
+/**
+ * A deployment whose confirmation never arrived within the bound.
+ *
+ * Carries the `txHash` because that hash is the ONLY thing that makes the
+ * deploy recoverable: an operator can look it up, see whether the contract
+ * landed, and decide. A bare "timed out" would leave them with a chain to
+ * search and no key to search it by, and the obvious guess — deploy again —
+ * is how one asset becomes two contracts.
+ */
+export class DeploymentTimeoutError extends Error {
+  constructor(
+    readonly what: string,
+    readonly txHash: string,
+    readonly timeoutMs: number,
+  ) {
+    super(
+      `${what} did not confirm within ${timeoutMs}ms. Deploy transaction ${txHash || "(hash unavailable)"} may still be mining — ` +
+        "check it on-chain before redeploying, or the same contract will be deployed twice.",
+    );
+    this.name = "DeploymentTimeoutError";
+  }
+}
+
+/**
+ * Await a contract deployment for at most `timeoutMs`, then FAIL LOUDLY.
+ *
+ * DELIBERATELY UNLIKE `waitForReceipt`, WHICH RETURNS NULL. A send that has not
+ * confirmed still yields a usable fact (the hash) and the confirmer resolves it
+ * later, so a bounded wait can degrade to "submitted, outcome unknown". A
+ * deployment cannot: the caller needs the contract ADDRESS to persist an asset
+ * or a registry, and there is no honest half-answer. So the only two acceptable
+ * outcomes are an address or an error — never a hang (the browser spinning
+ * forever on a stalled chain is failure #2 of the spec) and never a
+ * half-constructed asset row pointing at a contract that may not exist.
+ */
+export async function awaitDeployment(
+  contract: { waitForDeployment: () => Promise<unknown>; deploymentTransaction: () => { hash: string } | null },
+  timeoutMs: number,
+  what: string,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<"timeout">((resolve) => { timer = setTimeout(() => resolve("timeout"), timeoutMs); });
+  // One promise for both the race and the late-rejection guard: `settled`
+  // inherits `waitForDeployment()`'s rejection, so catching on `settled` alone
+  // leaves nothing unhandled if the timeout wins and the deploy fails later.
+  const settled = contract.waitForDeployment().then(() => "confirmed" as const);
+  try {
+    if ((await Promise.race([settled, timeout])) === "timeout") {
+      throw new DeploymentTimeoutError(what, contract.deploymentTransaction()?.hash ?? "", timeoutMs);
+    }
+  } finally {
+    if (timer) clearTimeout(timer);
+    void settled.catch(() => {});
+  }
+}
+
 /** Gas pricing strategy. "zero" suits free-gas networks like Besu IBFT/dev. */
 export type GasMode = "auto" | "zero";
 
@@ -119,6 +206,8 @@ export interface EvmAdapterConfig {
   gas?: GasMode;
   /** Confirmations to await per transaction (1 for instant-finality dev chains). */
   confirmations?: number;
+  /** How long to await a receipt before returning the hash unconfirmed. Default 30s. */
+  confirmationTimeoutMs?: number;
 }
 
 /**
@@ -141,6 +230,7 @@ export class EvmLedgerAdapter implements LedgerAdapter, CredentialAnchor {
   private readonly registries?: { didRegistry: EvmArtifact; vcRegistry: EvmArtifact };
   private readonly gas: GasMode;
   private readonly confirmations: number;
+  private readonly confirmationTimeoutMs: number;
   private queue: Promise<unknown> = Promise.resolve();
 
   // ERC-3643 assets deploy a real T-REX suite; these track them per token address.
@@ -157,6 +247,7 @@ export class EvmLedgerAdapter implements LedgerAdapter, CredentialAnchor {
     this.registries = config.registryArtifacts;
     this.gas = config.gas ?? "auto";
     this.confirmations = config.confirmations ?? 1;
+    this.confirmationTimeoutMs = config.confirmationTimeoutMs ?? 30_000;
   }
 
   /** Boot-time probe: verifies the RPC answers and reports the operator account. */
@@ -172,7 +263,7 @@ export class EvmLedgerAdapter implements LedgerAdapter, CredentialAnchor {
   }
 
   private trexManager(): TrexManager {
-    this.trex ??= new TrexManager(this.signer, this.wallet, () => this.gasOverrides(), loadTrexArtifacts());
+    this.trex ??= new TrexManager(this.signer, this.wallet, () => this.gasOverrides(), loadTrexArtifacts(), this.confirmationTimeoutMs);
     return this.trex;
   }
 
@@ -241,8 +332,35 @@ export class EvmLedgerAdapter implements LedgerAdapter, CredentialAnchor {
     build: (overrides: Record<string, unknown>) => Promise<{ hash: string; wait: (c?: number) => Promise<unknown> }>,
   ): Promise<TxReceipt> {
     const tx = await build(this.gasOverrides());
-    const receipt = (await tx.wait(this.confirmations)) as { blockNumber?: number } | null;
+    const receipt = await waitForReceipt(tx, this.confirmations, this.confirmationTimeoutMs);
+    // No blockNumber means "submitted, not yet known" — never "failed".
     return { txHash: tx.hash, chainId: this.chainId, blockNumber: receipt?.blockNumber, timestamp: new Date().toISOString() };
+  }
+
+  /**
+   * The receipt for a hash, or null when the chain does not have one yet.
+   *
+   * NULL IS NOT FAILURE. A transaction the chain has not mined yet and a
+   * transaction that reverted are different facts with opposite remedies, so
+   * "no receipt" is reported as absence and a revert is reported as
+   * `status: 0`.
+   */
+  async getReceipt(txHash: string): Promise<{ blockNumber?: number; status?: number } | null> {
+    const r = await this.provider.getTransactionReceipt(txHash);
+    if (!r) return null;
+    // A mined receipt with no `status` field is itself an unresolved outcome —
+    // never default it to 1 (success). The governing rule of this whole change
+    // is that "unknown" must never read as "confirmed ok"; defaulting here would
+    // let a genuinely ambiguous receipt sail through as a success.
+    return { blockNumber: r.blockNumber, status: r.status == null ? undefined : Number(r.status) };
+  }
+
+  /**
+   * The bytecode deployed at `address`, or `"0x"` if none. Reuses the provider
+   * this adapter already holds — never constructs a second one.
+   */
+  async getCode(address: string): Promise<string> {
+    return this.provider.getCode(address);
   }
 
   /** Serialised single transaction (the common case for one-shot operations). */
@@ -268,7 +386,9 @@ export class EvmLedgerAdapter implements LedgerAdapter, CredentialAnchor {
       const factory = new ContractFactory(artifact.abi, artifact.bytecode, this.signer);
       const contract = await factory.deploy(spec.name, spec.symbol, spec.allowlistEnabled, this.gasOverrides());
       const tx = contract.deploymentTransaction();
-      await contract.waitForDeployment();
+      // BOUNDED, because this is reached synchronously from POST /use-cases/:key/deploy
+      // and POST /assets: an unbounded wait here is the browser spinning forever.
+      await awaitDeployment(contract, this.confirmationTimeoutMs, `deploy of '${spec.name}' (${spec.tokenStandard}) on chain '${this.chainId}'`);
       this.kind.set(await contract.getAddress(), "plain");
       return { contractRef: await contract.getAddress(), txHash: tx?.hash ?? "" };
     });
@@ -376,10 +496,14 @@ export class EvmLedgerAdapter implements LedgerAdapter, CredentialAnchor {
       const { didRegistry, vcRegistry } = this.requireRegistryArtifacts();
       const didFactory = new ContractFactory(didRegistry.abi, didRegistry.bytecode, this.signer);
       const did = await didFactory.deploy(this.gasOverrides());
-      await did.waitForDeployment();
+      // BOUNDED for the same reason as deployAsset — and here the throw is also
+      // the CORRECT boot behaviour: `resolveIdentityRegistry` catches any failure
+      // and degrades to UNANCHORED, so a stalled chain delays boot by the
+      // confirmation timeout rather than wedging it forever.
+      await awaitDeployment(did, this.confirmationTimeoutMs, `DID registry deploy on chain '${this.chainId}'`);
       const vcFactory = new ContractFactory(vcRegistry.abi, vcRegistry.bytecode, this.signer);
       const vc = await vcFactory.deploy(this.gasOverrides());
-      await vc.waitForDeployment();
+      await awaitDeployment(vc, this.confirmationTimeoutMs, `VC registry deploy on chain '${this.chainId}'`);
       return {
         didRegistry: await did.getAddress(),
         vcRegistry: await vc.getAddress(),

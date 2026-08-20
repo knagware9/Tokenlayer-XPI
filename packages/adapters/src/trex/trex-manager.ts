@@ -1,5 +1,6 @@
 import { AbiCoder, Contract, ContractFactory, getBytes, keccak256, toUtf8Bytes, ZeroAddress, type Signer, type Wallet } from "ethers";
 import type { Artifact } from "./artifacts.js";
+import { awaitDeployment, waitForReceipt } from "../evm-adapter.js";
 
 const KYC_TOPIC = 1n;
 const SCHEME_ECDSA = 1;
@@ -44,12 +45,30 @@ export class TrexManager {
     private readonly wallet: Wallet,
     private readonly gasOverrides: () => Record<string, unknown>,
     private readonly artifacts: Record<string, Artifact>,
+    private readonly confirmationTimeoutMs: number,
   ) {}
 
-  /** Send a contract transaction; the signer assigns the nonce. */
+  /**
+   * Send a contract transaction; the signer assigns the nonce.
+   *
+   * BOUNDED, AND THROWS RATHER THAN DEGRADING TO "SUBMITTED, UNKNOWN" ON
+   * TIMEOUT — unlike `EvmLedgerAdapter.sendTx`'s `waitForReceipt` use. Those
+   * sends get a `LedgerTransaction` row and a confirmer worker that resolves
+   * them later; these steps have neither, and every later step in a suite
+   * build assumes the one before it truly landed on-chain. Returning null and
+   * continuing would let the suite build proceed on top of a transaction that
+   * may not have happened.
+   */
   private async tx(call: (overrides: Record<string, unknown>) => Promise<TxResponse>): Promise<TxResponse> {
     const response = await call(this.gasOverrides());
-    await response.wait();
+    const receipt = await waitForReceipt(response, 1, this.confirmationTimeoutMs);
+    if (!receipt) {
+      throw new Error(
+        `trex: transaction ${response.hash} did not confirm within ${this.confirmationTimeoutMs}ms — it may still be ` +
+          "mining. The T-REX suite build cannot safely continue past an unconfirmed step; check the hash on-chain " +
+          "before retrying, or a repeat attempt may build a duplicate or partially-orphaned suite.",
+      );
+    }
     return response;
   }
 
@@ -59,7 +78,7 @@ export class TrexManager {
     if (!a) throw new Error(`trex: missing artifact '${name}'`);
     const factory = new ContractFactory(a.abi, a.bytecode, this.signer);
     const contract = await factory.deploy(...(args as never[]), this.gasOverrides());
-    await contract.waitForDeployment();
+    await awaitDeployment(contract, this.confirmationTimeoutMs, `trex '${name}' deploy`);
     return contract;
   }
 

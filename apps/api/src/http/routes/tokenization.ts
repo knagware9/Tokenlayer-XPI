@@ -21,6 +21,7 @@ import { isSupportedCurrency } from "../../tokenization/currencies.js";
 import { renderContractCode } from "../../tokenization/contract-code.js";
 import { deployAndCreateUseCase } from "../../tokenization/use-cases.js";
 import { computeAnalytics } from "../../tokenization/analytics.js";
+import { reconcile } from "../../tokenization/reconciliation.js";
 import { computeIdentityDashboard } from "../../identity/identity-analytics.js";
 import { issueCredentialFor, revokeCredentialById } from "../../identity/credential-issuance.js";
 import { namespaceHolding } from "../../shared/usecase-namespace.js";
@@ -29,7 +30,9 @@ import { mintOrgMembership } from "../../shared/membership.js";
 import { ensurePlatformIssuerOrg, PLATFORM_ORG_NAME } from "../../shared/platform-org.js";
 import { computeActivity, computePortfolio } from "../../tokenization/investor.js";
 import { readErpInvoices, stageInvoice } from "../../tokenization/invoice-register.js";
+import { settlementStatus } from "../../tokenization/asset-settlement.js";
 import { assetBalancesOf, coded, CodedError, dropPayerShare, executeCashflowCore, executeIssueActivation, runGatedAction } from "../../shared/executors.js";
+import { recordSubmission } from "../../shared/ledger-transactions.js";
 import { proposalKind } from "../../shared/proposal-kinds.js";
 import type { OnboardUserPayload } from "../../shared/user-kinds.js";
 import { resolveDid } from "../../identity/did-resolver.js";
@@ -515,6 +518,24 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
     let result: Awaited<ReturnType<typeof deps.engine.issue>>;
     try {
       result = await deps.engine.issue(actor, { useCaseKey: bUseCaseKey, chainId, id, metadata: meta });
+      // The engine reuses the use case contract's deploy tx as this asset's
+      // issuance receipt (issue() registers within an already-deployed
+      // contract, it does not itself deploy) — record() is idempotent on
+      // (chainId, txHash), so every asset issued into the same contract shares
+      // one row rather than fabricating a new "deploy" per asset. RULING L: the
+      // deploy tx is a property of the USE-CASE CONTRACT, not of whichever
+      // asset happened to be issued first — assetId: null, or the row would
+      // permanently (and falsely) claim to belong to asset #1. An asset's own
+      // outstanding state is carried by its own mint row, not this one.
+      // GUARDED ON A NON-EMPTY HASH. An ERC-3643 issuance deploys a whole T-REX
+      // suite over many transactions and reports no single hash (`txHash: ""`,
+      // see EvmLedgerAdapter.deployAsset). Recording that would key one row on
+      // (chainId, "") which every subsequent T-REX asset on the chain would
+      // collide into — one unresolvable row standing for all of them. No row is
+      // the honest outcome: we have no hash to be recoverable by.
+      if (result.txHash) {
+        await recordSubmission(deps, "deploy", { txHash: result.txHash, chainId, timestamp: new Date().toISOString() }, { assetId: null });
+      }
       await deps.assets.create({
         id,
         useCaseKey: bUseCaseKey,
@@ -758,7 +779,8 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
         const availableSupply = a.treasuryAccount
           ? await deps.engine.balanceOf(actor, ctx, a.treasuryAccount).catch(() => null)
           : null;
-        return { ...a, totalSupply, availableSupply };
+        const settlement = await settlementStatus(deps, a);
+        return { ...a, totalSupply, availableSupply, settlement };
       }),
     );
     return { data, pagination: { limit: q.limit, offset: q.offset, total } };
@@ -769,7 +791,8 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
     const asset = await scopedAsset(request, reply, "read");
     if (!asset) return reply;
     const totalSupply = await deps.engine.totalSupply(actorOf(request), contextOf(asset)).catch(() => null);
-    return { ...asset, totalSupply };
+    const settlement = await settlementStatus(deps, asset);
+    return { ...asset, totalSupply, settlement };
   });
 
 
@@ -888,6 +911,20 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
     });
   });
 
+  app.get("/reconciliation", { schema: S.reconciliation, ...authScoped("assets:read") }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    // Reconciliation compares believed state against the chain across every use
+    // case, so it is a whole-platform read: restrict it to the two roles whose
+    // job that is, rather than letting any assets:read principal see everything.
+    if (claims.role !== "PlatformAdmin" && claims.role !== "Auditor") return notFound(reply, "not found");
+    return reconcile(deps, actorOf(request), {
+      // DERIVED from confirmed transactions, not asserted by the register. An
+      // asset row has no supply column, and inventing one would just move the
+      // unchecked claim somewhere else.
+      believedSupply: (assetId) => deps.ledgerTransactions.settledSupply(assetId),
+    });
+  });
+
 
   // --- lifecycle actions --------------------------------------------------
   app.post("/assets/:id/actions/:action", { schema: S.action, ...authScoped("assets:transfer") }, async (request, reply) => {
@@ -936,10 +973,12 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
           }
         }
         receipt = await deps.engine.setAllowed(actor, ctx, b.account!, true);
+        await recordSubmission(deps, "allow", receipt, { assetId: asset.id });
         break;
       }
       case "disallow":
         receipt = await deps.engine.setAllowed(actor, ctx, b.account!, false);
+        await recordSubmission(deps, "allow", receipt, { assetId: asset.id });
         break;
       case "setPrice": {
         deps.rbac.authorize(actor, "issue");
@@ -1028,6 +1067,7 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
       // object into the audit payload; the extra keys carry the fee accounting.
       const buyMeta = { unitPrice, currency, cost, ...(fee !== "0" ? { fee, feeAccount } : {}) };
       const receipt = await deps.engine.buy(actor, ctx, treasuryAccount, wallet, quantity, buyMeta);
+      await recordSubmission(deps, "transfer", receipt, { assetId: asset.id, amount: quantity });
       return reply.code(200).send({ receipt, paid: { amount: cost, currency }, delivered: { amount: quantity, to: wallet }, fee: { amount: fee, account: fee !== "0" ? feeAccount ?? null : null } });
     } catch (err) {
       // Refund the FULL cost: reverse the treasury leg, and the fee leg if it ran.
@@ -1145,20 +1185,23 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
       const adapter = deps.chains.resolveAdapter(asset.chainId);
       if (!(await adapter.isAllowed(ctx.ref, escrow).catch(() => false))) {
         const allowActor = deps.rbac.can(actor.role, "allow") ? actor : { id: "platform-operator", role: "PlatformAdmin" as const };
-        await deps.engine.setAllowed(allowActor, ctx, escrow, true);
+        const allowReceipt = await deps.engine.setAllowed(allowActor, ctx, escrow, true);
+        await recordSubmission(deps, "allow", allowReceipt, { assetId: asset.id });
       }
     }
 
     // Escrow the tokens (engine enforces RBAC, lifecycle.transfer, allowlist,
     // freeze, and the seller's lockup), then create the row. If the row create
     // fails, compensate by releasing the escrowed tokens back to the seller.
-    await deps.engine.escrowList(actor, ctx, seller, escrow, quantity);
+    const listReceipt = await deps.engine.escrowList(actor, ctx, seller, escrow, quantity);
+    await recordSubmission(deps, "transfer", listReceipt, { assetId: asset.id, amount: quantity });
     let listing;
     try {
       listing = await deps.listings.create({ assetId: asset.id, seller, quantity, unitPrice, currency });
     } catch (err) {
       try {
-        await deps.engine.escrowRelease(actor, ctx, escrow, seller, quantity);
+        const releaseReceipt = await deps.engine.escrowRelease(actor, ctx, escrow, seller, quantity);
+        await recordSubmission(deps, "transfer", releaseReceipt, { assetId: asset.id, amount: quantity });
       } catch (releaseErr) {
         request.log.error({ err, releaseErr, seller, escrow, quantity, assetId: asset.id }, "listing row create failed AND escrow release failed — manual reconciliation required");
         throw releaseErr;
@@ -1265,6 +1308,7 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
         // audit folds debit the SELLER (the economic sender), not the pooled escrow.
         const meta = { unitPrice, currency, cost, seller, ...(fee !== "0" ? { fee, feeAccount } : {}) };
         receipt = await deps.engine.settleFromEscrow(actor, ctx, escrow, buyerWallet, quantity, meta);
+        await recordSubmission(deps, "transfer", receipt, { assetId: asset.id, amount: quantity });
       } catch (err) {
         // Delivery failed — reverse BOTH cash legs, then surface the real cause.
         try {
@@ -1321,7 +1365,8 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
     }
     if (BigInt(cancelled.quantity) > 0n) {
       try {
-        await deps.engine.escrowRelease(actorOf(request), contextOf(asset), escrow, listing.seller, cancelled.quantity);
+        const releaseReceipt = await deps.engine.escrowRelease(actorOf(request), contextOf(asset), escrow, listing.seller, cancelled.quantity);
+        await recordSubmission(deps, "transfer", releaseReceipt, { assetId: asset.id, amount: cancelled.quantity });
       } catch (err) {
         // Release failed — re-open the listing so it never sits "cancelled"
         // while the escrow still holds the seller's tokens.

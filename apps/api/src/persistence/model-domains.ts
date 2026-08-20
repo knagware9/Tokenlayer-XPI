@@ -70,6 +70,9 @@ export const MODEL_DOMAINS: Readonly<Record<string, DataDomain>> = {
   // Both products anchor on chain: identity writes DIDs and VCs, tokenization
   // anchors audit heads. The deployment record of the registries is shared.
   RegistryDeployment: "shared",
+  // Both products write to chains — identity anchors DIDs and VCs, tokenization
+  // mints and transfers — so neither owns the record of those writes.
+  LedgerTransaction: "shared",
 };
 
 /**
@@ -105,6 +108,7 @@ export const REPOSITORY_MODELS: Readonly<Record<string, string>> = {
   events: "Event",
   webhookEndpoints: "WebhookEndpoint",
   webhookDeliveries: "WebhookDelivery",
+  ledgerTransactions: "LedgerTransaction",
 };
 
 /** The product that owns `model`, or a refusal naming the missing decision. */

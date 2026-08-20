@@ -365,6 +365,13 @@ export interface RegistryDeploymentRecord {
 export interface RegistryDeploymentRepository {
   get(chainId: string): Promise<RegistryDeploymentRecord | null>;
   create(input: Omit<RegistryDeploymentRecord, "createdAt">): Promise<RegistryDeploymentRecord>;
+  /**
+   * Create-or-REPLACE by `chainId` (the primary key). Needed for the redeploy
+   * path: `chainId` is `@id`, so a plain `create` over an existing row throws —
+   * swapping a stale registry for no registry at all. Never duplicates, never
+   * loses the row.
+   */
+  upsert(input: Omit<RegistryDeploymentRecord, "createdAt">): Promise<RegistryDeploymentRecord>;
 }
 
 export interface LoginKeyRecord {
@@ -606,5 +613,89 @@ export interface WebhookDeliveryRepository {
    */
   requeue(id: string, at: string): Promise<WebhookDeliveryRecord | null>;
   update(id: string, patch: Partial<Pick<WebhookDeliveryRecord, "status" | "attempts" | "nextAttemptAt" | "lastAttemptAt" | "responseStatus" | "responseError" | "durationMs" | "claimedAt" | "claimedBy">>): Promise<WebhookDeliveryRecord>;
+}
+
+export type LedgerTxStatus = "pending" | "confirmed" | "failed" | "unknown";
+export type LedgerTxKind = "deploy" | "mint" | "transfer" | "burn" | "freeze" | "unfreeze" | "allow" | "anchor";
+
+export interface LedgerTransactionRecord {
+  id: string;
+  chainId: string;
+  txHash: string;
+  kind: LedgerTxKind;
+  amount: string | null;
+  assetId: string | null;
+  credentialId: string | null;
+  status: LedgerTxStatus;
+  attempts: number;
+  nextAttemptAt: string;
+  lastAttemptAt: string | null;
+  claimedAt: string | null;
+  claimedBy: string | null;
+  blockNumber: number | null;
+  error: string | null;
+  submittedAt: string;
+  confirmedAt: string | null;
+}
+
+/**
+ * How long an `unknown` row waits before anyone looks at it again.
+ *
+ * RULING AA: `listDue` is `submittedAt ASC LIMIT 25`, and an `unknown` row is
+ * both perpetually due and — being the oldest thing in the table — always at
+ * the front of that queue. Twenty-five of them fill every page forever, and a
+ * mint submitted this second is never polled at all. An hour is chosen to make
+ * `unknown` rows cheap stragglers rather than a permanent head-of-line block:
+ * they are still retried (a transaction that mines a day later must still be
+ * picked up), just not at the expense of live work.
+ */
+export const LEDGER_UNKNOWN_RETRY_MS = 3_600_000;
+
+export interface LedgerTransactionSettlement {
+  status: LedgerTxStatus;
+  blockNumber?: number;
+  confirmedAt?: string;
+  error?: string;
+  /**
+   * When this row should next be considered due. Callers that own a clock
+   * (the confirmer) pass it explicitly so the schedule is deterministic; both
+   * repositories apply `LEDGER_UNKNOWN_RETRY_MS` themselves when a row is
+   * settled `unknown` without one, so no caller can reintroduce the starvation.
+   */
+  nextAttemptAt?: string;
+}
+
+export interface LedgerTransactionRepository {
+  /** Idempotent on (chainId, txHash): re-recording the same submission returns the existing row. */
+  record(input: {
+    chainId: string; txHash: string; kind: LedgerTxKind; amount?: string | null;
+    assetId?: string | null; credentialId?: string | null; submittedAt: string;
+  }): Promise<LedgerTransactionRecord>;
+  findById(id: string): Promise<LedgerTransactionRecord | null>;
+  /** Confirmed mints minus confirmed burns for one asset — the believed supply. */
+  settledSupply(assetId: string): Promise<string>;
+  /** Due = (pending|unknown) and nextAttemptAt <= now, oldest first. */
+  listDue(now: string, limit: number): Promise<LedgerTransactionRecord[]>;
+  /** CAS claim, mirroring WebhookDeliveryRepository.claim — null if another worker won. */
+  claim(id: string, workerId: string, now: string): Promise<LedgerTransactionRecord | null>;
+  /** Claims left behind by a crashed worker. Returns how many were released. */
+  reclaimStale(before: string): Promise<number>;
+  /** Outstanding (pending|unknown) rows for one asset, oldest first. */
+  listByAsset(assetId: string): Promise<LedgerTransactionRecord[]>;
+  /**
+   * Row counts for one asset, by status — EVERY status, including the ones
+   * `listByAsset` deliberately hides.
+   *
+   * Two questions need it, and neither can be answered by the outstanding rows
+   * alone. A reverted mint settles `failed`, which `listByAsset` excludes, so
+   * the asset read back as `active` and reconciliation saw believed 0 against
+   * chain 0 and reported nothing — the original bug, reproduced for reverts.
+   * And an all-zero result is its own fact: an asset issued before this table
+   * existed has no rows at all, which is "we have no record", not "zero mints".
+   */
+  countsByStatus(assetId: string): Promise<Record<LedgerTxStatus, number>>;
+  settle(id: string, settlement: LedgerTransactionSettlement): Promise<LedgerTransactionRecord>;
+  /** Records one more failed poll and backs off. */
+  defer(id: string, nextAttemptAt: string, now: string, error?: string): Promise<LedgerTransactionRecord>;
 }
 

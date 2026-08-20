@@ -71,6 +71,11 @@ const RULES: ReadonlyArray<readonly [string, RouteDomain]> = [
   ["/analytics", "tokenization"],
   ["/me/portfolio", "tokenization"],
   ["/me/activity", "tokenization"],
+  // RULING T: reads deps.assets and deps.engine, both tokenization-owned
+  // (model-domains.ts) — guardRepositories rejects deps.assets.list() with
+  // DOMAIN_NOT_ENABLED on a deployment that does not sell tokenization, so
+  // an identity-only deployment must never be able to reach this handler.
+  ["/reconciliation", "tokenization"],
 
   // ── Shared platform ─────────────────────────────────────────────────────
   // Sessions. NOTE the QR/device-key routes are here, not under identity: they

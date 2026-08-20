@@ -23,6 +23,7 @@ import {
   PrismaCashRepository,
   PrismaDocumentRepository,
   PrismaEventRepository,
+  PrismaLedgerTransactionRepository,
   PrismaListingRepository,
   PrismaLoginKeyRepository,
   PrismaRegistryDeploymentRepository,
@@ -40,6 +41,7 @@ import { seedDefaults } from "./shared/seed.js";
 import { seedUseCases } from "./tokenization/use-cases.js";
 import { createHttpSender, startDispatcher } from "./webhooks/dispatcher.js";
 import { createSecretBox } from "./webhooks/secret-box.js";
+import { startConfirmer } from "./shared/ledger-confirmer.js";
 
 async function main(): Promise<void> {
   const rbac = new RbacPolicy();
@@ -68,6 +70,7 @@ async function main(): Promise<void> {
   const events = new PrismaEventRepository();
   const webhookEndpoints = new PrismaWebhookEndpointRepository();
   const webhookDeliveries = new PrismaWebhookDeliveryRepository();
+  const ledgerTransactions = new PrismaLedgerTransactionRepository();
   const keystore = createKeystore(env.didMasterKey);
   // Demo users/accounts (with predictable passwords) are seeded only outside
   // production. The ROSTER is seeded on every deployment — it is how anyone logs
@@ -145,6 +148,7 @@ async function main(): Promise<void> {
     events,
     webhookEndpoints,
     webhookDeliveries,
+    ledgerTransactions,
     webhooksAllowInsecure: env.webhooksAllowInsecure,
     // ONE box, shared by the registration routes (which seal a freshly minted
     // secret) and the dispatcher below (which opens it to sign). A DEDICATED key
@@ -229,47 +233,74 @@ async function main(): Promise<void> {
   // with it, so nothing accumulates AND nothing is delivered. An integrator that
   // missed deliveries catches up through the cursor API (GET /events?after=),
   // which is the documented recovery path — not this worker.
-  if (env.webhooksEnabled) {
-    const stop = startDispatcher(
-      {
-        events,
-        webhookEndpoints,
-        webhookDeliveries,
-        // The SAME box the routes sealed with — see deps.secretBox above. A
-        // second `createSecretBox` here would work only by coincidence of both
-        // reading the same env var, and would break silently the day they did not.
-        secretBox: deps.secretBox,
-        // Configuration is read HERE and handed in. dispatcher.ts imports no
-        // env at all: it used to, and that made `import`ing it a boot-time
-        // assertion which crashed the dispatcher TEST FILE in any checkout
-        // without a .env — sixteen security tests that stopped running while
-        // the suite still went green.
-        send: createHttpSender(env.webhooksTimeoutMs),
-        // The SAME guard posture the registration route uses, or a URL that was
-        // legal to save would be permanently undeliverable.
-        guard: { allowInsecureLoopback: env.webhooksAllowInsecure },
-      },
-      env.webhooksPollMs,
-    );
-    // AWAIT the running pass before exiting, rather than merely cancelling the
-    // timer and exiting immediately — that cancelled the ticker while killing
-    // the pass mid-send, stranding every row it had claimed as `inflight`,
-    // which is precisely what this handler exists to avoid.
-    //
-    // Bounded, because a pass can legitimately take batchSize × the per-attempt
-    // timeout, and an orchestrator will SIGKILL long before that. So: wait for
-    // the pass, but no longer than the grace below, then go. Anything still
-    // claimed when we give up is picked up by `reclaimStale` on the next
-    // process's first pass — that sweep, not this handler, is the guarantee.
-    const SHUTDOWN_GRACE_MS = 5_000;
-    for (const sig of ["SIGTERM", "SIGINT"] as const) {
-      process.once(sig, () => {
-        void Promise.race([stop(), new Promise((r) => setTimeout(r, SHUTDOWN_GRACE_MS).unref?.())]).then(() => {
-          process.exit(0);
-        });
+  const stopDispatcher = env.webhooksEnabled
+    ? startDispatcher(
+        {
+          events,
+          webhookEndpoints,
+          webhookDeliveries,
+          // The SAME box the routes sealed with — see deps.secretBox above. A
+          // second `createSecretBox` here would work only by coincidence of both
+          // reading the same env var, and would break silently the day they did not.
+          secretBox: deps.secretBox,
+          // Configuration is read HERE and handed in. dispatcher.ts imports no
+          // env at all: it used to, and that made `import`ing it a boot-time
+          // assertion which crashed the dispatcher TEST FILE in any checkout
+          // without a .env — sixteen security tests that stopped running while
+          // the suite still went green.
+          send: createHttpSender(env.webhooksTimeoutMs),
+          // The SAME guard posture the registration route uses, or a URL that was
+          // legal to save would be permanently undeliverable.
+          guard: { allowInsecureLoopback: env.webhooksAllowInsecure },
+        },
+        env.webhooksPollMs,
+      )
+    : null;
+  if (stopDispatcher) console.log(`[webhooks] dispatcher polling every ${env.webhooksPollMs}ms`);
+
+  // Resolves outstanding LedgerTransaction rows (Task 4) — started unconditionally
+  // (not gated on webhooksEnabled: it has nothing to do with webhooks) and, like
+  // the dispatcher, ONLY here, never inside buildApp.
+  const stopConfirmer = startConfirmer(deps, {
+    getReceipt: async (chainId, txHash) => {
+      let adapter;
+      try {
+        adapter = deps.chains.resolveAdapter(chainId);
+      } catch {
+        // Unknown/absent chain (or CHAIN_STRICT=0 left it unconfigured) is not a
+        // failed transaction — leaving the row due means it resolves once the
+        // chain is reachable again, rather than dead-ending the row here.
+        return null;
+      }
+      // Optional on the interface: simulated adapters (fabric, canton, sandbox)
+      // confirm on submission and never implement it.
+      if (!adapter.getReceipt) return null;
+      return adapter.getReceipt(txHash);
+    },
+  });
+  console.log("[ledger] confirmer polling started");
+
+  // ONE shutdown path for both workers, registered unconditionally: stopping the
+  // confirmer is synchronous (it only clears a timer — see ledger-confirmer.ts),
+  // so it happens first and always. The dispatcher's stop is async and must be
+  // AWAITED (not merely cancelled) before exiting, or a pass killed mid-send
+  // strands every row it had claimed as `inflight` — exactly what this handler
+  // exists to avoid. Bounded by a grace period because a pass can legitimately
+  // take batchSize × the per-attempt timeout, and an orchestrator will SIGKILL
+  // long before that; anything still claimed when we give up is picked up by
+  // `reclaimStale` on the next process's first pass — that sweep, not this
+  // handler, is the guarantee.
+  const SHUTDOWN_GRACE_MS = 5_000;
+  for (const sig of ["SIGTERM", "SIGINT"] as const) {
+    process.once(sig, () => {
+      stopConfirmer();
+      void Promise.race([
+        stopDispatcher ? stopDispatcher() : Promise.resolve(),
+        new Promise((r) => setTimeout(r, SHUTDOWN_GRACE_MS).unref?.()),
+      ]).then(() => {
+        process.exit(0);
       });
-    }
-    console.log(`[webhooks] dispatcher polling every ${env.webhooksPollMs}ms`);
+    });
   }
 }
 
