@@ -44,8 +44,7 @@ export const tokenizationSchemas: Record<string, FastifySchema> = {
     description:
       "Requires the `usecases:provision` scope. Creates a tokenization use case — the contract template, the chains " +
       "it may deploy on, and the compliance and fee configuration every asset issued under it inherits. Deploying " +
-      "it is a separate call. Pass `sandbox: true` (with `allowedChainIds: [\"sandbox\"]`) to create a TEST-MODE use " +
-      "case; the flag is fixed at creation.",
+      "it is a separate call.",
     body: { $ref: "UseCase#" },
     response: { 201: { $ref: "UseCase#" }, ...errs(400, 401, 403) },
   },
@@ -67,54 +66,6 @@ export const tokenizationSchemas: Record<string, FastifySchema> = {
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     body: { type: "object", additionalProperties: false, required: ["chainId"], properties: { chainId: { type: "string" } } },
     response: { 200: { $ref: "UseCase#" }, ...errs(400, 401, 403, 404, 502) },
-  },
-  cloneUseCaseToLive: {
-    tags: ["Use Cases"], summary: "Clone a sandbox use case into a live one (configuration only)", security: eitherCredential,
-    description:
-      "Requires the `usecases:provision` scope. THE SUPPORTED WAY OUT OF THE SANDBOX: `sandbox` cannot be changed " +
-      "on an existing use case, so this copies a sandbox one's CONFIGURATION — metadata schema, lifecycle, " +
-      "compliance rules, fees, sale terms, valuation, workflow, roles — into a brand-new LIVE use case and deploys " +
-      "fresh contracts on the real chains you name in `allowedChainIds`. IT COPIES NO DATA: no assets, holders, " +
-      "staged invoices, proposals or events come with it, and no contract address is inherited. The new key " +
-      "defaults to `<source key>-live`, may be overridden with `key`, and is echoed back as `key` on both answers. " +
-      "An Org Admin gets **202** and a **proposal** for a Platform Admin to approve — the same maker-checker " +
-      "`POST /use-cases` applies, because this creates a live use case and renaming the act must not change how it " +
-      "is governed. Cloning spans both environments, so an API key of EITHER mode is refused with " +
-      "**403 `WRONG_MODE`** (a `tl_test_` key on the live use case it would create, a `tl_live_` key on the sandbox " +
-      "one it must read): take this one from a human session. A source that is not sandbox answers " +
-      "**400 `NOT_SANDBOX`**.",
-    params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
-    body: {
-      type: "object", additionalProperties: false, required: ["allowedChainIds"],
-      properties: {
-        key: { type: "string", description: "Key for the new live use case. Defaults to `<source key>-live`. Must be free in BOTH domains." },
-        allowedChainIds: {
-          type: "array", items: { type: "string" }, minItems: 1,
-          description: "Real chains the live clone may deploy on. The `sandbox` chain is refused here (**400 `INVALID_SANDBOX_CHAINS`**).",
-        },
-        defaultChainId: { type: "string", description: "Defaults to the first of `allowedChainIds`." },
-        sandbox: {
-          type: "boolean",
-          description:
-            "Only `false` is meaningful: this route creates a LIVE use case by definition. `true` answers " +
-            "**400 `SANDBOX_NOT_CLONEABLE`** — it is declared here so it can be refused rather than dropped. To " +
-            "create a sandbox use case, `POST /use-cases` with `sandbox: true`.",
-        },
-      },
-    },
-    response: {
-      201: { $ref: "UseCase#" },
-      202: {
-        type: "object", additionalProperties: true,
-        properties: {
-          proposal: { type: "object", additionalProperties: true, description: "The pending `create-use-case` proposal — see `ProposalEnvelope`. The live use case DOES NOT EXIST YET." },
-          key: { type: "string", description: "The key the clone will have once the proposal is approved." },
-          clonedFrom: { type: "string", description: "The sandbox use case this was cloned from." },
-        },
-        required: ["proposal", "key"],
-      },
-      ...errs(400, 401, 403, 404, 409),
-    },
   },
   useCaseCode: {
     tags: ["Use Cases"], summary: "Contract code backing a use case on one allowed chain", security: humanOnly,
@@ -275,19 +226,12 @@ export const tokenizationSchemas: Record<string, FastifySchema> = {
     tags: ["Analytics"], summary: "Scope-aware dashboard summary (assets + audit + chains)", security: eitherCredential,
     description:
       "Requires the `assets:read` scope. Aggregates over exactly the assets the caller may already read, so it " +
-      "discloses nothing a direct read would refuse. SANDBOX USE CASES ARE EXCLUDED BY DEFAULT — a test asset " +
-      "inside a headline supply or tokenized-value total is a reporting defect — so pass `includeSandbox=true` to " +
-      "see them. An API key never mixes the two: it aggregates its own environment and only its own, whatever " +
-      "`includeSandbox` says.",
+      "discloses nothing a direct read would refuse.",
     querystring: {
       type: "object",
       properties: {
         useCaseKey: { type: "string" },
         days: { type: "integer", minimum: 1, maximum: 90, default: 30 },
-        includeSandbox: {
-          type: "boolean", default: false,
-          description: "Include sandbox use cases in the aggregate. Ignored for an API key, whose environment is fixed by its own mode.",
-        },
       },
     },
     response: { 200: { $ref: "Analytics#" }, ...errs(401) },
@@ -605,19 +549,12 @@ export const tokenizationSchemas: Record<string, FastifySchema> = {
   listInvoices: {
     tags: ["Invoice Register"], summary: "List staged/tokenized invoices for a use case", security: eitherCredential,
     description:
-      "Requires the `assets:read` scope. Staged and already-tokenized rows in a use case's invoice register. The " +
-      "register is the record of REAL invoices, so a SANDBOX use case's rows are withheld unless you pass " +
-      "`includeSandbox=true` — the answer is an empty list, not an error. An API key reads its own environment's " +
-      "register regardless of the flag.",
+      "Requires the `assets:read` scope. Staged and already-tokenized rows in a use case's invoice register.",
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     querystring: {
       type: "object", additionalProperties: false,
       properties: {
         status: { type: "string", enum: ["staged", "tokenized"] },
-        includeSandbox: {
-          type: "boolean", default: false,
-          description: "Return a sandbox use case's staged rows. Ignored for an API key, whose environment is fixed by its own mode.",
-        },
       },
     },
     response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(400, 401, 403, 404) },

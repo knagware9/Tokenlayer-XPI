@@ -59,18 +59,18 @@ async function storeDoc(h: TestAppHandle, contentType: string, b64: string, owne
   return { id: d.id, sha256: d.sha256 };
 }
 
-/** An org-scoped API key of the given mode, bound to a service OrgAdmin. */
-async function orgKey(h: TestAppHandle, orgId: string, scopes: string[], mode: "live" | "test" = "live"): Promise<string> {
+/** An org-scoped API key bound to a service OrgAdmin. */
+async function orgKey(h: TestAppHandle, orgId: string, scopes: string[]): Promise<string> {
   const tag = Math.random().toString(36).slice(2, 10);
   const svc = await h.users.create({
     email: `svc-design-${tag}@tokenlayer.dev`, passwordHash: bcrypt.hashSync(`unguessable-${tag}`, TEST_ROUNDS),
     role: "OrgAdmin", useCaseKey: null, accountId: null, active: true, kycStatus: "approved",
     kyc: null, orgId, kind: "service",
   });
-  const minted = await mintSecret(TEST_ROUNDS, mode);
+  const minted = await mintSecret(TEST_ROUNDS);
   await h.apiKeys.create({
     orgId, userId: svc.id, name: `key ${tag}`, prefix: minted.prefix, secretHash: minted.hash,
-    scopes, expiresAt: null, createdBy: "test", mode,
+    scopes, expiresAt: null, createdBy: "test",
   });
   return minted.secret;
 }
@@ -337,14 +337,6 @@ describe("PATCH /credential-use-cases/:key/certificate", () => {
 
     const right = await orgKey(w.h, w.orgId, ["usecases:provision"]);
     expect((await design(w, right, { credentialType: "CourseCompletion", placements: [] })).statusCode).toBe(200);
-  });
-
-  it("a tl_test_ key may not design a LIVE use case", async () => {
-    const w = await world();
-    const testKey = await orgKey(w.h, w.orgId, ["usecases:provision"], "test");
-    const res = await design(w, testKey, { credentialType: "CourseCompletion", placements: [] });
-    expect(res.statusCode).toBe(403);
-    expect(res.json().error).toBe("WRONG_MODE");
   });
 
   it("404s an unknown use case and an unknown credential type", async () => {

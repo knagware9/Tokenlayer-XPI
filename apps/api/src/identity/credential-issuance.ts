@@ -10,12 +10,28 @@
  * `deps.registry` directly.
  */
 import { randomUUID } from "node:crypto";
-import { SANDBOX_CHAIN_ID } from "@tokenlayer/core";
+import { SANDBOX_CHAIN_ID, type CredentialUseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { emitEvent } from "../shared/events.js";
 import { coded } from "../shared/executors.js";
 import type { CredentialRecord, OrganizationRecord } from "../persistence/types/index.js";
 import { isSandboxCredential, writableRegistry } from "../shared/sandbox.js";
+
+/**
+ * Carry a credential use case's `sandbox` flag forward across an update
+ * unchanged.
+ *
+ * The persistence layer writes the column from whatever is on the incoming
+ * definition (`raw.sandbox === true`), not from what is already stored, so an
+ * update built from a body that never carries the field would silently flip
+ * it to `false`. This is the one place that pin happens, so an update or
+ * re-provision route cannot forget it.
+ */
+export function preserveCredentialUseCaseEnvironment(
+  existing: CredentialUseCaseDefinition, incoming: CredentialUseCaseDefinition,
+): CredentialUseCaseDefinition {
+  return { ...incoming, sandbox: existing.sandbox };
+}
 
 export interface IssueCredentialArgs {
   issuerOrg: OrganizationRecord;
@@ -117,6 +133,19 @@ export async function issueCredentialFor(deps: AppDeps, a: IssueCredentialArgs):
     },
   });
   return credential;
+}
+
+/**
+ * `issueCredentialFor` for a caller that never issues into the withheld
+ * environment at all — e.g. the platform's own KYB-approval attestation on a
+ * real organization, which has no counterpart in that environment and always
+ * anchors for real. Keeps the underlying field required (so a genuine
+ * use-case-driven issuance path is still a compile error until someone
+ * decides which environment it belongs to) while sparing a caller that never
+ * needs to decide from spelling out the fixed answer itself.
+ */
+export async function issueLiveCredentialFor(deps: AppDeps, a: Omit<IssueCredentialArgs, "sandbox">): Promise<CredentialRecord> {
+  return issueCredentialFor(deps, { ...a, sandbox: false });
 }
 
 /** Chain FIRST, then the database — the DB is never "more revoked" than the chain. */

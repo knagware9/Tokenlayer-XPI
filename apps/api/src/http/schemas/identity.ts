@@ -29,8 +29,7 @@ export const identitySchemas: Record<string, FastifySchema> = {
     description:
       "Requires the `usecases:provision` scope — the same scope as its tokenization counterpart, because " +
       "configuring who may issue a credential is the same kind of authority as configuring who may mint a token. " +
-      "Pass `sandbox: true` for a TEST-MODE programme; the flag is fixed at creation. An Org Admin cannot use this " +
-      "route at all — `POST /credential-use-cases/provision` is theirs, and it takes the same flag. Neither a " +
+      "An Org Admin cannot use this route at all — `POST /credential-use-cases/provision` is theirs. Neither a " +
       "credential type's `certificate.background` nor its `certificate.logoDocumentId` may name a document " +
       "uploaded through `POST /orgs/{id}/branding/logo` — that organization's mark is not certificate artwork, " +
       "and it is already used automatically as the logo fallback when a type names none of its own — answering " +
@@ -49,39 +48,6 @@ export const identitySchemas: Record<string, FastifySchema> = {
     body: { type: "object", additionalProperties: true },
     response: { 200: { $ref: "CredentialUseCase#" }, ...errs(400, 401, 403, 404) },
   },
-  cloneCredentialUseCaseToLive: {
-    tags: ["Credential Use Cases"], summary: "Clone a sandbox credential use case into a live one (configuration only)", security: eitherCredential,
-    description:
-      "Requires the `usecases:provision` scope. The identity-domain twin of `POST /use-cases/{key}/clone-to-live`, " +
-      "and Platform-Admin-only with a **201** because that is what `POST /credential-use-cases` is — cloning is " +
-      "governed as the act it performs. Copies credential types, issuer binding, holder policy, verifier policy and " +
-      "certificate design into a new LIVE credential use case; copies NO credentials, holders or verification " +
-      "requests. There are no chains to choose here. The new key defaults to `<source key>-live`. An API key of " +
-      "either mode is refused with **403 `WRONG_MODE`** (the act spans both environments); a source that is not " +
-      "sandbox answers **400 `NOT_SANDBOX`**.\n\n" +
-      "The copied certificate design is REVALIDATED, not copied blind — the same check " +
-      "`POST /credential-use-cases` runs, so a source authored before that validation existed can now fail to " +
-      "clone where it previously succeeded: **400** `BACKGROUND_IS_BRAND_LOGO` / `CERTIFICATE_LOGO_IS_BRAND_LOGO` " +
-      "(an org's brand-logo document named as artwork or as a type's own logo) or `BACKGROUND_PIN_MALFORMED` / " +
-      "`BACKGROUND_DOCUMENT_MISMATCH` / `BACKGROUND_NOT_AN_IMAGE` (a background that no longer matches its digest " +
-      "or was never a PNG/JPEG).",
-    params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
-    body: {
-      type: "object", additionalProperties: false,
-      properties: {
-        key: { type: "string", description: "Key for the new live credential use case. Defaults to `<source key>-live`. Must be free in BOTH domains." },
-        sandbox: {
-          type: "boolean",
-          description:
-            "Only `false` is meaningful: this route creates a LIVE credential use case by definition. `true` answers " +
-            "**400 `SANDBOX_NOT_CLONEABLE`** — declared here so it is refused rather than dropped. To create a " +
-            "sandbox one, `POST /credential-use-cases` with `sandbox: true`, or provision it with `sandbox: true`.",
-        },
-      },
-    },
-    response: { 201: { $ref: "CredentialUseCase#" }, ...errs(400, 401, 403, 404, 409) },
-  },
-
   listUseCaseTemplates: {
     tags: ["Credential Use Cases"], summary: "List the credential-use-case template catalog (built-in + saved)", security: humanOnly,
     description: "Built-in catalog templates and saved ones together. The `body` skeleton is STRIPPED here — fetch a template by key to get it.",
@@ -104,9 +70,8 @@ export const identitySchemas: Record<string, FastifySchema> = {
     tags: ["Credential Use Cases"], summary: "Save a custom credential-use-case template (PlatformAdmin/OrgAdmin)", security: eitherCredential,
     description:
       "Requires the `usecases:provision` scope. Saves a reusable credential-use-case template. A template is " +
-      "authoring input and confers nothing until it is instantiated. It may NOT carry `sandbox` " +
-      "(**400 `SANDBOX_NOT_ON_TEMPLATE`**): the environment is chosen when the template is provisioned, so one " +
-      "template serves both. A credential type's `certificate.background` is silently stripped before storage — " +
+      "authoring input and confers nothing until it is instantiated. A credential type's `certificate.background` " +
+      "is silently stripped before storage — " +
       "artwork does not travel with a template — but `certificate.logoDocumentId` does, and naming an " +
       "organization's brand-logo document (one uploaded through `POST /orgs/{id}/branding/logo`) is refused rather " +
       "than stripped: **400** `CERTIFICATE_LOGO_IS_BRAND_LOGO`.",
@@ -262,27 +227,15 @@ export const identitySchemas: Record<string, FastifySchema> = {
     description:
       "Requires the `usecases:provision` scope. One call ensures the issuer organization, instantiates the " +
       "template's credential use case, and optionally creates scoped desk users — whose one-time passwords appear " +
-      "in **this response only** and are never retrievable again. Pass `sandbox: true` (at the TOP LEVEL, beside " +
-      "`templateKey`) to stand the programme up in TEST MODE — this is the way to create a sandbox credential " +
-      "programme, and the only one available to an Org Admin. The same template serves both environments, so " +
-      "`sandbox` is never written into the template itself. If the template's `certificate.logoDocumentId` names an " +
-      "organization's brand-logo document (checked again here, not just at template-save time, so a template saved " +
-      "before that check existed cannot smuggle one through), the call answers **400** " +
+      "in **this response only** and are never retrievable again. If the template's `certificate.logoDocumentId` " +
+      "names an organization's brand-logo document (checked again here, not just at template-save time, so a " +
+      "template saved before that check existed cannot smuggle one through), the call answers **400** " +
       "`CERTIFICATE_LOGO_IS_BRAND_LOGO` before anything is created.",
     body: {
       type: "object", additionalProperties: true, required: ["templateKey", "params"],
       properties: {
         templateKey: { type: "string" },
         params: { type: "object", additionalProperties: true },
-        sandbox: {
-          type: "boolean",
-          description:
-            "Create the programme in TEST MODE — see `CredentialUseCase.sandbox`. Defaults to `false`, so every " +
-            "existing caller is unaffected. Put it HERE, not inside `provisioning`: the nested spelling answers " +
-            "**400 `SANDBOX_MISPLACED`** rather than being ignored, because a dropped flag would return **201** for " +
-            "a LIVE programme you believed was a sandbox. Re-provisioning with the other value answers " +
-            "**409 `SANDBOX_IMMUTABLE`**; omitting it on a re-provision leaves the stored environment untouched.",
-        },
         provisioning: { type: "object", additionalProperties: true },
       },
     },
@@ -366,17 +319,7 @@ export const identitySchemas: Record<string, FastifySchema> = {
     tags: ["Identity"], summary: "Scoped identity operations dashboard (credential lifecycle + verification aggregates)", security: eitherCredential,
     description:
       "Requires the `credentials:read` scope. Aggregates the credential lifecycle and verification activity already " +
-      "inside the caller's scope. Sandbox programmes are excluded by default, exactly as in `GET /analytics`; pass " +
-      "`includeSandbox=true` for them.",
-    querystring: {
-      type: "object",
-      properties: {
-        includeSandbox: {
-          type: "boolean", default: false,
-          description: "Include sandbox credential use cases. Ignored for an API key, whose environment is fixed by its own mode.",
-        },
-      },
-    },
+      "inside the caller's scope.",
     // Loose 200: the nested fold output would be silently stripped by
     // fast-json-stringify under a typed schema (the standing lesson).
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403) },
@@ -599,10 +542,7 @@ export const identitySchemas: Record<string, FastifySchema> = {
       "**Read `source` before you trust `revoked`.** `chain` means the answer came from the on-chain VC registry; " +
       "`database` means it did not — either nothing is anchored, or the chain read FAILED and this fell back to our " +
       "own record. The two are indistinguishable in `source` alone, so a verifier with a hard requirement on " +
-      "on-chain proof must require `source === \"chain\"` rather than merely reading `revoked`.\n\n" +
-      "`sandbox` is the third value (EN-D2): the credential was issued in a SANDBOX use case, so it was never " +
-      "anchored and never will be — nothing about it exists on any chain. That is a design property, not a failure, " +
-      "and it is reported separately from `database` precisely so it cannot be mistaken for one.",
+      "on-chain proof must require `source === \"chain\"` rather than merely reading `revoked`.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: {
       200: {
@@ -617,10 +557,7 @@ export const identitySchemas: Record<string, FastifySchema> = {
           // lifecycle simply omits it.
           acceptance: { type: "string", enum: ["pending", "accepted", "rejected", "changes_requested"], description: "The holder's acceptance state. ABSENT for a credential that predates the acceptance lifecycle." },
           anchored: { type: "boolean", description: "Whether this credential was found in the on-chain registry." },
-          source: { type: "string", enum: ["chain", "database", "sandbox"], description: "Where `revoked` came from. `database` also covers an on-chain read that failed. `sandbox` means the credential belongs to a sandbox use case and is unanchored by design." },
-          // Declared, or fast-json-stringify strips it and the honest answer
-          // above silently becomes the ambiguous one.
-          sandbox: { type: "boolean", description: "Present and true only for a credential issued in a SANDBOX use case: never anchored, by design (EN-D2)." },
+          source: { type: "string", enum: ["chain", "database"], description: "Where `revoked` came from. `database` also covers an on-chain read that failed." },
           chainId: { type: "string", description: "Chain-source only." },
           registry: { type: "string", description: "The VC registry contract address. Chain-source only." },
           vcHash: { type: "string", description: "The anchored hash of the credential. Chain-source only." },

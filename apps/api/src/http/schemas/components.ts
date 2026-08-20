@@ -182,21 +182,6 @@ export const components: Record<string, unknown>[] = [
         },
       },
       roles: { type: "array", items: { type: "string" } },
-      // EN-D2. DECLARED, not merely tolerated: the component is
-      // `additionalProperties: true`, so the flag always travelled — but an
-      // integrator reading the reference could not see that it exists, and a
-      // field nobody can find is a feature nobody can use. Optional on input
-      // and always present on output (false when it was never set).
-      sandbox: {
-        type: "boolean",
-        description:
-          "Test mode. `true` makes this a SANDBOX use case: it may allow ONLY the `sandbox` chain (an always-simulated " +
-          "ledger — no environment variable promotes it to a real backend), only a `tl_test_` key may act on it, its " +
-          "events go only to `test` webhook endpoints, and it is excluded from analytics unless asked for by name. " +
-          "SET AT CREATION AND NEVER AFTER (**409 `SANDBOX_IMMUTABLE`**) — use `POST /use-cases/{key}/clone-to-live` " +
-          "to promote the configuration into a real use case. Defaults to `false`: every call that omits it creates a " +
-          "live use case, exactly as before.",
-      },
     },
     required: ["key", "name", "tokenStandard", "symbol", "allowedChainIds", "defaultChainId", "metadataSchema", "lifecycle", "compliance", "roles"],
   },
@@ -215,18 +200,6 @@ export const components: Record<string, unknown>[] = [
       verifier: { type: "object", additionalProperties: true },
       ownerOrgId: { type: "string", nullable: true },
       status: { type: "string" },
-      // The identity-domain twin of `UseCase.sandbox`, and declared for the
-      // same reason. There are no chains here, so the whole of the difference
-      // is who may act on it and where its events go.
-      sandbox: {
-        type: "boolean",
-        description:
-          "Test mode. `true` makes this a SANDBOX credential programme: only a `tl_test_` key may act on it, nothing " +
-          "issued under it is a real credential, its events reach only `test` webhook endpoints, and it stays out of " +
-          "the identity dashboard's totals unless asked for by name. SET AT CREATION AND NEVER AFTER " +
-          "(**409 `SANDBOX_IMMUTABLE`**) — use `POST /credential-use-cases/{key}/clone-to-live` to promote the " +
-          "configuration. Defaults to `false`.",
-      },
     },
     required: ["key", "name", "credentialTypes", "issuer", "holderPolicy", "verifier"],
   },
@@ -667,19 +640,8 @@ export const components: Record<string, unknown>[] = [
       revokedBy: { type: "string", nullable: true },
       createdBy: { type: "string" },
       createdAt: { type: "string" },
-      // EN-D2 (D2-8). DECLARED, not merely projected: fast-json-stringify
-      // serialises against this schema and silently strips anything it does
-      // not name, so a `mode` added to `apiKeyView` and not to this list would
-      // vanish between the handler and the wire — with nothing failing.
-      mode: {
-        type: "string", enum: ["live", "test"],
-        description:
-          "Which environment this key acts in. A `test` key reads `tl_test_…`, acts ONLY on sandbox use cases and is " +
-          "refused **403 `WRONG_MODE`** on real ones; a `live` key is the mirror. Fixed at creation — rotation " +
-          "preserves it, and there is no route that moves a key between environments.",
-      },
     },
-    required: ["id", "orgId", "userId", "name", "prefix", "scopes", "status", "createdBy", "createdAt", "mode"],
+    required: ["id", "orgId", "userId", "name", "prefix", "scopes", "status", "createdBy", "createdAt"],
   },
   {
     $id: "WebhookEndpoint",
@@ -705,15 +667,8 @@ export const components: Record<string, unknown>[] = [
       createdBy: { type: "string" },
       createdAt: { type: "string" },
       lastDeliveryAt: { type: "string", nullable: true },
-      mode: {
-        type: "string", enum: ["live", "test"],
-        description:
-          "Which stream this endpoint receives. A `test` endpoint hears ONLY sandbox events and a `live` one ONLY " +
-          "real ones — the two never cross, so a sandbox event can never reach a production handler. Fixed at " +
-          "registration: an endpoint cannot be moved between streams.",
-      },
     },
-    required: ["id", "url", "eventTypes", "status", "consecutiveFailures", "consecutiveGuardFailures", "createdBy", "createdAt", "mode"],
+    required: ["id", "url", "eventTypes", "status", "consecutiveFailures", "consecutiveGuardFailures", "createdBy", "createdAt"],
   },
   {
     $id: "WebhookDelivery",
@@ -756,15 +711,8 @@ export const components: Record<string, unknown>[] = [
       subjectId: { type: "string", nullable: true, description: "The id of the thing the event is about (asset, credential, verification request…)." },
       data: { type: "object", additionalProperties: true, description: "Per-type payload. Its shape follows `type`; treat unknown keys as forward-compatible additions." },
       occurredAt: { type: "string" },
-      mode: {
-        type: "string", enum: ["live", "test"],
-        description:
-          "`test` if the use case that produced this fact is a sandbox one, else `live`. DERIVED from that use case " +
-          "— never set by the caller — and an event with no use case is `live`. You do not need to check it to stay " +
-          "safe: a `test` event is only ever delivered to a `test` endpoint. It is here so a fact is self-describing.",
-      },
     },
-    required: ["seq", "id", "type", "data", "occurredAt", "mode"],
+    required: ["seq", "id", "type", "data", "occurredAt"],
   },
   {
     $id: "VerificationRequest",

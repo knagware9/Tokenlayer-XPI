@@ -2,10 +2,10 @@
  * EN-D2, THE THIRD RULE: **a sandbox act must never produce a real on-chain
  * write.**
  *
- * The feature shipped with two rules and a hole between them. `sandboxChainsValid`
- * governs which chains a USE CASE may name, and `modeGate` governs which
- * PRINCIPAL may act on it — between them they cover everything that reaches a
- * ledger through `deps.chains.resolveAdapter(useCase.chainId)`. The platform's
+ * The feature shipped with two rules and a hole between them: which chains a
+ * USE CASE may name, and which PRINCIPAL may act on it — between them they
+ * cover everything that reaches a ledger through
+ * `deps.chains.resolveAdapter(useCase.chainId)`. The platform's
  * identity registries do not: they live on ONE chain (`REGISTRY_CHAIN_ID`,
  * `besu` in practice) and are reached through `deps.registry`, which is resolved
  * once at boot and consults no use case at all. A live walkthrough proved the
@@ -41,11 +41,10 @@ import type { IdentityRegistry } from "../identity/registry.js";
  * The identity registry a WRITE may use — `undefined` for a sandbox act.
  *
  * Used by credential issuance and revocation. The other registry writers are
- * either sandbox-aware in their own right (`ensureOrg`, which takes the same
- * flag) or deliberately live-only — the boot-time platform-org bootstrap,
- * `POST /orgs`, and `POST /orgs/:id/approve`, all platform governance that a
+ * deliberately live-only — the boot-time platform-org bootstrap, `POST /orgs`,
+ * `POST /orgs/:id/approve`, and `ensureOrg`, all platform governance that a
  * machine principal cannot reach and that has no sandbox counterpart. Each says
- * so where it sits; there is no fourth kind.
+ * so where it sits; there is no third kind.
  */
 export function writableRegistry(deps: AppDeps, sandbox: boolean): IdentityRegistry | undefined {
   return sandbox ? undefined : deps.registry;
@@ -60,7 +59,7 @@ export function writableRegistry(deps: AppDeps, sandbox: boolean): IdentityRegis
  * exactly that case — it issues a KycCredential whose governing use case is a
  * TOKENIZATION one.
  *
- * AN UNRESOLVABLE KEY READS AS LIVE, matching `modeGate` and `deriveMode`
+ * AN UNRESOLVABLE KEY READS AS LIVE, matching `deriveMode`
  * rather than inventing a third default. It is the pre-EN-D2 answer, so a
  * deployment with no sandbox anywhere behaves byte-for-byte as it did; and the
  * alternative — defaulting a vanished use case to sandbox — would silently stop
@@ -90,8 +89,8 @@ export async function isSandboxUseCase(deps: AppDeps, useCaseKey: string | null 
  *      as a belt so that a credential issued before this fix (no marker on the
  *      row) is still not revoked on a real chain.
  *
- * `sandbox` is immutable on a use case (`sandboxImmutable`), so (2) cannot
- * change under a credential's feet.
+ * `sandbox` is immutable on a use case once created, so (2) cannot change
+ * under a credential's feet.
  */
 export async function isSandboxCredential(
   deps: AppDeps,

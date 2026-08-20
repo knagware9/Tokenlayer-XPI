@@ -4,44 +4,11 @@
  * database yields no working credential (an unsalted-hash lookup would).
  */
 import { createHash, randomBytes } from "node:crypto";
-import type { ResourceMode } from "@tokenlayer/core";
 import bcrypt from "bcryptjs";
 
-/**
- * Public marker distinguishing a key from a JWT in the Authorization header —
- * and, since EN-D2, which WORLD the key belongs to.
- *
- * ONE MAP, read by both the mint and the parse. The record already carries a
- * `mode`, so the string buys exactly one thing the column cannot: a human
- * reading a log line, a screenshot or a config file can SEE that a `tl_test_`
- * secret is not a production credential. Two secrets that look identical and
- * behave completely differently is how a test key reaches a production config,
- * or a live key a laptop's `.env`, with nothing in the string to catch it.
- *
- * A third mode is one entry here and nothing else — which is the point of the
- * map over two literals. Nothing outside this module may hardcode a marker:
- * a mint/parse pair that drifts would accept a secret it can never issue, or
- * issue one it can never accept.
- *
- * Typed as a TOTAL record over `ResourceMode`, so adding a mode to core without
- * giving it a marker fails the build rather than minting a marker-less secret.
- */
-export const KEY_PREFIX_MARKERS: Record<ResourceMode, string> = {
-  live: "tl_live_",
-  test: "tl_test_",
-};
+/** Every key carries this prefix — there is only one kind of key now. */
+export const KEY_PREFIX_MARKER = "tl_live_";
 
-/**
- * The pre-EN-D2 name, kept as the LIVE marker for the display and redaction
- * sites that legitimately mean "the ordinary key". Anything that must handle
- * both must read the map, not this.
- */
-export const KEY_PREFIX_MARKER = KEY_PREFIX_MARKERS.live;
-
-/** Marker → the mode it claims. Built from the map so it cannot fall behind it. */
-const MODE_BY_MARKER = new Map<string, ResourceMode>(
-  (Object.entries(KEY_PREFIX_MARKERS) as [ResourceMode, string][]).map(([mode, marker]) => [marker, mode]),
-);
 /** Chars of the secret body kept in the clear, for display and the indexed lookup. */
 const PREFIX_LEN = 8;
 /**
@@ -62,44 +29,31 @@ export interface MintedSecret {
   hash: string;
 }
 
-/**
- * `mode` DEFAULTS TO LIVE, which is the pre-EN-D2 behaviour of every existing
- * call site rather than a guess: a key is live unless something deliberately
- * asks for a sandbox one. The hash covers the FULL secret, marker included, so
- * re-labelling a body cannot produce a credential that verifies.
- */
-export async function mintSecret(rounds: number, mode: ResourceMode = "live"): Promise<MintedSecret> {
+/** The hash covers the FULL secret, marker included. */
+export async function mintSecret(rounds: number): Promise<MintedSecret> {
   const body = Array.from(randomBytes(BODY_LEN), (b) => ALPHABET[b % ALPHABET.length]).join("");
-  const secret = `${KEY_PREFIX_MARKERS[mode]}${body}`;
+  const secret = `${KEY_PREFIX_MARKER}${body}`;
   return { secret, prefix: body.slice(0, PREFIX_LEN), hash: await bcrypt.hash(secret, rounds) };
 }
 
-/** What a raw credential's marker claims: its lookup prefix and its mode. */
+/** What a raw credential's marker claims: its lookup prefix. */
 export interface ClaimedKey {
   /** The indexed lookup prefix — the first `PREFIX_LEN` chars of the BODY. */
   prefix: string;
-  /**
-   * The mode THE STRING claims. Not yet trusted: the caller must check it
-   * against the mode on the row it resolves (see `requirePrincipal`).
-   */
-  mode: ResourceMode;
 }
 
 /**
  * What a raw credential claims, or null when it isn't a key at all — null is
  * the signal to take the JWT path, so this must never throw.
  *
- * A string carrying NEITHER marker is null, not a live key: `tl_prod_…` is
- * refused rather than quietly accepted, so an invented marker can never widen
- * what authenticates.
+ * A string carrying no marker is null, not a live key: an unmarked or
+ * differently-prefixed string is refused rather than quietly accepted, so an
+ * invented marker can never widen what authenticates.
  */
 export function prefixOf(raw: string): ClaimedKey | null {
-  for (const [marker, mode] of MODE_BY_MARKER) {
-    if (!raw.startsWith(marker)) continue;
-    const body = raw.slice(marker.length);
-    return body.length >= PREFIX_LEN ? { prefix: body.slice(0, PREFIX_LEN), mode } : null;
-  }
-  return null;
+  if (!raw.startsWith(KEY_PREFIX_MARKER)) return null;
+  const body = raw.slice(KEY_PREFIX_MARKER.length);
+  return body.length >= PREFIX_LEN ? { prefix: body.slice(0, PREFIX_LEN) } : null;
 }
 
 /** Constant-time by construction — bcrypt.compare does not short-circuit. */
