@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FastifyInstance, InjectOptions } from "fastify";
-import { ACCOUNTS, auth, buildTestApp, issueAsset, loginAs, onboardUser, V1 } from "./helpers.js";
+import { ACCOUNTS, auth, buildTestApp, buildTestAppWithRepos, issueAsset, loginAs, onboardUser, V1 } from "./helpers.js";
 
 let app: FastifyInstance;
 beforeAll(async () => {
@@ -816,7 +816,12 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
   });
 
   it("buy 400 NO_WALLET when buyer has no linked wallet", async () => {
-    const app = await buildTestApp();
+    // A Buyer's own onboarding path auto-assigns a wallet now, so a walletless
+    // Buyer only arises from a legacy row that predates that — simulated here
+    // by resetting accountId directly on the repository after onboarding,
+    // rather than through any route (there is deliberately no route that can
+    // produce one anymore).
+    const { app, users } = await buildTestAppWithRepos();
     const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     const carbonAdmin = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
 
@@ -835,9 +840,9 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
       },
     })).json().asset.id as string;
 
-    // Onboard a Buyer WITHOUT a walletAddress (gated + checked by the platform admin)
     const createdBuyer = await onboardUser(app, carbonAdmin, platform, { email: "nowallet@x.dev", password: "secret1", role: "Buyer" });
-    expect(createdBuyer.accountId).toBeNull();
+    await users.update(createdBuyer.id, { accountId: null });
+    expect((await users.findById(createdBuyer.id))?.accountId).toBeNull();
 
     // KYC-approve the buyer
     await app.inject({

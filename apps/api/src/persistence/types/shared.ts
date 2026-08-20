@@ -65,6 +65,7 @@ export interface AuditEntryRecord {
 export interface UserRepository {
   findByEmail(email: string): Promise<UserRecord | null>;
   findById(id: string): Promise<UserRecord | null>;
+  findByAccountId(accountId: string): Promise<UserRecord | null>;
   /** `kind` is optional and defaults to "human" — mirrors the column default. */
   create(input: Omit<UserRecord, "id" | "createdAt" | "kind"> & { kind?: UserKind }): Promise<UserRecord>;
   list(useCaseKey?: string): Promise<UserRecord[]>;

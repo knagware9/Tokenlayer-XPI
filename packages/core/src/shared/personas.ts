@@ -276,6 +276,10 @@ export const PERSONAS: readonly PersonaDef[] = [
       // sit in STAFF_BASELINE, or an identity-only deployment would expose it
       // at its edge and then fail inside the handler on DOMAIN_NOT_ENABLED.
       { prefix: "/reconciliation", methods: ["GET"], why: "believed-vs-chain supply, per asset, next to the audit console" },
+      // Issuer is one of the three roles that can hold tokens — not staff-wide
+      // (an Auditor or UseCaseAdmin can never link one), so this sits here and
+      // in tokenization-marketplace rather than STAFF_BASELINE or BASELINE.
+      { prefix: "/me/wallet", methods: ["PATCH"], why: "link or replace the treasury's own wallet address" },
     ],
   },
   {
@@ -289,6 +293,7 @@ export const PERSONAS: readonly PersonaDef[] = [
     allow: [
       { prefix: "/me/portfolio", methods: ["GET"], why: "own holdings" },
       { prefix: "/me/activity", methods: ["GET"], why: "own transaction history" },
+      { prefix: "/me/wallet", methods: ["PATCH"], why: "link or replace one's own wallet address" },
       // READ-ONLY on the asset surface, plus the two actions an investor takes.
       // A bare `/assets` ALL rule would hand a retail user mint and freeze.
       { prefix: "/assets", methods: ["GET"], why: "browse offerings and their detail" },

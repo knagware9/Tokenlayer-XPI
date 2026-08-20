@@ -228,6 +228,9 @@ export class MemoryAccountRepository implements AccountRepository {
   async findById(accountId: string): Promise<AccountRecord | null> {
     return [...this.byAddress.values()].find((a) => a.id === accountId) ?? null;
   }
+  async findByAddress(address: string): Promise<AccountRecord | null> {
+    return this.byAddress.get(address) ?? null;
+  }
   async upsert(address: string, label: string): Promise<AccountRecord> {
     const existing = this.byAddress.get(address);
     if (existing) {

@@ -58,6 +58,7 @@ export interface AssetRepository {
 export interface AccountRepository {
   list(): Promise<AccountRecord[]>;
   findById(id: string): Promise<AccountRecord | null>;
+  findByAddress(address: string): Promise<AccountRecord | null>;
   upsert(address: string, label: string): Promise<AccountRecord>;
 }
 

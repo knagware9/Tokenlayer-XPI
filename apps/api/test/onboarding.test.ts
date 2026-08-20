@@ -176,6 +176,32 @@ describe("gated onboarding — no KYC", () => {
   });
 });
 
+describe("gated onboarding — wallet auto-assignment", () => {
+  it("a Buyer onboarded with no walletAddress gets one auto-assigned", async () => {
+    const app = await buildTestApp();
+    const carbon = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+
+    const res = await propose(app, carbon, { email: "autowallet.buyer@x.dev", password: "secret1", role: "Buyer" });
+    await approve(app, admin, (res.json().proposal as Proposal).id);
+
+    const user = (await listUsers(app, admin)).find((u) => u.email === "autowallet.buyer@x.dev") as { accountId: string | null };
+    expect(user.accountId).not.toBeNull();
+  });
+
+  it("an Auditor onboarded with no walletAddress stays without one", async () => {
+    const app = await buildTestApp();
+    const carbon = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+
+    const res = await propose(app, carbon, { email: "noaudit.wallet@x.dev", password: "secret1", role: "Auditor" });
+    await approve(app, admin, (res.json().proposal as Proposal).id);
+
+    const user = (await listUsers(app, admin)).find((u) => u.email === "noaudit.wallet@x.dev") as { accountId: string | null };
+    expect(user.accountId).toBeNull();
+  });
+});
+
 describe("gated identity revocation — chain-backed", () => {
   it("revokes the credential on-chain, flips kycStatus, keeps login, and blocks allowlisting", async () => {
     const anchor = new FakeAnchor();

@@ -2034,6 +2034,27 @@
         }
       }
     },
+    "/api/v1/me/wallet": {
+      "patch": {
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [],
+        "requestBody": true,
+        "responses": {
+          "200": "{accountId,walletAddress}",
+          "400": "#Error",
+          "401": "#Error",
+          "409": "#Error"
+        }
+      }
+    },
     "/api/v1/orgs": {
       "get": {
         "tags": [

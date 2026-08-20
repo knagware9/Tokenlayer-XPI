@@ -20,6 +20,9 @@ export class MemoryUserRepository implements UserRepository {
   async findById(userId: string): Promise<UserRecord | null> {
     return this.byId.get(userId) ?? null;
   }
+  async findByAccountId(accountId: string): Promise<UserRecord | null> {
+    return [...this.byId.values()].find((u) => u.accountId === accountId) ?? null;
+  }
   async create(input: Omit<UserRecord, "id" | "createdAt" | "kind"> & { kind?: UserKind }): Promise<UserRecord> {
     const rec: UserRecord = { ...input, kind: input.kind ?? "human", id: id("user"), createdAt: now() };
     this.byId.set(rec.id, rec);

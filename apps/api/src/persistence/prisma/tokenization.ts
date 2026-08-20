@@ -89,6 +89,10 @@ export class PrismaAccountRepository implements AccountRepository {
     const r = await prisma.account.findUnique({ where: { id } });
     return r ? { id: r.id, address: r.address, label: r.label } : null;
   }
+  async findByAddress(address: string): Promise<AccountRecord | null> {
+    const r = await prisma.account.findUnique({ where: { address } });
+    return r ? { id: r.id, address: r.address, label: r.label } : null;
+  }
   async upsert(address: string, label: string): Promise<AccountRecord> {
     return prisma.account.upsert({
       where: { address },

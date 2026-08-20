@@ -5,10 +5,39 @@ import { getOrCreateDeviceKey } from "../../lib/shared/device-wallet.js";
 import type { LoginKeyInfo } from "../../types.js";
 import { Card, SectionHeader } from "./ui.js";
 
+/** Mirrors the backend's WALLET_ELIGIBLE_ROLES (apps/api/src/shared/wallets.ts)
+ *  — the only roles PATCH /me/wallet will ever accept. Kept inline, not a
+ *  shared constant: the backend is the enforcement, this is only a UI gate to
+ *  avoid showing a control that would always 400. */
+const WALLET_ELIGIBLE_ROLES = new Set(["Buyer", "Trader", "Issuer"]);
+
 /** A read-only snapshot of the signed-in user's account and identity. */
 export function MyProfile({ onSelect }: { onSelect: (id: string) => void }): JSX.Element {
-  const { token, user } = useAuth();
+  const { token, user, setSession } = useAuth();
   const [copied, setCopied] = useState(false);
+
+  const walletEligible = !!user?.role && WALLET_ELIGIBLE_ROLES.has(user.role);
+  const [walletInput, setWalletInput] = useState("");
+  const [walletBusy, setWalletBusy] = useState(false);
+  const [walletError, setWalletError] = useState<string | null>(null);
+
+  const linkWallet = async (): Promise<void> => {
+    if (!token || !user || !walletInput.trim()) return;
+    setWalletBusy(true);
+    setWalletError(null);
+    try {
+      const result = await api.updateMyWallet(token, walletInput.trim());
+      // PATCH /me/wallet returns the new address directly — GET /me does not
+      // (see refreshSession's own comment), so merge it in here rather than
+      // refreshing the session.
+      setSession(token, { ...user, walletAddress: result.walletAddress });
+      setWalletInput("");
+    } catch (e) {
+      setWalletError(e instanceof ApiError ? e.message : "Could not link that wallet address.");
+    } finally {
+      setWalletBusy(false);
+    }
+  };
   // The organization name comes from the user's OrganizationMembership credential
   // (operators hold one without a tenancy orgId), falling back to any orgId.
   const [orgName, setOrgName] = useState<string | null>(null);
@@ -178,6 +207,37 @@ export function MyProfile({ onSelect }: { onSelect: (id: string) => void }): JSX
           </div>
         </Card>
       </div>
+
+      {walletEligible && (
+        <div className="mt-6">
+          <Card
+            title="Wallet"
+            description="Link the address you actually hold, replacing the one assigned when your account was created."
+          >
+            {walletError && (
+              <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">
+                {walletError}
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={walletInput}
+                onChange={(e) => setWalletInput(e.target.value)}
+                placeholder={user?.walletAddress ?? "0x…"}
+                className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-xs font-mono text-slate-900 focus:border-brand-500 focus:outline-none"
+              />
+              <button
+                onClick={() => void linkWallet()}
+                disabled={walletBusy || !walletInput.trim()}
+                className="shrink-0 inline-flex items-center rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {walletBusy ? "Linking…" : "Link"}
+              </button>
+            </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

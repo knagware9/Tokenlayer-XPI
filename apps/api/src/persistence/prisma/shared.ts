@@ -54,6 +54,10 @@ export class PrismaUserRepository implements UserRepository {
     const r = await prisma.user.findUnique({ where: { id } });
     return r ? toUser(r) : null;
   }
+  async findByAccountId(accountId: string): Promise<UserRecord | null> {
+    const r = await prisma.user.findFirst({ where: { accountId } });
+    return r ? toUser(r) : null;
+  }
   async create(input: Omit<UserRecord, "id" | "createdAt" | "kind"> & { kind?: UserKind }): Promise<UserRecord> {
     return toUser(await prisma.user.create({ data: { ...input, kind: input.kind ?? "human", kyc: input.kyc ? JSON.stringify(input.kyc) : null } }));
   }

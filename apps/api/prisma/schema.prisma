@@ -22,7 +22,7 @@ model User {
   passwordHash String
   role         String
   useCaseKey   String?  // null = global Platform Admin
-  accountId    String?  // wallet link for Buyer/Trader
+  accountId    String?  // wallet link for Buyer/Trader/Issuer
   active       Boolean  @default(true)
   kycStatus    String   @default("approved")
   kyc          String?

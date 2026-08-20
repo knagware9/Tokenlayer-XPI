@@ -24,6 +24,14 @@ describe("MemoryUserRepository", () => {
     await repo.remove(a.id);
     expect(await repo.findById(a.id)).toBeNull();
   });
+
+  it("finds the user linked to a given account id", async () => {
+    const repo = new MemoryUserRepository();
+    const a = await repo.create({ email: "a@x.dev", passwordHash: "h", role: "Buyer", useCaseKey: "carbon-credit", accountId: null, active: true, kycStatus: "approved", kyc: null });
+    expect(await repo.findByAccountId("acct_1")).toBeNull();
+    await repo.update(a.id, { accountId: "acct_1" });
+    expect((await repo.findByAccountId("acct_1"))?.id).toBe(a.id);
+  });
 });
 
 describe("MemoryAccountRepository", () => {
@@ -32,5 +40,14 @@ describe("MemoryAccountRepository", () => {
     const acct = await repo.upsert("0xabc", "EcoFund");
     expect((await repo.findById(acct.id))?.label).toBe("EcoFund");
     expect(await repo.findById("nope")).toBeNull();
+  });
+
+  it("finds by address without mutating an existing row's label", async () => {
+    const repo = new MemoryAccountRepository();
+    const acct = await repo.upsert("0xabc", "EcoFund");
+    expect(await repo.findByAddress("0xdoesnotexist")).toBeNull();
+    const found = await repo.findByAddress("0xabc");
+    expect(found?.id).toBe(acct.id);
+    expect(found?.label).toBe("EcoFund");
   });
 });

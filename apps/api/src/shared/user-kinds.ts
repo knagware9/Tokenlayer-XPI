@@ -11,6 +11,7 @@ import type { TokenClaims } from "../http/support.js";
 import { PLATFORM_ORG_NAME } from "./platform-org.js";
 import type { ProposalKindHandler } from "./proposal-kinds.js";
 import type { ProposalRecord } from "../persistence/types/index.js";
+import { resolveAccountId } from "./wallets.js";
 
 /** PlatformAdmin always; a UseCaseAdmin of the SAME use case. Never null-matches. */
 const userScopedView = async (_deps: AppDeps, claims: TokenClaims, p: ProposalRecord): Promise<boolean> =>
@@ -65,8 +66,7 @@ async function resolveIssuerOrg(deps: AppDeps, useCaseKey: string | null) {
 async function onboardSingle(deps: AppDeps, proposer: Actor, pl: OnboardUserPayload, p: ProposalRecord): Promise<void> {
   // Re-check the email — it may have been taken since propose (race ⇒ failed proposal).
   if (await deps.users.findByEmail(pl.email)) throw coded(409, "EMAIL_TAKEN", "email already registered");
-  let accountId: string | null = null;
-  if (pl.walletAddress) accountId = (await deps.accounts.upsert(pl.walletAddress, pl.email)).id;
+  const accountId = await resolveAccountId(deps, pl.role, pl.walletAddress, pl.email);
   const created = await deps.users.create({
     email: pl.email, passwordHash: pl.passwordHash, role: pl.role, useCaseKey: pl.useCaseKey,
     accountId, active: true, kycStatus: "pending", kyc: pl.kyc ?? null, kind: "human",

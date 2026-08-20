@@ -106,6 +106,32 @@ describe("POST /orgs/:id/users (members)", () => {
     expect(members.json().length).toBeGreaterThanOrEqual(1);
     expect(members.json()[0]).toHaveProperty("did");
   });
+
+  it("a member added with an eligible role gets a wallet auto-assigned", async () => {
+    const org = (await createOrg(admin, { name: "Wallet Org", orgType: "corporate" })).json();
+    const email = `trader.${org.id}@x.io`;
+    const res = await app.inject({
+      method: "POST", url: `${V1}/orgs/${org.id}/users`, headers: auth(admin),
+      payload: { email, password: "secret1", role: "Trader" },
+    });
+    expect(res.statusCode).toBe(201);
+    const listed = await app.inject({ method: "GET", url: `${V1}/users`, headers: auth(admin) });
+    const member = (listed.json() as Array<{ email: string; accountId: string | null }>).find((u) => u.email === email);
+    expect(member?.accountId).not.toBeNull();
+  });
+
+  it("a member added with an ineligible role stays without a wallet", async () => {
+    const org = (await createOrg(admin, { name: "No Wallet Org", orgType: "corporate" })).json();
+    const email = `auditor.${org.id}@x.io`;
+    const res = await app.inject({
+      method: "POST", url: `${V1}/orgs/${org.id}/users`, headers: auth(admin),
+      payload: { email, password: "secret1", role: "Auditor" },
+    });
+    expect(res.statusCode).toBe(201);
+    const listed = await app.inject({ method: "GET", url: `${V1}/users`, headers: auth(admin) });
+    const member = (listed.json() as Array<{ email: string; accountId: string | null }>).find((u) => u.email === email);
+    expect(member?.accountId).toBeNull();
+  });
 });
 
 describe("GET /dids/:did/document", () => {

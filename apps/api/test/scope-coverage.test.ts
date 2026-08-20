@@ -70,6 +70,7 @@ const DELIBERATELY_UNSCOPED: Record<string, string> = {
   "POST /orgs/:id/capabilities/request": "drafts only; the change applies via org-capability-change, which no key may approve",
 
   // --- self-affecting: acts on the caller's own artefacts, grants nothing ---
+  "PATCH /me/wallet": "links or replaces the caller's OWN wallet address (claims.id, never attacker-chosen); confers no authority over anyone",
   "DELETE /me/login-keys/:id": "removes the caller's OWN device key; revoking access needs no scope",
   "POST /me/credentials/:id/accept": "the caller's OWN held credential; confers no authority over anyone",
   "POST /me/credentials/:id/reject": "the caller's OWN held credential; confers no authority over anyone",

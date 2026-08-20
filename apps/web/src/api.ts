@@ -256,6 +256,10 @@ export const api = {
   // The live session principal. Returns LESS than SessionUser (no email/orgId/
   // did/walletAddress) — callers merge it over the stored user, never replace.
   me: (token: string) => request<SessionPrincipal>("/me", token),
+  // 400 ROLE_CANNOT_HOLD_WALLET if the caller's role can't hold tokens; 409
+  // ADDRESS_IN_USE if the address already belongs to a different user.
+  updateMyWallet: (token: string, walletAddress: string) =>
+    request<{ accountId: string; walletAddress: string }>("/me/wallet", token, { method: "PATCH", body: JSON.stringify({ walletAddress }) }),
   mePortfolio: (token: string) => request<Portfolio>("/me/portfolio", token),
   meActivity: (token: string) => request<ActivityEvent[]>("/me/activity", token),
   orgs: (token: string) => request<Organization[]>("/orgs", token),

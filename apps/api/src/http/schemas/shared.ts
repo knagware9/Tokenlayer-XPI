@@ -64,6 +64,25 @@ export const sharedSchemas: Record<string, FastifySchema> = {
       },
       ...errs(401),
     } },
+  updateMyWallet: {
+    tags: ["Auth"], summary: "Link or replace the caller's own wallet address", security: humanOnly,
+    description:
+      "Sets the address the caller's account holds tokens at, overwriting any wallet that was auto-assigned (or " +
+      "previously linked) — the usual path from a placeholder address to a real, self-owned one. Only a role that " +
+      "can hold tokens may call this; the address must not already belong to a different user's account.",
+    body: {
+      type: "object", additionalProperties: false, required: ["walletAddress"],
+      properties: { walletAddress: { type: "string", minLength: 1 } },
+    },
+    response: {
+      200: {
+        type: "object", additionalProperties: true,
+        properties: { accountId: { type: "string" }, walletAddress: { type: "string" } },
+        required: ["accountId", "walletAddress"],
+      },
+      ...errs(400, 401, 409),
+    },
+  },
   config: {
     tags: ["Config"], summary: "Deployment configuration (enabled domains)", security: humanOnly,
     description: "What this DEPLOYMENT has switched on — not what the caller may do. A domain listed here can still be closed to a given org by its capability envelope.",

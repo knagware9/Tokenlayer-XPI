@@ -35,6 +35,7 @@ import { resolveDid } from "../../identity/did-resolver.js";
 import { checkUrl } from "../../webhooks/url-guard.js";
 import { API_KEY_BCRYPT_ROUNDS, invalidateVerifiedPrefix, mintSecret } from "../../shared/api-keys.js";
 import { BRAND_LOGO_PRUNE_GRACE_MS, pruneSupersededBrandLogos } from "../../shared/brand-logo-prune.js";
+import { resolveAccountId, WALLET_ELIGIBLE_ROLES } from "../../shared/wallets.js";
 import { S } from "../schemas/index.js";
 import { holdsValidCredential, IDENTITY_CREDENTIAL_TYPE } from "../../identity/identity-assertions.js";
 import { actorOf, claimsOf, contextOf, isPositiveIntString, machinePrincipal, notFound, requirePrincipal, requireScope, scopedToCaller, type TokenClaims } from "../support.js";
@@ -99,6 +100,29 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
       brandLogoDocumentId: org?.brandLogoDocumentId ?? null,
       brandAccent: org?.brandAccent ?? null,
     };
+  });
+
+
+  app.patch("/me/wallet", { schema: S.updateMyWallet, ...auth }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const b = request.body as { walletAddress: string };
+    if (!WALLET_ELIGIBLE_ROLES.has(claims.role)) {
+      return reply.code(400).send({ error: "ROLE_CANNOT_HOLD_WALLET", message: `role '${claims.role}' cannot hold tokens` });
+    }
+    // Checked BEFORE upsert, which is deliberately deep: `accounts.upsert`
+    // OVERWRITES the label of an existing row at that address, so upserting
+    // first and checking after would silently relabel another user's account
+    // with this caller's email before the conflict was ever detected.
+    const existing = await deps.accounts.findByAddress(b.walletAddress);
+    if (existing) {
+      const owner = await deps.users.findByAccountId(existing.id);
+      if (owner && owner.id !== claims.id) {
+        return reply.code(409).send({ error: "ADDRESS_IN_USE", message: "this address is already linked to another user" });
+      }
+    }
+    const account = await deps.accounts.upsert(b.walletAddress, claims.email);
+    await deps.users.update(claims.id, { accountId: account.id });
+    return { accountId: account.id, walletAddress: account.address };
   });
 
 
@@ -374,8 +398,7 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
         const missing = await orgMemberCapabilityViolation(org, b.role, targetUseCaseKey);
         if (missing) return orgCapabilityMissing(reply, org, missing);
       }
-      let accountId: string | null = null;
-      if (b.walletAddress) accountId = (await deps.accounts.upsert(b.walletAddress, b.email)).id;
+      const accountId = await resolveAccountId(deps, b.role, b.walletAddress, b.email);
       const created = await deps.users.create({
         email: b.email,
         passwordHash: await bcrypt.hash(b.password, BCRYPT_ROUNDS),
@@ -1166,8 +1189,7 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
       }
     }
     if (await deps.users.findByEmail(b.email)) { reply.code(400).send({ error: "EMAIL_TAKEN", message: "email already registered" }); return null; }
-    let accountId: string | null = null;
-    if (b.walletAddress) accountId = (await deps.accounts.upsert(b.walletAddress, b.email)).id;
+    const accountId = await resolveAccountId(deps, b.role, b.walletAddress, b.email);
     const created = await deps.users.create({
       email: b.email, passwordHash: await bcrypt.hash(b.password, BCRYPT_ROUNDS), role: b.role,
       useCaseKey: memberUseCaseKey, accountId, active: true, kycStatus: "pending", kyc: b.kyc ?? null, orgId: id, kind,
