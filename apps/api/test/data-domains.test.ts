@@ -112,7 +112,7 @@ describe("the repository guard", () => {
     const guarded = guardRepository(repo, "Asset", ["identity"]);
     // If this threw synchronously, `.catch` would never be attached and the
     // expression below would blow up instead of resolving — which is exactly
-    // how `sandbox.ts` and `events.ts` consult the other namespace today.
+    // how `events.ts` consults the other namespace today.
     await expect(guarded.get().catch(() => null)).resolves.toBeNull();
   });
 

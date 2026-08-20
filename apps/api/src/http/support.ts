@@ -126,8 +126,8 @@ function isExpired(expiresAt: string | null): boolean {
 /**
  * Auth preHandler factory. Two ways to arrive at ONE principal:
  *
- *   Authorization: Bearer <jwt>              → verify the signature
- *   Authorization: Bearer tl_live_/tl_test_… → verify the API key (EN-B/EN-D2)
+ *   Authorization: Bearer <jwt>       → verify the signature
+ *   Authorization: Bearer tl_live_…  → verify the API key (EN-B)
  *
  * Both branches then re-read the principal from the database and rewrite
  * `request.user` into the SAME `TokenClaims` shape. That is the whole design:

@@ -1077,7 +1077,7 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
    * minted user is actually refused at /auth/login.
    */
   async function createOrgMember(
-    request: FastifyRequest, reply: FastifyReply, claims: TokenClaims, id: string, b: OrgMemberInput, kind: UserRecord["kind"],
+    reply: FastifyReply, claims: TokenClaims, id: string, b: OrgMemberInput, kind: UserRecord["kind"],
   ): Promise<{ org: OrganizationRecord; user: UserRecord; did: string } | null> {
     if (!orgScoped(claims, id)) { reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to add members to that organization" }); return null; }
     if (!canCreateOrgMember(claims.role, b.role)) { reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to create that member role" }); return null; }
@@ -1188,7 +1188,7 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     const claims = request.user as TokenClaims;
     const { id } = request.params as { id: string };
     const b = request.body as OrgMemberInput;
-    const made = await createOrgMember(request, reply, claims, id, b, "human");
+    const made = await createOrgMember(reply, claims, id, b, "human");
     if (!made) return;
     return reply.code(201).send({ id: made.user.id, email: made.user.email, role: made.user.role, useCaseKey: made.user.useCaseKey, orgId: id, did: made.did, membershipVc: true });
   });
@@ -1279,7 +1279,7 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     // never be stronger than a member its creator could have added by hand.
     // `kind: "service"` is what makes it unable to log in interactively.
     const slug = b.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 24) || "key";
-    const made = await createOrgMember(request, reply, claims, id, {
+    const made = await createOrgMember(reply, claims, id, {
       email: `svc-${slug}-${randomUUID().slice(0, 8)}@service.tokenlayer.local`,
       // A service account has no usable password: this value is random, never
       // returned, and /auth/login refuses `kind === "service"` regardless.
@@ -1487,7 +1487,7 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
    * THE ONE DOOR TO A SINGLE ENDPOINT — every per-endpoint route (patch, rotate,
    * delete, ping, deliveries, redeliver) goes through it.
    */
-  async function orgEndpoint(request: FastifyRequest, reply: FastifyReply, orgId: string, whId: string): Promise<WebhookEndpointRecord | null> {
+  async function orgEndpoint(reply: FastifyReply, orgId: string, whId: string): Promise<WebhookEndpointRecord | null> {
     const e = await deps.webhookEndpoints.findById(whId);
     if (!e || e.orgId !== orgId || e.deletedAt !== null) {
       notFound(reply, "webhook endpoint not found");
@@ -1575,7 +1575,7 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     };
     const org = await webhookOrg(request, reply, id);
     if (!org) return;
-    const endpoint = await orgEndpoint(request, reply, id, whId);
+    const endpoint = await orgEndpoint(reply, id, whId);
     if (!endpoint) return;
 
     const patch: Parameters<typeof deps.webhookEndpoints.update>[1] = {};
@@ -1633,7 +1633,7 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     const claims = request.user as TokenClaims;
     const { id, whId } = request.params as { id: string; whId: string };
     if (!(await webhookOrg(request, reply, id))) return;
-    const endpoint = await orgEndpoint(request, reply, id, whId);
+    const endpoint = await orgEndpoint(reply, id, whId);
     if (!endpoint) return;
 
     // NO OVERLAP WINDOW, deliberately: the moment this returns, deliveries are
@@ -1656,7 +1656,7 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     const claims = request.user as TokenClaims;
     const { id, whId } = request.params as { id: string; whId: string };
     if (!(await webhookOrg(request, reply, id))) return;
-    const endpoint = await orgEndpoint(request, reply, id, whId);
+    const endpoint = await orgEndpoint(reply, id, whId);
     if (!endpoint) return;
 
     // SOFT delete: the row stays so its delivery history keeps a destination to
@@ -1715,7 +1715,7 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     const claims = request.user as TokenClaims;
     const { id, whId } = request.params as { id: string; whId: string };
     if (!(await webhookOrg(request, reply, id))) return;
-    const endpoint = await orgEndpoint(request, reply, id, whId);
+    const endpoint = await orgEndpoint(reply, id, whId);
     if (!endpoint) return;
     // A disabled endpoint's delivery is dead on arrival (the dispatcher settles
     // it `dead` without sending), so queueing one would report success for
@@ -1745,7 +1745,7 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     const { id, whId } = request.params as { id: string; whId: string };
     const q = request.query as { limit?: string };
     if (!(await webhookOrg(request, reply, id))) return;
-    const endpoint = await orgEndpoint(request, reply, id, whId);
+    const endpoint = await orgEndpoint(reply, id, whId);
     if (!endpoint) return;
     // A delivery row carries no payload — ids, status, attempt counts and the
     // endpoint's own HTTP answer. The event body is read from GET /events, which
@@ -1758,7 +1758,7 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     const claims = request.user as TokenClaims;
     const { id, whId, dId } = request.params as { id: string; whId: string; dId: string };
     if (!(await webhookOrg(request, reply, id))) return;
-    const endpoint = await orgEndpoint(request, reply, id, whId);
+    const endpoint = await orgEndpoint(reply, id, whId);
     if (!endpoint) return;
     const delivery = await deps.webhookDeliveries.findById(dId);
     // 404, NOT 403, for a delivery belonging to another org — and the check is

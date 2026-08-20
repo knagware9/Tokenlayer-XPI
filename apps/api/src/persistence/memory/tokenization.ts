@@ -42,10 +42,6 @@ export class MemoryAssetRepository implements AssetRepository {
   async list(filter: AssetFilter = {}, page: Page = {}): Promise<Paged<AssetRecord>> {
     const matched = [...this.byId.values()]
       .filter((a) => (!filter.useCaseKey || a.useCaseKey === filter.useCaseKey))
-      // An allowlist, ANDed with the single-key filter above rather than
-      // replacing it: a scoped caller stays clamped to their own use case even
-      // when the mode narrowing also applies.
-      .filter((a) => (!filter.useCaseKeys || filter.useCaseKeys.includes(a.useCaseKey)))
       .filter((a) => (!filter.chainId || a.chainId === filter.chainId))
       .filter((a) => (!filter.status || a.status === filter.status))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));

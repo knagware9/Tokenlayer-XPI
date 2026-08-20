@@ -655,9 +655,8 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
    *
    * THE DEFINITION WRITTEN IS THE STORED ONE. Only
    * `credentialTypes[i].certificate.{background,placements}` is taken from the
-   * body; `key`, `ownerOrgId` and every other field — including the immutable
-   * environment flag — are read back from storage, so an extra field in the
-   * request is inert rather than trusted.
+   * body; `key`, `ownerOrgId` and every other field are read back from
+   * storage, so an extra field in the request is inert rather than trusted.
    *
    * Absent means UNCHANGED and explicit means CLEAR — `background: null` drops
    * the artwork (reverting to the built-in layout) and `placements: []` empties

@@ -62,7 +62,7 @@ and on the certificates the org issues.
 packages/
   core/        Domain, pure and fully tested: LedgerAdapter interface, LifecycleEngine,
                RBAC, capability envelopes, use-case + credential-use-case validation,
-               proposal kinds, certificate field vocabulary, sandbox mode vocabulary.
+               proposal kinds, certificate field vocabulary.
   adapters/    SimulatedLedger · EvmLedgerAdapter (ethers v6) · real T-REX/ERC-3643 deployer
                · Fabric · Canton · credential anchoring. One shared parity suite runs
                against every adapter.
@@ -102,14 +102,6 @@ configured, the chain simply does not appear.
 | **Besu** (QBFT, 5 nodes, vendored in `infra/besu-network/`) | Real. `make besu-up`, RPC on `:8545`, chainId 1337. |
 | **MST Testnet** | Real. chainId 91562037, explorer links, boot-time chainId guard. |
 | **Fabric · Canton** | Behaviourally faithful simulations; real SDK adapters slot in behind the same seam. |
-| **sandbox** | Always simulated, by construction — see below. |
-
-### Sandbox
-
-A use case can be marked `sandbox`. Sandbox work uses `tl_test_` API keys, an always-simulated
-chain, mode-scoped events and webhooks, and is excluded from analytics. A test key cannot reach
-live data, and a sandbox use case cannot touch a real chain — enforced at one chokepoint and
-proven by a test that fails if any write reaches the chain seams.
 
 ---
 

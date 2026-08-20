@@ -272,8 +272,8 @@ async function main(): Promise<void> {
         // chain is reachable again, rather than dead-ending the row here.
         return null;
       }
-      // Optional on the interface: simulated adapters (fabric, canton, sandbox)
-      // confirm on submission and never implement it.
+      // Optional on the interface: simulated adapters (fabric, canton) confirm
+      // on submission and never implement it.
       if (!adapter.getReceipt) return null;
       return adapter.getReceipt(txHash);
     },
