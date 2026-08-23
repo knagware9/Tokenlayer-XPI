@@ -170,7 +170,7 @@ In `apps/api/src/persistence/prisma/tokenization.ts`:
 cd "/Users/kamleshnagware/Tokenlayer XPI/apps/api"
 npx prisma migrate dev --name org_treasury_accounts
 ```
-Expected: applies cleanly. `UseCase.ownerOrgId` going from nullable to required on a table that may already hold NULL rows will make Prisma ask for either a default or a manual data-fill step — answer with a temporary placeholder value (e.g. an empty string) for the migration to apply against the dev database; Task 6's backfill is what gives every row a REAL org id afterward, so this default is transitional, not a design decision.
+Expected: applies cleanly. `UseCase.ownerOrgId` going from nullable to required on a table that may already hold NULL rows will make Prisma ask for either a default or a manual data-fill step — answer with `""` (empty string) as the transitional placeholder, exactly, not any other placeholder text. Task 6's backfill detects rows needing an owner with a falsy check (`!ownerOrgId`), which only an empty string (or a still-NULL row) satisfies — any other placeholder text is truthy and would make the backfill silently skip that row forever. Task 6 gives every row a REAL org id afterward; this default is transitional, not a design decision, and its exact value is load-bearing for Task 6.
 
 - [ ] **Step 10: Regenerate the client and compile**
 
