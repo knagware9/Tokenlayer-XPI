@@ -123,6 +123,7 @@ interface UseCaseRow {
   workflow: string;
   roles: string;
   ownerOrgId: string | null;
+  treasuryAccountId: string | null;
 }
 
 /** Parse a JSON object column, tolerating null/empty/invalid → `{}`. */
@@ -152,6 +153,7 @@ export function rowToUseCase(r: UseCaseRow): UseCaseDefinition {
     ...(Object.keys(valuation).length > 0 ? { valuation } : {}),
     ...(Object.keys(derivedFields).length > 0 ? { derivedFields: derivedFields as Record<string, "invoiceFingerprint"> } : {}),
     ...(r.uniqueBy ? { uniqueBy: r.uniqueBy } : {}),
+    ...(r.treasuryAccountId ? { treasuryAccountId: r.treasuryAccountId } : {}),
     ...(Object.keys(terms).length > 0 ? { terms: terms as UseCaseDefinition["terms"] } : {}),
     ...(Object.keys(workflow).length > 0 ? { workflow: workflow as UseCaseDefinition["workflow"] } : {}),
     ownerOrgId: r.ownerOrgId ?? undefined,
@@ -180,6 +182,7 @@ function useCaseToData(def: UseCaseDefinition) {
     terms: JSON.stringify(def.terms ?? {}),
     workflow: JSON.stringify(def.workflow ?? {}),
     ownerOrgId: def.ownerOrgId ?? null,
+    treasuryAccountId: def.treasuryAccountId ?? null,
     roles: JSON.stringify(def.roles),
   };
 }

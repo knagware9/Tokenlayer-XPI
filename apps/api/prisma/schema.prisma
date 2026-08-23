@@ -106,7 +106,7 @@ model UseCase {
   terms            String   @default("{}") // JSON object: { principalField, maturityField, rateField?, frequency?, currency }
   workflow         String   @default("{}") // JSON object: { approvals?: { [gatedOp]: requiredApprovals } }
   roles           String // JSON array
-  ownerOrgId        String  // every use case has an owning organization now
+  ownerOrgId        String  @default("") // every use case has an owning organization now; "" is the transitional not-yet-owned placeholder Task 6 backfills
   treasuryAccountId String? // this use case's registered treasury Account
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
