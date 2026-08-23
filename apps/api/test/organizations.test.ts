@@ -202,6 +202,40 @@ describe("GET /use-cases (org scoping)", () => {
   });
 });
 
+describe("POST /use-cases (org self-service) — treasury provisioning", () => {
+  it("an OrgAdmin-created use case gets a treasury owned by their org", async () => {
+    const org = (await createOrg(admin, { name: "Treasury Test Org", orgType: "corporate" })).json();
+    const orgAdminRes = await app.inject({
+      method: "POST", url: `${V1}/orgs/${org.id}/users`, headers: auth(admin),
+      payload: { email: `oa.${org.id}@x.io`, password: "secret1", role: "OrgAdmin" },
+    });
+    expect(orgAdminRes.statusCode).toBe(201);
+    const orgAdminToken = await loginAs(app, `oa.${org.id}@x.io`, "secret1");
+    const propose = await app.inject({
+      method: "POST", url: `${V1}/use-cases`, headers: auth(orgAdminToken),
+      payload: {
+        key: `treasury-test-${org.id}`, name: "Treasury Test", symbol: "TRT", tokenStandard: "ERC-20",
+        allowedChainIds: ["fabric"], defaultChainId: "fabric",
+        metadataSchema: { type: "object", properties: {} },
+        lifecycle: { mint: true, transfer: true, burn: true, freeze: true },
+        compliance: { allowlist: true, transferRestrictions: false },
+        roles: ["UseCaseAdmin", "Issuer"],
+      },
+    });
+    expect(propose.statusCode).toBe(202);
+    const executed = await app.inject({
+      method: "POST", url: `${V1}/proposals/${propose.json().proposal.id}/approve`,
+      headers: auth(admin), payload: {},
+    });
+    expect(executed.statusCode).toBe(200);
+    const uc = await app.inject({ method: "GET", url: `${V1}/use-cases/treasury-test-${org.id}`, headers: auth(admin) });
+    expect(uc.json().ownerOrgId).toBe(org.id);
+    expect(typeof uc.json().treasuryAccountId).toBe("string");
+    const acct = await app.inject({ method: "GET", url: `${V1}/accounts`, headers: auth(admin) });
+    expect(acct.json().some((a: { id: string }) => a.id === uc.json().treasuryAccountId)).toBe(true);
+  });
+});
+
 describe("back-compat", () => {
   it("a non-org POST /users is now gated behind an onboard-user proposal (202)", async () => {
     // Use-case user management is maker-checker: the non-org path no longer

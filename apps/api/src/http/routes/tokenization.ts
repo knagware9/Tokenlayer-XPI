@@ -28,6 +28,7 @@ import { namespaceHolding } from "../../shared/usecase-namespace.js";
 import { emitEvent, ownerOrgOfUseCase } from "../../shared/events.js";
 import { mintOrgMembership } from "../../shared/membership.js";
 import { ensurePlatformIssuerOrg, PLATFORM_ORG_NAME } from "../../shared/platform-org.js";
+import { provisionTreasury } from "../../shared/wallets.js";
 import { computeActivity, computePortfolio } from "../../tokenization/investor.js";
 import { readErpInvoices, stageInvoice } from "../../tokenization/invoice-register.js";
 import { settlementStatus } from "../../tokenization/asset-settlement.js";
@@ -143,10 +144,15 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
     // and persist it. Best-effort per chain: a failure leaves that chain pending;
     // at least one success is required (NO_DEPLOYABLE_CHAIN via the shared helper,
     // mapped to 400 by the global error handler). Same path the proposal executes.
+    // PlatformAdmin may name an owning org explicitly in the body; absent one,
+    // the use case belongs to the platform's own org — the same fallback
+    // identity issuance already uses when a credential use case has no owner.
+    const ownerOrgId = definition.ownerOrgId ?? (await ensurePlatformIssuerOrg(deps)).id;
+    const treasuryAccountId = await provisionTreasury(deps, ownerOrgId, `${definition.name} treasury`);
     const available = new Set(deps.chains.list().map((c) => c.id));
     const created = await deployAndCreateUseCase(
       deps.useCases,
-      definition,
+      { ...definition, ownerOrgId, treasuryAccountId },
       available,
       (def, chainId) => deps.engine.deployUseCaseContract(def, chainId),
       (m) => request.log.warn(m),

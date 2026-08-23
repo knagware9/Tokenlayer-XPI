@@ -14,6 +14,7 @@ import type { ProposalKindHandler } from "../shared/proposal-kinds.js";
 import type { ProposalRecord } from "../persistence/types/index.js";
 import { deployAndCreateUseCase } from "./use-cases.js";
 import { namespaceHolding } from "../shared/usecase-namespace.js";
+import { provisionTreasury } from "../shared/wallets.js";
 
 /** PlatformAdmin, or an OrgAdmin of the proposal's own org. Never null-matches. */
 const orgScopedView = async (_deps: AppDeps, claims: TokenClaims, p: ProposalRecord): Promise<boolean> =>
@@ -50,11 +51,12 @@ export const createUseCaseKind: ProposalKindHandler = {
       }
     }
     const available = new Set(ctx.deps.chains.list().map((c) => c.id));
+    const treasuryAccountId = await provisionTreasury(ctx.deps, def.ownerOrgId, `${def.name} treasury`);
     // Deploy + persist via the shared helper so the NO_DEPLOYABLE_CHAIN surface
     // stays identical to the PlatformAdmin direct-create path.
     await deployAndCreateUseCase(
       ctx.deps.useCases,
-      def,
+      { ...def, treasuryAccountId },
       available,
       (d, chainId) => ctx.deps.engine.deployUseCaseContract(d, chainId),
       (m) => ctx.log.error({ err: m }, "use-case contract deploy skipped"),
