@@ -22,6 +22,17 @@ export async function resolveAccountId(
   return (await deps.accounts.upsert(address, label)).id;
 }
 
+/** Auto-provisions a fresh, org-owned treasury Account. One per use case —
+ *  called by every path that creates one (org self-service, PlatformAdmin
+ *  direct-create, the create-use-case proposal executor, and boot seeding). */
+export async function provisionTreasury(
+  deps: Pick<AppDeps, "accounts">, ownerOrgId: string, label: string,
+): Promise<string> {
+  const address = "0x" + randomBytes(20).toString("hex");
+  const account = await deps.accounts.upsert(address, label, ownerOrgId);
+  return account.id;
+}
+
 /**
  * One-time backfill for users who existed before wallet auto-assignment
  * shipped: every eligible role still sitting on `accountId: null` gets one.

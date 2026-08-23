@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { MemoryAccountRepository, MemoryUserRepository } from "../src/persistence/memory/index.js";
-import { backfillWallets, resolveAccountId, WALLET_ELIGIBLE_ROLES } from "../src/shared/wallets.js";
+import { backfillWallets, provisionTreasury, resolveAccountId, WALLET_ELIGIBLE_ROLES } from "../src/shared/wallets.js";
 import { auth, buildTestApp, loginAs, V1 } from "./helpers.js";
 
 describe("resolveAccountId", () => {
@@ -31,6 +31,17 @@ describe("resolveAccountId", () => {
     expect(WALLET_ELIGIBLE_ROLES.has("Issuer")).toBe(true);
     expect(WALLET_ELIGIBLE_ROLES.has("Auditor")).toBe(false);
     expect(WALLET_ELIGIBLE_ROLES.has("PlatformAdmin")).toBe(false);
+  });
+});
+
+describe("provisionTreasury", () => {
+  it("creates an org-owned account and returns its id", async () => {
+    const accounts = new MemoryAccountRepository();
+    const id = await provisionTreasury({ accounts }, "org_1", "carbon-credit treasury");
+    const acct = await accounts.findById(id);
+    expect(acct?.ownerOrgId).toBe("org_1");
+    expect(acct?.address).toMatch(/^0x[0-9a-f]{40}$/);
+    expect(acct?.label).toBe("carbon-credit treasury");
   });
 });
 
