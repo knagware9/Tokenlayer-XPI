@@ -8,6 +8,7 @@
     "test": "vitest run",
     "openapi:snapshot": "tsx scripts/write-openapi-snapshot.ts",
     "backfill:wallets": "tsx scripts/backfill-wallets.ts",
+    "backfill:treasuries": "tsx scripts/backfill-treasuries.ts",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push --skip-generate --accept-data-loss",
     "db:setup": "prisma generate && prisma db push --skip-generate --accept-data-loss",
