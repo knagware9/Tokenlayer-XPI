@@ -55,6 +55,39 @@ describe("maker-checker: gated issuance lifecycle", () => {
     expect(accts.find((a: { address: string }) => a.address.toLowerCase() === treasury.toLowerCase())?.balance).toBe("1000");
   });
 
+  it("gated issuance with sale terms but NO initial supply: approval writes the sale terms, not a silent no-op", async () => {
+    // Regression: `treasury` used to be captured in the proposal payload only
+    // when `initialSupply` was also requested (`wantsSupply ? {initialSupply,
+    // treasury} : {}`), so a gated issue with `sale` alone silently dropped the
+    // sale terms on approval — no mint (nothing to gate) but no price either.
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "bond.admin@tokenlayer.dev", "bond123");
+    const chainId = await bondChain(app, admin);
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const treasury = await treasuryAddressOf(app, platform, "corporate-bond");
+
+    const res = await app.inject({
+      method: "POST", url: `${V1}/assets`, headers: auth(admin),
+      payload: { useCaseKey: "corporate-bond", name: "BOND-SALE-ONLY", chainId, sale: { unitPrice: "5", currency: "CBDC-INR" }, metadata: bondMeta },
+    });
+    expect(res.statusCode).toBe(202);
+    const { proposal, asset } = res.json();
+    expect(asset.unitPrice).toBeNull(); // deferred to approval, not set yet
+
+    const issuer = await loginAs(app, "bond.issuer@tokenlayer.dev", "bond123");
+    const decided = await app.inject({ method: "POST", url: `${V1}/proposals/${proposal.id}/approve`, headers: auth(issuer), payload: {} });
+    expect(decided.statusCode).toBe(200);
+    expect(decided.json().proposal.status).toBe("executed");
+
+    const after = (await app.inject({ method: "GET", url: `${V1}/assets/${asset.id}`, headers: auth(admin) })).json();
+    expect(after.unitPrice).toBe("5");
+    expect(after.currency).toBe("CBDC-INR");
+    expect(after.treasuryAccount).toBe(treasury);
+    // No supply was requested — nothing minted.
+    const accts = (await app.inject({ method: "GET", url: `${V1}/assets/${asset.id}/accounts`, headers: auth(admin) })).json();
+    expect(accts.find((a: { address: string }) => a.address.toLowerCase() === treasury.toLowerCase())).toBeUndefined();
+  });
+
   it("segregation of duties: the proposer cannot approve their own proposal", async () => {
     const app = await buildTestApp();
     const admin = await loginAs(app, "bond.admin@tokenlayer.dev", "bond123");

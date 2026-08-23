@@ -274,15 +274,26 @@ describe("LifecycleEngine — engine-enforced compliance rules", () => {
     treasuryAccountId: "treasury-acct-1",
     compliance: { allowlist: false, transferRestrictions: true, allowedJurisdictions: ["IN"] },
   };
+  // A SECOND, independently-gated use case with its OWN (different)
+  // treasuryAccountId — proves the exemption doesn't leak across use cases:
+  // the same resolved address that is exempt as UC1's treasury is just an
+  // ordinary (ungated) holder here, never checked against UC1's mapping.
+  const JURISDICTION_TREASURY_UC_2: UseCaseDefinition = {
+    ...FUNGIBLE_USE_CASE,
+    key: "jurisdiction-treasury-2",
+    treasuryAccountId: "treasury-acct-3",
+    compliance: { allowlist: false, transferRestrictions: true, allowedJurisdictions: ["IN"] },
+  };
 
   const holderCtx: AssetContext = { ref: { id: "h1", chainId: "fake", contractRef: "fake:h1" }, useCaseKey: "holder-limit" };
   const lockupCtx: AssetContext = { ref: { id: "l1", chainId: "fake", contractRef: "fake:l1" }, useCaseKey: "lockup" };
   const jurCtx: AssetContext = { ref: { id: "j1", chainId: "fake", contractRef: "fake:j1" }, useCaseKey: "jurisdiction" };
   const jurTreasuryCtx: AssetContext = { ref: { id: "j2", chainId: "fake", contractRef: "fake:j2" }, useCaseKey: "jurisdiction-treasury" };
+  const jurTreasuryCtx2: AssetContext = { ref: { id: "j3", chainId: "fake", contractRef: "fake:j3" }, useCaseKey: "jurisdiction-treasury-2" };
 
   function makeEngine(now: () => string): LifecycleEngine {
     return new LifecycleEngine({
-      useCases: new StaticUseCaseSource([HOLDER_LIMIT_UC, LOCKUP_UC, JURISDICTION_UC, JURISDICTION_TREASURY_UC]),
+      useCases: new StaticUseCaseSource([HOLDER_LIMIT_UC, LOCKUP_UC, JURISDICTION_UC, JURISDICTION_TREASURY_UC, JURISDICTION_TREASURY_UC_2]),
       rbac: new RbacPolicy(),
       resolveAdapter: () => adapter,
       audit,
@@ -358,6 +369,20 @@ describe("LifecycleEngine — engine-enforced compliance rules", () => {
     // "someone-else" is not the registered treasury address — ordinary customer
     // holder rules still apply on this same use case.
     await expect(engine.mint(ADMIN, jurTreasuryCtx, "someone-else", "10")).rejects.toThrow(/JURISDICTION_NOT_ALLOWED|not allowed/);
+  });
+
+  it("treasury exemption does NOT leak across use cases: UC1's own treasury address is still gated on UC2, which has a DIFFERENT treasuryAccountId", async () => {
+    const engine = makeEngine(() => "2026-01-01T00:00:00.000Z");
+    // "treasury-addr" resolves to UC1's treasury (treasury-acct-1) — exempt on
+    // jurTreasuryCtx (proven above). UC2's own treasury is a different account
+    // (treasury-acct-3) that never maps to "treasury-addr". isUseCaseTreasury is
+    // always called with THIS use case's own treasuryAccountId (never a caller
+    // argument — see prepare()/ctx.useCaseKey), so it must return false here.
+    provider.treasuryAccounts.set("treasury-acct-1", "treasury-addr");
+    provider.treasuryAccounts.set("treasury-acct-3", "some-other-address");
+    // "treasury-addr"'s jurisdiction is genuinely unknown (no user linked) — same
+    // as a real cross-use-case leak would look like if the exemption were wrong.
+    await expect(engine.mint(ADMIN, jurTreasuryCtx2, "treasury-addr", "10")).rejects.toThrow(/JURISDICTION_NOT_ALLOWED|not allowed/);
   });
 
   it("no provider / no rule: engine without a ComplianceProvider skips the rules", async () => {

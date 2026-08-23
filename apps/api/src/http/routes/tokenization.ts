@@ -233,8 +233,15 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
 
     let incoming: UseCaseDefinition;
     try {
-      // Preserve deployed contracts: never let an update wipe them.
-      incoming = normalizeUseCaseDefinition({ ...(request.body as UseCaseDefinition), key, contracts: existingContracts });
+      // Preserve deployed contracts AND the registered treasury: never let an
+      // update wipe either, whether the client's body omits the field (which
+      // would otherwise silently null the treasury — every future mint/setPrice
+      // then fails MISSING_TREASURY with no obvious cause) or sets it to some
+      // other Account id (which, via the treasury's compliance exemption, would
+      // covertly grant that account a permanent jurisdiction+identity bypass on
+      // this use case). The treasury is provisioned once, at creation — it is
+      // not a PUT-editable field.
+      incoming = normalizeUseCaseDefinition({ ...(request.body as UseCaseDefinition), key, contracts: existingContracts, treasuryAccountId: existing.treasuryAccountId });
     } catch (err) {
       if (err instanceof PolicyError) return reply.code(400).send({ error: err.code, message: err.message });
       throw err;
@@ -295,8 +302,11 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
     const treasury = useCase.treasuryAccountId
       ? (await deps.accounts.findById(useCase.treasuryAccountId))?.address ?? null
       : null;
-    if (wantsSupply && !treasury) {
-      return { ok: false, status: 400, error: "MISSING_TREASURY", message: "a treasury account is required to mint initial supply" };
+    // Sale terms are ALWAYS keyed to the treasury (setPrice enforces the same
+    // rule — see its own MISSING_TREASURY check below) — a use case with no
+    // treasury cannot be priced any more than it can be minted into.
+    if ((wantsSupply || sale) && !treasury) {
+      return { ok: false, status: 400, error: "MISSING_TREASURY", message: "a treasury account is required to mint initial supply or set sale terms" };
     }
     // Initial supply is fungible-only — reject up front, before charging any fee.
     if (wantsSupply && useCase.tokenType !== "fungible") {
@@ -408,8 +418,15 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
 
       if (gatedIssue) {
         // Defer supply mint + sale terms to approval; capture them in the proposal.
+        // `treasury` must be captured whenever EITHER a mint OR sale terms are
+        // deferred — executeIssueActivation (run on approval) needs it to write
+        // sale terms even when no initial supply was requested; omitting it here
+        // used to mean gated issue-with-sale-only silently dropped the terms on
+        // approval, with no error anywhere.
+        const wantsTreasury = wantsSupply || !!sale;
         const proposal = await proposeIfGated(input.request, useCase, "issue", id, {
-          ...(wantsSupply ? { initialSupply, treasury } : {}),
+          ...(wantsSupply ? { initialSupply } : {}),
+          ...(wantsTreasury ? { treasury } : {}),
           ...(sale ? { sale } : {}),
           ...(issuanceFeeCharged ? { issuanceFee: { ...issuanceFeeCharged, payer: feePayer } } : {}),
         });

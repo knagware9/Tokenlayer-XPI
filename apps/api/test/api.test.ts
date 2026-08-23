@@ -325,6 +325,47 @@ describe("use-case-owned contracts", () => {
     expect(accountsAfter.some((a) => a.label === "UC Besu treasury")).toBe(false);
   });
 
+  it("PUT preserves the registered treasury: a body that omits it doesn't null it, and a body that sets it can't repoint it", async () => {
+    // Mirrors the existing `contracts` preservation (see `existingContracts` in
+    // the PUT handler) — treasuryAccountId gets the identical treatment. A body
+    // that omits it would otherwise silently null the treasury (every future
+    // mint/setPrice then fails MISSING_TREASURY with no obvious cause); a body
+    // that sets it to a different Account id would, via the treasury's
+    // compliance exemption, covertly grant that account a permanent
+    // jurisdiction+identity bypass while `compliance.allowedJurisdictions`
+    // still visibly reads as gated.
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const created = await app.inject({
+      method: "POST", url: "/api/v1/use-cases", headers: auth(admin),
+      payload: { ...base, key: "uc-treasury", name: "UC Treasury", symbol: "UCT", allowedChainIds: ["fabric"], defaultChainId: "fabric" },
+    });
+    expect(created.statusCode).toBe(201);
+    const treasuryAccountId = created.json().treasuryAccountId as string;
+    expect(typeof treasuryAccountId).toBe("string");
+
+    // A PUT body that omits treasuryAccountId entirely must NOT null it.
+    const put = await app.inject({
+      method: "PUT", url: "/api/v1/use-cases/uc-treasury", headers: auth(admin),
+      payload: { ...base, key: "uc-treasury", name: "UC Treasury Renamed", symbol: "UCT", allowedChainIds: ["fabric"], defaultChainId: "fabric" },
+    });
+    expect(put.statusCode).toBe(200);
+    expect(put.json().treasuryAccountId).toBe(treasuryAccountId);
+    const afterOmit = await app.inject({ method: "GET", url: "/api/v1/use-cases/uc-treasury", headers: auth(admin) });
+    expect(afterOmit.json().treasuryAccountId).toBe(treasuryAccountId);
+
+    // A PUT body that tries to REPOINT the treasury to a different account id
+    // is ignored just the same.
+    const hijack = await app.inject({
+      method: "PUT", url: "/api/v1/use-cases/uc-treasury", headers: auth(admin),
+      payload: { ...base, key: "uc-treasury", name: "UC Treasury Renamed", symbol: "UCT", allowedChainIds: ["fabric"], defaultChainId: "fabric", treasuryAccountId: "some-other-account-id" },
+    });
+    expect(hijack.statusCode).toBe(200);
+    expect(hijack.json().treasuryAccountId).toBe(treasuryAccountId);
+    const afterHijack = await app.inject({ method: "GET", url: "/api/v1/use-cases/uc-treasury", headers: auth(admin) });
+    expect(afterHijack.json().treasuryAccountId).toBe(treasuryAccountId);
+  });
+
   it("issues assets that share the use case's per-chain contract", async () => {
     const app = await buildTestApp();
     const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
@@ -698,6 +739,33 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
     const res = await buy(app, buyerToken, assetId, "1");
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe("NO_SALE_TERMS");
+  });
+
+  it("issue with sale terms on a use case with no registered treasury → 400 MISSING_TREASURY, not a silent success", async () => {
+    // Regression: issuance only checked MISSING_TREASURY when initialSupply was
+    // requested, so `sale` alone on a treasury-less use case (the one case this
+    // can happen: a use case that predates treasury auto-provisioning) used to
+    // 201 with sale terms silently dropped, instead of failing loudly the way
+    // setPrice already does for the identical condition.
+    const { app, deps } = await buildTestAppWithRepos();
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const carbon = await deps.useCases.get("carbon-credit");
+    await deps.useCases.update("carbon-credit", { ...carbon, treasuryAccountId: undefined });
+
+    const res = await app.inject({
+      method: "POST", url: `${V1}/assets`, headers: { authorization: `Bearer ${platform}` },
+      payload: {
+        useCaseKey: "carbon-credit", name: "No Treasury Asset", chainId: "fabric",
+        metadata: { projectName: "Amazon Rainforest", registry: "Verra", vintage: 2024 },
+        sale: { unitPrice: "5", currency: "CBDC-INR" },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("MISSING_TREASURY");
+
+    // No ghost asset was created.
+    const list = (await app.inject({ method: "GET", url: `${V1}/assets?useCaseKey=carbon-credit`, headers: { authorization: `Bearer ${platform}` } })).json();
+    expect(list.data.some((a: { name: string }) => a.name === "No Treasury Asset")).toBe(false);
   });
 
   it("buy 400 INSUFFICIENT_FUNDS when buyer funded less than cost", async () => {
