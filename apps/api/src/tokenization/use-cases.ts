@@ -75,15 +75,23 @@ export async function deployAndCreateUseCase(
 }
 
 /**
- * Idempotently seeds the default use cases into a repository. When a use case
- * does not yet exist AND a deploy wiring is supplied, its contract is deployed on
- * every allowed+available chain (best-effort, tolerant of failures — NEVER
- * crashes boot). Seeded config use cases include "fabric" (always available in
- * the simulated stack), so they deploy on fabric at boot. If no chain is
- * available, the use case is seeded with empty contracts (pending) and logged.
+ * Idempotently seeds the default use cases into a repository. Every newly
+ * seeded use case is stamped with `ownerOrgId` and gets its own treasury
+ * Account via `provisionTreasury` — the same requirement every other
+ * use-case-creation path enforces. An already-existing use case (warm
+ * restart) takes the `has` branch and is never re-owned or re-provisioned
+ * here; backfilling a pre-existing use case is a separate, later concern.
+ * When a use case does not yet exist AND a deploy wiring is supplied, its
+ * contract is deployed on every allowed+available chain (best-effort,
+ * tolerant of failures — NEVER crashes boot). Seeded config use cases include
+ * "fabric" (always available in the simulated stack), so they deploy on
+ * fabric at boot. If no chain is available, the use case is seeded with
+ * empty contracts (pending) and logged.
  */
 export async function seedUseCases(
   repo: UseCaseRepository,
+  ownerOrgId: string,
+  provisionTreasury: (label: string) => Promise<string>,
   wiring?: {
     availableChainIds: ReadonlySet<string>;
     /**
@@ -106,7 +114,8 @@ export async function seedUseCases(
         console.warn(`[use-cases] seeded '${def.key}' with no deployed contracts (no allowed chain available) — pending`);
       }
     }
-    await repo.create({ ...def, contracts });
+    const treasuryAccountId = await provisionTreasury(`${def.name} treasury`);
+    await repo.create({ ...def, ownerOrgId, treasuryAccountId, contracts });
   }
 }
 

@@ -68,7 +68,12 @@ describe("seedUseCases re-registers simulated chains after a restart", () => {
     for (const d of defs) stored.set(d.key, seeded(d.key, ["fabric"]));
 
     const deployed: string[] = [];
-    await seedUseCases(fakeRepo(stored), {
+    // Every use case in `stored` already exists, so seedUseCases takes the
+    // `has` branch for each — ownerOrgId/provisionTreasury are never read on
+    // that path (see the boot-seed test for the owner+treasury behavior).
+    await seedUseCases(fakeRepo(stored), "unused-owner-org-id", async () => {
+      throw new Error("provisionTreasury should not be called for a use case that already exists");
+    }, {
       availableChainIds: new Set(["fabric"]),
       simulatedChainIds: new Set(["fabric"]),
       deploy: async (def, chainId) => { deployed.push(`${def.key}:${chainId}`); return { address: `0xNEW-${chainId}` }; },
@@ -86,7 +91,12 @@ describe("seedUseCases re-registers simulated chains after a restart", () => {
     for (const d of loadDefaultUseCaseDefinitions()) stored.set(d.key, seeded(d.key, ["besu"]));
 
     const deployed: string[] = [];
-    await seedUseCases(fakeRepo(stored), {
+    // Every use case in `stored` already exists, so seedUseCases takes the
+    // `has` branch for each — ownerOrgId/provisionTreasury are never read on
+    // that path (see the boot-seed test for the owner+treasury behavior).
+    await seedUseCases(fakeRepo(stored), "unused-owner-org-id", async () => {
+      throw new Error("provisionTreasury should not be called for a use case that already exists");
+    }, {
       availableChainIds: new Set(["besu"]),
       simulatedChainIds: new Set(["fabric"]), // besu is real
       deploy: async (def, chainId) => { deployed.push(`${def.key}:${chainId}`); return { address: "0xNEW" }; },
@@ -102,7 +112,12 @@ describe("seedUseCases re-registers simulated chains after a restart", () => {
     const stored = new Map<string, UseCaseDefinition>();
     for (const d of loadDefaultUseCaseDefinitions()) stored.set(d.key, seeded(d.key, ["fabric"]));
     const deployed: string[] = [];
-    await seedUseCases(fakeRepo(stored), {
+    // Every use case in `stored` already exists, so seedUseCases takes the
+    // `has` branch for each — ownerOrgId/provisionTreasury are never read on
+    // that path (see the boot-seed test for the owner+treasury behavior).
+    await seedUseCases(fakeRepo(stored), "unused-owner-org-id", async () => {
+      throw new Error("provisionTreasury should not be called for a use case that already exists");
+    }, {
       availableChainIds: new Set(["fabric"]),
       deploy: async (def, chainId) => { deployed.push(`${def.key}:${chainId}`); return { address: "0xNEW" }; },
     });

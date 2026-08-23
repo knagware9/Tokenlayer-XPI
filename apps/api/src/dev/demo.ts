@@ -8,6 +8,8 @@ import { createMemoryQrLoginStore } from "../identity/qr-login-sessions.js";
 import { createKeystore } from "../shared/keystore.js";
 import { createSecretBox } from "../webhooks/secret-box.js";
 import { loadCurrencies } from "../tokenization/currencies.js";
+import { ensurePlatformIssuerOrg } from "../shared/platform-org.js";
+import { provisionTreasury } from "../shared/wallets.js";
 import {
   MemoryAccountRepository,
   MemoryApiKeyRepository,
@@ -54,15 +56,18 @@ async function main(): Promise<void> {
   const auditAnchors = new MemoryAuditAnchorRepository();
   const accounts = new MemoryAccountRepository();
   const useCases = new MemoryUseCaseRepository();
+  const organizations = new MemoryOrganizationRepository();
+  const keystore = createKeystore("11".repeat(32));
   await seedDefaults(users, accounts);
   const engine = createEngine(useCases, rbac, chains, audit);
-  await seedUseCases(useCases, {
+  const platformOrg = await ensurePlatformIssuerOrg({ organizations, keystore, registry: undefined });
+  await seedUseCases(useCases, platformOrg.id, (label) => provisionTreasury({ accounts }, platformOrg.id, label), {
     availableChainIds: new Set(chains.list().map((c) => c.id)),
     deploy: (def, chainId) => engine.deployUseCaseContract(def, chainId),
   });
   const cash = new MemoryCashRepository();
   const listings = new MemoryListingRepository();
-  const app = await buildApp({ useCases, credentialUseCases: new MemoryCredentialUseCaseRepository(), credentialTemplates: new MemoryCredentialUseCaseTemplateRepository(), rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents: new MemoryDocumentRepository(), cashflows: new MemoryCashflowRepository(), proposals: new MemoryProposalRepository(), organizations: new MemoryOrganizationRepository(), credentials: new MemoryCredentialRepository(), verificationRequests: new MemoryVerificationRequestRepository(), stagedInvoices: new MemoryStagedInvoiceRepository(), apiKeys: new MemoryApiKeyRepository(), events: new MemoryEventRepository(), webhookEndpoints: new MemoryWebhookEndpointRepository(), webhookDeliveries: new MemoryWebhookDeliveryRepository(), ledgerTransactions: new MemoryLedgerTransactionRepository(), webhooksAllowInsecure: false, secretBox: createSecretBox("22".repeat(32)), keystore: createKeystore("11".repeat(32)), didMasterConfigured: true, challenges: createMemoryChallengeStore(), loginKeys: new MemoryLoginKeyRepository(), qrLogin: createMemoryQrLoginStore(), publicWebUrl: "http://localhost:5173", enabledDomains: ["tokenization", "identity"], currencies: loadCurrencies(), jwtSecret: "demo", publicApiUrl: "http://localhost:4000/api/v1" });
+  const app = await buildApp({ useCases, credentialUseCases: new MemoryCredentialUseCaseRepository(), credentialTemplates: new MemoryCredentialUseCaseTemplateRepository(), rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents: new MemoryDocumentRepository(), cashflows: new MemoryCashflowRepository(), proposals: new MemoryProposalRepository(), organizations, credentials: new MemoryCredentialRepository(), verificationRequests: new MemoryVerificationRequestRepository(), stagedInvoices: new MemoryStagedInvoiceRepository(), apiKeys: new MemoryApiKeyRepository(), events: new MemoryEventRepository(), webhookEndpoints: new MemoryWebhookEndpointRepository(), webhookDeliveries: new MemoryWebhookDeliveryRepository(), ledgerTransactions: new MemoryLedgerTransactionRepository(), webhooksAllowInsecure: false, secretBox: createSecretBox("22".repeat(32)), keystore, didMasterConfigured: true, challenges: createMemoryChallengeStore(), loginKeys: new MemoryLoginKeyRepository(), qrLogin: createMemoryQrLoginStore(), publicWebUrl: "http://localhost:5173", enabledDomains: ["tokenization", "identity"], currencies: loadCurrencies(), jwtSecret: "demo", publicApiUrl: "http://localhost:4000/api/v1" });
   const token = (await post(app, "/auth/login", null, { email: "admin@tokenlayer.dev", password: "admin123" })).body.token;
 
   // 1. ERC-20 across every available DLT — identical behaviour everywhere.

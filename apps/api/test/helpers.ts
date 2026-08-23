@@ -35,6 +35,7 @@ import {
   MemoryWebhookEndpointRepository,
 } from "../src/persistence/memory/index.js";
 import { ensurePlatformIssuerOrg } from "../src/shared/platform-org.js";
+import { provisionTreasury } from "../src/shared/wallets.js";
 import type { IdentityRegistry } from "../src/identity/registry.js";
 import { DEFAULT_USERS, seedDefaults } from "../src/shared/seed.js";
 import { seedUseCases } from "../src/tokenization/use-cases.js";
@@ -105,7 +106,8 @@ export async function buildTestAppWithRepos(opts: TestAppOptions = {}): Promise<
   // proposer===approver, and only PlatformAdmins can approve those proposals.
   await seedDefaults(users, accounts);
   const engine = createEngine(useCases, rbac, chains, audit, { users, accounts, credentials });
-  await seedUseCases(useCases, {
+  const platformOrg = await ensurePlatformIssuerOrg({ organizations, keystore, registry: opts.registry });
+  await seedUseCases(useCases, platformOrg.id, (label) => provisionTreasury({ accounts }, platformOrg.id, label), {
     availableChainIds: new Set(chains.list().map((c) => c.id)),
     deploy: (def, chainId) => engine.deployUseCaseContract(def, chainId),
   });
@@ -145,7 +147,6 @@ export async function buildTestAppWithRepos(opts: TestAppOptions = {}): Promise<
     // `BRAND_LOGO_PRUNE_GRACE_MS` explicitly.
     brandLogoPruneGraceMs: opts.brandLogoPruneGraceMs ?? 0,
   };
-  await ensurePlatformIssuerOrg(deps);
   return { app: await buildApp(deps), users, apiKeys, loginKeys, organizations, audit, deps };
 }
 

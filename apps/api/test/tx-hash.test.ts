@@ -46,6 +46,7 @@ import {
   MemoryWebhookEndpointRepository,
 } from "../src/persistence/memory/index.js";
 import { ensurePlatformIssuerOrg } from "../src/shared/platform-org.js";
+import { provisionTreasury } from "../src/shared/wallets.js";
 import { createMemoryQrLoginStore } from "../src/identity/qr-login-sessions.js";
 import type { IdentityRegistry } from "../src/identity/registry.js";
 import { seedDefaults } from "../src/shared/seed.js";
@@ -68,9 +69,12 @@ async function buildAppWithDeps(registry?: IdentityRegistry): Promise<TestApp> {
   const accounts = new MemoryAccountRepository();
   const useCases = new MemoryUseCaseRepository();
   const credentials = new MemoryCredentialRepository();
+  const organizations = new MemoryOrganizationRepository();
+  const keystore = createKeystore("11".repeat(32));
   await seedDefaults(users, accounts);
   const engine = createEngine(useCases, rbac, chains, audit, { users, accounts, credentials });
-  await seedUseCases(useCases, {
+  const platformOrg = await ensurePlatformIssuerOrg({ organizations, keystore, registry });
+  await seedUseCases(useCases, platformOrg.id, (label) => provisionTreasury({ accounts }, platformOrg.id, label), {
     availableChainIds: new Set(chains.list().map((c) => c.id)),
     deploy: (def, chainId) => engine.deployUseCaseContract(def, chainId),
   });
@@ -79,18 +83,17 @@ async function buildAppWithDeps(registry?: IdentityRegistry): Promise<TestApp> {
     rbac, engine, users, assets, audit, auditAnchors: new MemoryAuditAnchorRepository(), accounts, chains,
     cash: new MemoryCashRepository(), listings: new MemoryListingRepository(), documents: new MemoryDocumentRepository(),
     cashflows: new MemoryCashflowRepository(), proposals: new MemoryProposalRepository(),
-    organizations: new MemoryOrganizationRepository(), credentials, verificationRequests: new MemoryVerificationRequestRepository(),
+    organizations, credentials, verificationRequests: new MemoryVerificationRequestRepository(),
     stagedInvoices: new MemoryStagedInvoiceRepository(), apiKeys: new MemoryApiKeyRepository(),
     events: new MemoryEventRepository(), webhookEndpoints: new MemoryWebhookEndpointRepository(), webhookDeliveries: new MemoryWebhookDeliveryRepository(), ledgerTransactions: new MemoryLedgerTransactionRepository(),
     webhooksAllowInsecure: false, secretBox: createSecretBox("22".repeat(32)),
-    keystore: createKeystore("11".repeat(32)), didMasterConfigured: true,
+    keystore, didMasterConfigured: true,
     challenges: createMemoryChallengeStore(), loginKeys: new MemoryLoginKeyRepository(), qrLogin: createMemoryQrLoginStore(),
     publicWebUrl: "http://localhost:5173", enabledDomains: ["tokenization", "identity"],
     currencies: loadCurrencies(), jwtSecret: "test-secret", publicApiUrl: "http://test.local/api/v1",
     loginRateLimitMax: 100000, marketEscrowAccount: TEST_MARKET_ESCROW,
     registry,
   };
-  await ensurePlatformIssuerOrg(deps);
   return { app: await buildApp(deps), credentials };
 }
 

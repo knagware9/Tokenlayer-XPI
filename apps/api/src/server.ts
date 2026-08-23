@@ -39,6 +39,7 @@ import {
 import { resolveIdentityRegistry } from "./identity/registry.js";
 import { seedDefaults } from "./shared/seed.js";
 import { seedUseCases } from "./tokenization/use-cases.js";
+import { provisionTreasury } from "./shared/wallets.js";
 import { createHttpSender, startDispatcher } from "./webhooks/dispatcher.js";
 import { createSecretBox } from "./webhooks/secret-box.js";
 import { startConfirmer } from "./shared/ledger-confirmer.js";
@@ -100,24 +101,6 @@ async function main(): Promise<void> {
   );
 
   const engine = createEngine(useCases, rbac, chains, audit, { users, accounts, credentials, identity });
-  // Seed default use cases and deploy their contracts on each allowed+available
-  // chain (best-effort; never crashes boot). Available = present in the registry.
-  //
-  // ONLY WHERE TOKENIZATION IS SOLD. This ran unconditionally, so an
-  // identity-only deployment wrote tokenization use cases it had no route to
-  // serve and — worse — spent boot deploying their contracts on a real chain.
-  // Boot happens before `buildApp` installs the repository guard, so this is
-  // the explicit condition rather than a caught refusal.
-  if (env.enabledDomains.includes("tokenization")) {
-    await seedUseCases(useCases, {
-      availableChainIds: new Set(chains.list().map((c) => c.id)),
-      // Simulated chains keep their ledger in memory, so a recorded deployment on
-      // one is stale the moment this process restarts — seedUseCases re-registers
-      // those, and only those. See redeployOnSimulatedChains.
-      simulatedChainIds: new Set(chains.list().filter((c) => c.mode === "simulated").map((c) => c.id)),
-      deploy: (def, chainId) => engine.deployUseCaseContract(def, chainId),
-    });
-  }
   const registry = await resolveIdentityRegistry({
     chainId: env.registryChainId,
     chains,
@@ -179,7 +162,31 @@ async function main(): Promise<void> {
     brandLogoPruneGraceMs: env.brandLogoPruneGraceMs,
     registry,
   };
+  // Resolved BEFORE seedUseCases now: every seeded use case needs an owner.
   const platformOrg = await ensurePlatformIssuerOrg(deps);
+  // Seed default use cases and deploy their contracts on each allowed+available
+  // chain (best-effort; never crashes boot). Available = present in the registry.
+  //
+  // ONLY WHERE TOKENIZATION IS SOLD. This ran unconditionally, so an
+  // identity-only deployment wrote tokenization use cases it had no route to
+  // serve and — worse — spent boot deploying their contracts on a real chain.
+  // Boot happens before `buildApp` installs the repository guard, so this is
+  // the explicit condition rather than a caught refusal.
+  if (env.enabledDomains.includes("tokenization")) {
+    await seedUseCases(
+      useCases,
+      platformOrg.id,
+      (label) => provisionTreasury(deps, platformOrg.id, label),
+      {
+        availableChainIds: new Set(chains.list().map((c) => c.id)),
+        // Simulated chains keep their ledger in memory, so a recorded deployment on
+        // one is stale the moment this process restarts — seedUseCases re-registers
+        // those, and only those. See redeployOnSimulatedChains.
+        simulatedChainIds: new Set(chains.list().filter((c) => c.mode === "simulated").map((c) => c.id)),
+        deploy: (def, chainId) => engine.deployUseCaseContract(def, chainId),
+      },
+    );
+  }
   // Demo operators get a real identity so their profile/credentials pages are
   // populated like any org member (outside production only).
   if (env.nodeEnv !== "production") {
