@@ -106,7 +106,8 @@ model UseCase {
   terms            String   @default("{}") // JSON object: { principalField, maturityField, rateField?, frequency?, currency }
   workflow         String   @default("{}") // JSON object: { approvals?: { [gatedOp]: requiredApprovals } }
   roles           String // JSON array
-  ownerOrgId      String?  // owning organization id (null = legacy platform-owned)
+  ownerOrgId        String  // every use case has an owning organization now
+  treasuryAccountId String? // this use case's registered treasury Account
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 }
@@ -196,9 +197,10 @@ model Listing {
 
 /// domain: tokenization
 model Account {
-  id      String @id @default(cuid())
-  address String @unique
-  label   String
+  id         String  @id @default(cuid())
+  address    String  @unique
+  label      String
+  ownerOrgId String? // the organization this treasury belongs to; null for a personal wallet
 }
 
 /// domain: tokenization

@@ -50,4 +50,12 @@ describe("MemoryAccountRepository", () => {
     expect(found?.id).toBe(acct.id);
     expect(found?.label).toBe("EcoFund");
   });
+
+  it("upsert stamps ownerOrgId when supplied, and leaves it null otherwise", async () => {
+    const repo = new MemoryAccountRepository();
+    const personal = await repo.upsert("0xaaa", "buyer wallet");
+    expect(personal.ownerOrgId).toBeNull();
+    const treasury = await repo.upsert("0xbbb", "carbon-credit treasury", "org_1");
+    expect(treasury.ownerOrgId).toBe("org_1");
+  });
 });

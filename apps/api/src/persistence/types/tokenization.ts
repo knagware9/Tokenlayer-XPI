@@ -37,6 +37,7 @@ export interface AccountRecord {
   id: string;
   address: string;
   label: string;
+  ownerOrgId: string | null;
 }
 
 export interface AssetFilter {
@@ -59,7 +60,7 @@ export interface AccountRepository {
   list(): Promise<AccountRecord[]>;
   findById(id: string): Promise<AccountRecord | null>;
   findByAddress(address: string): Promise<AccountRecord | null>;
-  upsert(address: string, label: string): Promise<AccountRecord>;
+  upsert(address: string, label: string, ownerOrgId?: string): Promise<AccountRecord>;
 }
 
 /** An on-ledger anchor of one asset's audit chain head. */

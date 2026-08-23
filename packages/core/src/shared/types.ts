@@ -164,8 +164,10 @@ export interface UseCaseDefinition {
   key: string;
   name: string;
   description?: string;
-  /** Owning organization id (null/undefined for legacy platform-owned use cases). */
-  ownerOrgId?: string;
+  /** Owning organization id. */
+  ownerOrgId: string;
+  /** This use case's registered treasury Account id. */
+  treasuryAccountId?: string;
   tokenStandard: TokenStandard;
   /** Derived from tokenStandard; kept explicit for convenience. */
   tokenType: TokenType;
