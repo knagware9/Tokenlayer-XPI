@@ -164,13 +164,20 @@ In `apps/api/src/persistence/prisma/tokenization.ts`:
 ```
 (`list()` at the top of the file returns `prisma.account.findMany()` directly and needs no change — Prisma's generated row shape already carries `ownerOrgId` once the migration below runs.)
 
-- [ ] **Step 9: Generate the migration**
+- [ ] **Step 9: Apply the schema change via `db push`, not `migrate dev`**
 
+This repo has no `prisma/migrations` directory and none should be created: every real boot path (`Dockerfile`, `package.json`'s `db:setup`, `scripts/api-fabric.sh`, `.claude/launch.json`) runs `prisma db push --accept-data-loss`, never `migrate deploy` — a migrations directory was introduced once before on this repo and reverted by a whole-branch review for exactly this reason. Add a default to the schema so `db push` can apply cleanly against a database that already has `UseCase` rows:
+
+```prisma
+  ownerOrgId        String  @default("") // every use case has an owning organization now
+```
+
+The default is `""` exactly, not any other placeholder — Task 6's backfill detects rows needing a real owner with a falsy check (`!ownerOrgId`), which only an empty string (or a still-NULL row) satisfies. Then:
 ```bash
 cd "/Users/kamleshnagware/Tokenlayer XPI/apps/api"
-npx prisma migrate dev --name org_treasury_accounts
+npx prisma db push --accept-data-loss
 ```
-Expected: applies cleanly. `UseCase.ownerOrgId` going from nullable to required on a table that may already hold NULL rows will make Prisma ask for either a default or a manual data-fill step — answer with `""` (empty string) as the transitional placeholder, exactly, not any other placeholder text. Task 6's backfill detects rows needing an owner with a falsy check (`!ownerOrgId`), which only an empty string (or a still-NULL row) satisfies — any other placeholder text is truthy and would make the backfill silently skip that row forever. Task 6 gives every row a REAL org id afterward; this default is transitional, not a design decision, and its exact value is load-bearing for Task 6.
+Expected: applies cleanly against this worktree's dev database.
 
 - [ ] **Step 10: Regenerate the client and compile**
 
