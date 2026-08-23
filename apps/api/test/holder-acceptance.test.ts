@@ -286,7 +286,6 @@ describe("consent gate — only accepted credentials are eligible (L3)", () => {
 });
 
 describe("ID-H identity gate on acceptance-enabled KYC (L3)", () => {
-  const TREASURY_ADDR = "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65";
   const BUYER_WALLET = "0x14dC79964da2C08b23698B3D3cc7Ca32193d9955";
 
   async function issuePricedCarbonAsset(app: Awaited<ReturnType<typeof buildTestApp>>, platformToken: string): Promise<string> {
@@ -295,8 +294,8 @@ describe("ID-H identity gate on acceptance-enabled KYC (L3)", () => {
       payload: {
         useCaseKey: "carbon-credit", name: "L3 Identity Gate Asset", chainId: "fabric",
         metadata: { projectName: "P", registry: "Verra", vintage: 2024 },
-        sale: { unitPrice: "5", currency: "CBDC-INR", treasuryAccount: TREASURY_ADDR },
-        treasuryAccount: TREASURY_ADDR, initialSupply: "100",
+        sale: { unitPrice: "5", currency: "CBDC-INR" },
+        initialSupply: "100",
       },
     });
     expect(res.statusCode).toBe(201);

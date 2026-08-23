@@ -21,7 +21,7 @@ async function seeded(): Promise<{ app: FastifyInstance; deps: AppDeps; admin: s
   const issuer = await loginAs(h.app, "carbon.issuer@tokenlayer.dev", "carbon123");
   const res = await h.app.inject({
     method: "POST", url: `${V1}/assets`, headers: auth(issuer),
-    payload: { useCaseKey: "carbon-credit", name: "ANCHOR-1", chainId: "fabric", initialSupply: "100", treasuryAccount: "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65", metadata: { projectName: "P", registry: "Verra", vintage: 2024 } },
+    payload: { useCaseKey: "carbon-credit", name: "ANCHOR-1", chainId: "fabric", initialSupply: "100", metadata: { projectName: "P", registry: "Verra", vintage: 2024 } },
   });
   expect(res.statusCode).toBe(201);
   return { app: h.app, deps: h.deps, admin, assetId: res.json().asset.id };

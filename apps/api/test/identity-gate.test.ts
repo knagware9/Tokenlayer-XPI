@@ -1,9 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildTestApp, V1, loginAs, auth, onboardUser } from "./helpers.js";
 
-// A platform fee account distinct from any seeded buyer/treasury address (unused
-// here but kept for parity with the other richer-config-style tests).
-const TREASURY_ADDR = "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65";
 const BUYER_WALLET = "0x14dC79964da2C08b23698B3D3cc7Ca32193d9955";
 
 interface AssetSummary { id: string }
@@ -17,8 +14,8 @@ async function issuePricedCarbonAsset(app: Awaited<ReturnType<typeof buildTestAp
     payload: {
       useCaseKey: "carbon-credit", name: "Identity Gate Asset", chainId: "fabric",
       metadata: { projectName: "P", registry: "Verra", vintage: 2024 },
-      sale: { unitPrice: "5", currency: "CBDC-INR", treasuryAccount: TREASURY_ADDR },
-      treasuryAccount: TREASURY_ADDR, initialSupply: "100",
+      sale: { unitPrice: "5", currency: "CBDC-INR" },
+      initialSupply: "100",
     },
   });
   expect(res.statusCode).toBe(201);

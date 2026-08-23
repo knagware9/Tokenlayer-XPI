@@ -273,6 +273,16 @@ export interface ComplianceProvider {
   jurisdictionOf(account: string): Promise<string | null>;
   /** True iff the account's user holds a valid, unrevoked identity (KYC) credential. */
   hasVerifiedIdentity(account: string): Promise<boolean>;
+  /**
+   * True iff `account` is the resolved address of `treasuryAccountId` — the use
+   * case's OWN registered treasury (an issuer's operational reserve), not a
+   * customer holder. Callers use this to exempt the treasury from
+   * customer-facing gates (jurisdiction, verified identity) when it is acting
+   * as that use case's own treasury — never a blanket exemption for the
+   * address elsewhere. `treasuryAccountId` is undefined for a use case that
+   * predates treasury auto-provisioning; always false in that case.
+   */
+  isUseCaseTreasury(account: string, treasuryAccountId: string | undefined): Promise<boolean>;
 }
 
 /**

@@ -56,9 +56,11 @@ export async function executeIssueActivation(
   deps: AppDeps,
   actor: Actor,
   asset: AssetRecord,
-  p: { initialSupply?: string; treasury?: string; sale?: { unitPrice: string; currency: string; treasuryAccount: string } },
+  p: { initialSupply?: string; treasury?: string | null; sale?: { unitPrice: string; currency: string } },
 ): Promise<void> {
-  if (p.sale) await deps.assets.setSaleTerms(asset.id, p.sale);
+  // The treasury is never client-supplied (see issueAssetCore) — sale terms
+  // always reference the same use-case-derived treasury as the mint below.
+  if (p.sale && p.treasury) await deps.assets.setSaleTerms(asset.id, { ...p.sale, treasuryAccount: p.treasury });
   if (p.initialSupply && p.treasury) {
     const ctx = contextOf(asset);
     const useCase = await deps.useCases.get(asset.useCaseKey);

@@ -469,6 +469,10 @@ export class LifecycleEngine {
   private async requireJurisdiction(useCase: UseCaseDefinition, to: string): Promise<void> {
     const allowed = useCase.compliance.allowedJurisdictions;
     if (allowed === undefined || !this.compliance) return;
+    // The use case's own treasury is an operational reserve, not a customer
+    // holder — it never carries a KYC jurisdiction of its own, and gating it
+    // here would make the treasury unable to hold its own use case's tokens.
+    if (await this.compliance.isUseCaseTreasury(to, useCase.treasuryAccountId)) return;
     const j = await this.compliance.jurisdictionOf(to);
     if (j === null || !allowed.includes(j)) {
       throw new PolicyError(
@@ -485,6 +489,9 @@ export class LifecycleEngine {
    */
   private async requireVerifiedIdentity(useCase: UseCaseDefinition, to: string): Promise<void> {
     if (!useCase.compliance.requireVerifiedIdentity || !this.compliance) return;
+    // Same treasury exemption as requireJurisdiction: an operational reserve
+    // has no identity credential of its own to present.
+    if (await this.compliance.isUseCaseTreasury(to, useCase.treasuryAccountId)) return;
     const ok = await this.compliance.hasVerifiedIdentity(to);
     if (!ok) {
       throw new PolicyError(

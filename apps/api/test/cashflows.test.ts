@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { buildTestApp, V1, loginAs, auth, onboardUser } from "./helpers.js";
+import { buildTestApp, V1, loginAs, auth, onboardUser, treasuryAddressOf } from "./helpers.js";
 
 const UC = "invoice-tokenization";
 const HOLDER = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"; // Carol — seeded account, linkable
@@ -25,10 +25,23 @@ async function linkPayer(app: FastifyInstance, admin: string): Promise<void> {
   expect(user.id).toBeTruthy();
 }
 
+/**
+ * Issues an invoice asset and moves its whole initial supply from the (now
+ * server-derived, never client-supplied — org-treasury-accounts Task 5)
+ * treasury to HOLDER, so the cashflow tests below have an actual token holder
+ * distinct from the treasury to pay out pro-rata, exactly as when the test
+ * payload could still name HOLDER as the treasury directly.
+ */
 async function issueInvoice(app: FastifyInstance, admin: string, n: string, due: string): Promise<string> {
-  const res = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(admin), payload: { useCaseKey: UC, name: n, chainId: "fabric", initialSupply: "10000", treasuryAccount: HOLDER, metadata: inv(n, due) } });
+  const res = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(admin), payload: { useCaseKey: UC, name: n, chainId: "fabric", initialSupply: "10000", metadata: inv(n, due) } });
   expect(res.statusCode).toBe(201);
-  return res.json().asset.id as string;
+  const assetId = res.json().asset.id as string;
+  const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+  const treasury = await treasuryAddressOf(app, platform, UC);
+  await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: auth(admin), payload: { account: HOLDER } });
+  const xfer = await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/transfer`, headers: auth(admin), payload: { from: treasury, to: HOLDER, amount: "10000" } });
+  expect(xfer.statusCode).toBe(200);
+  return assetId;
 }
 
 /**
@@ -202,7 +215,7 @@ describe("cashflows: execution", () => {
       roles: ["UseCaseAdmin", "Issuer", "Buyer", "Auditor"],
     };
     expect((await app.inject({ method: "POST", url: `${V1}/use-cases`, headers: auth(platform), payload: def })).statusCode).toBe(201);
-    const issued = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(platform), payload: { useCaseKey: "cf-note", name: "NOTE-1", chainId: "fabric", initialSupply: "1000", treasuryAccount: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8", metadata: { faceValue: 1000000, couponRate: 10, maturityDate: "2099-12-31" } } });
+    const issued = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(platform), payload: { useCaseKey: "cf-note", name: "NOTE-1", chainId: "fabric", initialSupply: "1000", metadata: { faceValue: 1000000, couponRate: 10, maturityDate: "2099-12-31" } } });
     expect(issued.statusCode).toBe(201);
     const assetId = issued.json().asset.id;
     const { cashflows } = (await app.inject({ method: "GET", url: `${V1}/assets/${assetId}/cashflows`, headers: auth(platform) })).json();
@@ -228,7 +241,7 @@ describe("cashflows: execution", () => {
       roles: ["UseCaseAdmin", "Issuer", "Buyer", "Auditor"],
     };
     expect((await app.inject({ method: "POST", url: `${V1}/use-cases`, headers: auth(platform), payload: def })).statusCode).toBe(201);
-    const issued = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(platform), payload: { useCaseKey: "cf-note-2", name: "NOTE-2", chainId: "fabric", initialSupply: "1000", treasuryAccount: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8", metadata: { faceValue: 1000000, couponRate: 12, maturityDate: maturity } } });
+    const issued = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(platform), payload: { useCaseKey: "cf-note-2", name: "NOTE-2", chainId: "fabric", initialSupply: "1000", metadata: { faceValue: 1000000, couponRate: 12, maturityDate: maturity } } });
     expect(issued.statusCode).toBe(201);
     const assetId = issued.json().asset.id;
     const { cashflows } = (await app.inject({ method: "GET", url: `${V1}/assets/${assetId}/cashflows`, headers: auth(platform) })).json();

@@ -106,16 +106,14 @@ export const tokenizationSchemas: Record<string, FastifySchema> = {
         symbol: { type: "string" },
         chainId: { type: "string" },
         metadata: { type: "object", additionalProperties: true },
-        treasuryAccount: { type: "string" },
         initialSupply: { type: "string" },
         sale: {
           type: "object",
           additionalProperties: false,
-          required: ["unitPrice", "currency", "treasuryAccount"],
+          required: ["unitPrice", "currency"],
           properties: {
             unitPrice: { type: "string" },
             currency: { type: "string" },
-            treasuryAccount: { type: "string" },
           },
         },
       },
@@ -210,7 +208,6 @@ export const tokenizationSchemas: Record<string, FastifySchema> = {
         account: { type: "string" },
         unitPrice: { type: "string" },
         currency: { type: "string" },
-        treasuryAccount: { type: "string" },
       },
     },
     response: {
@@ -574,11 +571,10 @@ export const tokenizationSchemas: Record<string, FastifySchema> = {
       "`POST /assets`, so it carries the same scope: a second door onto issuance must not be a cheaper one.",
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     body: {
-      type: "object", required: ["ids", "chainId", "treasuryAccount"],
+      type: "object", required: ["ids", "chainId"],
       properties: {
         ids: { type: "array", items: { type: "string" } },
         chainId: { type: "string" },
-        treasuryAccount: { type: "string" },
         parValue: { type: "number" },
         sale: {
           type: "object", additionalProperties: false, required: ["unitPrice", "currency"],

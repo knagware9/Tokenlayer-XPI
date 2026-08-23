@@ -265,10 +265,10 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
     actor: Actor;
     request: FastifyRequest;
     useCaseKey: string; name: string; chainId: string;
-    metadata?: Record<string, unknown>; treasuryAccount?: string; initialSupply?: string;
-    sale?: { unitPrice: string; currency: string; treasuryAccount: string };
+    metadata?: Record<string, unknown>; initialSupply?: string;
+    sale?: { unitPrice: string; currency: string };
   }): Promise<{ ok: true; status: number; body: unknown } | { ok: false; status: number; error: string; message: string }> {
-    const { useCaseKey: bUseCaseKey, name, chainId, metadata, treasuryAccount, initialSupply, sale } = input;
+    const { useCaseKey: bUseCaseKey, name, chainId, metadata, initialSupply, sale } = input;
     const claims = input.claims;
     if (claims.role !== "PlatformAdmin" && bUseCaseKey !== claims.useCaseKey) {
       return { ok: false, status: 403, error: "WRONG_USE_CASE", message: "cannot issue into another use case" };
@@ -282,19 +282,22 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
         return { ok: false, status: 400, error: "INVALID_PRICE", message: "unitPrice must be a positive integer" };
       }
     }
-    // The treasury holds the initial supply and is the seller for the marketplace.
-    const treasury = treasuryAccount ?? sale?.treasuryAccount;
     const wantsSupply = initialSupply !== undefined && initialSupply !== "" && initialSupply !== "0";
-    if (wantsSupply) {
-      if (!/^\d+$/.test(initialSupply!)) {
-        return { ok: false, status: 400, error: "INVALID_SUPPLY", message: "initialSupply must be a whole number" };
-      }
-      if (!treasury) {
-        return { ok: false, status: 400, error: "MISSING_TREASURY", message: "a treasury account is required to mint initial supply" };
-      }
+    if (wantsSupply && !/^\d+$/.test(initialSupply!)) {
+      return { ok: false, status: 400, error: "INVALID_SUPPLY", message: "initialSupply must be a whole number" };
     }
     const actor = input.actor;
     const useCase = await deps.useCases.get(bUseCaseKey);
+    // The treasury is the use case's own registered account — never client-
+    // supplied. A use case created before this shipped and not yet backfilled
+    // has no treasuryAccountId; that is the one case MISSING_TREASURY still
+    // reaches, and the fix is running the backfill, not re-adding the field.
+    const treasury = useCase.treasuryAccountId
+      ? (await deps.accounts.findById(useCase.treasuryAccountId))?.address ?? null
+      : null;
+    if (wantsSupply && !treasury) {
+      return { ok: false, status: 400, error: "MISSING_TREASURY", message: "a treasury account is required to mint initial supply" };
+    }
     // Initial supply is fungible-only — reject up front, before charging any fee.
     if (wantsSupply && useCase.tokenType !== "fungible") {
       return { ok: false, status: 400, error: "SUPPLY_UNSUPPORTED", message: "initial supply is only supported for fungible assets" };
@@ -460,7 +463,7 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
 
 
   app.post("/assets", { schema: S.issueAsset, ...authScoped("assets:issue") }, async (request, reply) => {
-    const b = request.body as { useCaseKey: string; name: string; chainId: string; metadata?: Record<string, unknown>; treasuryAccount?: string; initialSupply?: string; sale?: { unitPrice: string; currency: string; treasuryAccount: string } };
+    const b = request.body as { useCaseKey: string; name: string; chainId: string; metadata?: Record<string, unknown>; initialSupply?: string; sale?: { unitPrice: string; currency: string } };
     const r = await issueAssetCore({ claims: request.user as TokenClaims, actor: actorOf(request), request, ...b });
     return r.ok ? reply.code(r.status).send(r.body) : reply.code(r.status).send({ error: r.error, message: r.message });
   });
@@ -563,7 +566,7 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
 
   app.post("/use-cases/:key/invoices/tokenize", { schema: S.tokenizeInvoices, ...authScoped("assets:issue") }, async (request, reply) => {
     const gate = await invoiceGate(request, reply); if (!gate) return reply;
-    const { ids, chainId, treasuryAccount, parValue = 1000, sale } = request.body as { ids: string[]; chainId: string; treasuryAccount: string; parValue?: number; sale?: { unitPrice: string; currency: string } };
+    const { ids, chainId, parValue = 1000, sale } = request.body as { ids: string[]; chainId: string; parValue?: number; sale?: { unitPrice: string; currency: string } };
     const results: { id: string; status: string; assetId?: string; error?: string }[] = [];
     for (const id of ids) {
       const rec = await deps.stagedInvoices.get(id);
@@ -572,8 +575,8 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
       const r = await issueAssetCore({
         claims: gate.claims, actor: gate.actor, request, useCaseKey: gate.useCase.key,
         name: `${rec.metadata.invoiceNumber} · ${rec.metadata.buyerName}`, chainId,
-        metadata: rec.metadata, initialSupply: String(supply), treasuryAccount,
-        sale: sale ? { unitPrice: sale.unitPrice, currency: sale.currency, treasuryAccount } : undefined,
+        metadata: rec.metadata, initialSupply: String(supply),
+        sale: sale ? { unitPrice: sale.unitPrice, currency: sale.currency } : undefined,
       });
       if (r.ok) {
         const assetId = (r.body as { asset: { id: string } }).asset.id;
@@ -798,10 +801,13 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
         break;
       case "setPrice": {
         deps.rbac.authorize(actor, "issue");
-        if (!b.unitPrice || !b.currency || !b.treasuryAccount) return reply.code(400).send({ error: "VALIDATION_ERROR", message: "setPrice requires unitPrice, currency, and treasuryAccount" });
+        if (!b.unitPrice || !b.currency) return reply.code(400).send({ error: "VALIDATION_ERROR", message: "setPrice requires unitPrice and currency" });
         if (!isSupportedCurrency(b.currency)) return reply.code(400).send({ error: "UNSUPPORTED_CURRENCY", message: `currency '${b.currency}' is not supported` });
         if (!isPositiveIntString(b.unitPrice)) return reply.code(400).send({ error: "INVALID_PRICE", message: "unitPrice must be a positive integer" });
-        await deps.assets.setSaleTerms(asset.id, { unitPrice: b.unitPrice, currency: b.currency, treasuryAccount: b.treasuryAccount });
+        const uc = await deps.useCases.get(asset.useCaseKey);
+        const treasuryAccount = uc.treasuryAccountId ? (await deps.accounts.findById(uc.treasuryAccountId))?.address ?? null : null;
+        if (!treasuryAccount) return reply.code(400).send({ error: "MISSING_TREASURY", message: "this use case has no registered treasury — run the treasury backfill" });
+        await deps.assets.setSaleTerms(asset.id, { unitPrice: b.unitPrice, currency: b.currency, treasuryAccount });
         return reply.code(200).send({ ok: true });
       }
       default:

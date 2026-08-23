@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { buildTestApp, V1, loginAs, auth, onboardUser, PLATFORM_ADMIN_2 } from "./helpers.js";
+import { buildTestApp, V1, loginAs, auth, onboardUser, treasuryAddressOf, PLATFORM_ADMIN_2 } from "./helpers.js";
 
 // Seeded accounts (unlinked → usable as treasuries/holders).
 const BOB = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC";
@@ -17,7 +17,7 @@ async function bondChain(app: FastifyInstance, token: string): Promise<string> {
 }
 async function proposeBond(app: FastifyInstance, proposer: string, name: string) {
   const chainId = await bondChain(app, proposer);
-  return app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(proposer), payload: { useCaseKey: "corporate-bond", name, chainId, initialSupply: "1000", treasuryAccount: BOB, metadata: bondMeta } });
+  return app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(proposer), payload: { useCaseKey: "corporate-bond", name, chainId, initialSupply: "1000", metadata: bondMeta } });
 }
 
 describe("maker-checker: gated issuance lifecycle", () => {
@@ -45,9 +45,14 @@ describe("maker-checker: gated issuance lifecycle", () => {
     expect(decided.json().proposal.status).toBe("executed");
     const after = (await app.inject({ method: "GET", url: `${V1}/assets/${asset.id}`, headers: auth(admin) })).json();
     expect(after.status).toBe("active");
-    // Supply minted to the treasury only on approval.
+    // Supply minted to the use case's own (server-derived, never client-supplied
+    // — org-treasury-accounts Task 5) treasury only on approval. The treasury
+    // Account is never linked to a user, so a scoped GET /accounts (unlike
+    // PlatformAdmin's) would never show it — look it up as platform.
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const treasury = await treasuryAddressOf(app, platform, "corporate-bond");
     const accts = (await app.inject({ method: "GET", url: `${V1}/assets/${asset.id}/accounts`, headers: auth(admin) })).json();
-    expect(accts.find((a: { address: string }) => a.address.toLowerCase() === BOB.toLowerCase())?.balance).toBe("1000");
+    expect(accts.find((a: { address: string }) => a.address.toLowerCase() === treasury.toLowerCase())?.balance).toBe("1000");
   });
 
   it("segregation of duties: the proposer cannot approve their own proposal", async () => {
@@ -116,7 +121,7 @@ describe("maker-checker: thresholds + concurrency", () => {
   it("threshold 2: the first approval leaves it pending; the second (distinct approver) executes", async () => {
     const app = await buildTestApp();
     const { adminTok, iss1, iss2, chainId } = await makeT2(app);
-    const { proposal } = (await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(adminTok), payload: { useCaseKey: "t2-note", name: "N1", chainId, initialSupply: "500", treasuryAccount: BOB, metadata: { faceValue: 100 } } })).json();
+    const { proposal } = (await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(adminTok), payload: { useCaseKey: "t2-note", name: "N1", chainId, initialSupply: "500", metadata: { faceValue: 100 } } })).json();
     const first = await app.inject({ method: "POST", url: `${V1}/proposals/${proposal.id}/approve`, headers: auth(iss1), payload: {} });
     expect(first.json().proposal.status).toBe("pending");
     expect(first.json().proposal.approvals).toHaveLength(1);
@@ -127,7 +132,7 @@ describe("maker-checker: thresholds + concurrency", () => {
   it("the same approver cannot approve twice", async () => {
     const app = await buildTestApp();
     const { adminTok, iss1, chainId } = await makeT2(app);
-    const { proposal } = (await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(adminTok), payload: { useCaseKey: "t2-note", name: "N2", chainId, initialSupply: "500", treasuryAccount: BOB, metadata: { faceValue: 100 } } })).json();
+    const { proposal } = (await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(adminTok), payload: { useCaseKey: "t2-note", name: "N2", chainId, initialSupply: "500", metadata: { faceValue: 100 } } })).json();
     expect((await app.inject({ method: "POST", url: `${V1}/proposals/${proposal.id}/approve`, headers: auth(iss1), payload: {} })).json().proposal.status).toBe("pending");
     const dup = await app.inject({ method: "POST", url: `${V1}/proposals/${proposal.id}/approve`, headers: auth(iss1), payload: {} });
     expect(dup.statusCode).toBe(409);
@@ -150,9 +155,12 @@ describe("maker-checker: thresholds + concurrency", () => {
     const statuses = [r1, r2].map((r) => (r.json().proposal?.status ?? r.json().error));
     expect(statuses.filter((s) => s === "executed")).toHaveLength(1);
     expect(statuses.filter((s) => s === "PROPOSAL_NOT_PENDING")).toHaveLength(1);
-    // Supply minted exactly once.
+    // Supply minted exactly once, into the use case's own server-derived
+    // treasury — looked up as platform since the treasury Account is never
+    // linked to a user, so a scoped GET /accounts would never show it.
+    const treasury = await treasuryAddressOf(app, platform, "corporate-bond");
     const accts = (await app.inject({ method: "GET", url: `${V1}/assets/${asset.id}/accounts`, headers: auth(admin) })).json();
-    expect(accts.find((a: { address: string }) => a.address.toLowerCase() === BOB.toLowerCase())?.balance).toBe("1000");
+    expect(accts.find((a: { address: string }) => a.address.toLowerCase() === treasury.toLowerCase())?.balance).toBe("1000");
   });
 });
 
@@ -163,7 +171,7 @@ describe("maker-checker: gated settlement + ungated pass-through", () => {
     const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     await onboardUser(app, admin, platform, { email: "ap.holder@x.dev", password: "secret1", role: "Buyer", walletAddress: HOLDER, kyc: { legalName: "AP Holder", country: "IN" } });
     await onboardUser(app, admin, platform, { email: "ap.settle@x.dev", password: "secret1", role: "Auditor", walletAddress: PAYER, kyc: { legalName: "AP Settle", country: "IN" } });
-    const issued = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(admin), payload: { useCaseKey: "invoice-tokenization", name: "INV-AP-1", chainId: "fabric", initialSupply: "10000", treasuryAccount: HOLDER, metadata: { invoiceNumber: "INV-AP-1", invoiceDate: "2026-07-01", buyerName: "JSW Steel Limited", currency: "INR", amount: 1000000, dueDate: "2099-12-31" } } });
+    const issued = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(admin), payload: { useCaseKey: "invoice-tokenization", name: "INV-AP-1", chainId: "fabric", initialSupply: "10000", metadata: { invoiceNumber: "INV-AP-1", invoiceDate: "2026-07-01", buyerName: "JSW Steel Limited", currency: "INR", amount: 1000000, dueDate: "2099-12-31" } } });
     expect(issued.statusCode).toBe(201); // invoice issuance is NOT gated
     const assetId = issued.json().asset.id;
     await app.inject({ method: "POST", url: `${V1}/cash/credit`, headers: auth(platform), payload: { account: PAYER, currency: "CBDC-INR", amount: "1000000" } });
@@ -183,7 +191,7 @@ describe("maker-checker: gated settlement + ungated pass-through", () => {
     const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     await onboardUser(app, admin, platform, { email: "ap.holder2@x.dev", password: "secret1", role: "Buyer", walletAddress: HOLDER, kyc: { legalName: "AP Holder2", country: "IN" } });
     await onboardUser(app, admin, platform, { email: "ap.settle2@x.dev", password: "secret1", role: "Auditor", walletAddress: PAYER, kyc: { legalName: "AP Settle2", country: "IN" } });
-    const assetId = (await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(admin), payload: { useCaseKey: "invoice-tokenization", name: "INV-AP-2", chainId: "fabric", initialSupply: "10000", treasuryAccount: HOLDER, metadata: { invoiceNumber: "INV-AP-2", invoiceDate: "2026-07-01", buyerName: "JSW Steel Limited", currency: "INR", amount: 1000000, dueDate: "2099-12-31" } } })).json().asset.id;
+    const assetId = (await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(admin), payload: { useCaseKey: "invoice-tokenization", name: "INV-AP-2", chainId: "fabric", initialSupply: "10000", metadata: { invoiceNumber: "INV-AP-2", invoiceDate: "2026-07-01", buyerName: "JSW Steel Limited", currency: "INR", amount: 1000000, dueDate: "2099-12-31" } } })).json().asset.id;
     const { cashflows } = (await app.inject({ method: "GET", url: `${V1}/assets/${assetId}/cashflows`, headers: auth(admin) })).json();
     const proposed = await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/cashflows/${cashflows[0].id}/execute`, headers: auth(admin), payload: { from: PAYER } });
     expect(proposed.statusCode).toBe(202); // PAYER is scoped but unfunded — checked at execution
@@ -202,7 +210,7 @@ describe("maker-checker: gated settlement + ungated pass-through", () => {
     const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     await onboardUser(app, admin, platform, { email: "ap.holder3@x.dev", password: "secret1", role: "Buyer", walletAddress: HOLDER, kyc: { legalName: "AP Holder3", country: "IN" } });
     // Invoice issuance is ungated → 201 immediately with supply minted.
-    const issued = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(admin), payload: { useCaseKey: "invoice-tokenization", name: "INV-AP-3", chainId: "fabric", initialSupply: "10000", treasuryAccount: HOLDER, metadata: { invoiceNumber: "INV-AP-3", invoiceDate: "2026-07-01", buyerName: "JSW Steel Limited", currency: "INR", amount: 1000000, dueDate: "2099-12-31" } } });
+    const issued = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(admin), payload: { useCaseKey: "invoice-tokenization", name: "INV-AP-3", chainId: "fabric", initialSupply: "10000", metadata: { invoiceNumber: "INV-AP-3", invoiceDate: "2026-07-01", buyerName: "JSW Steel Limited", currency: "INR", amount: 1000000, dueDate: "2099-12-31" } } });
     expect(issued.statusCode).toBe(201);
     expect(issued.json().asset.status).toBe("active");
   });

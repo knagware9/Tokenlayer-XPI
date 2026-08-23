@@ -1,10 +1,9 @@
 import { describe, it, expect } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { buildTestApp, V1, loginAs, auth, onboardUser, TEST_MARKET_ESCROW } from "./helpers.js";
+import { buildTestApp, V1, loginAs, auth, onboardUser, treasuryAddressOf, TEST_MARKET_ESCROW } from "./helpers.js";
 
 // A platform fee account distinct from any seeded buyer/treasury address.
 const FEE_ACCOUNT = "0xdF3e18d64BC6A983f673Ab319CCaE4f1a57C7097";
-const TREASURY_ADDR = "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65";
 // The seeded carbon Buyer's linked wallet (EcoFund Capital) — our seller.
 const SELLER_WALLET = "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc";
 // Second buyer onboarded during the tests (Nordic Pension Fund).
@@ -45,17 +44,19 @@ async function setupMarket() {
   const carbon = (await app.inject({ method: "GET", url: `${V1}/use-cases/carbon-credit`, headers: auth(platform) })).json();
   await app.inject({ method: "PUT", url: `${V1}/use-cases/carbon-credit`, headers: auth(platform), payload: { ...carbon, fees: { marketplaceBps: 250 } } });
 
-  // Priced asset with supply minted to the treasury.
+  // Priced asset with supply minted into the use case's own (server-derived,
+  // never client-supplied — org-treasury-accounts Task 5) treasury.
   const issued = await app.inject({
     method: "POST", url: `${V1}/assets`, headers: auth(platform),
     payload: {
       useCaseKey: "carbon-credit", name: "Market Asset", chainId: "fabric", metadata: { projectName: "P", registry: "Verra", vintage: 2024 },
-      sale: { unitPrice: "5", currency: CBDC, treasuryAccount: TREASURY_ADDR },
-      treasuryAccount: TREASURY_ADDR, initialSupply: "1000",
+      sale: { unitPrice: "5", currency: CBDC },
+      initialSupply: "1000",
     },
   });
   expect(issued.statusCode).toBe(201);
   const assetId = issued.json().asset.id as string;
+  const treasury = await treasuryAddressOf(app, platform, "carbon-credit");
 
   // Seller = the seeded carbon Buyer (already KYC-approved, wallet EcoFund).
   await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: auth(carbonAdmin), payload: { account: SELLER_WALLET } });
@@ -72,7 +73,7 @@ async function setupMarket() {
   await app.inject({ method: "POST", url: `${V1}/cash/credit`, headers: auth(platform), payload: { account: BUYER2_WALLET, currency: CBDC, amount: "1000" } });
   const buyer2 = await loginAs(app, "buyer2@x.dev", "secret1");
 
-  return { app, platform, carbonAdmin, seller, buyer2, assetId };
+  return { app, platform, carbonAdmin, seller, buyer2, assetId, treasury };
 }
 
 /** Onboard a fresh KYC-approved, allowlisted (and optionally funded) Buyer; returns their login token. */
@@ -227,7 +228,7 @@ describe("secondary market: escrowed sell-listings", () => {
   });
 
   it("trades feed: returns primary + secondary buys, newest first, with the secondary flag", async () => {
-    const { app, seller, buyer2, assetId } = await setupMarket();
+    const { app, seller, buyer2, assetId, treasury } = await setupMarket();
     const listing = (await app.inject({
       method: "POST", url: `${V1}/assets/${assetId}/listings`, headers: auth(seller),
       payload: { quantity: "60", unitPrice: "7", currency: CBDC },
@@ -242,7 +243,7 @@ describe("secondary market: escrowed sell-listings", () => {
     expect(trades[0]).toMatchObject({ amount: "25", unitPrice: "7", currency: CBDC, from: SELLER_WALLET, to: BUYER2_WALLET, secondary: true });
     expect(trades[0].from).not.toBe(TEST_MARKET_ESCROW);
     expect(trades[0].at).toBeTruthy();
-    expect(trades[1]).toMatchObject({ amount: "100", unitPrice: "5", currency: CBDC, from: TREASURY_ADDR, to: SELLER_WALLET, secondary: false });
+    expect(trades[1]).toMatchObject({ amount: "100", unitPrice: "5", currency: CBDC, from: treasury, to: SELLER_WALLET, secondary: false });
   });
 
   it("concurrency: two takes racing for more than the remainder — exactly one wins, the pooled escrow never over-delivers", async () => {

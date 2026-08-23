@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FastifyInstance, InjectOptions } from "fastify";
-import { ACCOUNTS, auth, buildTestApp, buildTestAppWithRepos, issueAsset, loginAs, onboardUser, V1 } from "./helpers.js";
+import { ACCOUNTS, auth, buildTestApp, buildTestAppWithRepos, issueAsset, loginAs, onboardUser, treasuryAddressOf, V1 } from "./helpers.js";
 
 let app: FastifyInstance;
 beforeAll(async () => {
@@ -514,10 +514,12 @@ describe("per-use-case tenancy", () => {
 // Marketplace: buy (DvP) + cash/credit endpoints
 // ---------------------------------------------------------------------------
 
-// Seeded addresses used across buy tests:
-// Treasury wallet (used as treasury account for listings): 0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65
+// Seeded address used across buy tests:
 // A buyer wallet we onboard fresh: Helios Energy Corp — 0x14dC79964da2C08b23698B3D3cc7Ca32193d9955
-const TREASURY_ADDR = "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65";
+//
+// There is no fixed "treasury wallet" constant any more (org-treasury-accounts
+// Task 5): the treasury is the use case's own server-derived Account, looked up
+// per test via treasuryAddressOf(app, platform, "carbon-credit").
 const BUYER_WALLET = "0x14dC79964da2C08b23698B3D3cc7Ca32193d9955";
 
 /** Fund an address with CBDC-INR via POST /cash/credit using the given token. */
@@ -558,7 +560,9 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
     const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     const carbonAdmin = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
 
-    // Issue asset WITH sale terms (unitPrice=5, currency=CBDC-INR, treasuryAccount=TREASURY_ADDR)
+    // Issue asset WITH sale terms (unitPrice=5, currency=CBDC-INR). The treasury
+    // is never client-supplied (org-treasury-accounts Task 5) — it is the use
+    // case's own registered Account, looked up below.
     const issueRes = await app.inject({
       method: "POST",
       url: `${V1}/assets`,
@@ -569,7 +573,7 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
         symbol: "VCU",
         chainId: "fabric",
         metadata: { projectName: "Amazon Rainforest", registry: "Verra", vintage: 2024 },
-        sale: { unitPrice: "5", currency: "CBDC-INR", treasuryAccount: TREASURY_ADDR },
+        sale: { unitPrice: "5", currency: "CBDC-INR" },
       },
     });
     expect(issueRes.statusCode).toBe(201);
@@ -577,6 +581,9 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
     // Sale terms should be reflected in the returned asset
     expect(issueRes.json().asset.unitPrice).toBe("5");
     expect(issueRes.json().asset.currency).toBe("CBDC-INR");
+    const treasury = await treasuryAddressOf(app, platform, "carbon-credit");
+    // The sale-terms treasury IS the use case's own registered treasury.
+    expect(issueRes.json().asset.treasuryAccount).toBe(treasury);
 
     // Onboard a new Buyer with a wallet (BUYER_WALLET = Helios Energy Corp),
     // gated + checked by the platform admin.
@@ -592,11 +599,11 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
     });
 
     // Allow treasury and buyer wallet
-    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: TREASURY_ADDR } });
+    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: treasury } });
     await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: BUYER_WALLET } });
 
     // Mint 100 tokens to treasury
-    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/mint`, headers: { authorization: `Bearer ${platform}` }, payload: { to: TREASURY_ADDR, amount: "100" } });
+    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/mint`, headers: { authorization: `Bearer ${platform}` }, payload: { to: treasury, amount: "100" } });
 
     // Fund the buyer with 1000 CBDC-INR via cash/credit (platform admin can always credit)
     const creditRes = await app.inject({
@@ -622,7 +629,7 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
     expect(buyerBalance).toBe("950");
 
     // Assert treasury CBDC balance = 50 (received payment)
-    const treasuryBalance = await cashBalance(app, platform, TREASURY_ADDR);
+    const treasuryBalance = await cashBalance(app, platform, treasury);
     expect(treasuryBalance).toBe("50");
 
     // Assert buyer received 10 tokens by checking asset accounts
@@ -647,18 +654,19 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
         symbol: "VCU",
         chainId: "fabric",
         metadata: { projectName: "Amazon Rainforest", registry: "Verra", vintage: 2024 },
-        sale: { unitPrice: "5", currency: "CBDC-INR", treasuryAccount: TREASURY_ADDR },
+        sale: { unitPrice: "5", currency: "CBDC-INR" },
       },
     })).json().asset.id as string;
+    const treasury = await treasuryAddressOf(app, platform, "carbon-credit");
 
     // Onboard buyer with a fresh email (gated + checked by the platform admin)
     const createdBuyer = await onboardUser(app, carbonAdmin, platform, { email: "helios2@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER_WALLET });
     await app.inject({ method: "PATCH", url: `${V1}/users/${createdBuyer.id}`, headers: { authorization: `Bearer ${carbonAdmin}` }, payload: { kycStatus: "approved" } });
 
     // Allow ONLY treasury (NOT the buyer wallet)
-    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: TREASURY_ADDR } });
+    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: treasury } });
     // Mint to treasury
-    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/mint`, headers: { authorization: `Bearer ${platform}` }, payload: { to: TREASURY_ADDR, amount: "100" } });
+    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/mint`, headers: { authorization: `Bearer ${platform}` }, payload: { to: treasury, amount: "100" } });
 
     // Fund buyer
     await creditCash(app, platform, BUYER_WALLET, "1000");
@@ -707,15 +715,16 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
         symbol: "VCU",
         chainId: "fabric",
         metadata: { projectName: "Amazon Rainforest", registry: "Verra", vintage: 2024 },
-        sale: { unitPrice: "5", currency: "CBDC-INR", treasuryAccount: TREASURY_ADDR },
+        sale: { unitPrice: "5", currency: "CBDC-INR" },
       },
     })).json().asset.id as string;
+    const treasury = await treasuryAddressOf(app, platform, "carbon-credit");
 
     const createdBuyer = await onboardUser(app, carbonAdmin, platform, { email: "helios4@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER_WALLET });
     await app.inject({ method: "PATCH", url: `${V1}/users/${createdBuyer.id}`, headers: { authorization: `Bearer ${carbonAdmin}` }, payload: { kycStatus: "approved" } });
-    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: TREASURY_ADDR } });
+    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: treasury } });
     await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: BUYER_WALLET } });
-    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/mint`, headers: { authorization: `Bearer ${platform}` }, payload: { to: TREASURY_ADDR, amount: "100" } });
+    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/mint`, headers: { authorization: `Bearer ${platform}` }, payload: { to: treasury, amount: "100" } });
 
     // Fund with only 10 — not enough for 10 tokens at 5 each (cost=50)
     await creditCash(app, platform, BUYER_WALLET, "10");
@@ -741,17 +750,18 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
         symbol: "VCU",
         chainId: "fabric",
         metadata: { projectName: "Amazon Rainforest", registry: "Verra", vintage: 2024 },
-        sale: { unitPrice: "5", currency: "CBDC-INR", treasuryAccount: TREASURY_ADDR },
+        sale: { unitPrice: "5", currency: "CBDC-INR" },
       },
     })).json().asset.id as string;
+    const treasury = await treasuryAddressOf(app, platform, "carbon-credit");
 
     const createdBuyer = await onboardUser(app, carbonAdmin, platform, { email: "helios5@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER_WALLET });
     await app.inject({ method: "PATCH", url: `${V1}/users/${createdBuyer.id}`, headers: { authorization: `Bearer ${carbonAdmin}` }, payload: { kycStatus: "approved" } });
-    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: TREASURY_ADDR } });
+    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: treasury } });
     await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: BUYER_WALLET } });
 
     // Mint only 5 tokens to treasury — buyer requests 10
-    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/mint`, headers: { authorization: `Bearer ${platform}` }, payload: { to: TREASURY_ADDR, amount: "5" } });
+    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/mint`, headers: { authorization: `Bearer ${platform}` }, payload: { to: treasury, amount: "5" } });
     await creditCash(app, platform, BUYER_WALLET, "1000");
 
     const buyerToken = await loginAs(app, "helios5@x.dev", "secret1");
@@ -795,20 +805,23 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
     const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     const id = await issueGenericAsset(admin);
 
-    // setPrice should work for PlatformAdmin
+    // setPrice should work for PlatformAdmin. The treasury is never
+    // client-supplied (org-treasury-accounts Task 5) — it is derived from the
+    // use case's own registered Account.
     const setPriceRes = await inj({
       method: "POST",
       url: `/assets/${id}/actions/setPrice`,
       headers: auth(admin),
-      payload: { unitPrice: "10", currency: "CBDC-INR", treasuryAccount: TREASURY_ADDR },
+      payload: { unitPrice: "10", currency: "CBDC-INR" },
     });
     expect(setPriceRes.statusCode).toBe(200);
     expect(setPriceRes.json().ok).toBe(true);
 
-    // Verify sale terms are stored
+    // Verify sale terms are stored, including the derived treasury.
     const assetRes = await inj({ method: "GET", url: `/assets/${id}`, headers: auth(admin) });
     expect(assetRes.json().unitPrice).toBe("10");
     expect(assetRes.json().currency).toBe("CBDC-INR");
+    expect(assetRes.json().treasuryAccount).toBe(await treasuryAddressOf(app, admin, "generic-asset"));
 
     // Buyer cannot setPrice (no issue RBAC)
     const buyerToken = await loginAs(app, "carbon.buyer@tokenlayer.dev", "carbon123");
@@ -816,7 +829,7 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
       method: "POST",
       url: `/assets/${id}/actions/setPrice`,
       headers: auth(buyerToken),
-      payload: { unitPrice: "10", currency: "CBDC-INR", treasuryAccount: TREASURY_ADDR },
+      payload: { unitPrice: "10", currency: "CBDC-INR" },
     });
     expect(blockedRes.statusCode).toBe(403);
   });
@@ -842,7 +855,7 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
         symbol: "VCU",
         chainId: "fabric",
         metadata: { projectName: "Amazon Rainforest", registry: "Verra", vintage: 2024 },
-        sale: { unitPrice: "5", currency: "CBDC-INR", treasuryAccount: TREASURY_ADDR },
+        sale: { unitPrice: "5", currency: "CBDC-INR" },
       },
     })).json().asset.id as string;
 
@@ -877,7 +890,7 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
       method: "POST",
       url: `${V1}/assets/${assetId}/actions/setPrice`,
       headers: { authorization: `Bearer ${issuerToken}` },
-      payload: { unitPrice: "20", currency: "CBDC-INR", treasuryAccount: TREASURY_ADDR },
+      payload: { unitPrice: "20", currency: "CBDC-INR" },
     });
     expect(setPriceRes.statusCode).toBe(200);
     expect(setPriceRes.json().ok).toBe(true);
@@ -888,7 +901,7 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
       method: "POST",
       url: `${V1}/assets/${assetId}/actions/setPrice`,
       headers: { authorization: `Bearer ${buyerToken}` },
-      payload: { unitPrice: "20", currency: "CBDC-INR", treasuryAccount: TREASURY_ADDR },
+      payload: { unitPrice: "20", currency: "CBDC-INR" },
     });
     expect(blockedRes.statusCode).toBe(403);
   });
@@ -927,7 +940,10 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
     expect(balances.find((b) => b.currency === "CBDC-INR")?.amount).toBe("500");
   });
 
-  it("setPrice 400 VALIDATION_ERROR when treasuryAccount is missing", async () => {
+  // Was "...when treasuryAccount is missing": treasuryAccount is no longer a
+  // setPrice input at all (org-treasury-accounts Task 5 derives it server-side),
+  // so the only remaining required fields are unitPrice and currency.
+  it("setPrice 400 VALIDATION_ERROR when unitPrice or currency is missing", async () => {
     const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     const id = await issueGenericAsset(admin);
 
@@ -935,10 +951,10 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
       method: "POST",
       url: `/assets/${id}/actions/setPrice`,
       headers: auth(admin),
-      payload: { unitPrice: "10", currency: "CBDC-INR" }, // missing treasuryAccount
+      payload: { currency: "CBDC-INR" }, // missing unitPrice
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe("VALIDATION_ERROR");
-    expect(res.json().message).toContain("setPrice requires unitPrice, currency, and treasuryAccount");
+    expect(res.json().message).toContain("setPrice requires unitPrice and currency");
   });
 });

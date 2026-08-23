@@ -202,6 +202,27 @@ export function auth(token: string): { authorization: string } {
   return { authorization: `Bearer ${token}` };
 }
 
+/**
+ * The real, server-derived treasury address for a use case (org-treasury-accounts
+ * Task 5: the treasury is the use case's own registered `Account`, resolved from
+ * `treasuryAccountId` — never client-supplied). Tests that used to pass an
+ * arbitrary `treasuryAccount` in the issue payload and then assert against that
+ * same literal must instead look the real address up here, since the platform
+ * now picks it. `token` needs read access to both endpoints (a platform token
+ * always qualifies).
+ */
+export async function treasuryAddressOf(app: FastifyInstance, token: string, useCaseKey: string): Promise<string> {
+  const uc = await app.inject({ method: "GET", url: `${V1}/use-cases/${useCaseKey}`, headers: auth(token) });
+  if (uc.statusCode !== 200) throw new Error(`treasuryAddressOf(${useCaseKey}): GET use-case failed ${uc.statusCode}: ${uc.body}`);
+  const treasuryAccountId = uc.json().treasuryAccountId as string | null | undefined;
+  if (!treasuryAccountId) throw new Error(`treasuryAddressOf(${useCaseKey}): use case has no treasuryAccountId`);
+  const accts = await app.inject({ method: "GET", url: `${V1}/accounts`, headers: auth(token) });
+  if (accts.statusCode !== 200) throw new Error(`treasuryAddressOf(${useCaseKey}): GET accounts failed ${accts.statusCode}: ${accts.body}`);
+  const acct = (accts.json() as { id: string; address: string }[]).find((a) => a.id === treasuryAccountId);
+  if (!acct) throw new Error(`treasuryAddressOf(${useCaseKey}): account ${treasuryAccountId} not in GET /accounts`);
+  return acct.address;
+}
+
 const ALICE = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
 const BOB = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC";
 export const ACCOUNTS = { ALICE, BOB };

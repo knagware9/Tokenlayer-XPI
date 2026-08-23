@@ -70,5 +70,10 @@ export function createComplianceProvider(deps: ComplianceProviderDeps): Complian
       if (!user?.did) return false;
       return identity.holds(user.did, IDENTITY_CREDENTIAL_TYPE);
     },
+    async isUseCaseTreasury(account: string, treasuryAccountId: string | undefined): Promise<boolean> {
+      if (!treasuryAccountId) return false;
+      const acct = await accounts.findByAddress(account);
+      return acct?.id === treasuryAccountId;
+    },
   };
 }

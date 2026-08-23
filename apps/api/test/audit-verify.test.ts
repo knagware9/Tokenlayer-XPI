@@ -9,7 +9,7 @@ async function seeded(): Promise<{ app: FastifyInstance; admin: string; assetId:
   const issuer = await loginAs(app, "carbon.issuer@tokenlayer.dev", "carbon123");
   const res = await app.inject({
     method: "POST", url: `${V1}/assets`, headers: auth(issuer),
-    payload: { useCaseKey: "carbon-credit", name: "VCU-1", chainId: "fabric", initialSupply: "100", treasuryAccount: "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65", metadata: { projectName: "P", registry: "Verra", vintage: 2024 } },
+    payload: { useCaseKey: "carbon-credit", name: "VCU-1", chainId: "fabric", initialSupply: "100", metadata: { projectName: "P", registry: "Verra", vintage: 2024 } },
   });
   expect(res.statusCode).toBe(201);
   return { app, admin, assetId: res.json().asset.id };

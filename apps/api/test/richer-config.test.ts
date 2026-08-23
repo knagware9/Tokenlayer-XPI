@@ -1,10 +1,15 @@
 import { describe, it, expect } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { buildTestApp, V1, loginAs, auth, onboardUser } from "./helpers.js";
+import { buildTestApp, V1, loginAs, auth, onboardUser, treasuryAddressOf } from "./helpers.js";
 
 // A platform fee account distinct from any seeded buyer/treasury address.
 const FEE_ACCOUNT = "0xdF3e18d64BC6A983f673Ab319CCaE4f1a57C7097";
-const TREASURY_ADDR = "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65";
+// The seeded "Treasury" wallet — linked to carbon.issuer's own wallet (used only
+// by the issuance-fee test below, which pays FROM the calling issuer's linked
+// wallet, not from the asset's own treasury). Kept as its own constant since the
+// two concepts are unrelated: this is the ISSUER's wallet, not the use case's
+// registered treasury (which is now server-derived — see treasuryAddressOf).
+const ISSUER_WALLET = "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65";
 const BUYER_WALLET = "0x14dC79964da2C08b23698B3D3cc7Ca32193d9955";
 
 
@@ -70,15 +75,18 @@ describe("richer low-code config: compliance rules + fees", () => {
     const carbon = (await app.inject({ method: "GET", url: `${V1}/use-cases/carbon-credit`, headers: auth(platform) })).json();
     await app.inject({ method: "PUT", url: `${V1}/use-cases/carbon-credit`, headers: auth(platform), payload: { ...carbon, fees: { marketplaceBps: 250 } } });
 
-    // Issue a priced asset (unitPrice 5, CBDC-INR) and mint 100 to treasury.
+    // Issue a priced asset (unitPrice 5, CBDC-INR) and mint 100 into the use
+    // case's own (server-derived, never client-supplied — org-treasury-accounts
+    // Task 5) treasury.
     const asset = (await app.inject({
       method: "POST", url: `${V1}/assets`, headers: auth(platform),
       payload: {
         useCaseKey: "carbon-credit", name: "Fee Asset", chainId: "fabric", metadata: { projectName: "P", registry: "Verra", vintage: 2024 },
-        sale: { unitPrice: "5", currency: "CBDC-INR", treasuryAccount: TREASURY_ADDR },
-        treasuryAccount: TREASURY_ADDR, initialSupply: "100",
+        sale: { unitPrice: "5", currency: "CBDC-INR" },
+        initialSupply: "100",
       },
     })).json().asset;
+    const treasury = await treasuryAddressOf(app, platform, "carbon-credit");
 
     // Onboard + KYC-approve a Buyer (via the scoped UseCaseAdmin, checked by the
     // platform admin) with a linked wallet. Full KYC → approved with country IN.
@@ -93,7 +101,7 @@ describe("richer low-code config: compliance rules + fees", () => {
     expect(buyRes.json().fee).toMatchObject({ amount: "1", account: FEE_ACCOUNT });
 
     expect(await cashBalance(app, platform, FEE_ACCOUNT)).toBe("1");
-    expect(await cashBalance(app, platform, TREASURY_ADDR)).toBe("49");
+    expect(await cashBalance(app, platform, treasury)).toBe("49");
     expect(await cashBalance(app, platform, BUYER_WALLET)).toBe("950"); // 1000 - 50 total
   });
 
@@ -108,10 +116,11 @@ describe("richer low-code config: compliance rules + fees", () => {
       method: "POST", url: `${V1}/assets`, headers: auth(platform),
       payload: {
         useCaseKey: "carbon-credit", name: "Juris Asset", chainId: "fabric", metadata: { projectName: "P", registry: "Verra", vintage: 2024 },
-        sale: { unitPrice: "5", currency: "CBDC-INR", treasuryAccount: TREASURY_ADDR },
-        treasuryAccount: TREASURY_ADDR, initialSupply: "100",
+        sale: { unitPrice: "5", currency: "CBDC-INR" },
+        initialSupply: "100",
       },
     })).json().asset;
+    const treasury = await treasuryAddressOf(app, platform, "carbon-credit");
 
     // Now restrict to IN/US only.
     const carbon = (await app.inject({ method: "GET", url: `${V1}/use-cases/carbon-credit`, headers: auth(platform) })).json();
@@ -130,7 +139,7 @@ describe("richer low-code config: compliance rules + fees", () => {
 
     // Fail-closed: the buyer's cash was refunded (no net movement to treasury/fee).
     expect(await cashBalance(app, platform, BUYER_WALLET)).toBe("1000");
-    expect(await cashBalance(app, platform, TREASURY_ADDR)).toBe("0");
+    expect(await cashBalance(app, platform, treasury)).toBe("0");
   });
 
   it("issuance fee: charges issuanceFlat from the issuer's cash to the fee account before minting", async () => {
@@ -146,18 +155,21 @@ describe("richer low-code config: compliance rules + fees", () => {
     });
     expect(putRes.statusCode).toBe(200);
 
-    // The carbon issuer's linked wallet (Treasury) must hold funds to pay the fee.
-    await app.inject({ method: "POST", url: `${V1}/cash/credit`, headers: auth(platform), payload: { account: TREASURY_ADDR, currency: "CBDC-INR", amount: "500" } });
+    // The issuance fee is paid from the CALLING ISSUER'S OWN linked wallet (the
+    // seeded carbon.issuer is linked to "Treasury" = ISSUER_WALLET) — a
+    // different account from the asset's own registered treasury, and unaffected
+    // by this task's treasury derivation.
+    await app.inject({ method: "POST", url: `${V1}/cash/credit`, headers: auth(platform), payload: { account: ISSUER_WALLET, currency: "CBDC-INR", amount: "500" } });
     const issuer = await loginAs(app, "carbon.issuer@tokenlayer.dev", "carbon123");
 
     const res = await app.inject({
       method: "POST", url: `${V1}/assets`, headers: auth(issuer),
-      payload: { useCaseKey: "carbon-credit", name: "Iss Asset", chainId: "fabric", metadata: { projectName: "P", registry: "Verra", vintage: 2024 }, sale: { unitPrice: "5", currency: "CBDC-INR", treasuryAccount: TREASURY_ADDR } },
+      payload: { useCaseKey: "carbon-credit", name: "Iss Asset", chainId: "fabric", metadata: { projectName: "P", registry: "Verra", vintage: 2024 }, sale: { unitPrice: "5", currency: "CBDC-INR" } },
     });
     expect(res.statusCode).toBe(201);
     expect(res.json().issuanceFee).toMatchObject({ amount: "100", currency: "CBDC-INR" });
     // Issuer paid 100 → 400 left; fee account received 100.
-    expect(await cashBalance(app, platform, TREASURY_ADDR)).toBe("400");
+    expect(await cashBalance(app, platform, ISSUER_WALLET)).toBe("400");
     expect(await cashBalance(app, platform, FEE_ACCOUNT)).toBe("100");
   });
 });

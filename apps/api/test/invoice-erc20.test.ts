@@ -1,25 +1,18 @@
 import { describe, it, expect } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { buildTestApp, V1, loginAs, auth, onboardUser } from "./helpers.js";
+import { buildTestApp, V1, loginAs, auth } from "./helpers.js";
 import { invoiceFingerprint } from "@tokenlayer/core";
 
 const UC = "invoice-tokenization";
-// "Carol" — a seeded demo account not linked to any seeded user, so we can link
-// it to an IN-KYC holder and use it as the treasury (mint gates on IN jurisdiction).
-const HOLDER = "0x90F79bf6EB2c4f870365E785982E1f101E93b906";
 const inv = { invoiceNumber: "INV-9001", invoiceDate: "2026-07-01", buyerName: "JSW Steel Limited", currency: "INR", amount: 1000000, dueDate: "2026-12-31" };
 
-// Log in as the seeded invoice desk admin (UseCaseAdmin) and onboard an IN-KYC
-// holder wallet — the invoice use case gates token receipt on IN jurisdiction,
-// so the treasury that the initial supply mints into must resolve to IN.
+// Log in as the seeded invoice desk admin (UseCaseAdmin). The initial supply
+// mints into the use case's own registered treasury (org-treasury-accounts
+// Task 5: server-derived, never client-supplied), which is exempt from the
+// IN-jurisdiction gate as the use case's own operational reserve — no holder
+// needs to be onboarded here just to receive the mint.
 async function invoiceAdmin(app: FastifyInstance): Promise<string> {
-  const admin = await loginAs(app, "m1.admin@tokenlayer.dev", "m1admin123");
-  const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
-  // Gated onboarding: full KYC (legalName + country) → the checker's approval
-  // mints the credential and links HOLDER to an IN-KYC user, so the treasury mint
-  // resolves to IN jurisdiction.
-  await onboardUser(app, admin, platform, { email: "m1.holder@x.dev", password: "secret1", role: "Buyer", walletAddress: HOLDER, kyc: { legalName: "M1 Holder", country: "IN" } });
-  return admin;
+  return loginAs(app, "m1.admin@tokenlayer.dev", "m1admin123");
 }
 
 describe("invoice ERC-20 issue", () => {
@@ -27,7 +20,7 @@ describe("invoice ERC-20 issue", () => {
     const app = await buildTestApp();
     const admin = await invoiceAdmin(app);
     const res = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(admin), payload: {
-      useCaseKey: UC, name: inv.invoiceNumber, chainId: "fabric", initialSupply: "10000", treasuryAccount: HOLDER,
+      useCaseKey: UC, name: inv.invoiceNumber, chainId: "fabric", initialSupply: "10000",
       metadata: { ...inv, invoiceHash: "0x" + "00".repeat(32) }, // bogus — must be ignored
     }});
     expect(res.statusCode).toBe(201);
@@ -37,7 +30,7 @@ describe("invoice ERC-20 issue", () => {
   it("rejects a duplicate invoice (same fingerprint) with 409 DUPLICATE_ASSET", async () => {
     const app = await buildTestApp();
     const admin = await invoiceAdmin(app);
-    const body = { useCaseKey: UC, name: inv.invoiceNumber, chainId: "fabric", initialSupply: "10000", treasuryAccount: HOLDER, metadata: { ...inv } };
+    const body = { useCaseKey: UC, name: inv.invoiceNumber, chainId: "fabric", initialSupply: "10000", metadata: { ...inv } };
     expect((await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(admin), payload: body })).statusCode).toBe(201);
     const dup = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(admin), payload: { ...body, name: "dup" } });
     expect(dup.statusCode).toBe(409);

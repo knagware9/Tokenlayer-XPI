@@ -217,8 +217,13 @@ class FakeCompliance implements ComplianceProvider {
   acquired = new Map<string, string | null>();
   jurisdictions = new Map<string, string | null>();
   verified = new Map<string, boolean>();
+  /** treasuryAccountId → the account address it resolves to, mirroring the real
+   *  provider's address→Account.id lookup without needing a repo here. */
+  treasuryAccounts = new Map<string, string>();
   /** When true, hasVerifiedIdentity throws — used to prove it's never consulted when the flag is off. */
   throwOnVerify = false;
+  /** When true, jurisdictionOf throws — used to prove it's never consulted once the treasury exemption applies. */
+  throwOnJurisdiction = false;
   async holderCount(_ref: AssetRef): Promise<number> {
     return this.holders;
   }
@@ -226,11 +231,16 @@ class FakeCompliance implements ComplianceProvider {
     return this.acquired.get(account) ?? null;
   }
   async jurisdictionOf(account: string): Promise<string | null> {
+    if (this.throwOnJurisdiction) throw new Error("jurisdictionOf should not be consulted once the treasury exemption applies");
     return this.jurisdictions.get(account) ?? null;
   }
   async hasVerifiedIdentity(account: string): Promise<boolean> {
     if (this.throwOnVerify) throw new Error("hasVerifiedIdentity should not be consulted when the flag is off");
     return this.verified.get(account) ?? false;
+  }
+  async isUseCaseTreasury(account: string, treasuryAccountId: string | undefined): Promise<boolean> {
+    if (!treasuryAccountId) return false;
+    return this.treasuryAccounts.get(treasuryAccountId) === account;
   }
 }
 
@@ -255,14 +265,24 @@ describe("LifecycleEngine — engine-enforced compliance rules", () => {
     key: "jurisdiction",
     compliance: { allowlist: false, transferRestrictions: true, allowedJurisdictions: ["IN"] },
   };
+  // Same jurisdiction gate, but with a registered treasury — proves the
+  // treasury exemption (org-treasury-accounts plan, Task 5 fix) without
+  // touching the no-treasury fixture above.
+  const JURISDICTION_TREASURY_UC: UseCaseDefinition = {
+    ...FUNGIBLE_USE_CASE,
+    key: "jurisdiction-treasury",
+    treasuryAccountId: "treasury-acct-1",
+    compliance: { allowlist: false, transferRestrictions: true, allowedJurisdictions: ["IN"] },
+  };
 
   const holderCtx: AssetContext = { ref: { id: "h1", chainId: "fake", contractRef: "fake:h1" }, useCaseKey: "holder-limit" };
   const lockupCtx: AssetContext = { ref: { id: "l1", chainId: "fake", contractRef: "fake:l1" }, useCaseKey: "lockup" };
   const jurCtx: AssetContext = { ref: { id: "j1", chainId: "fake", contractRef: "fake:j1" }, useCaseKey: "jurisdiction" };
+  const jurTreasuryCtx: AssetContext = { ref: { id: "j2", chainId: "fake", contractRef: "fake:j2" }, useCaseKey: "jurisdiction-treasury" };
 
   function makeEngine(now: () => string): LifecycleEngine {
     return new LifecycleEngine({
-      useCases: new StaticUseCaseSource([HOLDER_LIMIT_UC, LOCKUP_UC, JURISDICTION_UC]),
+      useCases: new StaticUseCaseSource([HOLDER_LIMIT_UC, LOCKUP_UC, JURISDICTION_UC, JURISDICTION_TREASURY_UC]),
       rbac: new RbacPolicy(),
       resolveAdapter: () => adapter,
       audit,
@@ -322,6 +342,24 @@ describe("LifecycleEngine — engine-enforced compliance rules", () => {
     await expect(engine.mint(ADMIN, jurCtx, "unknown-holder", "10")).rejects.toThrow(/JURISDICTION_NOT_ALLOWED|not allowed/);
   });
 
+  it("treasury exemption: minting to the use case's OWN registered treasury bypasses the jurisdiction gate, even with unknown jurisdiction", async () => {
+    const engine = makeEngine(() => "2026-01-01T00:00:00.000Z");
+    provider.treasuryAccounts.set("treasury-acct-1", "treasury-addr");
+    provider.throwOnJurisdiction = true; // would throw if jurisdictionOf were consulted at all
+    // No jurisdictions.set("treasury-addr", ...) — its jurisdiction is genuinely
+    // unknown, exactly like a freshly provisionTreasury'd account with no linked
+    // user. Without the exemption this would 400 JURISDICTION_NOT_ALLOWED.
+    await expect(engine.mint(ADMIN, jurTreasuryCtx, "treasury-addr", "10")).resolves.toBeDefined();
+  });
+
+  it("treasury exemption: does NOT exempt a different account, even on a use case that has a registered treasury", async () => {
+    const engine = makeEngine(() => "2026-01-01T00:00:00.000Z");
+    provider.treasuryAccounts.set("treasury-acct-1", "treasury-addr");
+    // "someone-else" is not the registered treasury address — ordinary customer
+    // holder rules still apply on this same use case.
+    await expect(engine.mint(ADMIN, jurTreasuryCtx, "someone-else", "10")).rejects.toThrow(/JURISDICTION_NOT_ALLOWED|not allowed/);
+  });
+
   it("no provider / no rule: engine without a ComplianceProvider skips the rules", async () => {
     // Engine constructed WITHOUT a compliance provider, use case WITH maxHolders set.
     const engine = new LifecycleEngine({
@@ -354,13 +392,21 @@ describe("LifecycleEngine — compliance.requireVerifiedIdentity gate", () => {
     key: "verified-id-off",
     compliance: { allowlist: false, transferRestrictions: true },
   };
+  // Same requireVerifiedIdentity gate, but with a registered treasury.
+  const VERIFIED_ID_TREASURY_UC: UseCaseDefinition = {
+    ...FUNGIBLE_USE_CASE,
+    key: "verified-id-treasury",
+    treasuryAccountId: "treasury-acct-2",
+    compliance: { allowlist: false, transferRestrictions: true, requireVerifiedIdentity: true },
+  };
 
   const idCtx: AssetContext = { ref: { id: "v1", chainId: "fake", contractRef: "fake:v1" }, useCaseKey: "verified-id" };
   const offCtx: AssetContext = { ref: { id: "v2", chainId: "fake", contractRef: "fake:v2" }, useCaseKey: "verified-id-off" };
+  const idTreasuryCtx: AssetContext = { ref: { id: "v3", chainId: "fake", contractRef: "fake:v3" }, useCaseKey: "verified-id-treasury" };
 
   function makeEngine(): LifecycleEngine {
     return new LifecycleEngine({
-      useCases: new StaticUseCaseSource([VERIFIED_ID_UC, FLAG_OFF_UC]),
+      useCases: new StaticUseCaseSource([VERIFIED_ID_UC, FLAG_OFF_UC, VERIFIED_ID_TREASURY_UC]),
       rbac: new RbacPolicy(),
       resolveAdapter: () => adapter,
       audit,
@@ -417,6 +463,20 @@ describe("LifecycleEngine — compliance.requireVerifiedIdentity gate", () => {
     provider.throwOnVerify = true; // would throw if consulted at all
     await expect(engine.mint(ADMIN, offCtx, "alice", "10")).resolves.toBeDefined();
     await expect(engine.transfer(ADMIN, offCtx, "alice", "bob", "5")).resolves.toBeDefined();
+  });
+
+  it("treasury exemption: minting to the use case's OWN registered treasury bypasses requireVerifiedIdentity", async () => {
+    const engine = makeEngine();
+    provider.treasuryAccounts.set("treasury-acct-2", "treasury-addr");
+    provider.throwOnVerify = true; // would throw if hasVerifiedIdentity were consulted at all
+    await expect(engine.mint(ADMIN, idTreasuryCtx, "treasury-addr", "10")).resolves.toBeDefined();
+  });
+
+  it("treasury exemption: does NOT exempt a different account on the same treasury-bearing use case", async () => {
+    const engine = makeEngine();
+    provider.treasuryAccounts.set("treasury-acct-2", "treasury-addr");
+    provider.verified.set("someone-else", false);
+    await expect(engine.mint(ADMIN, idTreasuryCtx, "someone-else", "10")).rejects.toThrow(/IDENTITY_NOT_VERIFIED|verified identity/);
   });
 });
 

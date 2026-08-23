@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { cachedVerification, invalidateVerifiedPrefix, mintSecret, rememberVerification, verifiedPrefixCacheStats } from "../src/shared/api-keys.js";
 import { requirePrincipal } from "../src/http/support.js";
 import { MemoryApiKeyRepository, MemoryUserRepository } from "../src/persistence/memory/index.js";
-import { ACCOUNTS, auth, buildTestAppWithRepos, loginAs, onboardUser, V1, type TestAppHandle } from "./helpers.js";
+import { auth, buildTestAppWithRepos, loginAs, onboardUser, V1, type TestAppHandle } from "./helpers.js";
 
 describe("MemoryApiKeyRepository", () => {
   it("creates, finds by prefix and id, touches lastUsedAt and revokes", async () => {
@@ -978,7 +978,7 @@ describe("assets:issue is not bypassable through the invoice register (H2)", () 
     const issuer = await seedServiceKey(h, { role: "PlatformAdmin", scopes: ["assets:issue"] });
     const tokenize = (credential: string) => h.app.inject({
       method: "POST", url: `${V1}/use-cases/invoice-tokenization/invoices/tokenize`, headers: auth(credential),
-      payload: { ids: ["inv_none"], chainId: "fabric", treasuryAccount: ACCOUNTS.ALICE },
+      payload: { ids: ["inv_none"], chainId: "fabric" },
     });
 
     // Same key, same authority — the two doors onto issueAssetCore must agree.
