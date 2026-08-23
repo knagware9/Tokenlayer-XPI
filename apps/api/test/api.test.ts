@@ -308,15 +308,21 @@ describe("use-case-owned contracts", () => {
     expect(contracts.canton.contractRef).toBe("canton:uc-multi");
   });
 
-  it("rejects create with NO_DEPLOYABLE_CHAIN when no allowed chain is available", async () => {
-    const app = await buildTestApp();
+  it("rejects create with NO_DEPLOYABLE_CHAIN when no allowed chain is available, and leaves no orphaned treasury Account behind", async () => {
+    const { app, deps } = await buildTestAppWithRepos();
     const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const accountsBefore = await deps.accounts.list();
     const res = await app.inject({
       method: "POST", url: "/api/v1/use-cases", headers: auth(admin),
       payload: { ...base, key: "uc-besu", name: "UC Besu", symbol: "UCB", allowedChainIds: ["besu"], defaultChainId: "besu" },
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe("NO_DEPLOYABLE_CHAIN");
+    // provisionTreasury must run only AFTER a successful deploy — a failed deploy
+    // (as here) must not have created (and orphaned) a treasury Account.
+    const accountsAfter = await deps.accounts.list();
+    expect(accountsAfter.length).toBe(accountsBefore.length);
+    expect(accountsAfter.some((a) => a.label === "UC Besu treasury")).toBe(false);
   });
 
   it("issues assets that share the use case's per-chain contract", async () => {

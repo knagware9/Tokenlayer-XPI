@@ -51,15 +51,18 @@ export const createUseCaseKind: ProposalKindHandler = {
       }
     }
     const available = new Set(ctx.deps.chains.list().map((c) => c.id));
-    const treasuryAccountId = await provisionTreasury(ctx.deps, def.ownerOrgId, `${def.name} treasury`);
     // Deploy + persist via the shared helper so the NO_DEPLOYABLE_CHAIN surface
-    // stays identical to the PlatformAdmin direct-create path.
+    // stays identical to the PlatformAdmin direct-create path. Treasury
+    // provisioning happens INSIDE the helper, only after a successful deploy —
+    // never on the NO_DEPLOYABLE_CHAIN path, so a failed deploy can't leave an
+    // orphaned treasury Account behind.
     await deployAndCreateUseCase(
       ctx.deps.useCases,
-      { ...def, treasuryAccountId },
+      def,
       available,
       (d, chainId) => ctx.deps.engine.deployUseCaseContract(d, chainId),
       (m) => ctx.log.error({ err: m }, "use-case contract deploy skipped"),
+      () => provisionTreasury(ctx.deps, def.ownerOrgId, `${def.name} treasury`),
     );
   },
 };

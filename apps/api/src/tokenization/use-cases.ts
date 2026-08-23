@@ -51,6 +51,12 @@ export async function deployUseCaseContracts(
  * direct-create path and the create-use-case proposal's execute step, so their
  * error surface can never drift. The caller must have already validated the
  * definition (normalise) and checked the key does not exist.
+ *
+ * `provisionTreasury`, if given, runs only AFTER the deploy-success check passes
+ * (i.e. never on the `NO_DEPLOYABLE_CHAIN` path) and before the record is
+ * persisted — so a failed deploy can never leave an orphaned treasury Account
+ * with nothing referencing it. `AccountRepository` has no delete, so this
+ * ordering is the only way to keep that failure mode from happening at all.
  */
 export async function deployAndCreateUseCase(
   repo: UseCaseRepository,
@@ -58,12 +64,14 @@ export async function deployAndCreateUseCase(
   availableChainIds: ReadonlySet<string>,
   deploy: (def: UseCaseDefinition, chainId: string) => Promise<UseCaseContract>,
   log?: (msg: string) => void,
+  provisionTreasury?: () => Promise<string>,
 ): Promise<UseCaseDefinition> {
   const contracts = await deployUseCaseContracts(def, availableChainIds, deploy, log);
   if (Object.keys(contracts).length === 0) {
     throw coded(400, "NO_DEPLOYABLE_CHAIN", `no allowed chain is available to deploy '${def.key}'; configure at least one of: ${def.allowedChainIds.join(", ")}`);
   }
-  return repo.create({ ...def, contracts });
+  const treasuryAccountId = provisionTreasury ? await provisionTreasury() : def.treasuryAccountId;
+  return repo.create({ ...def, treasuryAccountId, contracts });
 }
 
 /**

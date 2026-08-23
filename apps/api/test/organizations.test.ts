@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { decodeJwt, publicKeyFromDidKey, verifyJwtSignature } from "@tokenlayer/core";
 import { auth, buildTestApp, loginAs, V1 } from "./helpers.js";
+import { PLATFORM_ORG_NAME } from "../src/shared/platform-org.js";
 
 let app: FastifyInstance;
 let admin: string;
@@ -233,6 +234,42 @@ describe("POST /use-cases (org self-service) — treasury provisioning", () => {
     expect(typeof uc.json().treasuryAccountId).toBe("string");
     const acct = await app.inject({ method: "GET", url: `${V1}/accounts`, headers: auth(admin) });
     expect(acct.json().some((a: { id: string }) => a.id === uc.json().treasuryAccountId)).toBe(true);
+  });
+
+  const base = {
+    tokenStandard: "ERC-20", allowedChainIds: ["fabric"], defaultChainId: "fabric",
+    metadataSchema: { type: "object", properties: {} },
+    lifecycle: { mint: true, transfer: true, burn: true, freeze: true },
+    compliance: { allowlist: true, transferRestrictions: false },
+    roles: ["UseCaseAdmin", "Issuer"],
+  };
+
+  it("a PlatformAdmin direct-create with an explicit ownerOrgId gets a treasury owned by that org (201, no proposal)", async () => {
+    const org = (await createOrg(admin, { name: "PA Direct Treasury Org", orgType: "corporate" })).json();
+    const key = `treasury-pa-explicit-${org.id}`;
+    const created = await app.inject({
+      method: "POST", url: `${V1}/use-cases`, headers: auth(admin),
+      payload: { ...base, key, name: "PA Direct Explicit", symbol: "PDE", ownerOrgId: org.id },
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().ownerOrgId).toBe(org.id);
+    expect(typeof created.json().treasuryAccountId).toBe("string");
+    const acct = await app.inject({ method: "GET", url: `${V1}/accounts`, headers: auth(admin) });
+    expect(acct.json().some((a: { id: string }) => a.id === created.json().treasuryAccountId)).toBe(true);
+  });
+
+  it("a PlatformAdmin direct-create with NO ownerOrgId in the body falls back to the platform's own org", async () => {
+    const key = `treasury-pa-fallback-${Date.now()}`;
+    const created = await app.inject({
+      method: "POST", url: `${V1}/use-cases`, headers: auth(admin),
+      payload: { ...base, key, name: "PA Direct Fallback", symbol: "PDF" },
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().ownerOrgId).toBeTruthy();
+    expect(typeof created.json().treasuryAccountId).toBe("string");
+    const owner = await app.inject({ method: "GET", url: `${V1}/orgs/${created.json().ownerOrgId}`, headers: auth(admin) });
+    expect(owner.statusCode).toBe(200);
+    expect(owner.json().name).toBe(PLATFORM_ORG_NAME);
   });
 });
 

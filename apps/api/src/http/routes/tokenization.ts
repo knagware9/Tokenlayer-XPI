@@ -148,14 +148,17 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
     // the use case belongs to the platform's own org — the same fallback
     // identity issuance already uses when a credential use case has no owner.
     const ownerOrgId = definition.ownerOrgId ?? (await ensurePlatformIssuerOrg(deps)).id;
-    const treasuryAccountId = await provisionTreasury(deps, ownerOrgId, `${definition.name} treasury`);
     const available = new Set(deps.chains.list().map((c) => c.id));
+    // Treasury provisioning happens INSIDE deployAndCreateUseCase, only after a
+    // successful deploy — never on the NO_DEPLOYABLE_CHAIN path, so a failed
+    // deploy can't leave an orphaned treasury Account behind.
     const created = await deployAndCreateUseCase(
       deps.useCases,
-      { ...definition, ownerOrgId, treasuryAccountId },
+      { ...definition, ownerOrgId },
       available,
       (def, chainId) => deps.engine.deployUseCaseContract(def, chainId),
       (m) => request.log.warn(m),
+      () => provisionTreasury(deps, ownerOrgId, `${definition.name} treasury`),
     );
     return reply.code(201).send(created);
   });
