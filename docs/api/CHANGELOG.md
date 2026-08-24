@@ -19,6 +19,55 @@ diff. That file is generated, not written by hand; see the header of
 
 ---
 
+## Unreleased — the treasury is the use case's, and you no longer send it
+
+### **ACTION REQUIRED** — `treasuryAccount` is removed from three request bodies
+
+Every use case now owns a treasury account that the platform provisions for it
+and records on the use case itself. Issuance and pricing read it from there.
+Nothing about who receives a mint or who sells on the marketplace has changed in
+substance — what changed is that **you no longer name the account, and may no
+longer name one.** A treasury address that a caller could choose was an address
+a caller could point somewhere else.
+
+The field is gone from three bodies, and **two of them now reject a request that
+still sends it** rather than ignoring it. Check all three:
+
+| Request body | Sending `treasuryAccount` today | Omitting it today |
+| --- | --- | --- |
+| `POST /assets` — top-level `treasuryAccount` | **Ignored.** Extra top-level properties are not rejected here, so the field is silently dropped and the mint goes to the use case's own treasury. | Fine — and now required behaviour. |
+| `POST /assets` — `sale.treasuryAccount` | **`400 VALIDATION_ERROR`.** The `sale` object is `additionalProperties: false`. | Fine. It was **required** before, so this is also the half of the change that fixes existing callers. |
+| `POST /assets/{id}/actions/setPrice` — `treasuryAccount` | **`400 VALIDATION_ERROR`.** The actions body is `additionalProperties: false`. | Fine. |
+| `POST /use-cases/{key}/invoices/tokenize` — `treasuryAccount` | **Ignored.** Extra top-level properties are not rejected here either. | Fine. It was **required** before. |
+
+So: if your integration sends `sale.treasuryAccount` or a `setPrice`
+`treasuryAccount`, it is getting a `400` now and the fix is to delete the field.
+If it sends the top-level `POST /assets` `treasuryAccount` or the
+`tokenize` one, it is not failing — but the address it names is doing nothing,
+which is worth knowing before you conclude the mint went where you asked.
+
+**Nothing was added to any response.** `asset.treasuryAccount` is unchanged: it
+is still the marketplace seller, still `null` until sale terms exist, and now
+always the use case's registered treasury when it is set.
+
+### New refusal: `400 MISSING_TREASURY`
+
+`POST /assets` (with `initialSupply` or `sale`) and `setPrice` answer
+`400 MISSING_TREASURY` when the use case has no registered treasury. This can
+only happen to a use case created before this shipped on a deployment that has
+not yet run the backfill; the upgraded API runs it at boot, so in practice you
+should never see it. If you do, it is an operator action, not a client one.
+
+### `PATCH /me/wallet` gains `409 ADDRESS_IS_ORG_TREASURY`
+
+A use case's treasury address is visible to anyone who can read its assets, and
+it has no user linked to it. Linking yourself to one is now refused — on this
+route and on the `walletAddress` field of the user-creation routes (which answer
+`400` with the same code). No legitimate integration links a wallet it does not
+control, so this should be inert for you.
+
+---
+
 ## Unreleased — an issuer's register says which programme
 
 ### `GET /orgs/{id}/credentials` gains `credentialUseCaseKey` and `acceptance`

@@ -73,7 +73,17 @@ export function createComplianceProvider(deps: ComplianceProviderDeps): Complian
     async isUseCaseTreasury(account: string, treasuryAccountId: string | undefined): Promise<boolean> {
       if (!treasuryAccountId) return false;
       const acct = await accounts.findByAddress(account);
-      return acct?.id === treasuryAccountId;
+      if (!acct || acct.id !== treasuryAccountId) return false;
+      // DEFENCE IN DEPTH, and the second half of the same fix as
+      // `refuseIfOrgOwned`. The exemption exists because a use case's treasury
+      // is the use case ITSELF — an account no person holds, receiving its own
+      // mint. The moment a User is linked to it, that premise is false: the
+      // account is somebody's wallet now, and answering "true" here would hand
+      // that somebody a standing jurisdiction + identity bypass. So a CLAIMED
+      // account LOSES the exemption rather than granting one to whoever claimed
+      // it. Reached only if `refuseIfOrgOwned` was bypassed or a link predates
+      // it; fail-closed is the right direction when the two disagree.
+      return (await users.findByAccountId(acct.id)) === null;
     },
   };
 }

@@ -35,7 +35,7 @@ import { resolveDid } from "../../identity/did-resolver.js";
 import { checkUrl } from "../../webhooks/url-guard.js";
 import { API_KEY_BCRYPT_ROUNDS, invalidateVerifiedPrefix, mintSecret } from "../../shared/api-keys.js";
 import { BRAND_LOGO_PRUNE_GRACE_MS, pruneSupersededBrandLogos } from "../../shared/brand-logo-prune.js";
-import { resolveAccountId, WALLET_ELIGIBLE_ROLES } from "../../shared/wallets.js";
+import { refuseIfOrgOwned, resolveAccountId, WALLET_ELIGIBLE_ROLES } from "../../shared/wallets.js";
 import { S } from "../schemas/index.js";
 import { holdsValidCredential, IDENTITY_CREDENTIAL_TYPE } from "../../identity/identity-assertions.js";
 import { actorOf, claimsOf, contextOf, isPositiveIntString, machinePrincipal, notFound, requirePrincipal, requireScope, scopedToCaller, type TokenClaims } from "../support.js";
@@ -113,6 +113,18 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     // OVERWRITES the label of an existing row at that address, so upserting
     // first and checking after would silently relabel another user's account
     // with this caller's email before the conflict was ever detected.
+    // AN UNLINKED ADDRESS IS NOT A FREE ADDRESS. The check below asks "is
+    // someone else already on it?", and a use case's auto-provisioned treasury
+    // answers "no" — it has no linked user, by construction. It is also
+    // published: `Asset.treasuryAccount` rides every asset read, so any Buyer
+    // or Trader in the use case can read it and claim it here. Claiming it
+    // would link a person to the one account `isUseCaseTreasury` exempts from
+    // `requireJurisdiction`/`requireVerifiedIdentity`, turning this branch's
+    // compliance exemption into a compliance bypass. Ownership is the
+    // discriminator, not linkage — shared with `resolveAccountId`, the other
+    // door into wallet linkage, so both refuse the same address.
+    const orgOwned = await refuseIfOrgOwned(deps, b.walletAddress);
+    if (orgOwned) return reply.code(409).send(orgOwned);
     const existing = await deps.accounts.findByAddress(b.walletAddress);
     if (existing) {
       const owner = await deps.users.findByAccountId(existing.id);

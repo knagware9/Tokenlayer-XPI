@@ -181,7 +181,12 @@ function useCaseToData(def: UseCaseDefinition) {
     uniqueBy: def.uniqueBy ?? null,
     terms: JSON.stringify(def.terms ?? {}),
     workflow: JSON.stringify(def.workflow ?? {}),
-    ownerOrgId: def.ownerOrgId ?? null,
+    // `?? ""`, not `?? null`: the column is `String NOT NULL DEFAULT ""` (see
+    // schema.prisma) and "" is its own documented "not yet owned" sentinel.
+    // Writing null here made the mapper and the column type disagree — a
+    // Prisma validation error on any write that omitted an owner, invisible to
+    // the memory-backed tests.
+    ownerOrgId: def.ownerOrgId ?? "",
     treasuryAccountId: def.treasuryAccountId ?? null,
     roles: JSON.stringify(def.roles),
   };

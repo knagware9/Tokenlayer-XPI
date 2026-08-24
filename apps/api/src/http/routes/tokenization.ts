@@ -46,6 +46,14 @@ import { actorOf, claimsOf, contextOf, isPositiveIntString, machinePrincipal, no
 import { NO_USE_CASE, canAdministerUser, BCRYPT_ROUNDS, LOGIN_WINDOW_MS, MAX_DOC_BYTES, DOC_UPLOAD_BODY_LIMIT, ALLOWED_DOC_TYPES, storeUploadedDocument, orgOwnsDocument, decodeVcJti, devKeyFromSeed, orgView, orgCapabilityMissing } from "./common.js";
 import type { BrandLogoErrorCode, RouteContext } from "./context.js";
 
+/**
+ * ONE WORDING FOR ONE FACT. Issuance and `setPrice` refuse for the identical
+ * reason — a use case with no registered treasury — and used to say it two
+ * different ways, only one of which named the fix. An operator who hits this
+ * needs the same instruction whichever door they came through.
+ */
+const MISSING_TREASURY_MESSAGE = "this use case has no registered treasury — run the treasury backfill";
+
 export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, ctx: RouteContext): void {
   const { principal, auth, authScoped, loginThrottled, proposeIfGated, orgScoped, resolveUseCaseDomain, useCaseKeysByDomain, linkedWallet, orgMemberCapabilityViolation, brandLogoRefusal, proposalView, ensureOrg, manageableTarget, mapHeld, isRenderableArtwork, RENDERABLE_ARTWORK_TYPES, assetChain, verifyAsset, redactPayload } = ctx;
   // Loads an asset and enforces use-case scope. Returns null after sending the
@@ -147,7 +155,23 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
     // PlatformAdmin may name an owning org explicitly in the body; absent one,
     // the use case belongs to the platform's own org — the same fallback
     // identity issuance already uses when a credential use case has no owner.
-    const ownerOrgId = definition.ownerOrgId ?? (await ensurePlatformIssuerOrg(deps)).id;
+    //
+    // THE SAME DUPLICATE-KEY CHECK THE ORGADMIN PATH ALREADY MAKES, and for a
+    // sharper reason on this path: without it `deployAndCreateUseCase`
+    // provisions a treasury Account and deploys a contract on every allowed
+    // chain BEFORE `repo.create` throws on the existing key — real side
+    // effects, an orphaned treasury, and a messier error than the 409 the
+    // other door returns for the identical request.
+    if (await deps.useCases.has(definition.key)) {
+      return reply.code(409).send({ error: "USECASE_EXISTS", message: `use case '${definition.key}' already exists` });
+    }
+    // `||`, NOT `??`. An explicit `ownerOrgId: ""` in the body survived `??`,
+    // and "" is the backfill's own sentinel for "needs an owner" — so the use
+    // case would read as unowned, a later backfill run would silently reassign
+    // it to the Platform org, and its already-provisioned treasury Account
+    // would keep `ownerOrgId: ""` and never move with it. An empty string is
+    // not an organization; it falls back like an absent one.
+    const ownerOrgId = definition.ownerOrgId || (await ensurePlatformIssuerOrg(deps)).id;
     const available = new Set(deps.chains.list().map((c) => c.id));
     // Treasury provisioning happens INSIDE deployAndCreateUseCase, only after a
     // successful deploy — never on the NO_DEPLOYABLE_CHAIN path, so a failed
@@ -241,7 +265,16 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
       // covertly grant that account a permanent jurisdiction+identity bypass on
       // this use case). The treasury is provisioned once, at creation — it is
       // not a PUT-editable field.
-      incoming = normalizeUseCaseDefinition({ ...(request.body as UseCaseDefinition), key, contracts: existingContracts, treasuryAccountId: existing.treasuryAccountId });
+      //
+      // ownerOrgId rides the SAME preservation for a third reason. It is not
+      // in the PUT schema at all, so a body that only edits a name arrives
+      // with it `undefined`; `useCaseToData` then writes the column, which is
+      // `String NOT NULL DEFAULT ""` — a Prisma validation error (500) on the
+      // real database, and a silent null-out on the memory repo, which is
+      // exactly why the branch's own (memory-backed) tests never saw it. Who
+      // owns a use case is settled at creation and changed nowhere; an edit
+      // must not be able to clear it either loudly or quietly.
+      incoming = normalizeUseCaseDefinition({ ...(request.body as UseCaseDefinition), key, contracts: existingContracts, treasuryAccountId: existing.treasuryAccountId, ownerOrgId: existing.ownerOrgId });
     } catch (err) {
       if (err instanceof PolicyError) return reply.code(400).send({ error: err.code, message: err.message });
       throw err;
@@ -306,7 +339,7 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
     // rule — see its own MISSING_TREASURY check below) — a use case with no
     // treasury cannot be priced any more than it can be minted into.
     if ((wantsSupply || sale) && !treasury) {
-      return { ok: false, status: 400, error: "MISSING_TREASURY", message: "a treasury account is required to mint initial supply or set sale terms" };
+      return { ok: false, status: 400, error: "MISSING_TREASURY", message: MISSING_TREASURY_MESSAGE };
     }
     // Initial supply is fungible-only — reject up front, before charging any fee.
     if (wantsSupply && useCase.tokenType !== "fungible") {
@@ -823,7 +856,7 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
         if (!isPositiveIntString(b.unitPrice)) return reply.code(400).send({ error: "INVALID_PRICE", message: "unitPrice must be a positive integer" });
         const uc = await deps.useCases.get(asset.useCaseKey);
         const treasuryAccount = uc.treasuryAccountId ? (await deps.accounts.findById(uc.treasuryAccountId))?.address ?? null : null;
-        if (!treasuryAccount) return reply.code(400).send({ error: "MISSING_TREASURY", message: "this use case has no registered treasury — run the treasury backfill" });
+        if (!treasuryAccount) return reply.code(400).send({ error: "MISSING_TREASURY", message: MISSING_TREASURY_MESSAGE });
         await deps.assets.setSaleTerms(asset.id, { unitPrice: b.unitPrice, currency: b.currency, treasuryAccount });
         return reply.code(200).send({ ok: true });
       }

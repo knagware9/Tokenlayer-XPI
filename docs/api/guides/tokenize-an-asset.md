@@ -296,9 +296,23 @@ curl -sS -i -X POST https://<host>/api/v1/assets \
         "name": "Bond Series A",
         "chainId": "besu",
         "initialSupply": "1000",
-        "treasuryAccount": "0x…",
         "metadata": {} }'
 ```
+
+**There is no `treasuryAccount` field, and that is not an omission.** The use
+case owns a treasury account, provisioned when it was created, and the initial
+supply is minted to that account. You do not name it and you cannot choose it —
+an address the caller picks is an address the caller can point elsewhere. If
+your integration still sends one:
+
+- a top-level `treasuryAccount` here is **silently ignored** (the address does
+  nothing — do not conclude the mint went there);
+- a `sale.treasuryAccount`, or a `treasuryAccount` on `setPrice`, is a
+  **`400 VALIDATION_ERROR`** — delete the field.
+
+To find out where the supply actually went, read the use case's
+`treasuryAccountId` from `GET /use-cases/{key}` and resolve it through
+`GET /accounts`.
 
 **Ungated use case — `201`, and it is minted:**
 
@@ -322,10 +336,12 @@ cost somebody an afternoon:**
   not carry supply; supply is read live from the ledger by
   `GET /assets/{id}`. If your client asserts on `asset.totalSupply` here it will
   read `undefined` on a mint that entirely succeeded.
-- **`treasuryAccount` is `null`** even though you just sent one. That field is
-  the *marketplace seller*, populated from `sale.treasuryAccount`, not from the
-  top-level `treasuryAccount` that received the mint. The address you sent did
-  get the tokens — check step 7, not this field.
+- **`treasuryAccount` is `null`** even though the supply was minted. That field
+  is the *marketplace seller* — it is populated only once the asset has sale
+  terms (`sale` on this call, or `setPrice` later), and it is then the use
+  case's own treasury. It is not "where the mint went", and an asset with no
+  sale terms has none. The supply did land in the treasury — check step 7, not
+  this field.
 - **`txHash` is the use case's contract deployment**, not the mint. It is the
   same `deployTxHash` step 2 showed you, identical for every asset under this
   use case, because assets share the use case's contract. **The mint has its own

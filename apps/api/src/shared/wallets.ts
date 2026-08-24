@@ -1,10 +1,38 @@
-import { randomBytes } from "node:crypto";
 import type { Role } from "@tokenlayer/core";
+import { randomBytes } from "node:crypto";
 import type { AppDeps } from "../context.js";
+import { coded } from "./executors.js";
 
 /** The only roles that ever hold a token balance. Everyone else's wallet stays
  *  null unless an admin explicitly supplies one at creation time. */
 export const WALLET_ELIGIBLE_ROLES: ReadonlySet<Role> = new Set<Role>(["Buyer", "Trader", "Issuer"]);
+
+/**
+ * AN ORG-OWNED ACCOUNT IS NOT A PERSONAL WALLET, AND MUST NEVER BECOME ONE.
+ *
+ * `Account.ownerOrgId` is non-null on exactly one kind of row: a use case's
+ * auto-provisioned treasury (see `provisionTreasury`). That address is
+ * DISCOVERABLE — `Asset.treasuryAccount` is returned on every asset read to
+ * anyone scoped to the use case — and it carries the compliance exemption
+ * `isUseCaseTreasury` grants, which short-circuits `requireJurisdiction` and
+ * `requireVerifiedIdentity`. It also has NO linked user, so an
+ * "is this address already someone else's?" check answers "no" and waves the
+ * claim through. Linking a person to it would hand that person the exemption
+ * the branch was built to respect, not to sell.
+ *
+ * So the discriminator is ownership, not linkage: refuse the address outright
+ * whenever the Account it resolves to belongs to an org.
+ */
+export async function refuseIfOrgOwned(
+  deps: Pick<AppDeps, "accounts">, address: string,
+): Promise<{ error: string; message: string } | null> {
+  const existing = await deps.accounts.findByAddress(address);
+  if (!existing?.ownerOrgId) return null;
+  return {
+    error: "ADDRESS_IS_ORG_TREASURY",
+    message: "this address is an organization's use-case treasury and cannot be linked as a personal wallet",
+  };
+}
 
 /**
  * Resolve the `accountId` for a user being created or updated. An explicitly
@@ -12,11 +40,20 @@ export const WALLET_ELIGIBLE_ROLES: ReadonlySet<Role> = new Set<Role>(["Buyer", 
  * overridden by auto-generation. Absent one, an eligible role gets a fresh
  * synthetic address so `NO_WALLET` never blocks a first purchase; an
  * ineligible role stays null, matching today's behavior.
+ *
+ * The one address that never wins is an org-owned treasury: it is refused with
+ * `ADDRESS_IS_ORG_TREASURY` → 400, the same refusal `PATCH /me/wallet` makes
+ * (as a 409) on the other door into wallet linkage. Both doors, or the gate is
+ * one door of two — this program's recurring defect.
  */
 export async function resolveAccountId(
   deps: Pick<AppDeps, "accounts">, role: Role, suppliedWalletAddress: string | null | undefined, label: string,
 ): Promise<string | null> {
-  if (suppliedWalletAddress) return (await deps.accounts.upsert(suppliedWalletAddress, label)).id;
+  if (suppliedWalletAddress) {
+    const refusal = await refuseIfOrgOwned(deps, suppliedWalletAddress);
+    if (refusal) throw coded(400, refusal.error, refusal.message);
+    return (await deps.accounts.upsert(suppliedWalletAddress, label)).id;
+  }
   if (!WALLET_ELIGIBLE_ROLES.has(role)) return null;
   const address = "0x" + randomBytes(20).toString("hex");
   return (await deps.accounts.upsert(address, label)).id;

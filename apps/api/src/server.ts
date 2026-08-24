@@ -39,6 +39,7 @@ import {
 import { resolveIdentityRegistry } from "./identity/registry.js";
 import { seedDefaults } from "./shared/seed.js";
 import { seedUseCases } from "./tokenization/use-cases.js";
+import { backfillTreasuries } from "./shared/treasury-backfill.js";
 import { provisionTreasury } from "./shared/wallets.js";
 import { createHttpSender, startDispatcher } from "./webhooks/dispatcher.js";
 import { createSecretBox } from "./webhooks/secret-box.js";
@@ -186,6 +187,18 @@ async function main(): Promise<void> {
         deploy: (def, chainId) => engine.deployUseCaseContract(def, chainId),
       },
     );
+    // THE UPGRADE PATH, NOT A SEED. `seedUseCases` deliberately `continue`s on
+    // a use case that already exists, so an EXISTING deployment upgraded to
+    // this branch would come up with every one of its use cases on
+    // `treasuryAccountId: null` — and every issuance with supply or sale terms,
+    // and every `setPrice`, 400s MISSING_TREASURY until an operator remembers
+    // to run a script against all three live databases. Nobody remembers.
+    //
+    // Idempotent (it touches only rows still missing an owner or a treasury —
+    // see its own tests), so running it on every boot costs one `list()` on a
+    // healthy database and closes the gap entirely. `scripts/backfill-
+    // treasuries.ts` stays as the one-off/fallback tool, not a required step.
+    await backfillTreasuries(deps);
   }
   // Demo operators get a real identity so their profile/credentials pages are
   // populated like any org member (outside production only).

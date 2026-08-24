@@ -32,6 +32,7 @@
  */
 import type { EventType } from "@tokenlayer/core";
 import { KEY_PREFIX_MARKER } from "./api-keys.js";
+import { PLATFORM_ORG_NAME } from "./platform-org.js";
 import type { AppDeps } from "../context.js";
 import { endpointMatches } from "../webhooks/matching.js";
 
@@ -128,20 +129,40 @@ export async function emitEvent(deps: AppDeps, input: EmitInput, log: EmitLogger
 }
 
 /**
- * The owning org of a tokenization use case, for the asset events' tenancy key.
+ * The owning org of a tokenization use case, for the asset events' TENANCY key.
  *
  * Resolves to null rather than throwing when the use case has vanished or is
  * unowned — this feeds a call that must not fail its caller, so a missing owner
  * must not take the mint down with it. What null costs is DELIVERY, not safety:
  * the event is still recorded, but it matches no endpoint and only a
- * PlatformAdmin can read it back (see `EmitInput.orgId`). Every seeded/legacy
- * tokenization use case has no `ownerOrgId`, so this is the common case on an
- * old deployment, and it is the reason the null bucket must never be readable by
- * an org-less principal.
+ * PlatformAdmin can read it back (see `EmitInput.orgId`), which is why the null
+ * bucket must never be readable by an org-less principal.
+ *
+ * PROVISIONING OWNERSHIP AND TENANCY OWNERSHIP ARE TWO DIFFERENT QUESTIONS, and
+ * this function answers only the second. `UseCase.ownerOrgId` exists so every
+ * use case has an org to hang a treasury Account off — including the seven
+ * platform-seeded demo use cases, which the treasury work stamped with the
+ * "TokenLayer Platform" org. Before that they resolved to null here, and null is
+ * what their events must keep resolving to: the platform org is the deployment's
+ * own signer identity, not a customer-facing tenant. A PlatformAdmin can add an
+ * OrgAdmin to it, and an org-scoped API key can be minted under it; if those
+ * principals inherited the seeded use cases' asset events through `GET /events`
+ * and their own webhook endpoints, a read that used to require PlatformAdmin
+ * would have quietly widened to anyone the platform org ever admits. So the
+ * platform org is mapped back to null HERE — narrowly, at the tenancy boundary —
+ * rather than by weakening the provisioning field the treasury work needs.
  */
 export async function ownerOrgOfUseCase(deps: AppDeps, useCaseKey: string): Promise<string | null> {
   try {
-    return (await deps.useCases.get(useCaseKey)).ownerOrgId ?? null;
+    // `|| null`, matching emitEvent: "" is the not-yet-owned column sentinel,
+    // never a matchable org id.
+    const ownerOrgId = (await deps.useCases.get(useCaseKey)).ownerOrgId || null;
+    if (!ownerOrgId) return null;
+    // Resolved by NAME, never by creating one: this runs on the emit path, which
+    // must not have side effects (`ensurePlatformIssuerOrg` would seed an org).
+    const platformOrg = await deps.organizations.findByName(PLATFORM_ORG_NAME);
+    if (platformOrg && platformOrg.id === ownerOrgId) return null;
+    return ownerOrgId;
   } catch {
     return null;
   }
