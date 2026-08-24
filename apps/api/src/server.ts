@@ -198,7 +198,12 @@ async function main(): Promise<void> {
     // see its own tests), so running it on every boot costs one `list()` on a
     // healthy database and closes the gap entirely. `scripts/backfill-
     // treasuries.ts` stays as the one-off/fallback tool, not a required step.
-    await backfillTreasuries(deps);
+    const backfilled = await backfillTreasuries(deps);
+    if (backfilled.ownersAssigned > 0 || backfilled.treasuriesAssigned > 0) {
+      console.log(
+        `[treasury] boot backfill: ${backfilled.ownersAssigned} use case(s) assigned an owner, ${backfilled.treasuriesAssigned} assigned a treasury`,
+      );
+    }
   }
   // Demo operators get a real identity so their profile/credentials pages are
   // populated like any org member (outside production only).

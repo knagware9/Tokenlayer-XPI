@@ -305,10 +305,11 @@ supply is minted to that account. You do not name it and you cannot choose it �
 an address the caller picks is an address the caller can point elsewhere. If
 your integration still sends one:
 
-- a top-level `treasuryAccount` here is **silently ignored** (the address does
-  nothing — do not conclude the mint went there);
-- a `sale.treasuryAccount`, or a `treasuryAccount` on `setPrice`, is a
-  **`400 VALIDATION_ERROR`** — delete the field.
+- a top-level `treasuryAccount` here, a `sale.treasuryAccount`, or a
+  `treasuryAccount` on `setPrice` — all three are **silently ignored**. None
+  of them errors, so a status code will not tell you the field is unused; the
+  address does nothing and the mint goes to the use case's own treasury
+  regardless. Delete the field.
 
 To find out where the supply actually went, read the use case's
 `treasuryAccountId` from `GET /use-cases/{key}` and resolve it through

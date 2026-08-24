@@ -30,21 +30,27 @@ substance — what changed is that **you no longer name the account, and may no
 longer name one.** A treasury address that a caller could choose was an address
 a caller could point somewhere else.
 
-The field is gone from three bodies, and **two of them now reject a request that
-still sends it** rather than ignoring it. Check all three:
+The field is gone from all three bodies, and **every one of them silently
+ignores it now** rather than rejecting it — including the two whose schemas
+carry `additionalProperties: false`. Fastify's ajv compiler runs with its
+default `removeAdditional: true`, which *strips* an undeclared property
+before validation ever gets a chance to reject it; this app never overrides
+that default. Check all three:
 
 | Request body | Sending `treasuryAccount` today | Omitting it today |
 | --- | --- | --- |
-| `POST /assets` — top-level `treasuryAccount` | **Ignored.** Extra top-level properties are not rejected here, so the field is silently dropped and the mint goes to the use case's own treasury. | Fine — and now required behaviour. |
-| `POST /assets` — `sale.treasuryAccount` | **`400 VALIDATION_ERROR`.** The `sale` object is `additionalProperties: false`. | Fine. It was **required** before, so this is also the half of the change that fixes existing callers. |
-| `POST /assets/{id}/actions/setPrice` — `treasuryAccount` | **`400 VALIDATION_ERROR`.** The actions body is `additionalProperties: false`. | Fine. |
-| `POST /use-cases/{key}/invoices/tokenize` — `treasuryAccount` | **Ignored.** Extra top-level properties are not rejected here either. | Fine. It was **required** before. |
+| `POST /assets` — top-level `treasuryAccount` | **Ignored.** The field is silently stripped and the mint goes to the use case's own treasury. | Fine — and now required behaviour. |
+| `POST /assets` — `sale.treasuryAccount` | **Ignored**, despite `sale` being `additionalProperties: false` — stripped before validation runs. It was **required** before; sending it today no longer errors, it just does nothing. | Fine. |
+| `POST /assets/{id}/actions/setPrice` — `treasuryAccount` | **Ignored**, same reason. | Fine. |
+| `POST /use-cases/{key}/invoices/tokenize` — `treasuryAccount` | **Ignored.** | Fine. It was **required** before. |
 
-So: if your integration sends `sale.treasuryAccount` or a `setPrice`
-`treasuryAccount`, it is getting a `400` now and the fix is to delete the field.
-If it sends the top-level `POST /assets` `treasuryAccount` or the
-`tokenize` one, it is not failing — but the address it names is doing nothing,
-which is worth knowing before you conclude the mint went where you asked.
+So: nothing about sending this field errors anymore, on any of the four
+spellings — which is the more important thing to know than a 400 would have
+been. If your integration still sends a `treasuryAccount` address anywhere in
+these three bodies, it now gets a `2xx` and the address it named does nothing;
+the mint goes to the use case's own registered treasury regardless. Delete
+the field from your integration rather than trusting a status code to tell you
+it's unused.
 
 **Nothing was added to any response.** `asset.treasuryAccount` is unchanged: it
 is still the marketplace seller, still `null` until sale terms exist, and now
