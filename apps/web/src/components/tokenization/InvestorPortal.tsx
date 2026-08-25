@@ -22,8 +22,8 @@ export function InvestorPortal({ useCases, tab: controlledTab, onTabChange }: { 
   const [internalTab, setInternalTab] = useState<Tab>("offerings");
   const tab = controlledTab ?? internalTab;
   const tabs: { id: Tab; label: string }[] = [
-    { id: "offerings", label: "Offerings" },
-    { id: "portfolio", label: "Portfolio" },
+    { id: "offerings", label: "Marketplace" },
+    { id: "portfolio", label: "My Portfolio" },
     { id: "activity", label: "Activity" },
   ];
   return (
@@ -37,7 +37,7 @@ export function InvestorPortal({ useCases, tab: controlledTab, onTabChange }: { 
       )}
       {tab === "offerings" && <InvestorOfferings useCases={useCases} onSubscribed={() => { setInternalTab("portfolio"); onTabChange?.("portfolio"); }} />}
       {tab === "portfolio" && <InvestorPortfolio />}
-      {tab === "activity" && <InvestorActivity />}
+      {tab === "activity" && <InvestorActivity useCases={useCases} />}
     </div>
   );
 }
@@ -68,12 +68,12 @@ function InvestorOfferings({ useCases, onSubscribed }: { useCases: UseCase[]; on
     setBusy(true); setError(null); setNotice(null);
     try {
       const r = await api.buy(token, selected.id, qty);
-      setNotice(`Subscribed: ${qty} units for ${fmt(r.paid.amount)} ${r.paid.currency}.`);
+      setNotice(`Bought ${qty} units for ${fmt(r.paid.amount)} ${r.paid.currency}.`);
       setSelected(null); setQty("");
       await reload();
       onSubscribed();
     } catch (err) {
-      setError(describeApiError(err, "Subscription failed"));
+      setError(describeApiError(err, "Purchase failed"));
     } finally { setBusy(false); }
   }
 
@@ -118,7 +118,7 @@ function InvestorOfferings({ useCases, onSubscribed }: { useCases: UseCase[]; on
 
       {selected && (
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 max-w-xl space-y-3">
-          <h3 className="font-semibold text-slate-900">Subscribe — {selected.name}</h3>
+          <h3 className="font-semibold text-slate-900">Buy — {selected.name}</h3>
           <div className="text-xs text-slate-500 space-y-0.5">
             {Object.entries(selected.metadata).slice(0, 5).map(([k, v]) => (
               <div key={k}><span className="text-slate-400">{k}:</span> {typeof v === "string" && v.startsWith("http") ? <a className="text-brand-600 hover:underline" href={v} target="_blank" rel="noreferrer">document</a> : String(v)}</div>
@@ -132,7 +132,7 @@ function InvestorOfferings({ useCases, onSubscribed }: { useCases: UseCase[]; on
             <div className="text-sm text-slate-600 pb-2">
               {cost !== null && <>Total <span className="font-semibold text-slate-900">{cost.toLocaleString("en-IN")} {selected.currency}</span>{feeBps > 0 && <span className="text-[11px] text-slate-400"> (incl. {feeBps / 100}% exchange fee)</span>}</>}
             </div>
-            <button onClick={() => void subscribe()} disabled={busy || !qty} className="rounded-lg bg-brand-600 text-white px-4 py-2 text-sm font-medium hover:bg-brand-700 disabled:opacity-50">{busy ? "Subscribing…" : "Subscribe"}</button>
+            <button onClick={() => void subscribe()} disabled={busy || !qty} className="rounded-lg bg-brand-600 text-white px-4 py-2 text-sm font-medium hover:bg-brand-700 disabled:opacity-50">{busy ? "Buying…" : "Buy"}</button>
           </div>
         </div>
       )}
@@ -204,7 +204,7 @@ function InvestorPortfolio(): JSX.Element {
             {pf.holdings.length === 0 && (
               <tr>
                 <td colSpan={4}>
-                  <EmptyState icon="doc" title="No holdings yet" hint="Subscribe to an offering to build your portfolio." />
+                  <EmptyState icon="doc" title="No holdings yet" hint="Buy from the Marketplace to build your portfolio." />
                 </td>
               </tr>
             )}
@@ -253,6 +253,7 @@ function SellPanel({ holding, onDone, onClose }: { holding: Holding; onDone: () 
 function MyListings({ wallet, holdings, refreshKey, reload }: { wallet: string; holdings: Holding[]; refreshKey: number; reload: () => void }): JSX.Element | null {
   const { token } = useAuth();
   const [mine, setMine] = useState<Array<Listing & { assetName: string; assetId: string }>>([]);
+  const [expanded, setExpanded] = useState<string | null>(null);
   // NOTE: We only know asset ids from the current holdings, so this iterates pf.holdings.
   // Edge case: selling ALL units of an asset escrows them out of the seller's balance, so the
   // asset can drop out of pf.holdings and its open listing would then stop showing here. Partial
@@ -269,18 +270,41 @@ function MyListings({ wallet, holdings, refreshKey, reload }: { wallet: string; 
   return (
     <Card>
       <h3 className="text-sm font-semibold text-slate-900 mb-2">My listings</h3>
-      {mine.map((l) => (
-        <div key={l.id} className="flex items-center justify-between py-1.5 border-t border-slate-100 text-sm">
-          <span>{l.assetName} · {l.quantity} @ {l.unitPrice} {l.currency}</span>
-          <button onClick={() => void api.cancelListing(token!, l.id).then(() => { setMine((m) => m.filter((x) => x.id !== l.id)); reload(); })}
-            className="text-xs text-red-500 hover:text-red-700">Cancel</button>
-        </div>
-      ))}
+      {mine.map((l) => {
+        const h = holdings.find((x) => x.assetId === l.assetId);
+        return (
+          <div key={l.id} className="py-1.5 border-t border-slate-100 text-sm">
+            <div className="flex items-center justify-between">
+              <span>{l.assetName} · {l.quantity} @ {l.unitPrice} {l.currency}</span>
+              <div className="flex items-center gap-3">
+                <button onClick={() => setExpanded((cur) => (cur === l.id ? null : l.id))} className="text-xs text-brand-600 hover:text-brand-700">
+                  {expanded === l.id ? "Hide" : "View"}
+                </button>
+                <button onClick={() => void api.cancelListing(token!, l.id).then(() => { setMine((m) => m.filter((x) => x.id !== l.id)); reload(); })}
+                  className="text-xs text-red-500 hover:text-red-700">Cancel</button>
+              </div>
+            </div>
+            {expanded === l.id && (
+              <div className="mt-2 mb-1 rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-600 grid grid-cols-2 gap-1.5">
+                <div><span className="text-slate-400">Symbol:</span> {h?.symbol ?? "—"}</div>
+                <div><span className="text-slate-400">Chain:</span> {h?.chainId ?? "—"}</div>
+                <div><span className="text-slate-400">Use case:</span> {h?.useCaseKey ?? "—"}</div>
+                <div><span className="text-slate-400">Listing ID:</span> <span className="font-mono">{l.id}</span></div>
+                <div><span className="text-slate-400">Seller:</span> <span className="font-mono">{l.seller}</span></div>
+                <div><span className="text-slate-400">Status:</span> {l.status ?? "open"}</div>
+                <div><span className="text-slate-400">Created:</span> {new Date(l.createdAt).toLocaleString()}</div>
+              </div>
+            )}
+          </div>
+        );
+      })}
     </Card>
   );
 }
 
-function InvestorActivity(): JSX.Element {
+const short = (v: string | null): string => (v ? `${v.slice(0, 8)}…${v.slice(-4)}` : "—");
+
+function InvestorActivity({ useCases }: { useCases: UseCase[] }): JSX.Element {
   const { token } = useAuth();
   const [events, setEvents] = useState<ActivityEvent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -296,17 +320,48 @@ function InvestorActivity(): JSX.Element {
         <Skeleton lines={4} />
       </Card>
     );
+  if (events.length === 0)
+    return (
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm">
+        <EmptyState icon="spark" title="No activity yet" hint="Purchases, transfers and coupon payments show up here." />
+      </div>
+    );
   const tone: Record<ActivityEvent["kind"], string> = { subscribed: "bg-brand-50 text-brand-700", received: "bg-emerald-100 text-emerald-700", sent: "bg-slate-100 text-slate-600", coupon: "bg-amber-100 text-amber-700", redemption: "bg-violet-100 text-violet-700" };
+  const projectOf = (key: string): string => useCases.find((u) => u.key === key)?.name ?? key;
   return (
-    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm divide-y divide-slate-100">
-      {events.map((e, i) => (
-        <div key={`${e.at}-${i}`} className="flex items-center gap-3 px-4 py-3 text-sm">
-          <span className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${tone[e.kind]}`}>{e.kind}</span>
-          <span className="flex-1 text-slate-700"><span className="font-medium text-slate-900">{e.assetName}</span>{e.units && <> · {fmt(e.units)} units</>}{e.amount && <> · {fmt(e.amount)} {e.currency}</>}</span>
-          <span className="text-xs text-slate-400">{ago(e.at)}</span>
-        </div>
-      ))}
-      {events.length === 0 && <EmptyState icon="spark" title="No activity yet" hint="Subscriptions, transfers and coupon payments show up here." />}
+    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+          <tr>
+            <th className="text-left font-medium px-4 py-2.5">Type</th>
+            <th className="text-left font-medium px-4 py-2.5">Transaction ID</th>
+            <th className="text-left font-medium px-4 py-2.5">Asset</th>
+            <th className="text-left font-medium px-4 py-2.5">Project</th>
+            <th className="text-left font-medium px-4 py-2.5">Token ID</th>
+            <th className="text-left font-medium px-4 py-2.5">Seller</th>
+            <th className="text-left font-medium px-4 py-2.5">Buyer</th>
+            <th className="text-right font-medium px-4 py-2.5">Amount</th>
+            <th className="text-left font-medium px-4 py-2.5">Blockchain tx</th>
+            <th className="text-right font-medium px-4 py-2.5">Time</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {events.map((e, i) => (
+            <tr key={`${e.id}-${i}`}>
+              <td className="px-4 py-2.5"><span className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${tone[e.kind]}`}>{e.kind}</span></td>
+              <td className="px-4 py-2.5 font-mono text-xs text-slate-500" title={e.id}>{short(e.id)}</td>
+              <td className="px-4 py-2.5 font-medium text-slate-800">{e.assetName}{e.units && <span className="text-slate-400 font-normal"> · {fmt(e.units)}</span>}</td>
+              <td className="px-4 py-2.5 text-slate-600">{projectOf(e.useCaseKey)}</td>
+              <td className="px-4 py-2.5 font-mono text-xs text-slate-500">{e.tokenId ?? "—"}</td>
+              <td className="px-4 py-2.5 font-mono text-xs text-slate-500" title={e.from ?? undefined}>{short(e.from)}</td>
+              <td className="px-4 py-2.5 font-mono text-xs text-slate-500" title={e.to ?? undefined}>{short(e.to)}</td>
+              <td className="px-4 py-2.5 text-right text-slate-700">{e.amount ? `${fmt(e.amount)} ${e.currency}` : "—"}</td>
+              <td className="px-4 py-2.5 font-mono text-xs text-slate-500" title={e.txHash ?? undefined}>{short(e.txHash)}</td>
+              <td className="px-4 py-2.5 text-right text-xs text-slate-400" title={new Date(e.at).toLocaleString()}>{ago(e.at)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

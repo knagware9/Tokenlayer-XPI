@@ -157,6 +157,8 @@ export interface UseCase {
   roles: Role[];
   /** The organization that owns this use case. */
   ownerOrgId?: string | null;
+  /** The registered Account id backing this use case's treasury (org-owned; resolve via `api.accounts`). */
+  treasuryAccountId?: string | null;
 }
 
 export interface Asset {
@@ -337,9 +339,11 @@ export interface Portfolio {
   totalByCurrency: Record<string, string>;
 }
 export interface ActivityEvent {
-  at: string; kind: "subscribed" | "received" | "sent" | "coupon" | "redemption";
-  assetId: string; assetName: string; units: string | null; amount: string | null;
+  id: string; at: string; kind: "subscribed" | "received" | "sent" | "coupon" | "redemption";
+  assetId: string; assetName: string; useCaseKey: string; chainId: string;
+  units: string | null; tokenId: string | null; amount: string | null;
   currency: string | null; txHash: string | null;
+  from: string | null; to: string | null;
 }
 
 export type OrgType = "bank" | "corporate" | "msme" | "government" | "verifier";

@@ -1,13 +1,18 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { ApiError, api } from "../../api.js";
 import { useAuth } from "../../auth.js";
-import { assignableRoles } from "../../rbac.js";
+import { assignableRoles, can } from "../../rbac.js";
 import type { CredentialUseCase, IdentityResult, Role, UseCase } from "../../types.js";
 import type { DomainKey } from "../../domains.js";
 import { Pill } from "./ui.js";
 import { BatchCsv } from "./BatchCsv.js";
 
-type Summary = { id: string; email: string; role: Role; useCaseKey: string | null; accountId: string | null; active: boolean; kycStatus: "pending" | "approved" | "rejected"; kyc: { legalName?: string; country?: string; idType?: string; idNumber?: string; documentRef?: string } | null };
+/** The roles PATCH /me/wallet and the auto-assignment work ever give a wallet
+ *  to — mirrors apps/api/src/shared/wallets.ts's WALLET_ELIGIBLE_ROLES. Only
+ *  these can meaningfully be allowlisted. */
+const WALLET_ELIGIBLE_ROLES = new Set<Role>(["Buyer", "Trader", "Issuer"]);
+
+type Summary = { id: string; email: string; role: Role; useCaseKey: string | null; accountId: string | null; active: boolean; kycStatus: "pending" | "approved" | "rejected"; kyc: { legalName?: string; country?: string; idType?: string; idNumber?: string; documentRef?: string } | null; did: string | null };
 type Sub = "add" | "manage";
 
 export function UserManagement({ useCaseKey, useCases }: { useCaseKey: string; useCases: UseCase[] }): JSX.Element {
@@ -36,7 +41,7 @@ export function UserManagement({ useCaseKey, useCases }: { useCaseKey: string; u
           <BatchOnboard />
         </div>
       ) : (
-        <ManageUsers rows={rows} me={user?.email} onChanged={reload} />
+        <ManageUsers rows={rows} me={user?.email} useCases={useCases} onChanged={reload} />
       )}
     </div>
   );
@@ -181,10 +186,12 @@ function BatchOnboard(): JSX.Element {
   );
 }
 
-function ManageUsers({ rows, me, onChanged }: { rows: Summary[]; me?: string; onChanged: () => void }): JSX.Element {
-  const { token } = useAuth();
+function ManageUsers({ rows, me, useCases, onChanged }: { rows: Summary[]; me?: string; useCases: UseCase[]; onChanged: () => void }): JSX.Element {
+  const { token, user } = useAuth();
   const [editing, setEditing] = useState<Summary | null>(null);
   const [verifying, setVerifying] = useState<string | null>(null);
+  const [issuingKyc, setIssuingKyc] = useState<string | null>(null);
+  const [allowing, setAllowing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -194,6 +201,43 @@ function ManageUsers({ rows, me, onChanged }: { rows: Summary[]; me?: string; on
     try { await fn(); onChanged(); } catch (err) { setError(err instanceof ApiError ? err.message : "Action failed"); }
   };
   const manageable = (u: Summary): boolean => u.email !== me && u.role !== "PlatformAdmin";
+
+  // Allowlists a user's own wallet on every currently active asset in their
+  // use case, in one click — the common case (a buyer should generally be
+  // able to hold anything the use case offers). The per-asset fine-grained
+  // control (allow/disallow on one specific asset) already exists on that
+  // asset's own detail page; this is the discoverable, workflow-level door
+  // for the case that actually blocks people: NOT_ALLOWLISTED on a fresh buy.
+  const canAllowRow = (u: Summary): boolean =>
+    manageable(u) && !!u.accountId && WALLET_ELIGIBLE_ROLES.has(u.role) && can(user?.role ?? "Auditor", "allow") &&
+    (useCases.find((uc) => uc.key === u.useCaseKey)?.compliance.allowlist ?? false);
+
+  const allowEverywhere = async (u: Summary): Promise<void> => {
+    setError(null);
+    setNotice(null);
+    setAllowing(u.id);
+    try {
+      const accounts = await api.accounts(token!);
+      const address = accounts.find((a) => a.id === u.accountId)?.address;
+      if (!address) throw new Error("no wallet address found for this user");
+      const assets = await api.assets(token!, u.useCaseKey ?? undefined);
+      const active = assets.filter((a) => a.status === "active");
+      let failed = 0;
+      for (const asset of active) {
+        try { await api.action(token!, asset.id, "allow", { account: address }); }
+        catch { failed++; }
+      }
+      setNotice(
+        failed === 0
+          ? `Allowlisted ${u.email} on ${active.length} asset(s).`
+          : `Allowlisted ${u.email} on ${active.length - failed}/${active.length} asset(s) — ${failed} failed.`,
+      );
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : "Allow failed");
+    } finally {
+      setAllowing(null);
+    }
+  };
 
   return (
     <div className="space-y-3">
@@ -221,6 +265,12 @@ function ManageUsers({ rows, me, onChanged }: { rows: Summary[]; me?: string; on
                     {manageable(u) ? (
                       <>
                         {u.kycStatus === "pending" && <button onClick={() => setVerifying((v) => (v === u.id ? null : u.id))} className="text-xs text-brand-600 hover:text-brand-700 font-medium">Verify identity (DID/VC)</button>}
+                        {!u.did && <button onClick={() => setIssuingKyc((v) => (v === u.id ? null : u.id))} className="text-xs text-brand-600 hover:text-brand-700 font-medium">Issue KYC</button>}
+                        {canAllowRow(u) && (
+                          <button disabled={allowing === u.id} onClick={() => void allowEverywhere(u)} className="text-xs text-emerald-600 hover:text-emerald-700 font-medium disabled:opacity-40">
+                            {allowing === u.id ? "Allowing…" : "Allow"}
+                          </button>
+                        )}
                         <button onClick={() => setEditing(u)} className="text-xs text-brand-600 hover:text-brand-700">Edit</button>
                         <button onClick={() => act(() => api.updateUser(token!, u.id, { active: !u.active }))} className="text-xs text-amber-600 hover:text-amber-700">{u.active ? "Suspend" : "Reactivate"}</button>
                         {u.kycStatus !== "rejected" && (
@@ -238,6 +288,13 @@ function ManageUsers({ rows, me, onChanged }: { rows: Summary[]; me?: string; on
                   <tr className="border-t border-slate-100 bg-slate-50/60">
                     <td colSpan={6} className="px-4 py-3">
                       <VerifyIdentityPanel user={u} onClose={() => setVerifying(null)} onVerified={() => { setVerifying(null); onChanged(); }} />
+                    </td>
+                  </tr>
+                )}
+                {issuingKyc === u.id && (
+                  <tr className="border-t border-slate-100 bg-slate-50/60">
+                    <td colSpan={6} className="px-4 py-3">
+                      <IssueKycPanel user={u} onClose={() => setIssuingKyc(null)} onIssued={() => { setIssuingKyc(null); onChanged(); }} />
                     </td>
                   </tr>
                 )}
@@ -342,6 +399,70 @@ function VerifyIdentityPanel({ user, onClose, onVerified }: { user: Summary; onC
       {result && (
         <p className="text-xs text-emerald-600 font-medium">
           Verified · country {String(result.claims.country ?? "—")} · issuer {result.issuer.slice(0, 16)}…
+        </p>
+      )}
+      {error && <p className="text-xs text-red-600">{error}</p>}
+    </div>
+  );
+}
+
+/** Admin-issued counterpart of VerifyIdentityPanel: no presented credential
+ * involved. Mints the user a DID (if they don't have one) and issues a
+ * KycCredential directly — for the common case of a seeded operator/investor
+ * with no organization onboarding, and no external credential to present. */
+function IssueKycPanel({ user, onClose, onIssued }: { user: Summary; onClose: () => void; onIssued: () => void }): JSX.Element {
+  const { token } = useAuth();
+  const [legalName, setLegalName] = useState(user.kyc?.legalName ?? "");
+  const [country, setCountry] = useState(user.kyc?.country ?? "");
+  const [result, setResult] = useState<{ did: string; credentialId: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function issue(): Promise<void> {
+    setError(null);
+    setResult(null);
+    setBusy(true);
+    try {
+      const r = await api.issueAdminKyc(token!, user.id, { legalName: legalName.trim(), country: country.trim().toUpperCase() });
+      setResult(r);
+      onIssued();
+    } catch (err) {
+      setError(err instanceof ApiError ? `${err.code ?? err.status}: ${err.message}` : "Issuance failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-slate-900">Issue KYC directly · {user.email}</h3>
+        <button onClick={onClose} className="text-xs text-slate-400 hover:text-slate-600">Close</button>
+      </div>
+      <p className="text-xs text-slate-500">
+        Mints this user a decentralized identifier (if they don't already have one) and issues a KYC credential — no
+        presented credential needed. Use this for a user with nothing external to present.
+      </p>
+      <div className="grid grid-cols-2 gap-3">
+        <label className="block">
+          <span className="text-xs font-semibold text-slate-500 mb-1 block">Legal name</span>
+          <input className="input text-sm w-full" value={legalName} onChange={(e) => setLegalName(e.target.value)} placeholder="e.g. Jane Doe" />
+        </label>
+        <label className="block">
+          <span className="text-xs font-semibold text-slate-500 mb-1 block">Country (ISO 3166-1 alpha-2)</span>
+          <input className="input text-sm w-full font-mono uppercase" value={country} onChange={(e) => setCountry(e.target.value)} placeholder="e.g. IN" maxLength={2} />
+        </label>
+      </div>
+      <button
+        onClick={() => void issue()}
+        disabled={!legalName.trim() || country.trim().length !== 2 || busy}
+        className="rounded-lg bg-brand-600 text-white px-4 py-1.5 text-xs font-medium hover:bg-brand-700 disabled:opacity-40"
+      >
+        {busy ? "Issuing…" : "Issue KYC credential"}
+      </button>
+      {result && (
+        <p className="text-xs text-emerald-600 font-medium">
+          Issued · DID {result.did.slice(0, 16)}… · credential {result.credentialId.slice(0, 12)}…
         </p>
       )}
       {error && <p className="text-xs text-red-600">{error}</p>}

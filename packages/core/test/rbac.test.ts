@@ -3,11 +3,17 @@ import { RbacPolicy } from "../src/shared/rbac.js";
 
 describe("RbacPolicy (per-use-case roles)", () => {
   const rbac = new RbacPolicy();
-  it("PlatformAdmin and UseCaseAdmin can do every lifecycle action", () => {
-    for (const role of ["PlatformAdmin", "UseCaseAdmin"] as const) {
-      for (const a of ["issue", "mint", "transfer", "burn", "freeze", "unfreeze", "allow", "disallow", "buy", "list", "cancel-listing", "read"] as const) {
-        expect(rbac.can(role, a)).toBe(true);
-      }
+  it("PlatformAdmin can do every lifecycle action", () => {
+    for (const a of ["issue", "mint", "transfer", "burn", "freeze", "unfreeze", "allow", "disallow", "buy", "list", "cancel-listing", "read"] as const) {
+      expect(rbac.can("PlatformAdmin", a)).toBe(true);
+    }
+  });
+  it("UseCaseAdmin has every operator action but not the investor-side marketplace actions", () => {
+    for (const a of ["issue", "mint", "transfer", "burn", "freeze", "unfreeze", "allow", "disallow", "read"] as const) {
+      expect(rbac.can("UseCaseAdmin", a)).toBe(true);
+    }
+    for (const a of ["buy", "list", "cancel-listing"] as const) {
+      expect(rbac.can("UseCaseAdmin", a)).toBe(false);
     }
   });
   it("Issuer = issuance + KYC/compliance, not trading", () => {
@@ -36,12 +42,12 @@ describe("RbacPolicy (per-use-case roles)", () => {
     expect(rbac.can("Trader", "buy")).toBe(true);
     expect(rbac.can("Auditor", "buy")).toBe(false);
   });
-  it("market actions: Buyer/Trader/admins may list and cancel-listing; Issuer/Auditor may not", () => {
-    for (const role of ["Buyer", "Trader", "UseCaseAdmin", "PlatformAdmin"] as const) {
+  it("market actions: Buyer/Trader/PlatformAdmin may list and cancel-listing; UseCaseAdmin/Issuer/Auditor may not", () => {
+    for (const role of ["Buyer", "Trader", "PlatformAdmin"] as const) {
       expect(rbac.can(role, "list")).toBe(true);
       expect(rbac.can(role, "cancel-listing")).toBe(true);
     }
-    for (const role of ["Issuer", "Auditor"] as const) {
+    for (const role of ["UseCaseAdmin", "Issuer", "Auditor"] as const) {
       expect(rbac.can(role, "list")).toBe(false);
       expect(rbac.can(role, "cancel-listing")).toBe(false);
     }

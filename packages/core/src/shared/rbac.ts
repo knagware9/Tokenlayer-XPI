@@ -6,11 +6,14 @@ import type { Actor, LifecycleAction, Role } from "./types.js";
  * be audited at a glance and extended as new actions arrive in later phases.
  */
 const FULL: readonly LifecycleAction[] = ["issue", "mint", "transfer", "burn", "freeze", "unfreeze", "allow", "disallow", "buy", "list", "cancel-listing", "read"];
+// UseCaseAdmin manages the use case, not the investor side of it — it keeps every
+// operator action but not the marketplace-investor actions (buy/list/cancel-listing).
+const USE_CASE_ADMIN: readonly LifecycleAction[] = ["issue", "mint", "transfer", "burn", "freeze", "unfreeze", "allow", "disallow", "read"];
 
 const MATRIX: Record<Role, ReadonlySet<LifecycleAction>> = {
   PlatformAdmin: new Set<LifecycleAction>(FULL),
   OrgAdmin: new Set<LifecycleAction>(["read"]),
-  UseCaseAdmin: new Set<LifecycleAction>(FULL),
+  UseCaseAdmin: new Set<LifecycleAction>(USE_CASE_ADMIN),
   Issuer: new Set<LifecycleAction>(["issue", "mint", "allow", "disallow", "freeze", "unfreeze", "read"]),
   Trader: new Set<LifecycleAction>(["transfer", "burn", "buy", "list", "cancel-listing", "read"]),
   Buyer: new Set<LifecycleAction>(["buy", "list", "cancel-listing", "read"]),

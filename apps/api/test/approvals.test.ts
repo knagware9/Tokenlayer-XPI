@@ -83,9 +83,15 @@ describe("maker-checker: gated issuance lifecycle", () => {
     expect(after.unitPrice).toBe("5");
     expect(after.currency).toBe("CBDC-INR");
     expect(after.treasuryAccount).toBe(treasury);
-    // No supply was requested — nothing minted.
+    // No supply was requested — nothing minted, so the treasury sits at a zero
+    // balance and isn't allowlisted. It's still visible in the caller's own use
+    // case's accounts (scopedAccounts always includes the caller's own treasury,
+    // regardless of activity — see scopedAccounts in routes/tokenization.ts) —
+    // an Issuer needs the address to fund/allow it, not just after it already has.
     const accts = (await app.inject({ method: "GET", url: `${V1}/assets/${asset.id}/accounts`, headers: auth(admin) })).json();
-    expect(accts.find((a: { address: string }) => a.address.toLowerCase() === treasury.toLowerCase())).toBeUndefined();
+    const treasuryRow = accts.find((a: { address: string }) => a.address.toLowerCase() === treasury.toLowerCase());
+    expect(treasuryRow?.balance).toBe("0");
+    expect(treasuryRow?.allowed).toBe(false);
   });
 
   it("segregation of duties: the proposer cannot approve their own proposal", async () => {

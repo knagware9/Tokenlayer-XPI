@@ -4,7 +4,7 @@ import { useAuth } from "../../auth.js";
 import { can } from "../../rbac.js";
 import { CashflowPanel } from "./CashflowPanel.js";
 import type { AccountState, Asset, AuditEntry, ChainInfo, Listing, Role, TokenInfo, Trade, UseCase } from "../../types.js";
-import { EmptyState, Pill as UIPill, Skeleton } from "../shared/ui.js";
+import { DataBadge, EmptyState, Pill as UIPill, Skeleton } from "../shared/ui.js";
 
 interface Props {
   assetId: string;
@@ -37,6 +37,13 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
   const [fundError, setFundError] = useState<string | null>(null);
   const [fundSuccess, setFundSuccess] = useState<string | null>(null);
   const [availCurrencies, setAvailCurrencies] = useState<{ code: string; label: string }[]>([]);
+  const [treasuryAddress, setTreasuryAddress] = useState<string | null>(null);
+
+  // List for sale / update price
+  const [listPrice, setListPrice] = useState("");
+  const [listCurrency, setListCurrency] = useState("");
+  const [listBusy, setListBusy] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     if (!token) return;
@@ -74,9 +81,46 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
     void api.currencies(token).then(setAvailCurrencies).catch(() => {});
   }, [token]);
 
+  // Resolve the use case's treasury Account id to its wallet address. `accounts`
+  // (per-asset holders) already carries balance/allowed/frozen for it once it
+  // has any activity; this fills in the address even before that — an Issuer
+  // needs the address to fund/allow a brand-new treasury, not just after.
+  const treasuryAccountId = asset ? useCases.find((u) => u.key === asset.useCaseKey)?.treasuryAccountId : undefined;
+  useEffect(() => {
+    if (!token || !treasuryAccountId) { setTreasuryAddress(null); return; }
+    void api.accounts(token)
+      .then((all) => setTreasuryAddress(all.find((a) => a.id === treasuryAccountId)?.address ?? null))
+      .catch(() => setTreasuryAddress(null));
+  }, [token, treasuryAccountId]);
+
   const useCase = asset ? useCases.find((u) => u.key === asset.useCaseKey) : undefined;
   const role = user?.role ?? "Auditor";
   const chain = asset ? chains.find((c) => c.id === asset.chainId) : undefined;
+
+  // Prefill the List-for-sale form: the asset's current price if it already has
+  // one, else the use case's default sale terms.
+  useEffect(() => {
+    setListPrice(asset?.unitPrice ?? useCase?.saleTermsDefault?.unitPrice ?? "");
+    setListCurrency(asset?.currency ?? useCase?.saleTermsDefault?.currency ?? "");
+  }, [asset?.unitPrice, asset?.currency, useCase?.saleTermsDefault?.unitPrice, useCase?.saleTermsDefault?.currency]);
+
+  async function doListForSale(): Promise<void> {
+    if (!token || !listPrice || !listCurrency) return;
+    setListBusy(true);
+    setListError(null);
+    try {
+      await api.action(token, assetId, "setPrice", { unitPrice: listPrice, currency: listCurrency });
+    } catch (err) {
+      setListError(describeApiError(err, "Listing failed"));
+      setListBusy(false);
+      return;
+    }
+    setListBusy(false);
+    // The write already landed — a refresh failure here (e.g. a ledger read
+    // hiccup) must not be reported as the listing itself having failed.
+    await reload().catch(() => {});
+    onChanged();
+  }
 
   async function run(action: string, body: Record<string, string>): Promise<void> {
     if (!token) return;
@@ -141,6 +185,8 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
   const canAllow = useCase.compliance.allowlist && can(role, "allow");
   const canFreeze = useCase.lifecycle.freeze && can(role, "freeze");
   const safeQty = /^\d+$/.test(buyQty) ? buyQty : null;
+  const canSeeTreasury = (["Issuer", "UseCaseAdmin", "PlatformAdmin"] as string[]).includes(role);
+  const treasuryAcc = treasuryAddress ? accounts.find((a) => a.address === treasuryAddress) : undefined;
 
   return (
     <div className="space-y-5">
@@ -202,6 +248,46 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
         </div>
       )}
 
+      {canSeeTreasury && (
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-3">
+          <div className="text-sm font-semibold text-slate-800">Treasury account</div>
+          {treasuryAddress ? (
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+              <div>
+                <div className="text-[10px] text-slate-400 uppercase tracking-wide">Wallet address</div>
+                <DataBadge value={treasuryAddress} chars={25} />
+              </div>
+              <div>
+                <div className="text-[10px] text-slate-400 uppercase tracking-wide">Balance</div>
+                <div className="font-mono text-slate-700">{treasuryAcc?.balance ?? "0"}</div>
+              </div>
+              <div>
+                <div className="text-[10px] text-slate-400 uppercase tracking-wide">State</div>
+                {treasuryAcc?.frozen && <Pill tone="red">frozen</Pill>}
+                {useCase.compliance.allowlist && (treasuryAcc?.allowed ? <Pill tone="green">allowed</Pill> : <Pill tone="gray">not listed</Pill>)}
+                {!treasuryAcc?.frozen && !useCase.compliance.allowlist && <span className="text-slate-300 text-xs">—</span>}
+              </div>
+              {(canAllow || canFreeze) && (
+                <div className="flex gap-1.5 ml-auto">
+                  {canAllow && (
+                    <button disabled={busy} onClick={() => run(treasuryAcc?.allowed ? "disallow" : "allow", { account: treasuryAddress })} className="btn-sm border-slate-200 text-slate-600 hover:border-brand-500">
+                      {treasuryAcc?.allowed ? "Disallow" : "Allow"}
+                    </button>
+                  )}
+                  {canFreeze && (
+                    <button disabled={busy} onClick={() => run(treasuryAcc?.frozen ? "unfreeze" : "freeze", { account: treasuryAddress })} className="btn-sm border-slate-200 text-slate-600 hover:border-red-400">
+                      {treasuryAcc?.frozen ? "Unfreeze" : "Freeze"}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-slate-400">No treasury account registered for this use case yet.</p>
+          )}
+        </div>
+      )}
+
       {useCase.terms && <CashflowPanel asset={asset} useCase={useCase} role={role} onChanged={() => { void reload(); onChanged(); }} />}
 
       {asset.unitPrice && asset.currency && can(role, "buy") && (
@@ -237,6 +323,32 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
             </button>
           </div>
           {buyError && <p className="text-sm text-red-600">{buyError}</p>}
+        </div>
+      )}
+
+      {can(role, "issue") && (
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-3">
+          <div className="text-sm font-semibold text-slate-800">{asset.unitPrice && asset.currency ? "Update price" : "List for sale"}</div>
+          {!asset.unitPrice || !asset.currency ? (
+            <p className="text-sm text-slate-500">Not listed yet — set a price to let buyers purchase directly from the treasury.</p>
+          ) : (
+            <p className="text-sm text-slate-600">Currently listed at <strong>{asset.unitPrice} {asset.currency}</strong> per token.</p>
+          )}
+          <div className="flex gap-2">
+            <input className="input w-32" type="number" min="1" step="1" placeholder="Unit price" value={listPrice} onChange={(e) => setListPrice(e.target.value)} />
+            <select className="select" value={listCurrency} onChange={(e) => setListCurrency(e.target.value)}>
+              <option value="">Currency…</option>
+              {availCurrencies.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}
+            </select>
+            <button
+              disabled={listBusy || !listPrice || !listCurrency}
+              onClick={() => void doListForSale()}
+              className="rounded-lg bg-brand-600 text-white px-4 py-1.5 text-sm font-medium hover:bg-brand-700 disabled:opacity-40"
+            >
+              {listBusy ? "Saving…" : asset.unitPrice && asset.currency ? "Update price" : "List for sale"}
+            </button>
+          </div>
+          {listError && <p className="text-sm text-red-600">{listError}</p>}
         </div>
       )}
 

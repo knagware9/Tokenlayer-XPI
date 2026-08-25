@@ -19,7 +19,9 @@ export type Action =
 const MATRIX: Record<Role, Action[]> = {
   PlatformAdmin: ["issue", "mint", "transfer", "burn", "freeze", "unfreeze", "allow", "disallow", "buy", "list", "cancel-listing", "read"],
   OrgAdmin: ["read"],
-  UseCaseAdmin: ["issue", "mint", "transfer", "burn", "freeze", "unfreeze", "allow", "disallow", "buy", "list", "cancel-listing", "read"],
+  // Manages the use case, not the investor side of it — keeps every operator
+  // action but not the marketplace-investor actions (buy/list/cancel-listing).
+  UseCaseAdmin: ["issue", "mint", "transfer", "burn", "freeze", "unfreeze", "allow", "disallow", "read"],
   Issuer: ["issue", "mint", "allow", "disallow", "freeze", "unfreeze", "read"],
   Trader: ["transfer", "burn", "buy", "list", "cancel-listing", "read"],
   Buyer: ["read", "buy", "list", "cancel-listing"],

@@ -20,9 +20,11 @@ export interface Portfolio {
   totalByCurrency: Record<string, string>;
 }
 export interface ActivityEvent {
-  at: string; kind: "subscribed" | "received" | "sent" | "coupon" | "redemption";
-  assetId: string; assetName: string; units: string | null;
+  id: string; at: string; kind: "subscribed" | "received" | "sent" | "coupon" | "redemption";
+  assetId: string; assetName: string; useCaseKey: string; chainId: string;
+  units: string | null; tokenId: string | null;
   amount: string | null; currency: string | null; txHash: string | null;
+  from: string | null; to: string | null;
 }
 
 const eq = (a: unknown, b: string): boolean => typeof a === "string" && a.toLowerCase() === b.toLowerCase();
@@ -99,7 +101,13 @@ export async function computeActivity(deps: AppDeps, wallet: string, useCaseKey?
     const fold = createFold();
     for (const e of byAsset.get(a.id) ?? []) {
       const p = e.payload ?? {};
-      const base = { at: e.createdAt, assetId: a.id, assetName: nameOf.get(a.id)?.name ?? "", txHash: e.txHash ?? null };
+      const base = {
+        id: e.id, at: e.createdAt, assetId: a.id, assetName: nameOf.get(a.id)?.name ?? "",
+        useCaseKey: a.useCaseKey, chainId: a.chainId, txHash: e.txHash ?? null,
+        tokenId: typeof p.tokenId === "string" ? p.tokenId : null,
+        from: typeof p.from === "string" ? p.from : null,
+        to: typeof p.to === "string" ? p.to : null,
+      };
       if (e.action === "buy" && eq(p.to, wallet)) {
         events.push({ ...base, kind: "subscribed", units: p.amount != null ? String(p.amount) : null, amount: typeof p.cost === "string" ? p.cost : null, currency: typeof p.currency === "string" ? p.currency : null });
       } else if ((e.action === "mint" || e.action === "transfer") && eq(p.to, wallet)) {

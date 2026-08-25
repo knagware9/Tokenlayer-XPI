@@ -75,12 +75,18 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
 
 
   // Accounts visible to the caller: a PlatformAdmin sees all; a scoped user sees only
-  // the wallets linked to users in their own use case (no cross-tenant account enumeration).
+  // the wallets linked to users in their own use case (no cross-tenant account enumeration),
+  // plus their own use case's treasury — org-owned, so no User is ever linked to it, but an
+  // Issuer/UseCaseAdmin still needs to see its address to fund and allow it in the first place.
   async function scopedAccounts(claims: TokenClaims) {
     const all = await deps.accounts.list();
     if (claims.role === "PlatformAdmin") return all;
     const users = await deps.users.list(claims.useCaseKey ?? NO_USE_CASE);
     const allowed = new Set(users.map((u) => u.accountId).filter((id): id is string => !!id));
+    if (claims.useCaseKey) {
+      const useCase = await deps.useCases.get(claims.useCaseKey).catch(() => null);
+      if (useCase?.treasuryAccountId) allowed.add(useCase.treasuryAccountId);
+    }
     return all.filter((a) => allowed.has(a.id));
   }
 

@@ -178,7 +178,7 @@ export const api = {
     return request<AnalyticsSummary>(`/analytics${qs ? `?${qs}` : ""}`, token);
   },
   identityDashboard: (token: string) => request<IdentityDashboardData>("/identity/dashboard", token),
-  accounts: (token: string) => request<{ address: string; label: string }[]>("/accounts", token),
+  accounts: (token: string) => request<{ id: string; address: string; label: string }[]>("/accounts", token),
   // 201 → the UseCase; 202 (gated: an OrgAdmin proposes) → { proposal } pending platform approval.
   createUseCase: (token: string, def: UseCase) =>
     request<UseCase | { proposal: Proposal }>("/use-cases", token, { method: "POST", body: JSON.stringify(def) }),
@@ -192,7 +192,8 @@ export const api = {
   audit: (token: string, id: string) => request<Listed<AuditEntry>>(`/assets/${id}/audit?limit=200`, token).then((r) => r.data),
   issue: (
     token: string,
-    input: { useCaseKey: string; name: string; chainId: string; metadata: Record<string, unknown>; treasuryAccount?: string; initialSupply?: string; sale?: { unitPrice: string; currency: string; treasuryAccount: string } },
+    // The treasury is always derived server-side from the use case — never client-supplied.
+    input: { useCaseKey: string; name: string; chainId: string; metadata: Record<string, unknown>; initialSupply?: string; sale?: { unitPrice: string; currency: string } },
     // 201 → { asset }; 202 (maker-checker gated) → { proposal, asset }.
   ) => request<{ asset: Asset; txHash?: string; proposal?: Proposal }>("/assets", token, { method: "POST", body: JSON.stringify(input) }),
   action: (token: string, id: string, action: string, body: Record<string, string>) =>
@@ -209,7 +210,7 @@ export const api = {
   buy: (token: string, id: string, quantity: string) =>
     request<{ receipt: unknown; paid: { amount: string; currency: string }; delivered: { amount: string; to: string } }>(
       `/assets/${id}/buy`, token, { method: "POST", body: JSON.stringify({ quantity }) }),
-  setPrice: (token: string, id: string, terms: { unitPrice: string; currency: string; treasuryAccount: string }) =>
+  setPrice: (token: string, id: string, terms: { unitPrice: string; currency: string }) =>
     request<{ ok: boolean }>(`/assets/${id}/actions/setPrice`, token, { method: "POST", body: JSON.stringify(terms) }),
   listings: (token: string, assetId: string) => request<Listing[]>(`/assets/${assetId}/listings`, token),
   createListing: (token: string, assetId: string, input: { quantity: string; unitPrice: string; currency: string }) =>
@@ -237,7 +238,7 @@ export const api = {
     request<{ proposal: Proposal }>(`/proposals/${id}/reject`, token, { method: "POST", body: JSON.stringify({}) }),
   creditCash: (token: string, account: string, currency: string, amount: string) =>
     request<{ ok: boolean; balance: string }>("/cash/credit", token, { method: "POST", body: JSON.stringify({ account, currency, amount }) }),
-  users: (token: string) => request<{ id: string; email: string; role: Role; useCaseKey: string | null; accountId: string | null; active: boolean; kycStatus: "pending" | "approved" | "rejected"; kyc: { legalName?: string; country?: string; idType?: string; idNumber?: string; documentRef?: string } | null }[]>("/users", token),
+  users: (token: string) => request<{ id: string; email: string; role: Role; useCaseKey: string | null; accountId: string | null; active: boolean; kycStatus: "pending" | "approved" | "rejected"; kyc: { legalName?: string; country?: string; idType?: string; idNumber?: string; documentRef?: string } | null; did: string | null }[]>("/users", token),
   // 202 → { proposal }: non-org onboarding is gated; the user does not exist until it is approved.
   createUser: (token: string, input: { email: string; password: string; role: Role; useCaseKey?: string; walletAddress?: string; kyc?: { legalName?: string; country?: string; idType?: string; idNumber?: string; documentRef?: string } }) =>
     request<{ proposal: Proposal }>("/users", token, { method: "POST", body: JSON.stringify(input) }),
@@ -252,6 +253,10 @@ export const api = {
   deleteUser: (token: string, id: string) => request<void>(`/users/${id}`, token, { method: "DELETE" }),
   identityChallenge: (token: string, userId: string) => request<{ challenge: string; expiresAt: string }>(`/users/${userId}/identity/challenge`, token, { method: "POST", body: JSON.stringify({}) }),
   identityVerify: (token: string, userId: string, presentation: string) => request<IdentityResult>(`/users/${userId}/identity/verify`, token, { method: "POST", body: JSON.stringify({ presentation }) }),
+  // Admin-issued counterpart: mints a DID (if needed) and issues + persists a KycCredential
+  // directly, for a user with no external credential to present.
+  issueAdminKyc: (token: string, userId: string, claims: { legalName: string; country: string }) =>
+    request<{ status: string; did: string; credentialId: string }>(`/users/${userId}/identity/issue-kyc`, token, { method: "POST", body: JSON.stringify(claims) }),
   identityMint: (token: string, body: { subjectDid?: string; holderSeed?: string; claims: Record<string, unknown>; challenge: string }) => request<{ presentation: string; holderDid: string; issuerDid: string }>(`/identity/mint`, token, { method: "POST", body: JSON.stringify(body) }),
   // The live session principal. Returns LESS than SessionUser (no email/orgId/
   // did/walletAddress) — callers merge it over the stored user, never replace.

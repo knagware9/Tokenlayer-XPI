@@ -49,10 +49,13 @@ services:
       PORT: "4000"
       NODE_ENV: production
       DATABASE_URL: "file:/data/tokenization.db"
-      ENABLED_DOMAINS: tokenization
+      ENABLED_DOMAINS: tokenization,identity
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET — e.g. openssl rand -hex 32}
       DID_MASTER_KEY: ${DID_MASTER_KEY:?Set DID_MASTER_KEY — organization DID seeds are encrypted with it}
-      CORS_ORIGINS: ${TOKENIZATION_WEB_ORIGINS:-http://localhost:8100,http://localhost:8101,http://localhost:8102}
+      # :8090 is identity-issuer-web — see the "identity-api" alias below; it
+      # talks to THIS container, so it needs the same CORS grant a tokenization
+      # persona web app gets.
+      CORS_ORIGINS: ${TOKENIZATION_WEB_ORIGINS:-http://localhost:8100,http://localhost:8101,http://localhost:8102,http://localhost:8090}
       CHAIN_STRICT: ${CHAIN_STRICT:-0}
       LOGIN_RATE_LIMIT_MAX: ${LOGIN_RATE_LIMIT_MAX:-200}
       MARKET_ESCROW_ACCOUNT: ${MARKET_ESCROW_ACCOUNT:-0x000000000000000000000000000000000000E5C0}
@@ -74,7 +77,18 @@ services:
       IDENTITY_SERVICE_URL: ${IDENTITY_SERVICE_URL:-}
       IDENTITY_SERVICE_KEY: ${IDENTITY_SERVICE_KEY:-}
     volumes: [tokenization-data:/data]
-    networks: [xi-net]
+    # ALIAS "identity-api", DELIBERATELY. Not the service-to-service seam above —
+    # this is the identity-issuer PERSONA EDGE's own upstream, which
+    # gen-persona-edges.ts hardcodes to that hostname for any "identity" domain
+    # persona. Aliasing it here points an identity-issuer console (deployed from
+    # docker-compose.identity.yml with --no-deps, so no second identity-api ever
+    # starts) at THIS container instead of a separate identity.db — a one-off
+    # wiring for a deployment that wants a genuinely separate identity-issuer
+    # console while keeping ONE shared user/credential database. A real split
+    # deployment (its own identity-api, its own database) must never alias this.
+    networks:
+      xi-net:
+        aliases: [identity-api]
     restart: unless-stopped
 
   tokenization-issuer-edge:

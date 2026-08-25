@@ -28,6 +28,9 @@ export function AssetList({ chains, refreshKey, onSelect, useCaseKey }: Props): 
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
   const canBuy = user ? can(user.role, "buy") : false;
+  // "issue" is the same capability the setPrice action itself requires server-side —
+  // whoever can issue an asset can also list it (or relist it) for primary sale.
+  const canListForSale = user ? can(user.role, "issue") : false;
 
   useEffect(() => {
     if (!token) return;
@@ -64,7 +67,7 @@ export function AssetList({ chains, refreshKey, onSelect, useCaseKey }: Props): 
             <th className="text-right font-medium px-4 py-2.5">Total supply</th>
             <th className="text-left font-medium px-4 py-2.5">On-chain</th>
             <th className="text-left font-medium px-4 py-2.5">Available</th>
-            <th className="text-right font-medium px-4 py-2.5">{canBuy ? "Buy" : ""}</th>
+            <th className="text-right font-medium px-4 py-2.5">{canBuy ? "Buy" : canListForSale ? "List" : ""}</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
@@ -109,6 +112,14 @@ export function AssetList({ chains, refreshKey, onSelect, useCaseKey }: Props): 
                       className="rounded-lg bg-brand-600 text-white px-3 py-1 text-xs font-medium hover:bg-brand-700"
                     >
                       Buy
+                    </button>
+                  )}
+                  {canListForSale && avail === "not-listed" && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onSelect(a.id); }}
+                      className="rounded-lg border border-brand-600 text-brand-600 px-3 py-1 text-xs font-medium hover:bg-brand-50"
+                    >
+                      List
                     </button>
                   )}
                 </td>

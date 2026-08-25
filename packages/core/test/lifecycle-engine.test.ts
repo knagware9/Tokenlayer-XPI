@@ -466,7 +466,7 @@ describe("LifecycleEngine — compliance.requireVerifiedIdentity gate", () => {
     await engine.mint(ADMIN, idCtx, "treasury", "100");
     provider.verified.set("buyer", false);
     await expect(
-      engine.buy(ADMIN, idCtx, "treasury", "buyer", "10", { unitPrice: "5", currency: "CBDC-INR", cost: "50" }),
+      engine.buy(TRADER, idCtx, "treasury", "buyer", "10", { unitPrice: "5", currency: "CBDC-INR", cost: "50" }),
     ).rejects.toThrow(/IDENTITY_NOT_VERIFIED|verified identity/);
   });
 
@@ -479,7 +479,7 @@ describe("LifecycleEngine — compliance.requireVerifiedIdentity gate", () => {
     expect(await engine.balanceOf(ADMIN, idCtx, "bob")).toBe("5");
     provider.verified.set("buyer", true);
     await expect(
-      engine.buy(ADMIN, idCtx, "alice", "buyer", "1", { unitPrice: "5", currency: "CBDC-INR", cost: "5" }),
+      engine.buy(TRADER, idCtx, "alice", "buyer", "1", { unitPrice: "5", currency: "CBDC-INR", cost: "5" }),
     ).resolves.toBeDefined();
   });
 

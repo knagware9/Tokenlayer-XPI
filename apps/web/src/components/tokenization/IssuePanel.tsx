@@ -22,13 +22,11 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [treasury, setTreasury] = useState("");
   const [initialSupply, setInitialSupply] = useState("");
   const [listForSale, setListForSale] = useState(false);
   const [salePrice, setSalePrice] = useState("");
   const [saleCurrency, setSaleCurrency] = useState("");
   const [currencies, setCurrencies] = useState<Currency[]>([]);
-  const [allAccounts, setAllAccounts] = useState<{ address: string; label: string }[]>([]);
 
   // Keep the selected use case valid: pick the first when unset OR when the current
   // key is no longer in the list (a PlatformAdmin switched use cases while this panel
@@ -61,11 +59,6 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
   useEffect(() => {
     if (!token) return;
     void api.currencies(token).then(setCurrencies).catch(() => {});
-  }, [token]);
-
-  useEffect(() => {
-    if (!token) return;
-    void api.accounts(token).then(setAllAccounts);
   }, [token]);
 
   // Live-preview any server-derived metadata field (e.g. invoiceHash from the
@@ -104,20 +97,18 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
         if (raw === undefined || raw === "") continue;
         metadata[field] = prop.type === "number" ? Number(raw) : prop.type === "boolean" ? raw === "true" : raw;
       }
-      const sale = listForSale && salePrice && saleCurrency && treasury
-        ? { unitPrice: salePrice, currency: saleCurrency, treasuryAccount: treasury }
+      const sale = listForSale && salePrice && saleCurrency
+        ? { unitPrice: salePrice, currency: saleCurrency }
         : undefined;
       const supply = isFungible && /^\d+$/.test(initialSupply) && Number(initialSupply) > 0 ? initialSupply : undefined;
       const res = await api.issue(token, {
         useCaseKey, name, chainId, metadata,
-        treasuryAccount: treasury || undefined,
         initialSupply: supply,
         sale,
       });
       setName("");
       setMeta({});
       setDerived({});
-      setTreasury("");
       setInitialSupply("");
       setListForSale(false);
       setSalePrice("");
@@ -269,19 +260,9 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
       )}
 
       {isFungible && (
-        <div className="grid grid-cols-2 gap-4">
-          <Field label="Number of tokens" hint="Minted to the treasury at issuance (sets total supply)">
-            <input className="input" type="number" min="0" step="1" value={initialSupply} onChange={(e) => setInitialSupply(e.target.value)} placeholder="e.g. 100" />
-          </Field>
-          <Field label="Treasury account" hint="Holds the supply and sells it on the marketplace">
-            <select className="select" value={treasury} onChange={(e) => setTreasury(e.target.value)}>
-              <option value="">Select account…</option>
-              {allAccounts.map((a) => (
-                <option key={a.address} value={a.address}>{a.label}</option>
-              ))}
-            </select>
-          </Field>
-        </div>
+        <Field label="Number of tokens" hint="Minted to the use case's treasury at issuance (sets total supply)">
+          <input className="input" type="number" min="0" step="1" value={initialSupply} onChange={(e) => setInitialSupply(e.target.value)} placeholder="e.g. 100" />
+        </Field>
       )}
 
       {isFungible && (
@@ -303,7 +284,6 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
                   </select>
                 </Field>
               </div>
-              {!treasury && <p className="text-[11px] text-amber-600">Select a treasury account above to list this asset for sale.</p>}
             </div>
           )}
         </div>

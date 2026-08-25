@@ -155,8 +155,8 @@ export function App(): JSX.Element {
   // never renders the portfolio its edge would refuse anyway.
   if (user.role === "Buyer" || activePersona()?.shell === "self-service") {
     const items: NavItem[] = [
-      { id: "portfolio", label: "Portfolio", icon: "coins" },
-      { id: "offerings", label: "Offerings", icon: "spark" },
+      { id: "portfolio", label: "My Portfolio", icon: "coins" },
+      { id: "offerings", label: "Marketplace", icon: "spark" },
       { id: "transactions", label: "Recent Transactions", icon: "arrow" },
       ...pinned,
     ];
@@ -346,7 +346,7 @@ export function App(): JSX.Element {
       </div>
     );
   } else {
-    panel = <Dashboard useCaseKey={activeUseCase} />;
+    panel = <Dashboard useCaseKey={activeUseCase} onNavigate={handleSelect} />;
   }
 
   return <AppShell items={visible} active={activeId} onSelect={handleSelect} domains={branchDomains} activeDomain={effDomain} onDomainChange={onDomainChange}>{panel}</AppShell>;

@@ -776,6 +776,20 @@ export const identitySchemas: Record<string, FastifySchema> = {
     body: { type: "object", required: ["presentation"], properties: { presentation: { type: "string" } } },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
   },
+  issueAdminKyc: {
+    tags: ["Identity"], summary: "Admin-issue a KYC credential to a user who has no external one to present", security: eitherCredential,
+    description:
+      "Requires the `users:onboard` scope. Mints the user a custodial DID (if they don't already have one) and " +
+      "issues a KycCredential under the platform's verifier org, persisted in the local credential store — the " +
+      "same predicate `compliance.requireVerifiedIdentity` checks. Distinct from `identityVerify`, which only " +
+      "confirms a holder-presented external credential and persists nothing locally.",
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    body: {
+      type: "object", required: ["legalName", "country"],
+      properties: { legalName: { type: "string" }, country: { type: "string" } },
+    },
+    response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
+  },
   identityMint: {
     tags: ["Identity"], summary: "Dev: mint a demo VP", security: humanOnly,
     description:

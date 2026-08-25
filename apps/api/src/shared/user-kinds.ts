@@ -43,7 +43,7 @@ export interface OnboardUserPayload {
 }
 
 /** ownerOrg of the use case when present, else the platform issuer org. */
-async function resolveIssuerOrg(deps: AppDeps, useCaseKey: string | null) {
+export async function resolveIssuerOrg(deps: AppDeps, useCaseKey: string | null) {
   if (useCaseKey) {
     const uc = await deps.useCases.get(useCaseKey).catch(() => null);
     if (uc?.ownerOrgId) {

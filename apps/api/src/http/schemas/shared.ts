@@ -881,6 +881,7 @@ export const sharedSchemas: Record<string, FastifySchema> = {
             active: { type: "boolean" },
             kycStatus: { type: "string", enum: ["pending", "approved", "rejected"] },
             kyc: { type: "object", additionalProperties: true, nullable: true, description: "The captured KYC detail (legalName, country, id type/number, documentRef). PERSONAL DATA — `users:read` is what gates it." },
+            did: { type: "string", nullable: true, description: "The user's custodial decentralized identifier, when one has been minted (org onboarding, `POST /users/{id}/identity/issue-kyc`, or a linked external DID)." },
           },
           required: ["id", "email", "role", "active", "kycStatus"],
         },

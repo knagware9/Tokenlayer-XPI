@@ -3256,7 +3256,7 @@
         "parameters": [],
         "requestBody": false,
         "responses": {
-          "200": "[{accountId,active,email,id,kyc,kycStatus,role,useCaseKey}]",
+          "200": "[{accountId,active,did,email,id,kyc,kycStatus,role,useCaseKey}]",
           "401": "#Error",
           "403": "#Error"
         }
@@ -3391,6 +3391,35 @@
         "requestBody": false,
         "responses": {
           "200": "{}",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
+    "/api/v1/users/{id}/identity/issue-kyc": {
+      "post": {
+        "tags": [
+          "Identity"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "users:onboard"
+        ],
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "{}",
+          "400": "#Error",
           "401": "#Error",
           "403": "#Error",
           "404": "#Error"

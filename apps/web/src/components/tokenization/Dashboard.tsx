@@ -27,7 +27,7 @@ function fmtMoney(byCurrency: Record<string, string>): string {
   return parts.map(([cur, amt]) => `${fmtInt(amt)} ${cur}`).join(" · ");
 }
 
-export function Dashboard({ useCaseKey }: { useCaseKey?: string }): JSX.Element {
+export function Dashboard({ useCaseKey, onNavigate }: { useCaseKey?: string; onNavigate?: (id: string) => void }): JSX.Element {
   const { token } = useAuth();
   const { navigate } = useRoute();
   const [data, setData] = useState<AnalyticsSummary | null>(null);
@@ -79,9 +79,12 @@ export function Dashboard({ useCaseKey }: { useCaseKey?: string }): JSX.Element 
     <div className="space-y-4">
       {/* headline cards — click to drill into the matching breakdown */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <Stat icon="coins" label="Tokenized value" value={fmtMoney(t.valueByCurrency)} sub={`${t.assets} assets · ${t.useCases} use case${t.useCases === 1 ? "" : "s"}`} onClick={() => scrollTo(data.scope === "platform" ? "dash-usecases" : "dash-ledger")} stagger={1} />
+        <Stat icon="coins" label="Tokenized value" value={fmtMoney(t.valueByCurrency)} sub={`${t.assets} assets · ${t.useCases} use case${t.useCases === 1 ? "" : "s"}`} onClick={() => (data.scope === "platform" ? scrollTo("dash-usecases") : onNavigate?.("assets"))} stagger={1} />
         <Stat icon="spark" label="Total supply" value={fmtInt(t.supply)} sub="minted − burned" onClick={() => scrollTo("dash-ledger")} stagger={2} />
-        <Stat icon="users" label="Holders" value={String(t.holders)} sub="distinct accounts" onClick={() => scrollTo(data.scope === "platform" ? "dash-usecases" : "dash-ledger")} stagger={3} />
+        {/* "Holders" has no per-holder breakdown on this page (that lives per-asset, in
+            the asset's own Holders table) — jump there instead of a scroll target with
+            nothing about holders on it. */}
+        <Stat icon="users" label="Holders" value={String(t.holders)} sub="distinct accounts" onClick={() => (data.scope === "platform" ? scrollTo("dash-usecases") : onNavigate?.("assets"))} stagger={3} />
         <Stat icon="arrow" label={`Traded (${data.activity.length}d)`} value={fmtMoney(t.tradedByCurrency)} sub={`${t.trades} trade${t.trades === 1 ? "" : "s"}`} onClick={() => scrollTo("dash-recent")} stagger={4} />
       </div>
 
