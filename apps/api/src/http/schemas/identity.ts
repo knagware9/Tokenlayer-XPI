@@ -312,9 +312,6 @@ export const identitySchemas: Record<string, FastifySchema> = {
     },
   },
 
-  myCredentials: { tags: ["Identity"], summary: "Credentials held by the caller", security: eitherCredential,
-    description: "Requires the `credentials:read` scope. The credentials held by the principal the credential belongs to.",
-    response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(401) } },
   identityDashboard: {
     tags: ["Identity"], summary: "Scoped identity operations dashboard (credential lifecycle + verification aggregates)", security: eitherCredential,
     description:
@@ -323,69 +320,6 @@ export const identitySchemas: Record<string, FastifySchema> = {
     // Loose 200: the nested fold output would be silently stripped by
     // fast-json-stringify under a typed schema (the standing lesson).
     response: { 200: { type: "object", additionalProperties: true }, ...errs(401, 403) },
-  },
-  // The three holder-acceptance routes each answer with a MINIMAL acknowledgement
-  // — id plus the fields that just changed — never the whole credential.
-  acceptCredential: {
-    tags: ["Credentials"], summary: "Holder accepts a pending credential", security: humanOnly,
-    description: "Session-only, and only the holder of the credential may call it. Valid from `pending` or `changes_requested`; anything else is a **409**.",
-    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
-    body: { type: "object", additionalProperties: false, properties: { note: { type: "string" } } },
-    response: {
-      200: {
-        type: "object", additionalProperties: true,
-        properties: {
-          id: { type: "string" },
-          acceptance: { type: "string", enum: ["accepted"] },
-          acceptanceAt: { type: "string", nullable: true },
-        },
-        required: ["id", "acceptance"],
-      },
-      ...errs(401, 404, 409),
-    },
-  },
-  rejectHeldCredential: {
-    tags: ["Credentials"], summary: "Holder rejects a pending credential (revokes it)", security: humanOnly,
-    description:
-      "Session-only, holder of the credential only. **Rejection REVOKES the credential** — it is not merely a " +
-      "status flag, so this is irreversible and the issuer must re-issue rather than re-offer.",
-    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
-    body: { type: "object", additionalProperties: false, properties: { note: { type: "string" } } },
-    response: {
-      200: {
-        type: "object", additionalProperties: true,
-        properties: {
-          id: { type: "string" },
-          acceptance: { type: "string", enum: ["rejected"] },
-          revoked: { type: "boolean", description: "Always `true` — rejecting a held credential revokes it." },
-        },
-        required: ["id", "acceptance", "revoked"],
-      },
-      ...errs(401, 404, 409),
-    },
-  },
-  requestCredentialChanges: {
-    tags: ["Credentials"], summary: "Holder requests changes on a pending credential", security: humanOnly,
-    description: "Session-only, holder of the credential only. Valid from `pending` ALONE — a credential already in `changes_requested` answers **409**.",
-    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
-    body: { type: "object", additionalProperties: false, required: ["note"], properties: { note: { type: "string", minLength: 1 } } },
-    response: {
-      200: {
-        type: "object", additionalProperties: true,
-        properties: {
-          id: { type: "string" },
-          acceptance: { type: "string", enum: ["changes_requested"] },
-          acceptanceNote: { type: "string", nullable: true, description: "The note you sent, echoed back — this is what the issuer reads." },
-        },
-        required: ["id", "acceptance"],
-      },
-      ...errs(400, 401, 404, 409),
-    },
-  },
-  didDocument: {
-    tags: ["Identity"], summary: "Resolve a did:key into a W3C DID document", security: humanOnly,
-    params: { type: "object", required: ["did"], properties: { did: { type: "string" } } },
-    response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401) },
   },
   didResolve: {
     tags: ["Identity"], summary: "Public: resolve a DID (W3C DID Resolution Result; did:key + on-chain registration)",
@@ -638,13 +572,6 @@ export const identitySchemas: Record<string, FastifySchema> = {
     },
     response: { 201: { $ref: "VerificationRequest#" }, ...errs(400, 401, 403) },
   },
-  myVerificationRequests: { tags: ["Verification"], summary: "The caller's inbound verification requests", security: eitherCredential,
-    description:
-      "Requires the `verifications:read` scope. The requests addressed to the principal the credential belongs to.\n\n" +
-      "Each row is enriched with `eligibleCredentials` — the caller's own unrevoked, accepted credentials of a " +
-      "requested type — which is what you pass as `credentialIds` when consenting. A caller with no DID gets an " +
-      "empty array rather than an error.",
-    response: { 200: { type: "array", items: { $ref: "VerificationRequest#" } }, ...errs(401) } },
   listVerificationRequests: { tags: ["Verification"], summary: "The caller's OUTBOUND verification requests", security: eitherCredential,
     description:
       "Requires the `verifications:read` scope. The mirror of `GET /me/verification-requests`: that one returns the " +
@@ -774,20 +701,6 @@ export const identitySchemas: Record<string, FastifySchema> = {
     description: "Requires the `users:onboard` scope. Verifies the signed presentation and sets the user's KYC state.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: { type: "object", required: ["presentation"], properties: { presentation: { type: "string" } } },
-    response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
-  },
-  issueAdminKyc: {
-    tags: ["Identity"], summary: "Admin-issue a KYC credential to a user who has no external one to present", security: eitherCredential,
-    description:
-      "Requires the `users:onboard` scope. Mints the user a custodial DID (if they don't already have one) and " +
-      "issues a KycCredential under the platform's verifier org, persisted in the local credential store — the " +
-      "same predicate `compliance.requireVerifiedIdentity` checks. Distinct from `identityVerify`, which only " +
-      "confirms a holder-presented external credential and persists nothing locally.",
-    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
-    body: {
-      type: "object", required: ["legalName", "country"],
-      properties: { legalName: { type: "string" }, country: { type: "string" } },
-    },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404) },
   },
   identityMint: {

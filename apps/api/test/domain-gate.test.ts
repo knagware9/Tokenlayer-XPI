@@ -14,9 +14,13 @@
  *      the 401 an unauthenticated request always got is the answer it still
  *      gets, so the gate is not a free oracle for which products you run;
  *   3. the routes that sit under a SHARED prefix are classified by what they
- *      are rather than where they live: `/me/credentials` is identity,
- *      `/me/portfolio` is tokenization, `/me` itself is shared. That is where a
- *      prefix-based split would quietly get it wrong.
+ *      are rather than where they live: `/me/verification-requests` is
+ *      identity's inbox, `/me/portfolio` is tokenization, `/me` itself is
+ *      shared. That is where a prefix-based split would quietly get it wrong —
+ *      and `/me/credentials` is the deliberate exception to its own rule
+ *      (below): identity work, reclassified "shared" so "My identity" still
+ *      answers for a tokenization console user issue-kyc gave a DID to,
+ *      still safe because `deps.credentials` stays guardRepository-wrapped.
  *
  * The anti-drift control is the BOOT, not this file: an unclassified route
  * throws from the onRoute hook in src/app.ts, so a new route cannot reach
@@ -41,7 +45,7 @@ describe("a tokenization-only deployment", () => {
     const { app, token } = await adminOn(["tokenization"]);
 
     // Identity — gone. Not 403: this instance does not have the product at all.
-    for (const url of ["/credential-use-cases", "/credential-types", "/verification-requests", "/me/credentials", "/registry"]) {
+    for (const url of ["/credential-use-cases", "/credential-types", "/verification-requests", "/registry"]) {
       const res = await get(app, url, token);
       expect(res.statusCode, `${url} should be absent`).toBe(404);
       expect(res.json().error, `${url} should say WHY it is absent`).toBe("DOMAIN_NOT_ENABLED");
@@ -53,7 +57,9 @@ describe("a tokenization-only deployment", () => {
     }
 
     // Shared — without these there is no login, no tenant, no approval queue.
-    for (const url of ["/me", "/orgs", "/users", "/proposals", "/chains", "/config"]) {
+    // /me/credentials and /me/verification-requests sit here too: "My
+    // identity" self-service for a roster member issue-kyc gave a DID to.
+    for (const url of ["/me", "/orgs", "/users", "/proposals", "/chains", "/config", "/me/credentials", "/me/verification-requests"]) {
       expect((await get(app, url, token)).statusCode, `${url} should work`).toBe(200);
     }
     await app.close();
@@ -122,9 +128,18 @@ describe("classification of the routes that share a prefix", () => {
     ["/me/login-keys", "shared"],
     ["/me/portfolio", "tokenization"],
     ["/me/activity", "tokenization"],
-    ["/me/credentials", "identity"],
-    ["/me/credentials/:id/accept", "identity"],
-    ["/me/verification-requests", "identity"],
+    // The three EXCEPTIONS: longest-prefix beats the broader identity rules
+    // below them, because "My identity" self-service must answer on any
+    // console for a roster member issue-kyc gave a DID to — see the header
+    // comment. /verification-requests (the verifier's own inbox) and
+    // /orgs/:id/wallet, /orgs/:id/credentials, /credential-types stay identity:
+    // they are programme/verifier machinery, not a caller's own records.
+    ["/me/credentials", "shared"],
+    ["/me/credentials/:id/accept", "shared"],
+    ["/me/verification-requests", "shared"],
+    ["/dids/:did/document", "shared"],
+    ["/dids/:did/resolve", "identity"],
+    ["/users/:id/identity/issue-kyc", "shared"],
     ["/orgs", "shared"],
     ["/orgs/:id/webhooks", "shared"],
     ["/orgs/:id/wallet", "identity"],
@@ -132,6 +147,7 @@ describe("classification of the routes that share a prefix", () => {
     ["/users", "shared"],
     ["/users/:id/identity/verify", "identity"],
     ["/users/:id/revoke-identity", "identity"],
+    ["/verification-requests", "identity"],
     ["/credential-types", "identity"],
     ["/chains", "shared"],
     ["/auth/qr/start", "shared"],
@@ -140,8 +156,8 @@ describe("classification of the routes that share a prefix", () => {
   });
 
   it("classifies the same whether or not the mount prefix is present", () => {
-    expect(classifyRoute("/api/v1/me/credentials")).toBe("identity");
-    expect(classifyRoute("/me/credentials")).toBe("identity");
+    expect(classifyRoute("/api/v1/me/credentials")).toBe("shared");
+    expect(classifyRoute("/me/credentials")).toBe("shared");
   });
 
   it("shared routes are enabled under every deployment shape", () => {

@@ -841,6 +841,17 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
     const ctx = contextOf(asset);
     const b = (request.body ?? {}) as Record<string, string>;
 
+    // The schema can only say `tokenId` is a string — whether it's REQUIRED
+    // depends on this asset's own tokenType, which the schema never sees. An
+    // empty string satisfies `type: "string"` and would otherwise reach
+    // mintToken/transferToken/burnToken unchecked, minting a token with no id
+    // (unrecoverable — nothing can address it afterward to fix it). Checked
+    // before the maker-checker gate below so a bad proposal is never created
+    // in the first place; the approver would have no way to correct it.
+    if (asset.tokenType === "nonfungible" && (action === "mint" || action === "transfer" || action === "burn") && !b.tokenId?.trim()) {
+      return reply.code(400).send({ error: "MISSING_TOKEN_ID", message: "tokenId is required for a non-fungible asset and must not be empty" });
+    }
+
     // Maker-checker: gate mint/transfer/burn/freeze/unfreeze when configured. The
     // proposer must hold the capability up front (so they can't propose what they
     // couldn't do), then the operation is captured as a pending proposal.

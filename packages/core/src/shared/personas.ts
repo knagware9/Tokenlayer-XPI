@@ -286,6 +286,13 @@ export const PERSONAS: readonly PersonaDef[] = [
       // STAFF_BASELINE too, or identity-verifier would inherit the power to
       // mint credentials for people it should only ever be reading about.
       { prefix: "/users/:id/identity/issue-kyc", methods: ["POST"], exact: true, why: "mint a DID + KYC credential directly for a roster member with nothing external to present" },
+      // The rest of "My identity" (surfaced as "credentials" above) for a
+      // roster member issue-kyc gave a DID to: resolve their own DID document,
+      // read their own held credentials, and act on their own pending ones.
+      // Self-service on your own records only — see route-domains.ts.
+      { prefix: "/dids/:did/document", methods: ["GET"], exact: true, why: "resolve one's own DID document" },
+      { prefix: "/me/credentials", methods: "ALL", why: "view own held credentials; accept/reject/request-changes on one's own pending ones" },
+      { prefix: "/me/verification-requests", methods: ["GET"], exact: true, why: "the caller's own inbox of requests to present a credential" },
     ],
   },
   {
@@ -333,9 +340,12 @@ export const PERSONAS: readonly PersonaDef[] = [
       // sit in STAFF_BASELINE, or an identity-only deployment would expose it
       // at its edge and then fail inside the handler on DOMAIN_NOT_ENABLED.
       { prefix: "/reconciliation", methods: ["GET"], why: "believed-vs-chain supply, per asset, next to the audit console" },
-      // See tokenization-issuer's identical grant just above for why this is
-      // scoped to the one exact route rather than STAFF_BASELINE.
+      // See tokenization-issuer's identical grants just above for why these
+      // are scoped narrowly rather than sitting in STAFF_BASELINE.
       { prefix: "/users/:id/identity/issue-kyc", methods: ["POST"], exact: true, why: "mint a DID + KYC credential directly for a roster member with nothing external to present" },
+      { prefix: "/dids/:did/document", methods: ["GET"], exact: true, why: "resolve one's own DID document" },
+      { prefix: "/me/credentials", methods: "ALL", why: "view own held credentials; accept/reject/request-changes on one's own pending ones" },
+      { prefix: "/me/verification-requests", methods: ["GET"], exact: true, why: "the caller's own inbox of requests to present a credential" },
     ],
   },
 ];

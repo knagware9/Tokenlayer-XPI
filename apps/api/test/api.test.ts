@@ -216,6 +216,25 @@ describe("lifecycle + compliance + audit", () => {
     expect(transfer.json().error).toBe("ACTION_DISABLED");
   });
 
+  it("refuses an ERC-721 mint with an empty or missing tokenId — a fungible action never needs one", async () => {
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const issue = await inj({
+      method: "POST",
+      url: "/assets",
+      headers: auth(admin),
+      payload: { useCaseKey: "generic-certificate", name: "Cert2", symbol: "CERT", chainId: "fabric", metadata: { category: "registration", authority: "Gov" } },
+    });
+    const id = issue.json().asset.id as string;
+
+    const missing = await inj({ method: "POST", url: `/assets/${id}/actions/mint`, headers: auth(admin), payload: { to: ACCOUNTS.ALICE, uri: "ipfs://x" } });
+    expect(missing.statusCode).toBe(400);
+    expect(missing.json().error).toBe("MISSING_TOKEN_ID");
+
+    const empty = await inj({ method: "POST", url: `/assets/${id}/actions/mint`, headers: auth(admin), payload: { to: ACCOUNTS.ALICE, tokenId: "", uri: "ipfs://x" } });
+    expect(empty.statusCode).toBe(400);
+    expect(empty.json().error).toBe("MISSING_TOKEN_ID");
+  });
+
   it("rejects issuance to a chain the use case does not allow", async () => {
     const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     const create = await inj({

@@ -46,14 +46,31 @@ const RULES: ReadonlyArray<readonly [string, RouteDomain]> = [
   ["/credentials", "identity"],
   // Presentation exchange.
   ["/verification-requests", "identity"],
-  ["/me/verification-requests", "identity"],
-  // The holder's wallet and the acceptance lifecycle.
-  ["/me/credentials", "identity"],
+  // EXCEPTION: a roster member's OWN inbox of requests to present a
+  // credential. issue-kyc (below) can now give tokenization staff a DID, and
+  // "My identity" — rendered on every console, tokenization included — reads
+  // this on mount; before that fix nothing on a tokenization edge ever had a
+  // DID, so this call never ran there and the gap went unnoticed. Self-service
+  // read of one's own inbox, same standing as `/me` itself below — moved out
+  // of the "shared platform" block only because it touches deps below.
+  ["/me/verification-requests", "shared"],
+  // EXCEPTION, same reasoning: "My identity" fetches the caller's own held
+  // credentials and lets them accept/reject/request changes on THEIR OWN
+  // pending ones — self-service on your own records, not a capability to
+  // reach anyone else's. Not `exact`, so it also covers
+  // /me/credentials/:id/accept|reject|request-changes.
+  ["/me/credentials", "shared"],
   // An organization's own wallet of held credentials.
   ["/orgs/:id/credentials", "identity"],
   ["/orgs/:id/wallet", "identity"],
   // DID resolution, the dev issuer, the identity dashboard.
   ["/dids", "identity"],
+  // EXCEPTION, longest-prefix beats the rule above: resolving ONE DID document
+  // is the other half of "My identity" self-service — `/dids/:did/resolve`
+  // (public) and the dev issuer stay identity-only, but the authenticated
+  // per-DID document lookup is needed by anyone, on any console, who now has
+  // a DID to look up.
+  ["/dids/:did/document", "shared"],
   ["/identity", "identity"],
   // Per-user identity verification and its reversal.
   ["/users/:id/identity", "identity"],

@@ -21,7 +21,8 @@ import { renderContractCode } from "../../tokenization/contract-code.js";
 import { deployAndCreateUseCase } from "../../tokenization/use-cases.js";
 import { computeAnalytics } from "../../tokenization/analytics.js";
 import { computeIdentityDashboard } from "../../identity/identity-analytics.js";
-import { issueCredentialFor, revokeCredentialById } from "../../identity/credential-issuance.js";
+import { issueCredentialFor } from "../../identity/credential-issuance.js";
+import { vreqView } from "../../identity/verification-request-view.js";
 import { namespaceHolding } from "../../shared/usecase-namespace.js";
 import { emitEvent, ownerOrgOfUseCase } from "../../shared/events.js";
 import { mintOrgMembership } from "../../shared/membership.js";
@@ -1297,127 +1298,10 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
   });
 
 
-  app.get("/dids/:did/document", { schema: S.didDocument, ...auth }, async (request, reply) => {
-    const { did } = request.params as { did: string };
-    const res = await resolveDid(did, {
-      registry: deps.registry,
-      onChainError: (err) => request.log.error({ err, did }, "on-chain DID registration read failed"),
-    });
-    if (res.didResolutionMetadata.error || !res.didDocument) {
-      return reply.code(400).send({ error: "UNSUPPORTED_DID", message: "only did:key ed25519 can be resolved" });
-    }
-    const m = res.didDocumentMetadata;
-    const registration = m.source === "chain"
-      ? { registered: m.registered, active: m.active, chainId: m.chainId, registry: m.registry }
-      : null;
-    return { ...res.didDocument, registration };
-  });
-
-
-  app.get("/me/credentials", { schema: S.myCredentials, ...authScoped("credentials:read") }, async (request) => {
-    const claims = request.user as TokenClaims;
-    if (!claims.did) return [];
-    return mapHeld(await deps.credentials.listByHolder(claims.did));
-  });
-
-
-  /** Load a credential owned by the caller — either their own personal DID, or
-   *  (for an ORG-held credential, e.g. issued via subjectOrgId) their org's DID
-   *  when they are that org's OrgAdmin — currently in one of `from` states.
-   *  Null ⇒ reply sent. */
-  async function holderCredentialInState(
-    request: FastifyRequest, reply: FastifyReply, from: CredentialRecord["acceptance"][],
-  ): Promise<CredentialRecord | null> {
-    const claims = request.user as TokenClaims;
-    const { id } = request.params as { id: string };
-    const cred = await deps.credentials.get(id);
-    const isOwnDid = !!cred && !!claims.did && cred.holderDid === claims.did;
-    const isOrgAdminOfHolder = !!cred && claims.role === "OrgAdmin" && !!claims.orgId
-      && (await deps.organizations.get(claims.orgId).catch(() => null))?.did === cred.holderDid;
-    if (!cred || (!isOwnDid && !isOrgAdminOfHolder)) { notFound(reply, "credential not found"); return null; }
-    if (!from.includes(cred.acceptance)) {
-      reply.code(409).send({ error: "INVALID_ACCEPTANCE_STATE", message: `credential is '${cred.acceptance}'` });
-      return null;
-    }
-    return cred;
-  }
-
-
-  /**
-   * EN-C tenancy key for the credential lifecycle events. The owning org of a
-   * credential is the org that SIGNED it, resolved from its issuer DID — not the
-   * acting principal's org, which on these routes is the HOLDER's. Null (⇒
-   * platform-scope) only if that org has vanished; never throws, because it
-   * feeds an emit that must not fail the route.
-   */
-  const issuerOrgIdOf = async (cred: CredentialRecord): Promise<string | null> =>
-    (await deps.organizations.findByDid(cred.issuerDid).catch(() => null))?.id ?? null;
-
-
-  // EN-B: the three holder-lifecycle routes below are DELIBERATELY UNSCOPED.
-  // They act only on a credential the caller ALREADY holds and confer no
-  // authority over anyone else: accepting/rejecting/asking-for-changes changes
-  // the caller's own acceptance state. Contrast POST /verification-requests/:id/
-  // consent, which needs `credentials:present` because it signs AS the holder
-  // and DISCLOSES those credentials to a third-party verifier, irreversibly.
-  app.post("/me/credentials/:id/accept", { schema: S.acceptCredential, ...auth }, async (request, reply) => {
-    const cred = await holderCredentialInState(request, reply, ["pending", "changes_requested"]);
-    if (!cred) return reply;
-    const updated = await deps.credentials.setAcceptance(cred.id, { acceptance: "accepted", at: new Date().toISOString(), note: null });
-    await deps.audit.append({ actorId: (request.user as TokenClaims).id, action: "credential-accepted" as LifecycleAction, payload: { credentialId: cred.id } });
-    // EN-C: the ISSUER is the party waiting on this answer, so the event is
-    // theirs — a holder does not register webhook endpoints.
-    await emitEvent(deps, {
-      type: "credential.accepted",
-      orgId: await issuerOrgIdOf(cred),
-      useCaseKey: cred.credentialUseCaseKey,
-      subjectId: cred.id,
-      data: {
-        credentialId: cred.id, credentialType: cred.type, subjectDid: cred.holderDid,
-        issuerDid: cred.issuerDid, credentialUseCaseKey: cred.credentialUseCaseKey,
-        acceptance: updated.acceptance, acceptedAt: updated.acceptanceAt,
-      },
-    }, request.log);
-    return { id: updated.id, acceptance: updated.acceptance, acceptanceAt: updated.acceptanceAt };
-  });
-
-
-  app.post("/me/credentials/:id/reject", { schema: S.rejectHeldCredential, ...auth }, async (request, reply) => {
-    const cred = await holderCredentialInState(request, reply, ["pending", "changes_requested"]);
-    if (!cred) return reply;
-    const claims = request.user as TokenClaims;
-    const note = (request.body as { note?: string })?.note ?? null;
-    // Chain-first revoke; a throw leaves the credential in its prior state (never DB-revoked/chain-valid).
-    await revokeCredentialById(deps, cred.id, { reason: note ? `holder rejected: ${note}` : "holder rejected", by: claims.id, at: new Date().toISOString() });
-    const updated = await deps.credentials.setAcceptance(cred.id, { acceptance: "rejected", at: new Date().toISOString(), note });
-    await deps.audit.append({ actorId: claims.id, action: "credential-rejected" as LifecycleAction, payload: { credentialId: cred.id, note } });
-    // EN-C: a holder rejection legitimately produces TWO events — the
-    // `credential.revoked` that revokeCredentialById above already emitted (the
-    // credential is now dead on-chain) and this one, which says WHY. Both facts
-    // are true and an integrator subscribed to either should see it.
-    await emitEvent(deps, {
-      type: "credential.rejected",
-      orgId: await issuerOrgIdOf(cred),
-      useCaseKey: cred.credentialUseCaseKey,
-      subjectId: cred.id,
-      data: {
-        credentialId: cred.id, credentialType: cred.type, subjectDid: cred.holderDid,
-        issuerDid: cred.issuerDid, credentialUseCaseKey: cred.credentialUseCaseKey,
-        acceptance: updated.acceptance, rejectedAt: updated.acceptanceAt, note, revoked: true,
-      },
-    }, request.log);
-    return { id: updated.id, acceptance: updated.acceptance, revoked: true };
-  });
-
-
-  app.post("/me/credentials/:id/request-changes", { schema: S.requestCredentialChanges, ...auth }, async (request, reply) => {
-    const cred = await holderCredentialInState(request, reply, ["pending"]);
-    if (!cred) return reply;
-    const { note } = request.body as { note: string };
-    const updated = await deps.credentials.setAcceptance(cred.id, { acceptance: "changes_requested", at: new Date().toISOString(), note });
-    await deps.audit.append({ actorId: (request.user as TokenClaims).id, action: "credential-changes-requested" as LifecycleAction, payload: { credentialId: cred.id, note } });
-    return { id: updated.id, acceptance: updated.acceptance, acceptanceNote: updated.acceptanceNote };
-  });
+  // GET /dids/:did/document, GET /me/credentials, and the three holder
+  // accept/reject/request-changes routes live in shared.ts: route-domains.ts
+  // classifies all of them "shared" so a tokenization console still answers
+  // "My identity" for a roster member issue-kyc gave a DID to.
 
 
   // --- credentials ---------------------------------------------------------
@@ -1687,18 +1571,6 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
 
 
   // --- verification (verifier-request → holder-consent → verify) -----------
-  // A public projection — never leaks the challenge (it's embedded in the VP) or
-  // the raw VP blob to a list view.
-  function vreqView(r: VerificationRequestRecord) {
-    return {
-      id: r.id, verifierOrgId: r.verifierOrgId, holderDid: r.holderDid, requestedTypes: r.requestedTypes,
-      purpose: r.purpose, status: r.status, consentedCredentialIds: r.consentedCredentialIds,
-      consentedAt: r.consentedAt, verifiedAt: r.verifiedAt, createdAt: r.createdAt, expiresAt: r.expiresAt,
-      credentialUseCaseKey: r.credentialUseCaseKey,
-    };
-  }
-
-
   app.post("/verification-requests", { schema: S.createVerificationRequest, ...authScoped("verifications:request") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const b = request.body as { holderDid: string; requestedTypes: string[]; purpose: string; credentialUseCaseKey?: string };
@@ -1813,19 +1685,9 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
     return reply.code(201).send(vreqView(rec));
   });
 
-
-  app.get("/me/verification-requests", { schema: S.myVerificationRequests, ...authScoped("verifications:read") }, async (request) => {
-    const claims = request.user as TokenClaims;
-    if (!claims.did) return [];
-    const rows = await deps.verificationRequests.listByHolder(claims.did);
-    const mine = await deps.credentials.listByHolder(claims.did);
-    return rows.map((r) => ({
-      ...vreqView(r),
-      eligibleCredentials: mine
-        .filter((c) => !c.revoked && c.acceptance === "accepted" && r.requestedTypes.includes(c.type))
-        .map((c) => ({ id: c.id, type: c.type, issuerDid: c.issuerDid, issuedAt: c.issuedAt })),
-    }));
-  });
+  // The holder's own inbox (GET /me/verification-requests) lives in shared.ts:
+  // route-domains.ts classifies it "shared" so it still answers on a
+  // tokenization console for a roster member issue-kyc gave a DID to.
 
 
   /**
