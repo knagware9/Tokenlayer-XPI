@@ -791,7 +791,7 @@ export interface StagedInvoice {
   createdBy: string; createdAt: string; tokenizedAt: string | null;
 }
 export interface InvoiceRowResult { index: number; status: "staged" | "duplicate" | "invalid"; id?: string; error?: string }
-export interface TokenizeResult { id: string; status: "tokenized" | "skipped" | "failed"; assetId?: string; error?: string }
+export interface TokenizeResult { id: string; status: "tokenized" | "pending_approval" | "skipped" | "failed"; assetId?: string; error?: string }
 
 export interface CertificateConfig {
   enabled: boolean;

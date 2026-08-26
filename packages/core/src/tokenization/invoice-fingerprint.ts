@@ -25,3 +25,20 @@ export function invoiceFingerprint(inv: InvoiceFingerprintInput): string {
   ].join("|");
   return "0x" + createHash("sha256").update(canonical, "utf8").digest("hex");
 }
+
+/**
+ * Generic staging fingerprint for a use case with no special-cased fingerprint
+ * of its own (every use case except the canonical invoice one — see
+ * `stageInvoice`, which picks between the two). Sorted-key JSON over the whole
+ * metadata object, so the same values hash the same regardless of field order.
+ * Not normalization-aware the way `invoiceFingerprint` is (no case-folding, no
+ * numeric parsing) — good enough to catch an exact re-upload, not a fuzzy
+ * near-duplicate.
+ */
+export function genericMetadataFingerprint(metadata: Record<string, unknown>): string {
+  const sorted = Object.keys(metadata).sort().reduce<Record<string, unknown>>((acc, k) => {
+    acc[k] = metadata[k];
+    return acc;
+  }, {});
+  return "0x" + createHash("sha256").update(JSON.stringify(sorted), "utf8").digest("hex");
+}

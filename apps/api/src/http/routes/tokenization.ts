@@ -525,32 +525,46 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
   });
 
 
-  // --- invoice register ---------------------------------------------------
+  // --- asset register (staging) --------------------------------------------
   // Staging area in front of the shared issuance path: rows (uploaded / pulled
   // from the ERP / keyed in) are validated + fingerprinted + de-duped, held as
   // StagedInvoice rows, then selectively tokenized through issueAssetCore.
-  // Every route is gated on: use-case scope (403 WRONG_USE_CASE), issue
-  // capability (403 FORBIDDEN), a known use case (404), and its being an invoice
-  // use case (400 NOT_INVOICE_USECASE).
+  // Generic over every use case, not just the canonical invoice one — see
+  // stageInvoice's fingerprint choice. Every route is gated on: use-case scope
+  // (403 WRONG_USE_CASE), issue capability (403 FORBIDDEN), a known use case (404).
   async function invoiceGate(request: FastifyRequest, reply: FastifyReply): Promise<{ useCase: UseCaseDefinition; claims: TokenClaims; actor: Actor; actorId: string } | null> {
     const claims = request.user as TokenClaims;
     const actor = actorOf(request);
     const { key } = request.params as { key: string };
     if (claims.role !== "PlatformAdmin" && key !== claims.useCaseKey) {
-      reply.code(403).send({ error: "WRONG_USE_CASE", message: "cannot manage invoices in another use case" });
+      reply.code(403).send({ error: "WRONG_USE_CASE", message: "cannot manage a register in another use case" });
       return null;
     }
     if (!deps.rbac.can(actor.role, "issue")) {
-      reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to manage invoices" });
+      reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to manage the asset register" });
       return null;
     }
     const useCase = await deps.useCases.get(key).catch(() => null);
     if (!useCase) { notFound(reply, "use case not found"); return null; }
-    if (useCase.derivedFields?.invoiceHash !== "invoiceFingerprint") {
-      reply.code(400).send({ error: "NOT_INVOICE_USECASE", message: "this use case does not tokenize invoices" });
-      return null;
-    }
     return { useCase, claims, actor, actorId: actor.id };
+  }
+
+  /** A readable per-row label for a batch-tokenized asset: the canonical invoice
+   * label for the invoice use case (unchanged), else the use case's own
+   * `uniqueBy` field's value when present, else the first two required
+   * metadata fields joined, else a use-case-name + row-id fallback that is
+   * always available. */
+  function stagedRowLabel(useCase: UseCaseDefinition, rec: { id: string; metadata: Record<string, unknown> }): string {
+    if (useCase.derivedFields?.invoiceHash === "invoiceFingerprint") {
+      return `${rec.metadata.invoiceNumber} · ${rec.metadata.buyerName}`;
+    }
+    if (useCase.uniqueBy && rec.metadata[useCase.uniqueBy] != null) {
+      return String(rec.metadata[useCase.uniqueBy]);
+    }
+    const required = useCase.metadataSchema.required ?? [];
+    const parts = required.slice(0, 2).map((f) => rec.metadata[f]).filter((v) => v != null).map(String);
+    if (parts.length > 0) return parts.join(" · ");
+    return `${useCase.name} ${rec.id.slice(-6)}`;
   }
 
 
@@ -622,22 +636,35 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
 
   app.post("/use-cases/:key/invoices/tokenize", { schema: S.tokenizeInvoices, ...authScoped("assets:issue") }, async (request, reply) => {
     const gate = await invoiceGate(request, reply); if (!gate) return reply;
-    const { ids, chainId, parValue = 1000, sale } = request.body as { ids: string[]; chainId: string; parValue?: number; sale?: { unitPrice: string; currency: string } };
+    // `parValue` fractionalizes the invoice use case's own `amount` field into
+    // whole units (unchanged behavior). `initialSupply` is the general-purpose
+    // override: every OTHER use case has no "amount to fractionalize" concept,
+    // so the caller states the per-asset supply directly; absent, each row
+    // mints exactly 1 unit — always valid, and right for a use case where one
+    // staged row already IS one physical/legal unit (one credit, one bond).
+    const { ids, chainId, parValue = 1000, initialSupply, sale } = request.body as {
+      ids: string[]; chainId: string; parValue?: number; initialSupply?: string; sale?: { unitPrice: string; currency: string };
+    };
+    const isInvoice = gate.useCase.derivedFields?.invoiceHash === "invoiceFingerprint";
     const results: { id: string; status: string; assetId?: string; error?: string }[] = [];
     for (const id of ids) {
       const rec = await deps.stagedInvoices.get(id);
       if (!rec || rec.useCaseKey !== gate.useCase.key || rec.status !== "staged") { results.push({ id, status: "skipped" }); continue; }
-      const supply = Math.max(1, Math.round(Number(rec.metadata.amount) / parValue));
+      const supply = initialSupply ?? (isInvoice ? String(Math.max(1, Math.round(Number(rec.metadata.amount) / parValue))) : "1");
       const r = await issueAssetCore({
         claims: gate.claims, actor: gate.actor, request, useCaseKey: gate.useCase.key,
-        name: `${rec.metadata.invoiceNumber} · ${rec.metadata.buyerName}`, chainId,
-        metadata: rec.metadata, initialSupply: String(supply),
+        name: stagedRowLabel(gate.useCase, rec), chainId,
+        metadata: rec.metadata, initialSupply: supply,
         sale: sale ? { unitPrice: sale.unitPrice, currency: sale.currency } : undefined,
       });
       if (r.ok) {
         const assetId = (r.body as { asset: { id: string } }).asset.id;
         await deps.stagedInvoices.markTokenized(id, assetId, new Date().toISOString());
-        results.push({ id, status: "tokenized", assetId });
+        // A gated use case (workflow.approvals.issue) defers the mint to a second
+        // approval — issueAssetCore returns 202 with the asset already created but
+        // still pending, not 201. Report that distinctly so a caller doesn't read
+        // "tokenized" as "active with the supply it asked for".
+        results.push({ id, status: r.status === 202 ? "pending_approval" : "tokenized", assetId });
       } else {
         results.push({ id, status: "failed", error: r.error });
       }

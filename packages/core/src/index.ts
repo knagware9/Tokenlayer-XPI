@@ -12,7 +12,7 @@ export * from "./identity/credential-use-cases.js";
 export * from "./identity/certificate-fields.js";
 export * from "./shared/branding.js";
 export * from "./identity/use-case-templates.js";
-export { invoiceFingerprint, type InvoiceFingerprintInput } from "./tokenization/invoice-fingerprint.js";
+export { invoiceFingerprint, genericMetadataFingerprint, type InvoiceFingerprintInput } from "./tokenization/invoice-fingerprint.js";
 export { computeCashflowSchedule, splitProRata, type TermsConfig, type ScheduledCashflow } from "./tokenization/cashflows.js";
 export { auditGenesis, auditEntryHash, verifyChain, type AuditChainFields, type ChainEntry, type VerifyResult } from "./shared/audit-chain.js";
 export { ORG_DOMAINS, ORG_OPERATING_ROLES, orgDomainEnabled, orgRoleEnabled, validateOrgCapabilities, type OrgDomain, type OrgOperatingRole, type OrgCapabilities } from "./shared/org-capabilities.js";

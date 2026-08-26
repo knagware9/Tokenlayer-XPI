@@ -32,7 +32,17 @@ export function Dashboard({ useCaseKey, onNavigate }: { useCaseKey?: string; onN
   const { navigate } = useRoute();
   const [data, setData] = useState<AnalyticsSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const scrollTo = (id: string): void => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  // A stat card's target section is often already fully in view on a short page —
+  // scrollIntoView then produces no visible motion at all, and the click reads as
+  // dead. The flash gives every click a visible result whether or not it scrolled.
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const scrollTo = (id: string): void => {
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setHighlightedId(id);
+    setTimeout(() => setHighlightedId((cur) => (cur === id ? null : cur)), 1400);
+  };
+  const flash = (id: string): string =>
+    `scroll-mt-4 rounded-2xl transition-shadow duration-500 ${highlightedId === id ? "ring-2 ring-brand-400 shadow-lg" : "ring-2 ring-transparent"}`;
 
   useEffect(() => {
     if (!token) return;
@@ -89,7 +99,7 @@ export function Dashboard({ useCaseKey, onNavigate }: { useCaseKey?: string; onN
       </div>
 
       <div className="grid lg:grid-cols-2 gap-4">
-        <div id="dash-ledger" className="scroll-mt-4">
+        <div id="dash-ledger" className={flash("dash-ledger")}>
           <Card title="Supply by ledger">
             <Donut slices={ledgerSlices} />
           </Card>
@@ -104,7 +114,7 @@ export function Dashboard({ useCaseKey, onNavigate }: { useCaseKey?: string; onN
       </div>
 
       {data.scope === "platform" && data.byUseCase.length > 0 && (
-        <div id="dash-usecases" className="scroll-mt-4">
+        <div id="dash-usecases" className={flash("dash-usecases")}>
           <Card title="By use case">
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
@@ -146,7 +156,7 @@ export function Dashboard({ useCaseKey, onNavigate }: { useCaseKey?: string; onN
         <Card title="Supply by ledger (detail)">
           <BarChart bars={data.byLedger.map((l) => ({ label: `${l.chainId} · ${l.mode}`, value: Number(l.supply) }))} />
         </Card>
-        <div id="dash-recent" className="scroll-mt-4">
+        <div id="dash-recent" className={flash("dash-recent")}>
           <Card title="Recent activity">
             <ol className="space-y-0 divide-y divide-slate-100">
               {data.recent.slice(0, 8).map((e, i) => {

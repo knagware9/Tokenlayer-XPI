@@ -201,6 +201,11 @@ function ManageUsers({ rows, me, useCases, onChanged }: { rows: Summary[]; me?: 
     try { await fn(); onChanged(); } catch (err) { setError(err instanceof ApiError ? err.message : "Action failed"); }
   };
   const manageable = (u: Summary): boolean => u.email !== me && u.role !== "PlatformAdmin";
+  // Narrower than `manageable`: the server's canAdministerUser lets a PlatformAdmin
+  // act on ANY row including another PlatformAdmin's (only suspend/edit/delete of a
+  // peer admin stay UI-blocked) — issuing a DID/KYC credential is purely additive,
+  // so it doesn't need that stricter guard. Self-targeting still stays excluded.
+  const canIssueKycRow = (u: Summary): boolean => u.email !== me && !u.did;
 
   // Allowlists a user's own wallet on every currently active asset in their
   // use case, in one click — the common case (a buyer should generally be
@@ -262,10 +267,10 @@ function ManageUsers({ rows, me, useCases, onChanged }: { rows: Summary[]; me?: 
                     </span>
                   </td>
                   <td className="px-4 py-2 text-right space-x-3">
+                    {manageable(u) && u.kycStatus === "pending" && <button onClick={() => setVerifying((v) => (v === u.id ? null : u.id))} className="text-xs text-brand-600 hover:text-brand-700 font-medium">Verify identity (DID/VC)</button>}
+                    {canIssueKycRow(u) && <button onClick={() => setIssuingKyc((v) => (v === u.id ? null : u.id))} className="text-xs text-brand-600 hover:text-brand-700 font-medium">Issue KYC</button>}
                     {manageable(u) ? (
                       <>
-                        {u.kycStatus === "pending" && <button onClick={() => setVerifying((v) => (v === u.id ? null : u.id))} className="text-xs text-brand-600 hover:text-brand-700 font-medium">Verify identity (DID/VC)</button>}
-                        {!u.did && <button onClick={() => setIssuingKyc((v) => (v === u.id ? null : u.id))} className="text-xs text-brand-600 hover:text-brand-700 font-medium">Issue KYC</button>}
                         {canAllowRow(u) && (
                           <button disabled={allowing === u.id} onClick={() => void allowEverywhere(u)} className="text-xs text-emerald-600 hover:text-emerald-700 font-medium disabled:opacity-40">
                             {allowing === u.id ? "Allowing…" : "Allow"}
@@ -280,7 +285,7 @@ function ManageUsers({ rows, me, useCases, onChanged }: { rows: Summary[]; me?: 
                         <button onClick={() => act(() => api.deleteUser(token!, u.id))} className="text-xs text-red-500 hover:text-red-700">Delete</button>
                       </>
                     ) : (
-                      <span className="text-xs text-slate-300">—</span>
+                      !canIssueKycRow(u) && <span className="text-xs text-slate-300">—</span>
                     )}
                   </td>
                 </tr>

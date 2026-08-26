@@ -440,7 +440,8 @@ export const api = {
     request<StagedInvoice>(`/use-cases/${encodeURIComponent(key)}/invoices`, token, { method: "POST", body: JSON.stringify({ metadata, documentId }) }),
   deleteInvoice: (token: string, key: string, id: string) =>
     request<{ id: string; deleted: boolean }>(`/use-cases/${encodeURIComponent(key)}/invoices/${encodeURIComponent(id)}`, token, { method: "DELETE" }),
-  tokenizeInvoices: (token: string, key: string, body: { ids: string[]; chainId: string; treasuryAccount: string; parValue?: number; sale?: { unitPrice: string; currency: string } }) =>
+  // The treasury is always derived server-side from the use case — never client-supplied.
+  tokenizeInvoices: (token: string, key: string, body: { ids: string[]; chainId: string; parValue?: number; initialSupply?: string; sale?: { unitPrice: string; currency: string } }) =>
     request<{ results: TokenizeResult[] }>(`/use-cases/${encodeURIComponent(key)}/invoices/tokenize`, token, { method: "POST", body: JSON.stringify(body) }),
   credentialTemplates: (token: string) => request<Record<string, CredentialTypeSpec>>("/credential-templates", token),
   credentialUseCases: (token: string) => request<CredentialUseCase[]>("/credential-use-cases", token),

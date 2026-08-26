@@ -22,7 +22,6 @@ import { deployAndCreateUseCase } from "../../tokenization/use-cases.js";
 import { computeAnalytics } from "../../tokenization/analytics.js";
 import { computeIdentityDashboard } from "../../identity/identity-analytics.js";
 import { issueCredentialFor, revokeCredentialById } from "../../identity/credential-issuance.js";
-import { issueAdminKycCredential } from "../../shared/identity-verification.js";
 import { namespaceHolding } from "../../shared/usecase-namespace.js";
 import { emitEvent, ownerOrgOfUseCase } from "../../shared/events.js";
 import { mintOrgMembership } from "../../shared/membership.js";
@@ -2093,22 +2092,13 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
     return { status: "approved", did: result.holderDid, claims: result.credential!.claims, issuer: result.credential!.issuer };
   });
 
-
-  // Admin-issued counterpart of the route above: for a user with no external
-  // credential to present (the common case for a seeded operator/investor with
-  // no organization onboarding behind them), an admin attests KYC directly.
-  app.post("/users/:id/identity/issue-kyc", { schema: S.issueAdminKyc, ...authScoped("users:onboard") }, async (request, reply) => {
-    const target = await manageableTarget(request, reply);
-    if (!target) return reply;
-    const { legalName, country } = request.body as { legalName: string; country: string };
-    const { did, credentialId, issuerDid } = await issueAdminKycCredential(deps, target, { legalName, country });
-    await deps.users.update(target.id, {
-      kycStatus: "approved",
-      kyc: { ...(target.kyc ?? {}), country, legalName, issuerDid, credentialId, verifiedAt: new Date().toISOString() },
-    });
-    await deps.audit.append({ actorId: actorOf(request).id, action: "kyc-verified" as LifecycleAction, payload: { userId: target.id, did, issuer: issuerDid, country } });
-    return { status: "approved", did, credentialId };
-  });
+  // The admin-issued counterpart of the route above (mint a DID + KycCredential
+  // directly, no presentation) now lives in shared.ts: route-domains.ts
+  // classifies it "shared" — a tokenization use case's
+  // compliance.requireVerifiedIdentity gate needs it satisfiable for a roster
+  // member with no organization onboarding behind them, so it must answer on a
+  // tokenization-only deployment too — and route-file-domains.test.ts requires
+  // a route's file to agree with its classification.
 
 
   /**

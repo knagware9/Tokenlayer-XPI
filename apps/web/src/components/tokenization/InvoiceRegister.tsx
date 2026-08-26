@@ -4,14 +4,20 @@ import { useAuth } from "../../auth.js";
 import type { ChainInfo, InvoiceRowResult, StagedInvoice, TokenizeResult, UseCase } from "../../types.js";
 import { Card, EmptyState, Pill, SectionHeader } from "../shared/ui.js";
 import { parseCsv } from "../../lib/shared/csv.js";
+import { isInvoiceUseCase } from "./AssetManagement.js";
 
 // ============================================================================
-// Invoice Register — the server-side staging table for the invoice use case.
-// Invoices arrive from three sources (file upload, an ERP pull, or a manual
-// add), land as `staged` rows, and are selectively tokenized. The client
-// parses uploaded files into field-mapped rows; the SERVER re-validates,
-// fingerprints and dedupes, so the parsers here only map headers → canonical
-// fields. Tokenization mints round(amount ÷ par) fungible units per invoice.
+// Asset Register — the server-side staging table for ANY use case. Rows arrive
+// from three sources (file upload, an ERP pull, or a manual add), land as
+// `staged` rows, and are selectively tokenized. The client parses uploaded
+// files into field-mapped rows; the SERVER re-validates, fingerprints and
+// dedupes, so the parsers here only map headers → canonical fields.
+//
+// The canonical invoice use case is a special case throughout this file
+// (`isInvoiceUC`): "Pull from ERP" is meaningful only for it (the bundled
+// export is invoice-shaped), and it fractionalizes its own `amount` field
+// into round(amount ÷ par) units per row on tokenize — every other use case
+// mints a caller-stated `initialSupply` per row (default 1).
 // ============================================================================
 
 const INVOICE_FIELDS = ["invoiceNumber", "invoiceDate", "buyerName", "currency", "amount", "dueDate"] as const;
@@ -34,13 +40,19 @@ function excelSerialToISO(serial: number): string {
   return new Date(Date.UTC(1899, 11, 30) + Math.round(serial) * 86400000).toISOString().slice(0, 10);
 }
 
-/** Map raw {header: value} objects to canonical-field records via HEADER_MAP,
- * converting Excel date serials on the date fields. */
-function canonicalize(raws: Record<string, string>[]): Record<string, string>[] {
+/** Map raw {header: value} objects to canonical-field records via HEADER_MAP —
+ * the invoice-specific header aliases — falling back to a case/punctuation-
+ * insensitive match against the target use case's OWN metadata field names
+ * (so "Project Name" in a CSV lands on a carbon-credit asset's `projectName`),
+ * and finally the raw header verbatim when neither matches. Converts Excel
+ * date serials on the two invoice date fields. */
+function canonicalize(raws: Record<string, string>[], schemaFields: readonly string[] = []): Record<string, string>[] {
+  const bySchema = new Map(schemaFields.map((f) => [normalizeHeader(f), f]));
   return raws.map((raw) => {
     const rec: Record<string, string> = {};
     for (const [header, value] of Object.entries(raw)) {
-      const field = HEADER_MAP[normalizeHeader(header)] ?? header;
+      const norm = normalizeHeader(header);
+      const field = HEADER_MAP[norm] ?? bySchema.get(norm) ?? header;
       let v = (value ?? "").trim();
       // XLSX stores dates as day serials — convert plausible serials on date fields.
       if ((field === "invoiceDate" || field === "dueDate") && /^\d{4,6}(\.0+)?$/.test(v)) {
@@ -165,6 +177,14 @@ interface Props {
 export function InvoiceRegister({ useCase, chains }: Props): JSX.Element {
   const { token } = useAuth();
   const key = useCase.key;
+  const isInvoiceUC = isInvoiceUseCase(useCase);
+  const schemaFields = useMemo(() => Object.keys(useCase.metadataSchema.properties ?? {}), [useCase]);
+  // field name -> its JSON-schema `type`, so the add-row form coerces (and renders
+  // a number input for) any numeric field the use case declares, not only "amount".
+  const fieldTypes = useMemo(() => {
+    const props = useCase.metadataSchema.properties ?? {};
+    return Object.fromEntries(Object.entries(props).map(([f, p]) => [f, p.type]));
+  }, [useCase]);
   const [rows, setRows] = useState<StagedInvoice[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -184,14 +204,18 @@ export function InvoiceRegister({ useCase, chains }: Props): JSX.Element {
   }, [useCase]);
   const chainLabel = (id: string): string => chains.find((c) => c.id === id)?.label ?? id;
 
-  // Add-invoice form fields: the use case's required fields (minus any the server
-  // derives, e.g. invoiceHash), else the canonical invoice fields.
+  // Add-row form fields: the use case's required fields (minus any the server
+  // derives, e.g. invoiceHash) — else the invoice fields for the invoice use
+  // case specifically, else every field the schema declares.
   const addFields = useMemo(() => {
     const required = useCase.metadataSchema.required;
     const derived = useCase.derivedFields ?? {};
-    const base = required && required.length > 0 ? required : [...INVOICE_FIELDS];
+    const base = required && required.length > 0 ? required : isInvoiceUC ? [...INVOICE_FIELDS] : schemaFields;
     return base.filter((f) => !(f in derived));
-  }, [useCase]);
+  }, [useCase, isInvoiceUC, schemaFields]);
+  // The register table's generic columns — capped at 3 so the table doesn't
+  // sprawl sideways for a use case with a large metadata schema.
+  const previewFields = useMemo(() => addFields.slice(0, 3), [addFields]);
 
   const reload = async (): Promise<void> => {
     if (!token) return;
@@ -251,23 +275,23 @@ export function InvoiceRegister({ useCase, chains }: Props): JSX.Element {
     try {
       let rawRows: Record<string, string>[];
       if (/\.xlsx$/i.test(file.name)) {
-        rawRows = canonicalize(await parseXlsx(await file.arrayBuffer()));
+        rawRows = canonicalize(await parseXlsx(await file.arrayBuffer()), schemaFields);
       } else if (/\.json$/i.test(file.name)) {
         const parsed: unknown = JSON.parse(await file.text());
-        if (!Array.isArray(parsed)) throw new Error("JSON must be an array of invoice objects");
+        if (!Array.isArray(parsed)) throw new Error("JSON must be an array of row objects");
         const raws = parsed.map((o) => {
           const rec: Record<string, string> = {};
           for (const [k, v] of Object.entries(o as Record<string, unknown>)) rec[k] = v == null ? "" : String(v).trim();
           return rec;
         });
-        rawRows = canonicalize(raws);
+        rawRows = canonicalize(raws, schemaFields);
       } else {
-        rawRows = canonicalize(parseCsv(await file.text()));
+        rawRows = canonicalize(parseCsv(await file.text()), schemaFields);
       }
-      if (rawRows.length === 0) throw new Error("No invoice rows found in the file");
+      if (rawRows.length === 0) throw new Error("No rows found in the file");
       const res = await api.importInvoices(token, key, rawRows);
       setImportResults(res.results);
-      setNotice(`${res.staged} invoice(s) staged from ${file.name}`);
+      setNotice(`${res.staged} row(s) staged from ${file.name}`);
       await reload();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : "Could not import the file");
@@ -292,21 +316,23 @@ export function InvoiceRegister({ useCase, chains }: Props): JSX.Element {
   return (
     <div className="space-y-4">
       <SectionHeader
-        title="Invoice register"
-        description="Stage invoices from a file upload, an ERP pull, or a manual entry — then select and tokenize them. The server fingerprints and de-duplicates every invoice."
+        title={isInvoiceUC ? "Invoice register" : "Asset register"}
+        description={`Stage ${isInvoiceUC ? "invoices" : "asset data"} from a file upload${isInvoiceUC ? ", an ERP pull," : ""} or a manual entry — then select and tokenize them. The server fingerprints and de-duplicates every row.`}
       />
 
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className={btnGhost} disabled={busy} onClick={() => void pullErp()}>
-          {busy ? "Working…" : "Pull from ERP"}
-        </button>
+        {isInvoiceUC && (
+          <button type="button" className={btnGhost} disabled={busy} onClick={() => void pullErp()}>
+            {busy ? "Working…" : "Pull from ERP"}
+          </button>
+        )}
         <button type="button" className={btnGhost} disabled={busy} onClick={() => fileRef.current?.click()}>
           Upload CSV/XLSX
         </button>
         <input ref={fileRef} type="file" accept=".csv,.xlsx,.json" className="hidden" onChange={(e) => void handleFile(e)} />
         <button type="button" className={btnGhost} disabled={busy} onClick={() => { setShowAdd((v) => !v); setShowTokenize(false); }}>
-          Add invoice
+          {isInvoiceUC ? "Add invoice" : "Add row"}
         </button>
         <div className="flex-1" />
         <button
@@ -332,11 +358,12 @@ export function InvoiceRegister({ useCase, chains }: Props): JSX.Element {
         </div>
       )}
 
-      {showAdd && <AddInvoiceForm fields={addFields} onClose={() => setShowAdd(false)} onAdded={(msg) => { setShowAdd(false); setNotice(msg); void reload(); }} useCaseKey={key} />}
+      {showAdd && <AddInvoiceForm fields={addFields} fieldTypes={fieldTypes} isInvoiceUC={isInvoiceUC} onClose={() => setShowAdd(false)} onAdded={(msg) => { setShowAdd(false); setNotice(msg); void reload(); }} useCaseKey={key} />}
 
       {showTokenize && (
         <TokenizeForm
           count={selected.size}
+          isInvoiceUC={isInvoiceUC}
           chainIds={chainIds}
           chainLabel={chainLabel}
           defaultChainId={useCase.defaultChainId}
@@ -349,7 +376,11 @@ export function InvoiceRegister({ useCase, chains }: Props): JSX.Element {
               const res = await api.tokenizeInvoices(token, key, { ids: [...selected], ...body });
               setTokenizeResults(res.results);
               const ok = res.results.filter((r) => r.status === "tokenized").length;
-              setNotice(`${ok} of ${res.results.length} invoice(s) tokenized`);
+              const pending = res.results.filter((r) => r.status === "pending_approval").length;
+              setNotice(
+                `${ok} of ${res.results.length} row(s) tokenized` +
+                  (pending > 0 ? `, ${pending} awaiting a second approval before minting` : ""),
+              );
               setSelected(new Set());
               setShowTokenize(false);
               await reload();
@@ -367,7 +398,7 @@ export function InvoiceRegister({ useCase, chains }: Props): JSX.Element {
           {tokenizeResults.map((r) => (
             <div key={r.id}>
               <span className="font-mono text-slate-400">{r.id.slice(0, 8)}…</span>{" "}
-              <span className={r.status === "tokenized" ? "text-emerald-700" : r.status === "skipped" ? "text-amber-700" : "text-red-600"}>{r.status}</span>
+              <span className={r.status === "tokenized" ? "text-emerald-700" : r.status === "pending_approval" || r.status === "skipped" ? "text-amber-700" : "text-red-600"}>{r.status}</span>
               {r.assetId ? ` → ${r.assetId}` : ""}{r.error ? ` — ${r.error}` : ""}
             </div>
           ))}
@@ -376,7 +407,11 @@ export function InvoiceRegister({ useCase, chains }: Props): JSX.Element {
 
       <Card className="overflow-hidden">
         {rows.length === 0 ? (
-          <EmptyState icon="doc" title="No invoices staged" hint="Pull from ERP, upload a CSV/XLSX, or add an invoice manually to get started." />
+          <EmptyState
+            icon="doc"
+            title={isInvoiceUC ? "No invoices staged" : "No rows staged"}
+            hint={`${isInvoiceUC ? "Pull from ERP, upload" : "Upload"} a CSV/XLSX, or add a${isInvoiceUC ? "n invoice" : " row"} manually to get started.`}
+          />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -385,10 +420,16 @@ export function InvoiceRegister({ useCase, chains }: Props): JSX.Element {
                   <th className="px-4 py-2.5 w-8">
                     <input type="checkbox" checked={allStagedSelected} disabled={stagedIds.length === 0} onChange={toggleAll} aria-label="Select all staged" />
                   </th>
-                  <th className="text-left font-medium px-4 py-2.5">Invoice</th>
-                  <th className="text-left font-medium px-4 py-2.5">Buyer</th>
-                  <th className="text-right font-medium px-4 py-2.5">Amount</th>
-                  <th className="text-left font-medium px-4 py-2.5">Due date</th>
+                  {isInvoiceUC ? (
+                    <>
+                      <th className="text-left font-medium px-4 py-2.5">Invoice</th>
+                      <th className="text-left font-medium px-4 py-2.5">Buyer</th>
+                      <th className="text-right font-medium px-4 py-2.5">Amount</th>
+                      <th className="text-left font-medium px-4 py-2.5">Due date</th>
+                    </>
+                  ) : (
+                    previewFields.map((f) => <th key={f} className="text-left font-medium px-4 py-2.5">{f}</th>)
+                  )}
                   <th className="text-left font-medium px-4 py-2.5">Source</th>
                   <th className="text-left font-medium px-4 py-2.5">Hash</th>
                   <th className="text-left font-medium px-4 py-2.5">Status</th>
@@ -406,15 +447,21 @@ export function InvoiceRegister({ useCase, chains }: Props): JSX.Element {
                           <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggle(r.id)} aria-label={`Select ${String(m.invoiceNumber ?? r.id)}`} />
                         )}
                       </td>
-                      <td className="px-4 py-2.5 font-medium text-slate-800">
-                        {String(m.invoiceNumber ?? "—")}
-                        {m.invoiceDate ? <div className="text-[11px] font-normal text-slate-400">{String(m.invoiceDate)}</div> : null}
-                      </td>
-                      <td className="px-4 py-2.5 text-xs text-slate-600">{String(m.buyerName ?? "—")}</td>
-                      <td className="px-4 py-2.5 text-right font-mono text-slate-700">
-                        {amount != null && Number.isFinite(amount) ? `${amount.toLocaleString("en-IN")} ${String(m.currency ?? "")}`.trim() : "—"}
-                      </td>
-                      <td className="px-4 py-2.5 text-xs text-slate-600">{m.dueDate ? String(m.dueDate) : "—"}</td>
+                      {isInvoiceUC ? (
+                        <>
+                          <td className="px-4 py-2.5 font-medium text-slate-800">
+                            {String(m.invoiceNumber ?? "—")}
+                            {m.invoiceDate ? <div className="text-[11px] font-normal text-slate-400">{String(m.invoiceDate)}</div> : null}
+                          </td>
+                          <td className="px-4 py-2.5 text-xs text-slate-600">{String(m.buyerName ?? "—")}</td>
+                          <td className="px-4 py-2.5 text-right font-mono text-slate-700">
+                            {amount != null && Number.isFinite(amount) ? `${amount.toLocaleString("en-IN")} ${String(m.currency ?? "")}`.trim() : "—"}
+                          </td>
+                          <td className="px-4 py-2.5 text-xs text-slate-600">{m.dueDate ? String(m.dueDate) : "—"}</td>
+                        </>
+                      ) : (
+                        previewFields.map((f) => <td key={f} className="px-4 py-2.5 text-xs text-slate-700">{m[f] != null && m[f] !== "" ? String(m[f]) : "—"}</td>)
+                      )}
                       <td className="px-4 py-2.5"><Pill tone={SOURCE_TONE[r.source]}>{r.source}</Pill></td>
                       <td className="px-4 py-2.5 font-mono text-[11px] text-slate-400" title={r.invoiceHash}>{r.invoiceHash.slice(0, 10)}…</td>
                       <td className="px-4 py-2.5">
@@ -440,8 +487,10 @@ export function InvoiceRegister({ useCase, chains }: Props): JSX.Element {
   );
 }
 
-function AddInvoiceForm({ fields, useCaseKey, onClose, onAdded }: {
+function AddInvoiceForm({ fields, fieldTypes, isInvoiceUC, useCaseKey, onClose, onAdded }: {
   fields: string[];
+  fieldTypes: Record<string, string>;
+  isInvoiceUC: boolean;
   useCaseKey: string;
   onClose: () => void;
   onAdded: (msg: string) => void;
@@ -450,6 +499,7 @@ function AddInvoiceForm({ fields, useCaseKey, onClose, onAdded }: {
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isNumberField = (f: string): boolean => (isInvoiceUC && f === "amount") || fieldTypes[f] === "number";
 
   async function submit(e: React.FormEvent): Promise<void> {
     e.preventDefault();
@@ -458,20 +508,20 @@ function AddInvoiceForm({ fields, useCaseKey, onClose, onAdded }: {
     const metadata: Record<string, unknown> = {};
     for (const f of fields) {
       const v = (values[f] ?? "").trim();
-      metadata[f] = f === "amount" ? Number(v) : v;
+      metadata[f] = isNumberField(f) ? Number(v) : fieldTypes[f] === "boolean" ? v === "true" : v;
     }
     try {
       const inv = await api.addInvoice(token, useCaseKey, metadata);
-      onAdded(`Invoice ${String(inv.metadata.invoiceNumber ?? inv.id)} staged`);
+      onAdded(isInvoiceUC ? `Invoice ${String(inv.metadata.invoiceNumber ?? inv.id)} staged` : `Row ${inv.id.slice(-6)} staged`);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not add the invoice");
+      setError(err instanceof ApiError ? err.message : "Could not add the row");
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <Card title="Add an invoice" actions={<button type="button" className="text-xs text-slate-500 hover:underline" onClick={onClose}>Cancel</button>}>
+    <Card title={isInvoiceUC ? "Add an invoice" : "Add a row"} actions={<button type="button" className="text-xs text-slate-500 hover:underline" onClick={onClose}>Cancel</button>}>
       <form onSubmit={(e) => void submit(e)} className="space-y-4">
         <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
           {fields.map((f) => (
@@ -479,7 +529,7 @@ function AddInvoiceForm({ fields, useCaseKey, onClose, onAdded }: {
               <span className="block text-xs font-medium text-slate-600 mb-1">{f}</span>
               <input
                 className="input"
-                type={f === "amount" ? "number" : "text"}
+                type={isNumberField(f) ? "number" : "text"}
                 value={values[f] ?? ""}
                 onChange={(e) => setValues((prev) => ({ ...prev, [f]: e.target.value }))}
                 disabled={busy}
@@ -488,45 +538,48 @@ function AddInvoiceForm({ fields, useCaseKey, onClose, onAdded }: {
           ))}
         </div>
         {error && <p className="text-sm text-red-600">{error}</p>}
-        <button type="submit" className={btnPrimary} disabled={busy}>{busy ? "Adding…" : "Add invoice"}</button>
+        <button type="submit" className={btnPrimary} disabled={busy}>{busy ? "Adding…" : isInvoiceUC ? "Add invoice" : "Add row"}</button>
       </form>
     </Card>
   );
 }
 
-function TokenizeForm({ count, chainIds, chainLabel, defaultChainId, saleDefault, onClose, onSubmit }: {
+function TokenizeForm({ count, isInvoiceUC, chainIds, chainLabel, defaultChainId, saleDefault, onClose, onSubmit }: {
   count: number;
+  isInvoiceUC: boolean;
   chainIds: string[];
   chainLabel: (id: string) => string;
   defaultChainId: string;
   saleDefault?: { unitPrice?: string; currency?: string };
   onClose: () => void;
-  onSubmit: (body: { chainId: string; treasuryAccount: string; parValue?: number; sale?: { unitPrice: string; currency: string } }) => Promise<void>;
+  onSubmit: (body: { chainId: string; parValue?: number; initialSupply?: string; sale?: { unitPrice: string; currency: string } }) => Promise<void>;
 }): JSX.Element {
   const [chainId, setChainId] = useState(chainIds.includes(defaultChainId) ? defaultChainId : chainIds[0] ?? "");
-  const [treasury, setTreasury] = useState("");
   const [parValue, setParValue] = useState("1000");
+  const [initialSupply, setInitialSupply] = useState("1");
   const [listForSale, setListForSale] = useState(false);
   const [unitPrice, setUnitPrice] = useState(saleDefault?.unitPrice ?? "");
   const [currency, setCurrency] = useState(saleDefault?.currency ?? "");
   const [busy, setBusy] = useState(false);
+  const noun = isInvoiceUC ? "invoice" : "row";
 
   async function submit(e: React.FormEvent): Promise<void> {
     e.preventDefault();
-    if (!chainId || !treasury.trim()) return;
+    if (!chainId) return;
     setBusy(true);
     const par = Number(parValue);
     await onSubmit({
       chainId,
-      treasuryAccount: treasury.trim(),
-      ...(Number.isFinite(par) && par > 0 ? { parValue: par } : {}),
+      ...(isInvoiceUC
+        ? (Number.isFinite(par) && par > 0 ? { parValue: par } : {})
+        : (initialSupply.trim() ? { initialSupply: initialSupply.trim() } : {})),
       ...(listForSale && unitPrice.trim() && currency.trim() ? { sale: { unitPrice: unitPrice.trim(), currency: currency.trim() } } : {}),
     });
     setBusy(false);
   }
 
   return (
-    <Card title={`Tokenize ${count} invoice${count === 1 ? "" : "s"}`} actions={<button type="button" className="text-xs text-slate-500 hover:underline" onClick={onClose}>Cancel</button>}>
+    <Card title={`Tokenize ${count} ${noun}${count === 1 ? "" : "s"}`} actions={<button type="button" className="text-xs text-slate-500 hover:underline" onClick={onClose}>Cancel</button>}>
       <form onSubmit={(e) => void submit(e)} className="space-y-4">
         <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
           <label className="block">
@@ -536,15 +589,19 @@ function TokenizeForm({ count, chainIds, chainLabel, defaultChainId, saleDefault
               {chainIds.map((id) => <option key={id} value={id}>{chainLabel(id)}</option>)}
             </select>
           </label>
-          <label className="block">
-            <span className="block text-xs font-medium text-slate-600 mb-1">Treasury account</span>
-            <input className="input" value={treasury} onChange={(e) => setTreasury(e.target.value)} disabled={busy} placeholder="0x… / holder address" />
-          </label>
-          <label className="block">
-            <span className="block text-xs font-medium text-slate-600 mb-1">Par value per token</span>
-            <input className="input" type="number" min="1" step="1" value={parValue} onChange={(e) => setParValue(e.target.value)} disabled={busy} />
-            <span className="block text-[11px] text-slate-400 mt-1">supply per invoice = round(amount ÷ par)</span>
-          </label>
+          {isInvoiceUC ? (
+            <label className="block">
+              <span className="block text-xs font-medium text-slate-600 mb-1">Par value per token</span>
+              <input className="input" type="number" min="1" step="1" value={parValue} onChange={(e) => setParValue(e.target.value)} disabled={busy} />
+              <span className="block text-[11px] text-slate-400 mt-1">supply per invoice = round(amount ÷ par)</span>
+            </label>
+          ) : (
+            <label className="block">
+              <span className="block text-xs font-medium text-slate-600 mb-1">Supply per row</span>
+              <input className="input" type="number" min="1" step="1" value={initialSupply} onChange={(e) => setInitialSupply(e.target.value)} disabled={busy} />
+              <span className="block text-[11px] text-slate-400 mt-1">minted to the use case's treasury, same amount for every selected row</span>
+            </label>
+          )}
         </div>
         <label className="flex items-center gap-2 text-sm text-slate-700">
           <input type="checkbox" checked={listForSale} onChange={(e) => setListForSale(e.target.checked)} disabled={busy} />
@@ -562,8 +619,8 @@ function TokenizeForm({ count, chainIds, chainLabel, defaultChainId, saleDefault
             </label>
           </div>
         )}
-        <button type="submit" className={btnPrimary} disabled={busy || !chainId || !treasury.trim()}>
-          {busy ? "Tokenizing…" : `Tokenize ${count} invoice${count === 1 ? "" : "s"}`}
+        <button type="submit" className={btnPrimary} disabled={busy || !chainId}>
+          {busy ? "Tokenizing…" : `Tokenize ${count} ${noun}${count === 1 ? "" : "s"}`}
         </button>
       </form>
     </Card>

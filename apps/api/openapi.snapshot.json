@@ -3061,7 +3061,7 @@
     "/api/v1/use-cases/{key}/invoices": {
       "get": {
         "tags": [
-          "Invoice Register"
+          "Asset Register"
         ],
         "security": [
           [
@@ -3089,7 +3089,7 @@
       },
       "post": {
         "tags": [
-          "Invoice Register"
+          "Asset Register"
         ],
         "security": [
           [
@@ -3119,7 +3119,7 @@
     "/api/v1/use-cases/{key}/invoices/import": {
       "post": {
         "tags": [
-          "Invoice Register"
+          "Asset Register"
         ],
         "security": [
           [
@@ -3149,7 +3149,7 @@
     "/api/v1/use-cases/{key}/invoices/pull-erp": {
       "post": {
         "tags": [
-          "Invoice Register"
+          "Asset Register"
         ],
         "security": [
           [
@@ -3179,7 +3179,7 @@
     "/api/v1/use-cases/{key}/invoices/tokenize": {
       "post": {
         "tags": [
-          "Invoice Register"
+          "Asset Register"
         ],
         "security": [
           [
@@ -3209,7 +3209,7 @@
     "/api/v1/use-cases/{key}/invoices/{id}": {
       "delete": {
         "tags": [
-          "Invoice Register"
+          "Asset Register"
         ],
         "security": [
           [

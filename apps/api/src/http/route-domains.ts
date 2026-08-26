@@ -58,6 +58,17 @@ const RULES: ReadonlyArray<readonly [string, RouteDomain]> = [
   // Per-user identity verification and its reversal.
   ["/users/:id/identity", "identity"],
   ["/users/:id/revoke-identity", "identity"],
+  // EXCEPTION, longest-prefix beats the broader rule above: this one issues a
+  // DID + KycCredential directly, with no external credential to verify — it
+  // exists so a TOKENIZATION use case's `compliance.requireVerifiedIdentity`
+  // gate can be satisfied for a roster member (Issuer/Buyer/Trader/…, or a
+  // PlatformAdmin/UseCaseAdmin) who has no organization onboarding behind
+  // them. `deps.credentials` is still guardRepository-wrapped underneath, so
+  // an identity-disabled deployment still refuses it — cleanly, with
+  // DOMAIN_NOT_ENABLED, not silently — this rule only lets it past the FIRST
+  // gate on a deployment (like the tokenization persona containers) that has
+  // identity enabled but keeps it off the identity-specific consoles.
+  ["/users/:id/identity/issue-kyc", "shared"],
   // The on-chain DidRegistry/VcRegistry deployment this instance anchors to.
   ["/registry", "identity"],
 

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { invoiceFingerprint, validateMetadata, type UseCaseDefinition } from "@tokenlayer/core";
+import { genericMetadataFingerprint, invoiceFingerprint, validateMetadata, type UseCaseDefinition } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import type { InvoiceSource, StagedInvoiceRecord } from "../persistence/types/index.js";
 
@@ -32,7 +32,11 @@ export function readErpInvoices(): Record<string, unknown>[] {
   });
 }
 
-/** Validate + fingerprint + dedupe one row → a staged record or a rejection reason. */
+/** Validate + fingerprint + dedupe one row → a staged record or a rejection reason.
+ * Fingerprints via `invoiceFingerprint` for the canonical invoice use case (kept
+ * byte-identical to before — scripts/erp-import.mjs and the web preview both hash
+ * this same way), else a generic sorted-key hash of the whole metadata object so
+ * staging works for any use case's schema, not just invoices. */
 export async function stageInvoice(
   deps: AppDeps, useCase: UseCaseDefinition, actorId: string, source: InvoiceSource,
   metadata: Record<string, unknown>, doc: { id: string; sha256: string } | null,
@@ -42,7 +46,9 @@ export async function stageInvoice(
   } catch (err) {
     return { status: "invalid", error: (err as Error).message };
   }
-  const invoiceHash = invoiceFingerprint(metadata as unknown as Parameters<typeof invoiceFingerprint>[0]);
+  const invoiceHash = useCase.derivedFields?.invoiceHash === "invoiceFingerprint"
+    ? invoiceFingerprint(metadata as unknown as Parameters<typeof invoiceFingerprint>[0])
+    : genericMetadataFingerprint(metadata);
   if (await deps.stagedInvoices.findByHash(useCase.key, invoiceHash)) return { status: "duplicate", error: "already staged" };
   if (useCase.uniqueBy && (await deps.assets.findByMetadata(useCase.key, useCase.uniqueBy, invoiceHash))) {
     return { status: "duplicate", error: "already tokenized" };

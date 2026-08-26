@@ -109,7 +109,7 @@ const tags = [
   { name: "Use Cases", description: "Low-code asset-type definitions: fields, compliance rules, fees, and the contracts they deploy." },
   { name: "Lifecycle", description: "Compliance-aware token operations: mint, transfer, burn, freeze, allow." },
   { name: "Marketplace", description: "Secondary market: escrowed listings, offers and settlement." },
-  { name: "Invoice Register", description: "Server-side invoice staging: import or pull from an ERP, then selectively tokenize." },
+  { name: "Asset Register", description: "Server-side asset staging for any use case: upload, pull from an ERP (invoice use case only), or key in rows, then selectively tokenize." },
   { name: "Cashflows", description: "Scheduled and realized cashflows attached to an asset — coupons, redemptions, distributions." },
   { name: "Proposals", description: "Maker-checker: the pending record most mutations create, and the approve/reject decisions that execute or discard it." },
 

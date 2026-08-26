@@ -280,6 +280,12 @@ export const PERSONAS: readonly PersonaDef[] = [
       // (an Auditor or UseCaseAdmin can never link one), so this sits here and
       // in tokenization-marketplace rather than STAFF_BASELINE or BASELINE.
       { prefix: "/me/wallet", methods: ["PATCH"], why: "link or replace the treasury's own wallet address" },
+      // EXACT, and only this one identity subpath — not the broader
+      // `/users/:id/identity` grant identity-issuer carries (that one backs a
+      // challenge/verify flow this console has no UI for). Kept out of
+      // STAFF_BASELINE too, or identity-verifier would inherit the power to
+      // mint credentials for people it should only ever be reading about.
+      { prefix: "/users/:id/identity/issue-kyc", methods: ["POST"], exact: true, why: "mint a DID + KYC credential directly for a roster member with nothing external to present" },
     ],
   },
   {
@@ -327,6 +333,9 @@ export const PERSONAS: readonly PersonaDef[] = [
       // sit in STAFF_BASELINE, or an identity-only deployment would expose it
       // at its edge and then fail inside the handler on DOMAIN_NOT_ENABLED.
       { prefix: "/reconciliation", methods: ["GET"], why: "believed-vs-chain supply, per asset, next to the audit console" },
+      // See tokenization-issuer's identical grant just above for why this is
+      // scoped to the one exact route rather than STAFF_BASELINE.
+      { prefix: "/users/:id/identity/issue-kyc", methods: ["POST"], exact: true, why: "mint a DID + KYC credential directly for a roster member with nothing external to present" },
     ],
   },
 ];

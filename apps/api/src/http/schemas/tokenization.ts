@@ -508,11 +508,11 @@ export const tokenizationSchemas: Record<string, FastifySchema> = {
   },
 
   importInvoices: {
-    tags: ["Invoice Register"], summary: "Stage a batch of invoice rows (upload)", security: eitherCredential,
+    tags: ["Asset Register"], summary: "Stage a batch of asset rows (upload)", security: eitherCredential,
     description:
-      "Requires the `assets:issue` scope. Stages invoice rows in the register. Nothing is minted here — tokenizing " +
-      "is a separate, explicitly selective call — but staging is the first half of issuance, so it is gated as " +
-      "issuance.",
+      "Requires the `assets:issue` scope. Stages metadata rows in the use case's asset register — works for any " +
+      "use case, not only the canonical invoice one. Nothing is minted here — tokenizing is a separate, explicitly " +
+      "selective call — but staging is the first half of issuance, so it is gated as issuance.",
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     body: {
       type: "object", required: ["rows"],
@@ -521,21 +521,22 @@ export const tokenizationSchemas: Record<string, FastifySchema> = {
     response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404, 409) },
   },
   pullErp: {
-    tags: ["Invoice Register"], summary: "Stage invoices pulled from the bundled ERP export", security: eitherCredential,
+    tags: ["Asset Register"], summary: "Stage invoices pulled from the bundled ERP export", security: eitherCredential,
     description:
       "Requires the `assets:issue` scope. Stages invoices read from the bundled ERP export into the same register, " +
-      "for the same later tokenize step.",
+      "for the same later tokenize step. The ERP export is invoice-shaped, so this route is meaningful for the " +
+      "invoice use case specifically — every other use case stages via `importInvoices`/`addInvoice` instead.",
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     body: { type: "object", additionalProperties: true },
     response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404, 409) },
   },
   addInvoice: {
-    tags: ["Invoice Register"], summary: "Stage a single manually-keyed invoice", security: eitherCredential,
+    tags: ["Asset Register"], summary: "Stage a single manually-keyed asset row", security: eitherCredential,
     description:
-      "Requires the `assets:issue` scope. Stages one manually-keyed invoice in the register. `documentId`, when " +
-      "given, must name a document this door may attach as evidence: an unknown id answers **400** " +
-      "`DOCUMENT_NOT_FOUND`, and a document uploaded through `POST /orgs/{id}/branding/logo` — an organization's " +
-      "brand logo, not invoice evidence — answers **400** `INVOICE_DOCUMENT_IS_BRAND_LOGO`.",
+      "Requires the `assets:issue` scope. Stages one manually-keyed row in the use case's asset register. " +
+      "`documentId`, when given, must name a document this door may attach as evidence: an unknown id answers " +
+      "**400** `DOCUMENT_NOT_FOUND`, and a document uploaded through `POST /orgs/{id}/branding/logo` — an " +
+      "organization's brand logo, not evidence — answers **400** `INVOICE_DOCUMENT_IS_BRAND_LOGO`.",
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     body: {
       type: "object", required: ["metadata"],
@@ -544,9 +545,9 @@ export const tokenizationSchemas: Record<string, FastifySchema> = {
     response: { 201: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404, 409) },
   },
   listInvoices: {
-    tags: ["Invoice Register"], summary: "List staged/tokenized invoices for a use case", security: eitherCredential,
+    tags: ["Asset Register"], summary: "List staged/tokenized rows for a use case", security: eitherCredential,
     description:
-      "Requires the `assets:read` scope. Staged and already-tokenized rows in a use case's invoice register.",
+      "Requires the `assets:read` scope. Staged and already-tokenized rows in a use case's asset register.",
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     querystring: {
       type: "object", additionalProperties: false,
@@ -557,7 +558,7 @@ export const tokenizationSchemas: Record<string, FastifySchema> = {
     response: { 200: { type: "array", items: { type: "object", additionalProperties: true } }, ...errs(400, 401, 403, 404) },
   },
   deleteInvoice: {
-    tags: ["Invoice Register"], summary: "Delete a staged invoice (tokenized ones are guarded)", security: eitherCredential,
+    tags: ["Asset Register"], summary: "Delete a staged row (tokenized ones are guarded)", security: eitherCredential,
     description:
       "Requires the `assets:issue` scope. Removes a staged row. Rows that have already been tokenized are refused — " +
       "once an asset exists, the asset is the record.",
@@ -565,10 +566,12 @@ export const tokenizationSchemas: Record<string, FastifySchema> = {
     response: { 200: { type: "object", additionalProperties: true }, ...errs(400, 401, 403, 404, 409) },
   },
   tokenizeInvoices: {
-    tags: ["Invoice Register"], summary: "Selectively tokenize staged invoices into assets", security: eitherCredential,
+    tags: ["Asset Register"], summary: "Selectively tokenize staged rows into assets", security: eitherCredential,
     description:
       "Requires the `assets:issue` scope. Mints assets from the staged rows you name. It calls the same core as " +
-      "`POST /assets`, so it carries the same scope: a second door onto issuance must not be a cheaper one.",
+      "`POST /assets`, so it carries the same scope: a second door onto issuance must not be a cheaper one. " +
+      "`initialSupply`, when given, is minted for every named row; omitted, the invoice use case fractionalizes " +
+      "its own `amount` field by `parValue` (unchanged legacy behavior) and every other use case mints 1 unit per row.",
     params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
     body: {
       type: "object", required: ["ids", "chainId"],
@@ -576,6 +579,7 @@ export const tokenizationSchemas: Record<string, FastifySchema> = {
         ids: { type: "array", items: { type: "string" } },
         chainId: { type: "string" },
         parValue: { type: "number" },
+        initialSupply: { type: "string" },
         sale: {
           type: "object", additionalProperties: false, required: ["unitPrice", "currency"],
           properties: { unitPrice: { type: "string" }, currency: { type: "string" } },
