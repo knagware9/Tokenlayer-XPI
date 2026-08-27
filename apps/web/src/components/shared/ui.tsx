@@ -319,8 +319,15 @@ export function SectionHeader(props: {
 }): JSX.Element {
   const { title, description, actions, badge } = props;
   return (
-    <div className="flex items-end justify-between gap-4 mb-5">
-      <div className="min-w-0">
+    // `flex-wrap`, and NO `min-w-0` on the text column: a flex child that can
+    // shrink to zero never triggers wrap (the algorithm always prefers
+    // shrinking it over moving a sibling to a new line), which is exactly what
+    // squeezed a real description into an unreadable one-word-per-line column
+    // whenever `actions` carried two buttons instead of none. Letting the text
+    // column keep its natural (word-boundary) min width means `actions` wraps
+    // below it instead, once there truly isn't room for both on one line.
+    <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2 mb-5">
+      <div>
         <div className="flex items-center gap-2.5">
           <h2 className="text-xl font-bold tracking-tight text-slate-900 font-display">{title}</h2>
           {badge && (

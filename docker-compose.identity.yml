@@ -56,7 +56,13 @@ services:
       CORS_ORIGINS: ${IDENTITY_WEB_ORIGINS:-http://localhost:8090,http://localhost:8091,http://localhost:8092}
       CHAIN_STRICT: ${CHAIN_STRICT:-0}
       LOGIN_RATE_LIMIT_MAX: ${LOGIN_RATE_LIMIT_MAX:-200}
-      REGISTRY_CHAIN_ID: ${REGISTRY_CHAIN_ID:-}
+      # `env.ts` itself defaults this to "besu" when the var is UNSET — but an
+      # env var explicitly set to "" is not unset, so the empty fallback this
+      # line used to have defeated that default: identity-api booted saying
+      # "chain '' is absent" and issued every credential unanchored, even with
+      # --chain=besu supplying a live BESU_RPC_URL right below. Match the
+      # code's own default here so the two agree.
+      REGISTRY_CHAIN_ID: ${REGISTRY_CHAIN_ID:-besu}
       MST_RPC_URL: ${MST_RPC_URL:-}
       MST_OPERATOR_KEY: ${MST_OPERATOR_KEY:-}
       BESU_RPC_URL: ${BESU_RPC_URL:-}

@@ -3,6 +3,8 @@ import { api, ApiError } from "../../api.js";
 import { useAuth } from "../../auth.js";
 import { useRoute } from "../../router.js";
 import { getOrCreateDeviceKey, hasDeviceKey } from "../../lib/shared/device-wallet.js";
+import { activePersona } from "../../lib/shared/persona.js";
+import { landingFor } from "../../lib/shared/persona-landing.js";
 import { Logo, LogoMark } from "./Logo.js";
 import { Icon, type IconName } from "./ui.js";
 
@@ -15,6 +17,12 @@ const HIGHLIGHTS: { icon: IconName; title: string; text: string }[] = [
 export function Login(): JSX.Element {
   const { login, setSession } = useAuth();
   const { navigate } = useRoute();
+  // Same "which of six apps is this" problem PersonaHome solved for the
+  // landing page: unset means the combined app, which keeps the tokenization
+  // pitch below unchanged; a persona build swaps in its own copy so a holder
+  // signing in to their wallet is not sold cross-chain asset issuance.
+  const persona = activePersona();
+  const copy = landingFor(persona);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -125,24 +133,38 @@ export function Login(): JSX.Element {
         </div>
         <div className="relative max-w-md">
           <h1 className="text-3xl xl:text-4xl font-bold tracking-tight text-white leading-tight">
-            Institutional tokenization, on any ledger
+            {copy?.headline ?? "Institutional tokenization, on any ledger"}
           </h1>
-          <ul className="mt-8 space-y-5">
-            {HIGHLIGHTS.map((h) => (
-              <li key={h.icon} className="flex items-start gap-3.5">
-                <span className="shrink-0 w-9 h-9 rounded-lg bg-white/10 text-brand-400 flex items-center justify-center">
-                  <Icon name={h.icon} className="w-5 h-5" />
-                </span>
-                <span>
-                  <span className="block text-sm font-semibold text-white">{h.title}</span>
-                  <span className="block text-sm text-slate-300 mt-0.5">{h.text}</span>
-                </span>
-              </li>
-            ))}
-          </ul>
+          {copy ? (
+            // Same numbered treatment PersonaHome gives `does` — the data has
+            // no per-item icon, and inventing one would be an icon that says
+            // nothing the number doesn't already.
+            <ul className="mt-8 space-y-4">
+              {copy.does.map((line, i) => (
+                <li key={line} className="flex items-start gap-3.5">
+                  <span className="shrink-0 font-mono text-xs text-brand-400 mt-0.5">{String(i + 1).padStart(2, "0")}</span>
+                  <span className="text-sm text-slate-300 leading-relaxed">{line}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <ul className="mt-8 space-y-5">
+              {HIGHLIGHTS.map((h) => (
+                <li key={h.icon} className="flex items-start gap-3.5">
+                  <span className="shrink-0 w-9 h-9 rounded-lg bg-white/10 text-brand-400 flex items-center justify-center">
+                    <Icon name={h.icon} className="w-5 h-5" />
+                  </span>
+                  <span>
+                    <span className="block text-sm font-semibold text-white">{h.title}</span>
+                    <span className="block text-sm text-slate-300 mt-0.5">{h.text}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
         <p className="relative text-xs text-slate-400">
-          Tokenize any asset. On any chain. Any standard.
+          {copy && persona ? `${copy.product} · ${persona.label}` : "Tokenize any asset. On any chain. Any standard."}
         </p>
       </div>
 
@@ -161,7 +183,7 @@ export function Login(): JSX.Element {
                 </div>
                 <div>
                   <h2 className="text-lg font-semibold tracking-tight text-slate-900">Sign in</h2>
-                  <p className="text-sm text-slate-500 mt-0.5">Access your tokenization console</p>
+                  <p className="text-sm text-slate-500 mt-0.5">{copy && persona ? `${copy.product} · ${persona.label}` : "Access your tokenization console"}</p>
                 </div>
               </div>
               <form onSubmit={submit} className="space-y-4">
