@@ -4,7 +4,7 @@ import { useAuth } from "../../auth.js";
 import { can } from "../../rbac.js";
 import { CashflowPanel } from "./CashflowPanel.js";
 import type { AccountState, Asset, AuditEntry, ChainInfo, Listing, Role, TokenInfo, Trade, UseCase } from "../../types.js";
-import { DataBadge, EmptyState, Pill as UIPill, Skeleton } from "../shared/ui.js";
+import { DataBadge, EmptyState, Icon, Pill as UIPill, Skeleton, type IconName } from "../shared/ui.js";
 
 interface Props {
   assetId: string;
@@ -724,7 +724,31 @@ function Market({
   );
 }
 
-type OpField = { name: string; kind: "account" | "number" | "text"; optional?: boolean };
+type OpField = { name: string; label: string; kind: "account" | "number" | "text"; optional?: boolean; hint?: string };
+
+const OP_TONE: Record<"Mint" | "Transfer" | "Burn", { icon: IconName; iconWrap: string; button: string; missingHint: (fields: OpField[]) => string }> = {
+  Mint: {
+    icon: "plus",
+    iconWrap: "bg-brand-50 text-brand-600 ring-brand-100 group-hover:ring-brand-200",
+    button: "bg-brand-600 hover:bg-brand-700 border-brand-700",
+    missingHint: (fields) => `Choose a recipient and enter ${fields.some((f) => f.name === "tokenId") ? "a token ID" : "an amount"} to mint.`,
+  },
+  Transfer: {
+    icon: "send",
+    iconWrap: "bg-sky-50 text-sky-600 ring-sky-100 group-hover:ring-sky-200",
+    button: "bg-sky-600 hover:bg-sky-700 border-sky-700",
+    missingHint: () => "Choose both accounts and what to move.",
+  },
+  // Burn destroys supply irreversibly — it must not read as a routine action
+  // sitting next to Mint and Transfer in the same green, so it gets the only
+  // danger-toned button among the three.
+  Burn: {
+    icon: "warn",
+    iconWrap: "bg-red-50 text-red-600 ring-red-100 group-hover:ring-red-200",
+    button: "bg-red-600 hover:bg-red-700 border-red-700",
+    missingHint: (fields) => `Enter the ${fields.some((f) => f.name === "tokenId") ? "token ID" : "account and amount"} to burn.`,
+  },
+};
 
 function Operations({
   role,
@@ -747,34 +771,40 @@ function Operations({
   if (!showMint && !showTransfer && !showBurn) return null;
 
   const fungible = {
-    mint: [{ name: "to", kind: "account" }, { name: "amount", kind: "number" }] as OpField[],
-    transfer: [{ name: "from", kind: "account" }, { name: "to", kind: "account" }, { name: "amount", kind: "number" }] as OpField[],
-    burn: [{ name: "from", kind: "account" }, { name: "amount", kind: "number" }] as OpField[],
+    mint: [{ name: "to", label: "Recipient", kind: "account" }, { name: "amount", label: "Amount", kind: "number" }] as OpField[],
+    transfer: [{ name: "from", label: "From", kind: "account" }, { name: "to", label: "To", kind: "account" }, { name: "amount", label: "Amount", kind: "number" }] as OpField[],
+    burn: [{ name: "from", label: "Account", kind: "account" }, { name: "amount", label: "Amount", kind: "number" }] as OpField[],
   };
   const nft = {
-    mint: [{ name: "to", kind: "account" }, { name: "tokenId", kind: "text" }, { name: "uri", kind: "text", optional: true }] as OpField[],
-    transfer: [{ name: "from", kind: "account" }, { name: "to", kind: "account" }, { name: "tokenId", kind: "text" }] as OpField[],
-    burn: [{ name: "tokenId", kind: "text" }] as OpField[],
+    mint: [
+      { name: "to", label: "Recipient", kind: "account" },
+      { name: "tokenId", label: "Token ID", kind: "text", hint: "Must be unique for this asset — it can't be changed after minting." },
+      { name: "uri", label: "Metadata URI", kind: "text", optional: true },
+    ] as OpField[],
+    transfer: [{ name: "from", label: "From", kind: "account" }, { name: "to", label: "To", kind: "account" }, { name: "tokenId", label: "Token ID", kind: "text" }] as OpField[],
+    burn: [{ name: "tokenId", label: "Token ID", kind: "text" }] as OpField[],
   };
   const fields = isNft ? nft : fungible;
 
   return (
     <div className="grid gap-4 sm:grid-cols-3">
-      {showMint && <OpForm title="Mint" fields={fields.mint} accounts={accounts} busy={busy} onSubmit={(b) => onRun("mint", b)} />}
-      {showTransfer && <OpForm title="Transfer" fields={fields.transfer} accounts={accounts} busy={busy} onSubmit={(b) => onRun("transfer", b)} />}
-      {showBurn && <OpForm title="Burn" fields={fields.burn} accounts={accounts} busy={busy} onSubmit={(b) => onRun("burn", b)} />}
+      {showMint && <OpForm title="Mint" tone={OP_TONE.Mint} fields={fields.mint} accounts={accounts} busy={busy} onSubmit={(b) => onRun("mint", b)} />}
+      {showTransfer && <OpForm title="Transfer" tone={OP_TONE.Transfer} fields={fields.transfer} accounts={accounts} busy={busy} onSubmit={(b) => onRun("transfer", b)} />}
+      {showBurn && <OpForm title="Burn" tone={OP_TONE.Burn} fields={fields.burn} accounts={accounts} busy={busy} onSubmit={(b) => onRun("burn", b)} />}
     </div>
   );
 }
 
 function OpForm({
   title,
+  tone,
   fields,
   accounts,
   busy,
   onSubmit,
 }: {
   title: string;
+  tone: { icon: IconName; iconWrap: string; button: string; missingHint: (fields: OpField[]) => string };
   fields: OpField[];
   accounts: AccountState[];
   busy: boolean;
@@ -785,32 +815,50 @@ function OpForm({
   const ready = fields.every((f) => f.optional || state[f.name]);
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-4 space-y-2.5">
-      <div className="text-sm font-semibold text-slate-800">{title}</div>
-      {fields.map((f) =>
-        f.kind === "account" ? (
-          <select key={f.name} className="select" value={state[f.name] ?? ""} onChange={(e) => set(f.name, e.target.value)}>
-            <option value="">{f.name}…</option>
-            {accounts.map((a) => (
-              <option key={a.address} value={a.address}>
-                {a.label}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <input
-            key={f.name}
-            className="input"
-            type={f.kind === "number" ? "number" : "text"}
-            placeholder={f.optional ? `${f.name} (optional)` : f.name}
-            value={state[f.name] ?? ""}
-            onChange={(e) => set(f.name, e.target.value)}
-          />
-        ),
-      )}
-      <button disabled={busy || !ready} onClick={() => onSubmit(state)} className="w-full rounded-lg bg-brand-600 text-white py-1.5 text-xs font-medium hover:bg-brand-700 disabled:opacity-40">
-        {title}
-      </button>
+    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-4 space-y-3 group">
+      <div className="flex items-center gap-2.5">
+        <div className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center ring-1 transition ${tone.iconWrap}`}>
+          <Icon name={tone.icon} className="w-4 h-4" />
+        </div>
+        <div className="text-sm font-semibold text-slate-800 font-display">{title}</div>
+      </div>
+      {fields.map((f) => (
+        <div key={f.name} className="space-y-1">
+          <label htmlFor={`op-${title}-${f.name}`} className="text-[11px] font-medium text-slate-500">
+            {f.label}
+            {f.optional && <span className="text-slate-400 font-normal"> (optional)</span>}
+          </label>
+          {f.kind === "account" ? (
+            <select id={`op-${title}-${f.name}`} className="select" value={state[f.name] ?? ""} onChange={(e) => set(f.name, e.target.value)}>
+              <option value="">Select…</option>
+              {accounts.map((a) => (
+                <option key={a.address} value={a.address}>
+                  {a.label}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              id={`op-${title}-${f.name}`}
+              className="input"
+              type={f.kind === "number" ? "number" : "text"}
+              value={state[f.name] ?? ""}
+              onChange={(e) => set(f.name, e.target.value)}
+            />
+          )}
+          {f.hint && <p className="text-[11px] text-slate-400 leading-snug">{f.hint}</p>}
+        </div>
+      ))}
+      <div>
+        <button
+          disabled={busy || !ready}
+          onClick={() => onSubmit(state)}
+          className={`w-full rounded-lg text-white py-1.5 text-xs font-semibold border transition disabled:opacity-40 disabled:cursor-not-allowed ${tone.button}`}
+        >
+          {title}
+        </button>
+        {!ready && <p className="text-[11px] text-slate-400 mt-1.5 leading-snug">{tone.missingHint(fields)}</p>}
+      </div>
     </div>
   );
 }

@@ -2,9 +2,16 @@ import { useEffect, useState } from "react";
 import { ApiError, api } from "../../api.js";
 import { useAuth } from "../../auth.js";
 import type { ChainInfo, CredentialStatusInfo, DidDocument, HeldCredential } from "../../types.js";
-import { Card, EmptyState, SectionHeader, Skeleton } from "../shared/ui.js";
+import { Card, CopyBlock, DataBadge, EmptyState, Pill, SectionHeader, Skeleton } from "../shared/ui.js";
 import { CredentialCard } from "./CredentialCard.js";
 import { VerificationInbox } from "./VerificationInbox.js";
+
+/** The DID card's registration pill: anchored / registered-but-inactive / not anchored. */
+function RegistrationPill({ registration }: { registration: DidDocument["registration"] }): JSX.Element {
+  if (!registration || !registration.registered) return <Pill tone="muted">not anchored on-chain</Pill>;
+  if (!registration.active) return <Pill tone="warn">registered · inactive</Pill>;
+  return <Pill tone="ok">anchored · {registration.chainId}</Pill>;
+}
 
 /**
  * The signed-in user's decentralized identity: their DID, the resolved DID
@@ -62,21 +69,19 @@ export function MyIdentity(): JSX.Element {
       <SectionHeader title="My identity" description="Your decentralized identifier and the credentials issued to you." />
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      <Card title="Decentralized identifier" description={user?.email}>
-        <p className="font-mono text-xs text-slate-700 break-all">{did}</p>
+      <Card title="Decentralized identifier" description={user?.email} className="animate-slide-up" actions={doc && <RegistrationPill registration={doc.registration} />}>
+        <DataBadge value={did} chars={16} />
       </Card>
 
-      <Card title="DID document" description="Resolved from the platform's DID registry.">
+      <Card title="DID document" description="Resolved from the platform's DID registry." className="animate-slide-up stagger-1">
         {doc ? (
-          <pre className="overflow-x-auto text-xs font-mono bg-slate-950 text-slate-100 rounded-lg p-4">
-            {JSON.stringify(doc, null, 2)}
-          </pre>
+          <CopyBlock code={JSON.stringify(doc, null, 2)} language="DID Document" />
         ) : (
           <Skeleton lines={5} />
         )}
       </Card>
 
-      <div className="space-y-3">
+      <div className="space-y-3 animate-slide-up stagger-2">
         <SectionHeader title="Credentials" description="Verifiable credentials held by this DID." />
         {creds === null ? (
           <Card><Skeleton lines={3} /></Card>
@@ -91,7 +96,9 @@ export function MyIdentity(): JSX.Element {
         )}
       </div>
 
-      <VerificationInbox />
+      <div className="animate-slide-up stagger-3">
+        <VerificationInbox />
+      </div>
     </div>
   );
 }
