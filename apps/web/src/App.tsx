@@ -186,6 +186,7 @@ export function App(): JSX.Element {
       { id: "audit", label: "Audit", icon: "shield" },
       { id: "schemes", label: "Schemes", icon: "doc" },
       { id: "approvals", label: "Approvals", icon: "check" },
+      ...(canManageUsers(user.role) ? [{ id: "users", label: "User Management", icon: "users" as const }] : []),
       { id: "verify", label: "Verification", icon: "shield" },
       { id: "identity", label: "Identity", icon: "shield" },
       { id: "identity-dashboard", label: "Identity Dashboard", icon: "spark" },
@@ -194,12 +195,17 @@ export function App(): JSX.Element {
     ];
     const platViews: Record<string, PlatformTab> = {
       dashboard: "overview", "use-cases": "use-cases", create: "create",
-      organizations: "organizations", approvals: "approvals", verify: "verify", networks: "networks", identity: "identity",
+      organizations: "organizations", verify: "verify", networks: "networks", identity: "identity",
     };
     const branchDomains = availableDomains(items, enabledDomains);
     const effDomain = branchDomains.some((d) => d.key === activeDomain) ? activeDomain : (branchDomains[0]?.key ?? activeDomain);
     const visible = itemsForDomain(items, effDomain);
-    const knownIds = [...Object.keys(platViews), "profile", "credentials", "identity-dashboard", "developers", "audit", "schemes"];
+    // `approvals` and `users` were nav items here but neither `platViews` nor
+    // this list named them, so PlatformHome silently ignored a click on either
+    // — ApprovalsPanel had no route in this branch at all, and `users` (User
+    // Management) wasn't even offered as a nav item, though a PlatformAdmin
+    // scoped into any single use case reaches both fine (the branch below).
+    const knownIds = [...Object.keys(platViews), "profile", "credentials", "identity-dashboard", "developers", "audit", "schemes", "approvals", "users"];
     const activeId = knownIds.includes(view) && itemsForDomain([{ id: view }], effDomain).length ? view : DOMAINS.find((d) => d.key === effDomain)!.defaultView;
     const panel =
       activeId === "profile" ? <MyProfile onSelect={setView} />
@@ -208,6 +214,8 @@ export function App(): JSX.Element {
       : activeId === "developers" ? <Developers />
       : activeId === "audit" ? <AuditConsole enabledDomains={enabledDomains} />
       : activeId === "schemes" ? <SchemeConsole />
+      : activeId === "approvals" ? <ApprovalsPanel />
+      : activeId === "users" ? <UserManagement useCaseKey="" useCases={useCases} />
       : <PlatformHome useCases={useCases} chains={chains} onReloadUseCases={reloadUseCases} view={platViews[activeId] ?? "overview"} />;
     return <AppShell items={visible} active={activeId} onSelect={handleSelect} domains={branchDomains} activeDomain={effDomain} onDomainChange={onDomainChange}>{panel}</AppShell>;
   }

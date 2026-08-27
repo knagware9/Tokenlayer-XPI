@@ -70,6 +70,19 @@ function AddUser({ useCaseKey, useCases }: { useCaseKey: string; useCases: UseCa
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [selUseCase, setSelUseCase] = useState(useCaseKey || useCases[0]?.key || "");
+  // `credUseCases` — and so the identity half of `options` — loads async, after
+  // this state's initializer already ran. On an identity-only deployment
+  // `useCases` (tokenization) is empty, so `selUseCase` starts as "" and stays
+  // that way until something re-syncs it: `options.find` below then matches
+  // nothing and silently falls back to "tokenization", handing a PlatformAdmin
+  // the wrong domain's roles (Issuer/Trader/Buyer/Auditor, missing Holder and
+  // Verifier) — while the <select> itself LOOKS like it has the first identity
+  // use case selected, because an uncontrolled-value select falls back to
+  // rendering its first option. Re-sync once real options exist.
+  useEffect(() => {
+    if (!options.some((o) => o.key === selUseCase)) setSelUseCase(options[0]?.key ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [options]);
   // The domain that gates the role menu. A scoped manager is locked to their own
   // use case's domain; a PlatformAdmin derives it from the currently-picked one.
   const pickedDomain: DomainKey = isPlatform
