@@ -1,8 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../../api.js";
 import { useAuth } from "../../auth.js";
-import type { DerivedCredentialStatus, IdentityDashboardData } from "../../types.js";
+import type { DerivedCredentialStatus, IdentityDashboardData, Proposal } from "../../types.js";
 import { SectionHeader } from "../shared/ui.js";
+
+/** The maker-checker proposal kinds an issuer submits to mint a credential.
+ *  Distinct from the lifecycle totals above: those track what happens to a
+ *  credential AFTER it exists, this tracks whether the ISSUANCE ACTION itself
+ *  went through. issue-kyc is deliberately excluded — it is ungated (see
+ *  POST /users/:id/identity/issue-kyc) and always succeeds, so it has no
+ *  "failed" case to report. */
+const ISSUANCE_PROPOSAL_KINDS = new Set(["issue-credential", "issue-usecase-credential", "issue-usecase-credential-batch"]);
 
 // ID-N: scoped identity operations dashboard — stat tiles over the ID-L
 // lifecycle, a 30-day issued strip, verification counters, and the filterable
@@ -67,6 +75,7 @@ export function IdentityDashboard(): JSX.Element {
   const [statusFilter, setStatusFilter] = useState<DerivedCredentialStatus | "all">("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
+  const [proposals, setProposals] = useState<Proposal[] | null>(null);
 
   useEffect(() => {
     if (!token) return;
@@ -74,6 +83,20 @@ export function IdentityDashboard(): JSX.Element {
     setError(null);
     api.identityDashboard(token).then(setData).catch(() => setError("Could not load the identity dashboard."));
   }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+    api.proposals(token).then(setProposals).catch(() => setProposals([]));
+  }, [token]);
+
+  const issuance = useMemo(() => {
+    const rows = (proposals ?? []).filter((p) => ISSUANCE_PROPOSAL_KINDS.has(p.kind));
+    return {
+      issued: rows.length,
+      success: rows.filter((p) => p.status === "executed").length,
+      failed: rows.filter((p) => p.status === "rejected" || p.status === "failed").length,
+    };
+  }, [proposals]);
 
   const types = useMemo(() => (data ? [...new Set(data.board.map((r) => r.type))].sort() : []), [data]);
   const rows = useMemo(() => {
@@ -101,6 +124,25 @@ export function IdentityDashboard(): JSX.Element {
         <Tile label="Rejected" value={t.rejectedByHolder} tone="text-slate-600" stagger={5} />
         <Tile label="Revoked" value={t.revoked} tone="text-red-600" stagger={6} />
         <Tile label="Expired" value={t.expired} tone="text-slate-400" stagger={7} />
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 animate-slide-up stagger-1">
+        <h2 className="font-bold text-slate-900 text-sm mb-1 font-display">Issuance requests</h2>
+        <p className="text-xs text-slate-500 mb-4">Outcome of the maker-checker proposals submitted to mint a credential — separate from the lifecycle totals above, which track a credential after it exists.</p>
+        <div className="grid grid-cols-3 gap-3 text-center">
+          <div className="flex flex-col gap-0.5">
+            <div className="text-xl font-bold tabular-nums font-display text-slate-900">{issuance.issued}</div>
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Issued</div>
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <div className="text-xl font-bold tabular-nums font-display text-emerald-600">{issuance.success}</div>
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Success</div>
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <div className="text-xl font-bold tabular-nums font-display text-red-600">{issuance.failed}</div>
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Failed</div>
+          </div>
+        </div>
       </div>
 
       <div className="grid lg:grid-cols-2 gap-4">

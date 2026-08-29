@@ -219,7 +219,7 @@ export const PERSONAS: readonly PersonaDef[] = [
     description: "A relying party asks a holder for credentials and checks the answer against the chain.",
     defaultView: "verify",
     surfaces: [
-      "verify", "credentials", "organizations", "developers", "users", "approvals", "audit", "profile", "logout", "back",
+      "verify-dashboard", "verify", "credentials", "organizations", "developers", "users", "approvals", "audit", "profile", "logout", "back",
     ],
     allow: [
       { prefix: "/verification-requests", methods: "ALL", why: "raise a request, read the inbox, run the verification" },
@@ -239,7 +239,7 @@ export const PERSONAS: readonly PersonaDef[] = [
     label: "Wallet",
     description: "A person holds their credentials, accepts or rejects what is offered, and consents to share.",
     defaultView: "credentials",
-    surfaces: ["credentials", "profile", "logout"],
+    surfaces: ["holder-dashboard", "credentials", "requests", "profile", "logout"],
     allow: [
       { prefix: "/me/credentials", methods: "ALL", why: "the wallet, and accept / reject / request-changes on each offer" },
       { prefix: "/me/verification-requests", methods: ["GET"], why: "requests awaiting this holder's consent" },

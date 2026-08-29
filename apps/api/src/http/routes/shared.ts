@@ -45,7 +45,7 @@ import { NO_USE_CASE, canAdministerUser, BCRYPT_ROUNDS, LOGIN_WINDOW_MS, MAX_DOC
 import type { BrandLogoErrorCode, RouteContext } from "./context.js";
 
 export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: RouteContext): void {
-  const { principal, auth, authScoped, loginThrottled, proposeIfGated, orgScoped, resolveUseCaseDomain, useCaseKeysByDomain, linkedWallet, orgMemberCapabilityViolation, brandLogoRefusal, proposalView, ensureOrg, manageableTarget, mapHeld, isRenderableArtwork, RENDERABLE_ARTWORK_TYPES, assetChain, verifyAsset, redactPayload } = ctx;
+  const { principal, auth, authScoped, loginThrottled, proposeIfGated, orgScoped, resolveUseCaseDomain, useCaseKeysByDomain, linkedWallet, orgMemberCapabilityViolation, brandLogoRefusal, proposalView, ensureOrg, manageableTarget, mapHeld, issuerNameResolver, isRenderableArtwork, RENDERABLE_ARTWORK_TYPES, assetChain, verifyAsset, redactPayload } = ctx;
   // --- auth ---------------------------------------------------------------
   app.post("/auth/login", { schema: S.login }, async (request, reply) => {
     if (loginThrottled(request.ip)) {
@@ -628,12 +628,20 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     if (!claims.did) return [];
     const rows = await deps.verificationRequests.listByHolder(claims.did);
     const mine = await deps.credentials.listByHolder(claims.did);
-    return rows.map((r) => ({
+    // The holder needs the issuer's name to tell apart same-type credentials
+    // from different issuers when picking which one to present.
+    const nameOf = issuerNameResolver();
+    return Promise.all(rows.map(async (r) => ({
       ...vreqView(r),
-      eligibleCredentials: mine
-        .filter((c) => !c.revoked && c.acceptance === "accepted" && r.requestedTypes.includes(c.type))
-        .map((c) => ({ id: c.id, type: c.type, issuerDid: c.issuerDid, issuedAt: c.issuedAt })),
-    }));
+      eligibleCredentials: await Promise.all(
+        mine
+          .filter((c) => !c.revoked && c.acceptance === "accepted" && r.requestedTypes.includes(c.type))
+          .map(async (c) => ({
+            id: c.id, type: c.type, issuerDid: c.issuerDid, issuerName: await nameOf(c.issuerDid),
+            issuedAt: c.issuedAt, expiresAt: c.expiresAt,
+          })),
+      ),
+    })));
   });
 
 

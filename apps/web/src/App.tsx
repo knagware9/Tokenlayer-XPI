@@ -28,7 +28,10 @@ import { QrSign } from "./components/shared/QrSign.js";
 import { Signup } from "./components/shared/Signup.js";
 import { UseCaseBuilder } from "./components/tokenization/UseCaseBuilder.js";
 import { UserManagement } from "./components/shared/UserManagement.js";
+import { HolderDashboard } from "./components/identity/HolderDashboard.js";
+import { VerificationInbox } from "./components/identity/VerificationInbox.js";
 import { VerificationRequests } from "./components/identity/VerificationRequests.js";
+import { VerifierDashboard } from "./components/identity/VerifierDashboard.js";
 import { SectionHeader } from "./components/shared/ui.js";
 import { confirmNavigation } from "./lib/shared/nav-guard.js";
 import { can, canManageUsers } from "./rbac.js";
@@ -155,9 +158,11 @@ export function App(): JSX.Element {
   // never renders the portfolio its edge would refuse anyway.
   if (user.role === "Buyer" || activePersona()?.shell === "self-service") {
     const items: NavItem[] = [
+      { id: "holder-dashboard", label: "Dashboard", icon: "spark" },
       { id: "portfolio", label: "My Portfolio", icon: "coins" },
       { id: "offerings", label: "Marketplace", icon: "spark" },
       { id: "transactions", label: "Recent Transactions", icon: "arrow" },
+      { id: "requests", label: "Verification Requests", icon: "check" },
       ...pinned,
     ];
     const buyerTab: "offerings" | "portfolio" | "activity" =
@@ -166,11 +171,15 @@ export function App(): JSX.Element {
     // Wallet surface, and opening there would render a panel whose data the
     // holder edge refuses.
     const fallback = landingView(narrowToPersona(items, activePersona()), activePersona(), "portfolio");
-    const activeId = ["portfolio", "offerings", "transactions", "profile", "credentials"].includes(view) ? view : fallback;
+    const activeId = ["portfolio", "offerings", "transactions", "profile", "credentials", "requests", "holder-dashboard"].includes(view) ? view : fallback;
     const panel =
       view === "profile" ? <MyProfile onSelect={setView} />
       : view === "credentials" ? <MyIdentity />
+      : view === "requests" ? <VerificationInbox />
+      : view === "holder-dashboard" ? <HolderDashboard />
       : activeId === "credentials" ? <MyIdentity />
+      : activeId === "requests" ? <VerificationInbox />
+      : activeId === "holder-dashboard" ? <HolderDashboard />
       : activeId === "profile" ? <MyProfile onSelect={setView} />
       : <InvestorPortal useCases={useCases} tab={buyerTab} onTabChange={(t) => setView(t === "activity" ? "transactions" : t)} />;
     return <AppShell items={items} active={activeId} onSelect={handleSelect}>{panel}</AppShell>;
@@ -232,8 +241,9 @@ export function App(): JSX.Element {
   if (deskDomain === "identity") {
     const r = user.role;
     const idItems: NavItem[] = [
-      ...(r === "UseCaseAdmin" || r === "Issuer" ? [{ id: "identity-dashboard", label: "Dashboard", icon: "spark" as const }] : []),
+      ...(r === "UseCaseAdmin" || r === "Issuer" ? [{ id: "identity-dashboard", label: "Issuance Dashboard", icon: "spark" as const }] : []),
       ...(r === "UseCaseAdmin" || r === "Issuer" ? [{ id: "issue-credentials", label: "Issue Credentials", icon: "doc" as const }] : []),
+      ...(r === "UseCaseAdmin" || r === "Verifier" ? [{ id: "verify-dashboard", label: "Verification Dashboard", icon: "spark" as const }] : []),
       ...(r === "UseCaseAdmin" || r === "Verifier" ? [{ id: "verify", label: "Verification", icon: "shield" as const }] : []),
       ...(r === "UseCaseAdmin" || r === "Issuer" ? [{ id: "approvals", label: "Approvals", icon: "check" as const }] : []),
       ...(canManageUsers(r) ? [{ id: "users", label: "User Management", icon: "users" as const }] : []),
@@ -244,6 +254,8 @@ export function App(): JSX.Element {
     let idPanel: JSX.Element;
     if (idActive === "identity-dashboard") {
       idPanel = <IdentityDashboard />;
+    } else if (idActive === "verify-dashboard") {
+      idPanel = <VerifierDashboard />;
     } else if (idActive === "issue-credentials") {
       idPanel = deskCredUC
         ? <IssueUsecaseCredential useCase={deskCredUC} onIssued={reloadDeskCredUC} />

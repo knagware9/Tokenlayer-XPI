@@ -39,13 +39,13 @@ export const PERSONAS: WebPersona[] = [
     key: "identity-verifier", shell: "console", domain: "identity", label: "Verifier Console",
     description: "A relying party asks a holder for credentials and checks the answer against the chain.",
     defaultView: "verify",
-    surfaces: ["verify", "credentials", "organizations", "developers", "users", "approvals", "audit", "profile", "logout", "back"],
+    surfaces: ["verify-dashboard", "verify", "credentials", "organizations", "developers", "users", "approvals", "audit", "profile", "logout", "back"],
   },
   {
     key: "identity-holder", shell: "self-service", domain: "identity", label: "Wallet",
     description: "A person holds their credentials, accepts or rejects what is offered, and consents to share.",
     defaultView: "credentials",
-    surfaces: ["credentials", "profile", "logout"],
+    surfaces: ["holder-dashboard", "credentials", "requests", "profile", "logout"],
   },
   {
     key: "tokenization-issuer", shell: "console", domain: "tokenization", label: "Issuer Desk",

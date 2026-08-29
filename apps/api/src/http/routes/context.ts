@@ -374,14 +374,21 @@ export function buildRouteContext(app: FastifyInstance, deps: AppDeps, sharedPri
   }
 
 
-  /** Enriched held-credential projection: adds the use case + the issuer org's
-   *  name (memoised per call), shared by /me/credentials and the org wallet. */
-  async function mapHeld(rows: CredentialRecord[]) {
+  /** A fresh per-call memoized issuer-DID → org-name resolver. Shared by every
+   *  handler that labels a credential by its issuer's org name, so a request
+   *  touching the same issuer many times over only resolves it once. */
+  function issuerNameResolver(): (did: string) => Promise<string | null> {
     const names = new Map<string, Promise<string | null>>();
-    const nameOf = (did: string): Promise<string | null> => {
+    return (did: string): Promise<string | null> => {
       if (!names.has(did)) names.set(did, deps.organizations.findByDid(did).then((o) => o?.name ?? null));
       return names.get(did)!;
     };
+  }
+
+  /** Enriched held-credential projection: adds the use case + the issuer org's
+   *  name (memoised per call), shared by /me/credentials and the org wallet. */
+  async function mapHeld(rows: CredentialRecord[]) {
+    const nameOf = issuerNameResolver();
     const ucs = new Map<string, Promise<CredentialUseCaseDefinition | null>>();
     const ucOf = (key: string): Promise<CredentialUseCaseDefinition | null> => {
       if (!ucs.has(key)) ucs.set(key, deps.credentialUseCases.get(key).catch(() => null));
@@ -462,7 +469,7 @@ export function buildRouteContext(app: FastifyInstance, deps: AppDeps, sharedPri
   }
 
 
-  return { principal, auth, authScoped, loginThrottled, proposeIfGated, orgScoped, resolveUseCaseDomain, useCaseKeysByDomain, linkedWallet, orgMemberCapabilityViolation, brandLogoRefusal, proposalView, ensureOrg, manageableTarget, mapHeld, isRenderableArtwork, RENDERABLE_ARTWORK_TYPES, assetChain, verifyAsset, redactPayload };
+  return { principal, auth, authScoped, loginThrottled, proposeIfGated, orgScoped, resolveUseCaseDomain, useCaseKeysByDomain, linkedWallet, orgMemberCapabilityViolation, brandLogoRefusal, proposalView, ensureOrg, manageableTarget, mapHeld, issuerNameResolver, isRenderableArtwork, RENDERABLE_ARTWORK_TYPES, assetChain, verifyAsset, redactPayload };
 }
 
 /** What every `register*Routes` receives. */

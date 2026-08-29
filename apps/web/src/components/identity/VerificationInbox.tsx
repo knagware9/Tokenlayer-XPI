@@ -8,6 +8,18 @@ function errMessage(err: unknown, fallback: string): string {
   return err instanceof ApiError ? err.message : fallback;
 }
 
+function truncateDid(v: string): string { return v.length > 28 ? `${v.slice(0, 18)}…${v.slice(-6)}` : v; }
+function fmtDate(v: string | null): string {
+  if (!v) return "—";
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? v : d.toLocaleDateString();
+}
+/** Distinguishes same-type credentials from different issuers when the holder is picking which to present. */
+function candidateLabel(c: { type: string; issuerDid: string; issuerName?: string | null; issuedAt: string; expiresAt: string | null }): string {
+  const issuer = c.issuerName ?? truncateDid(c.issuerDid);
+  return `${c.type} — ${issuer} · issued ${fmtDate(c.issuedAt)}${c.expiresAt ? ` · expires ${fmtDate(c.expiresAt)}` : ""}`;
+}
+
 /**
  * Holder side: verification requests aimed at this DID. Nothing is disclosed
  * until the holder consents and picks which eligible credentials to present.
@@ -56,8 +68,9 @@ export function VerificationInbox(): JSX.Element {
               {(r.eligibleCredentials ?? []).length === 0
                 ? <div className="text-xs text-amber-600">You hold no unrevoked credential of the requested type(s).</div>
                 : (r.eligibleCredentials ?? []).map((c) => (
-                    <label key={c.id} className="text-sm flex items-center gap-1">
-                      <input type="checkbox" checked={!!sel[c.id]} onChange={(e) => setPicked({ ...picked, [r.id]: { ...sel, [c.id]: e.target.checked } })} /> {c.type}
+                    <label key={c.id} className="text-sm flex items-center gap-1.5">
+                      <input type="checkbox" checked={!!sel[c.id]} onChange={(e) => setPicked({ ...picked, [r.id]: { ...sel, [c.id]: e.target.checked } })} />
+                      <span>{candidateLabel(c)}</span>
                     </label>
                   ))}
               <div className="flex gap-2 mt-2">

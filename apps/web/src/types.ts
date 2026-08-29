@@ -781,7 +781,7 @@ export interface VerificationRequest {
   verifiedAt: string | null;
   createdAt: string;
   expiresAt: string;
-  eligibleCredentials?: { id: string; type: string; issuerDid: string; issuedAt: string }[];
+  eligibleCredentials?: { id: string; type: string; issuerDid: string; issuerName?: string | null; issuedAt: string; expiresAt: string | null }[];
 }
 export interface StagedInvoice {
   id: string; useCaseKey: string; source: "upload" | "erp" | "manual";
