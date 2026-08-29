@@ -6,14 +6,14 @@ import { auth, buildTestApp, loginAs, V1 } from "./helpers.js";
 describe("resolveAccountId", () => {
   it("uses the supplied address when given, regardless of role", async () => {
     const accounts = new MemoryAccountRepository();
-    const id = await resolveAccountId({ accounts } as never, "Auditor", "0xsupplied", "a@x.dev");
+    const id = await resolveAccountId({ accounts, enabledDomains: ["tokenization"] } as never, "Auditor", "0xsupplied", "a@x.dev");
     const acct = id ? await accounts.findById(id) : null;
     expect(acct?.address).toBe("0xsupplied");
   });
 
   it("auto-generates an address for an eligible role when none is supplied", async () => {
     const accounts = new MemoryAccountRepository();
-    const id = await resolveAccountId({ accounts } as never, "Buyer", null, "a@x.dev");
+    const id = await resolveAccountId({ accounts, enabledDomains: ["tokenization"] } as never, "Buyer", null, "a@x.dev");
     expect(id).not.toBeNull();
     const acct = id ? await accounts.findById(id) : null;
     expect(acct?.address).toMatch(/^0x[0-9a-f]{40}$/);
@@ -21,7 +21,24 @@ describe("resolveAccountId", () => {
 
   it("stays null for an ineligible role when no address is supplied", async () => {
     const accounts = new MemoryAccountRepository();
-    const id = await resolveAccountId({ accounts } as never, "Auditor", null, "a@x.dev");
+    const id = await resolveAccountId({ accounts, enabledDomains: ["tokenization"] } as never, "Auditor", null, "a@x.dev");
+    expect(id).toBeNull();
+  });
+
+  it("stays null for a wallet-eligible role when the deployment does not serve tokenization", async () => {
+    // "Issuer" is a role name both domains use for different things — identity's
+    // Issuer signs credentials, never a token transfer, and has nothing to hold
+    // a balance in. On an identity-only deployment Account is disabled
+    // store-wide, so trying to auto-provision one here (as WALLET_ELIGIBLE_ROLES
+    // would otherwise do for "Issuer") always failed onboarding outright.
+    const accounts = new MemoryAccountRepository();
+    const id = await resolveAccountId({ accounts, enabledDomains: ["identity"] } as never, "Issuer", null, "a@x.dev");
+    expect(id).toBeNull();
+  });
+
+  it("refuses even a SUPPLIED address when the deployment does not serve tokenization", async () => {
+    const accounts = new MemoryAccountRepository();
+    const id = await resolveAccountId({ accounts, enabledDomains: ["identity"] } as never, "Issuer", "0xsupplied", "a@x.dev");
     expect(id).toBeNull();
   });
 
@@ -54,7 +71,7 @@ describe("backfillWallets", () => {
     const existing = await accounts.upsert("0xalready", "trader");
     const traderHasWallet = await users.create({ email: "t@x.dev", passwordHash: "h", role: "Trader", useCaseKey: null, accountId: existing.id, active: true, kycStatus: "approved", kyc: null });
 
-    const result = await backfillWallets({ users, accounts });
+    const result = await backfillWallets({ users, accounts, enabledDomains: ["tokenization"] } as never);
     expect(result.assigned).toBe(1);
 
     expect((await users.findById(buyerNoWallet.id))?.accountId).not.toBeNull();
@@ -67,8 +84,8 @@ describe("backfillWallets", () => {
     const accounts = new MemoryAccountRepository();
     await users.create({ email: "b2@x.dev", passwordHash: "h", role: "Buyer", useCaseKey: null, accountId: null, active: true, kycStatus: "approved", kyc: null });
 
-    await backfillWallets({ users, accounts });
-    const second = await backfillWallets({ users, accounts });
+    await backfillWallets({ users, accounts, enabledDomains: ["tokenization"] } as never);
+    const second = await backfillWallets({ users, accounts, enabledDomains: ["tokenization"] } as never);
     expect(second.assigned).toBe(0);
   });
 });

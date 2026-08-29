@@ -92,7 +92,15 @@ async function onboardSingle(deps: AppDeps, proposer: Actor, pl: OnboardUserPayl
     let did: string;
     if (pl.did) {
       did = pl.did;
-      await deps.users.update(created.id, { did });
+      // No local `kyc` claim was made — and none can be, `did` and `kyc` are
+      // refused together — so there is nothing here to auto-approve against.
+      // Approve anyway: the DID was already cryptographically vouched for by
+      // the identity deployment that issued it, which is exactly what local
+      // KYC approval stands in for on every other path (see the `pl.kyc`
+      // branch below). Leaving this "pending" left no reachable approval
+      // action at all on a tokenization console — the one that exists
+      // (Verify identity, a VP-challenge) is identity-issuer-edge-only.
+      await deps.users.update(created.id, { did, kycStatus: "approved" });
     } else {
       // Mint the custodial DID (same custody as org members: encrypted Ed25519 seed).
       const seed = deps.keystore.newSeed();

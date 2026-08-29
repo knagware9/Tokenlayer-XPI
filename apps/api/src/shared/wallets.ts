@@ -47,8 +47,16 @@ export async function refuseIfOrgOwned(
  * one door of two — this program's recurring defect.
  */
 export async function resolveAccountId(
-  deps: Pick<AppDeps, "accounts">, role: Role, suppliedWalletAddress: string | null | undefined, label: string,
+  deps: Pick<AppDeps, "accounts" | "enabledDomains">, role: Role, suppliedWalletAddress: string | null | undefined, label: string,
 ): Promise<string | null> {
+  // A wallet is a tokenization concept, full stop — including "Issuer", a role
+  // name both domains use for different things (identity's Issuer signs
+  // credentials, never token transfers). On a deployment that does not serve
+  // tokenization, Account is disabled store-wide (see context.ts's own
+  // `!deps.enabledDomains.includes("tokenization")` guard), so provisioning one
+  // here would only fail — and for identity's Issuer it would be wrong to try:
+  // that role has nothing to hold a balance in.
+  if (!deps.enabledDomains.includes("tokenization")) return null;
   if (suppliedWalletAddress) {
     const refusal = await refuseIfOrgOwned(deps, suppliedWalletAddress);
     if (refusal) throw coded(400, refusal.error, refusal.message);
@@ -77,7 +85,7 @@ export async function provisionTreasury(
  * it is safe to run again after a partial failure or against an already-
  * backfilled database.
  */
-export async function backfillWallets(deps: Pick<AppDeps, "users" | "accounts">): Promise<{ assigned: number }> {
+export async function backfillWallets(deps: Pick<AppDeps, "users" | "accounts" | "enabledDomains">): Promise<{ assigned: number }> {
   const all = await deps.users.list();
   const eligible = all.filter((u) => u.accountId === null && WALLET_ELIGIBLE_ROLES.has(u.role));
   for (const u of eligible) {

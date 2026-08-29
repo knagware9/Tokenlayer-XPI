@@ -425,11 +425,17 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
         kind: "human",
       });
       let mintedDid: string | null = null;
+      let kycStatus = created.kycStatus;
       if (b.did) {
         // Linked, not minted — see the refusal above. No membership VC either:
         // this deployment holds no key for this subject and cannot sign as them.
-        await deps.users.update(created.id, { did: b.did });
+        // kycStatus: same reasoning as the gated onboarding path in
+        // user-kinds.ts — a linked DID was already vouched for by the
+        // deployment that issued it, and there is no local `kyc` claim to
+        // separately review (did/kyc are mutually exclusive).
+        await deps.users.update(created.id, { did: b.did, kycStatus: "approved" });
         mintedDid = b.did;
+        kycStatus = "approved";
       } else if (org) {
         try {
           mintedDid = await mintMembership(org, created, b.role);
@@ -438,7 +444,7 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
           throw err;
         }
       }
-      return reply.code(201).send({ id: created.id, email: created.email, role: created.role, useCaseKey: created.useCaseKey, accountId: created.accountId, kycStatus: created.kycStatus, orgId: claims.orgId ?? null, did: mintedDid });
+      return reply.code(201).send({ id: created.id, email: created.email, role: created.role, useCaseKey: created.useCaseKey, accountId: created.accountId, kycStatus, orgId: claims.orgId ?? null, did: mintedDid });
     }
 
     // Use-case user management is maker-checker: hash the password NOW (plaintext

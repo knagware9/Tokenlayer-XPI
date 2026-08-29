@@ -58,6 +58,13 @@ describe("linking a DID issued by a separately-deployed identity service", () =>
       // THE LOAD-BEARING HALF. A seed here would mean this deployment could sign
       // as the holder — custody it does not have and must not claim.
       expect(user?.didSeedEncrypted ?? null).toBeNull();
+      // The DID was already vouched for by the deployment that issued it, and
+      // there is no local `kyc` claim to separately review (did/kyc are
+      // mutually exclusive) — so there is nothing left "pending" to approve.
+      // Leaving it pending stranded every linked buyer behind a KYC gate no
+      // console could clear: the one manual approval action that exists
+      // (Verify identity, a VP-challenge) is identity-issuer-edge-only.
+      expect(user?.kycStatus).toBe("approved");
     } finally {
       await h.app.close();
     }

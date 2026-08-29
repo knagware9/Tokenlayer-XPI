@@ -66,11 +66,11 @@ describe("finding 1: the compliance-exempt treasury address is not claimable", (
     // /orgs/:id/users and the onboard-user proposal executor.
     const accounts = new MemoryAccountRepository();
     const orgOwned = await accounts.upsert("0xtreasury", "Carbon treasury", "org_owner");
-    await expect(resolveAccountId({ accounts } as never, "Buyer", orgOwned.address, "b@x.dev"))
+    await expect(resolveAccountId({ accounts, enabledDomains: ["tokenization"] } as never, "Buyer", orgOwned.address, "b@x.dev"))
       .rejects.toMatchObject({ code: "ADDRESS_IS_ORG_TREASURY", statusCode: 400 });
     // A personal (org-less) address is untouched by the new refusal.
     const personal = await accounts.upsert("0xpersonal", "someone", undefined);
-    expect(await resolveAccountId({ accounts } as never, "Buyer", personal.address, "b@x.dev")).toBe(personal.id);
+    expect(await resolveAccountId({ accounts, enabledDomains: ["tokenization"] } as never, "Buyer", personal.address, "b@x.dev")).toBe(personal.id);
   });
 
   it("defence in depth: a CLAIMED account is no longer the use case's treasury", async () => {

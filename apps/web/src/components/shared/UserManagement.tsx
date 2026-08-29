@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import { ApiError, api } from "../../api.js";
 import { useAuth } from "../../auth.js";
 import { assignableRoles, can } from "../../rbac.js";
+import { activePersona } from "../../lib/shared/persona.js";
 import type { CredentialUseCase, IdentityResult, Role, UseCase } from "../../types.js";
 import type { DomainKey } from "../../domains.js";
 import { Pill } from "./ui.js";
@@ -219,6 +220,17 @@ function ManageUsers({ rows, me, useCases, onChanged }: { rows: Summary[]; me?: 
   // peer admin stay UI-blocked) — issuing a DID/KYC credential is purely additive,
   // so it doesn't need that stricter guard. Self-targeting still stays excluded.
   const canIssueKycRow = (u: Summary): boolean => u.email !== me && !u.did;
+  // /users/:id/identity (challenge+verify) and /users/:id/revoke-identity are
+  // granted ONLY to the identity-issuer persona's edge (packages/core/src/shared/
+  // personas.ts) — deliberately, so a tokenization edge never carries them. This
+  // component is shared across every console, so without this check "Verify
+  // identity (DID/VC)" and "Revoke identity" render as dead buttons on every
+  // tokenization console: the request never reaches the API, nginx refuses it
+  // outright (a CORS-preflight 404, surfacing to the user as a bare "Failed to
+  // fetch"). `!persona` covers the combined/monolithic build, where every route
+  // is reachable and this restriction does not apply.
+  const persona = activePersona();
+  const identityIssuerEdge = !persona || persona.key === "identity-issuer";
 
   // Allowlists a user's own wallet on every currently active asset in their
   // use case, in one click — the common case (a buyer should generally be
@@ -280,7 +292,7 @@ function ManageUsers({ rows, me, useCases, onChanged }: { rows: Summary[]; me?: 
                     </span>
                   </td>
                   <td className="px-4 py-2 text-right space-x-3">
-                    {manageable(u) && u.kycStatus === "pending" && <button onClick={() => setVerifying((v) => (v === u.id ? null : u.id))} className="text-xs text-brand-600 hover:text-brand-700 font-medium">Verify identity (DID/VC)</button>}
+                    {identityIssuerEdge && manageable(u) && u.kycStatus === "pending" && <button onClick={() => setVerifying((v) => (v === u.id ? null : u.id))} className="text-xs text-brand-600 hover:text-brand-700 font-medium">Verify identity (DID/VC)</button>}
                     {canIssueKycRow(u) && <button onClick={() => setIssuingKyc((v) => (v === u.id ? null : u.id))} className="text-xs text-brand-600 hover:text-brand-700 font-medium">Issue KYC</button>}
                     {manageable(u) ? (
                       <>
@@ -291,7 +303,7 @@ function ManageUsers({ rows, me, useCases, onChanged }: { rows: Summary[]; me?: 
                         )}
                         <button onClick={() => setEditing(u)} className="text-xs text-brand-600 hover:text-brand-700">Edit</button>
                         <button onClick={() => act(() => api.updateUser(token!, u.id, { active: !u.active }))} className="text-xs text-amber-600 hover:text-amber-700">{u.active ? "Suspend" : "Reactivate"}</button>
-                        {u.kycStatus !== "rejected" && (
+                        {identityIssuerEdge && u.kycStatus !== "rejected" && (
                           <button onClick={() => { const reason = window.prompt("Reason for revoking this user's identity?")?.trim(); if (reason) void act(() => api.revokeUserIdentity(token!, u.id, reason).then(() => setNotice("Revoke proposal submitted — pending approval."))); }}
                             className="text-xs text-red-500 hover:text-red-700">Revoke identity</button>
                         )}
