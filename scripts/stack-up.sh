@@ -127,12 +127,18 @@ if [ "$WANT_IDENTITY" = 1 ] && [ "$WANT_TOKENIZATION" = 1 ]; then
   fi
   set -a; . "./$ENV_FILE"; set +a
   export IDENTITY_SERVICE_URL="${IDENTITY_SERVICE_URL:-http://identity-api:4000/api/v1}"
+  # A deployment cannot both own the identity domain locally AND delegate it
+  # to the linked stack — apps/api/src/env.ts refuses to boot on that pair.
+  # Narrow tokenization to its own domain now that identity-api is answering
+  # credential questions for it.
+  export ENABLED_DOMAINS="tokenization"
   say "tokenization will delegate identity to identity-api over '$NETWORK'"
 elif [ "$WANT_TOKENIZATION" = 1 ]; then
   # STANDALONE. Both variables must be empty together: half a pair is the
   # configuration that boots and then fails on the first gated transfer.
   export IDENTITY_SERVICE_URL=""
   export IDENTITY_SERVICE_KEY=""
+  export ENABLED_DOMAINS="tokenization,identity"
   say "tokenization will run STANDALONE (no identity service)"
 fi
 

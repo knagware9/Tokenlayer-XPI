@@ -49,7 +49,13 @@ services:
       PORT: "4000"
       NODE_ENV: production
       DATABASE_URL: "file:/data/tokenization.db"
-      ENABLED_DOMAINS: tokenization,identity
+      # Self-serving (both domains locally) by default — but a deployment that
+      # delegates identity to a linked stack (IDENTITY_SERVICE_URL set) MUST
+      # narrow this to just "tokenization", or the API refuses to boot: see
+      # the "running the identity domain AND pointing at a remote identity
+      # service is a contradiction" guard in apps/api/src/env.ts. stack-up.sh
+      # sets this override itself when it links both stacks together.
+      ENABLED_DOMAINS: ${ENABLED_DOMAINS:-tokenization,identity}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET — e.g. openssl rand -hex 32}
       DID_MASTER_KEY: ${DID_MASTER_KEY:?Set DID_MASTER_KEY — organization DID seeds are encrypted with it}
       # :8090 is identity-issuer-web — see the "identity-api" alias below; it
