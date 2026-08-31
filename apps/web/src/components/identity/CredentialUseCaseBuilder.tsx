@@ -236,6 +236,12 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
   async function previewCertificate(c: CredTypeDraft): Promise<void> {
     if (!token) return;
     const placements = withoutStalePlacements(c.certPlacements, claimKeysOf(c));
+    // Opened SYNCHRONOUSLY, in the same tick as the click — a popup blocker
+    // only recognises window.open as a direct response to a user gesture
+    // while that gesture is still live, and it is gone by the time an
+    // `await` resumes. Opening blank now and pointing it at the blob once
+    // the fetch resolves keeps the tab inside the gesture instead of after it.
+    const win = window.open("", "_blank");
     try {
       const blob = await api.previewCertificate(token, {
         credentialType: {
@@ -258,11 +264,12 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
         },
       });
       const url = URL.createObjectURL(blob);
-      window.open(url, "_blank");
+      if (win) win.location.href = url; else window.open(url, "_blank");
       // Revoking immediately would race the new tab's own load of the blob, so
       // hold it briefly; without any revoke every preview leaks a whole PDF.
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (e) {
+      win?.close();
       setError(e instanceof Error ? e.message : "preview failed");
     }
   }

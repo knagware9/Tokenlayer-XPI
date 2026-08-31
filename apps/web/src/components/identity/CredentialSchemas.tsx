@@ -28,12 +28,21 @@ function SchemaDetail({ useCase, name, onBack }: { useCase: CredentialUseCase; n
   async function previewStored(): Promise<void> {
     if (!token || !t) return;
     setErr(null); setBusy(true);
+    // Opened SYNCHRONOUSLY, in the same tick as the click — a browser's popup
+    // blocker allows window.open only while it can still see this as a direct
+    // response to a user gesture, and that permission is gone by the time an
+    // `await` resumes. Opening blank now and pointing it at the blob once the
+    // fetch resolves keeps the tab inside the gesture instead of after it.
+    const win = window.open("", "_blank");
     try {
       const blob = await api.previewStoredCertificate(token, useCase.key, t.name);
       const url = URL.createObjectURL(blob);
-      window.open(url, "_blank");
+      if (win) win.location.href = url; else window.open(url, "_blank");
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    } catch (e) { setErr(e instanceof ApiError ? e.message : "preview failed"); }
+    } catch (e) {
+      win?.close();
+      setErr(e instanceof ApiError ? e.message : "preview failed");
+    }
     finally { setBusy(false); }
   }
 
@@ -188,6 +197,9 @@ export function CredentialSchemas({ useCase, onChanged }: { useCase: CredentialU
   async function previewCertificate(): Promise<void> {
     if (!token) return;
     const placements = withoutStalePlacements(draft.certPlacements, claimKeysOf(draft));
+    // Opened synchronously, in the click's own gesture — see previewStored
+    // above for why this can't wait until after the fetch resolves.
+    const win = window.open("", "_blank");
     try {
       const blob = await api.previewCertificate(token, {
         credentialType: {
@@ -208,9 +220,12 @@ export function CredentialSchemas({ useCase, onChanged }: { useCase: CredentialU
         },
       });
       const url = URL.createObjectURL(blob);
-      window.open(url, "_blank");
+      if (win) win.location.href = url; else window.open(url, "_blank");
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    } catch (e) { setErr(e instanceof Error ? e.message : "preview failed"); }
+    } catch (e) {
+      win?.close();
+      setErr(e instanceof Error ? e.message : "preview failed");
+    }
   }
 
   const toggle = (list: string[], v: string): string[] => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
