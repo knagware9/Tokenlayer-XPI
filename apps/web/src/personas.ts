@@ -32,7 +32,7 @@ export const PERSONAS: WebPersona[] = [
     key: "identity-issuer", shell: "console", domain: "identity", label: "Issuer Console",
     description: "An authority defines credential programmes and issues, reissues and revokes credentials.",
     defaultView: "identity",
-    surfaces: ["identity", "identity-dashboard", "issue-credentials", "schemes", "credentials",
+    surfaces: ["identity", "identity-dashboard", "issue-credentials", "credential-schemas", "schemes", "credentials",
       "organizations", "developers", "users", "approvals", "audit", "profile", "logout", "back"],
   },
   {

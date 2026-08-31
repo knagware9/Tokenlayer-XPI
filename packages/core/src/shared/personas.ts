@@ -191,7 +191,7 @@ export const PERSONAS: readonly PersonaDef[] = [
     description: "An authority defines credential programmes and issues, reissues and revokes credentials.",
     defaultView: "identity",
     surfaces: [
-      "identity", "identity-dashboard", "issue-credentials", "schemes", "credentials",
+      "identity", "identity-dashboard", "issue-credentials", "credential-schemas", "schemes", "credentials",
       "organizations", "developers", "users", "approvals", "audit", "profile", "logout", "back",
     ],
     allow: [

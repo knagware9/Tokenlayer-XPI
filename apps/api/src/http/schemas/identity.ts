@@ -144,6 +144,19 @@ export const identitySchemas: Record<string, FastifySchema> = {
     // records the deferral for both.
     response: { ...errs(400, 401, 403) },
   },
+  previewStoredCertificate: {
+    tags: ["Credential Use Cases"], summary: "Render an already-saved credential type's certificate design as a sample PDF", security: eitherCredential,
+    description:
+      "Requires the `usecases:provision` scope **and** either a Platform/Org Admin or a desk operator (UseCaseAdmin " +
+      "or Issuer) scoped to this exact use case. The stored-config counterpart to `POST " +
+      "/credential-use-cases/preview-certificate`: no `credentialType` is posted — the type is read from the saved " +
+      "use case by `key` and `name`, so its background artwork id is never caller-supplied and there is no " +
+      "ownership check to get wrong. Same **SAMPLE — NOT A CREDENTIAL** stamp and the same fabricated `cred_sample` " +
+      "id whose status route answers 404.",
+    params: { type: "object", required: ["key", "name"], properties: { key: { type: "string" }, name: { type: "string" } } },
+    // Opaque PDF bytes — same documentation deferral as previewCertificate above.
+    response: { ...errs(401, 403, 404) },
+  },
   updateCertificateDesign: {
     tags: ["Credential Use Cases"], summary: "Set certificate artwork and field placements on a credential use case your organization owns", security: eitherCredential,
     description:

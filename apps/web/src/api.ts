@@ -129,6 +129,19 @@ export const api = {
     }
     return res.blob();
   },
+  /** Render an already-saved credential type's certificate design. Returns a PDF Blob, always stamped SAMPLE. */
+  previewStoredCertificate: async (token: string, key: string, name: string): Promise<Blob> => {
+    const res = await fetch(`${BASE}/credential-use-cases/${encodeURIComponent(key)}/credential-types/${encodeURIComponent(name)}/certificate-preview`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      let parsed: { message?: string; error?: string } | null = null;
+      try { parsed = text ? (JSON.parse(text) as { message?: string; error?: string }) : null; } catch { /* non-JSON error body */ }
+      throw new ApiError(parsed?.message ?? parsed?.error ?? res.statusText, res.status, parsed?.error);
+    }
+    return res.blob();
+  },
   /** Set artwork + placements on ONE credential type of a use case the caller's
    *  org owns. Writes nothing else on the definition — see the route's own
    *  comment for why that is the point. */

@@ -1375,6 +1375,34 @@
         }
       }
     },
+    "/api/v1/credential-use-cases/{key}/credential-types/{name}/certificate-preview": {
+      "get": {
+        "tags": [
+          "Credential Use Cases"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "usecases:provision"
+        ],
+        "parameters": [
+          "path:key!",
+          "path:name!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error"
+        }
+      }
+    },
     "/api/v1/credential-use-cases/{key}/credentials": {
       "post": {
         "tags": [

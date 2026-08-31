@@ -179,6 +179,70 @@ describe("credential QR route", () => {
   });
 });
 
+describe("stored credential-type certificate preview route", () => {
+  it("PlatformAdmin, and a UseCaseAdmin scoped to this use case, can both preview an existing type's design", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const admin2 = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    await seedUseCase(app, admin);
+
+    const platform = await app.inject({
+      method: "GET", url: `${V1}/credential-use-cases/domicile-cert/credential-types/DomicileCredential/certificate-preview`,
+      headers: auth(admin),
+    });
+    expect(platform.statusCode).toBe(200);
+    expect(platform.headers["content-type"]).toMatch(/^application\/pdf/);
+    expect(pdfBuf(platform).subarray(0, 5).toString("latin1")).toBe("%PDF-");
+
+    // The bug this route exists to fix: a UseCaseAdmin authoring their OWN
+    // use case's schema could not preview it at all — POST
+    // /credential-use-cases/preview-certificate is PlatformAdmin/OrgAdmin-only,
+    // and a desk operator has neither role.
+    await onboardUser(app, admin, admin2, { email: "certpreview.admin@x.dev", password: "secret1", role: "UseCaseAdmin", useCaseKey: "domicile-cert" });
+    const ucAdminToken = await loginAs(app, "certpreview.admin@x.dev", "secret1");
+    const scoped = await app.inject({
+      method: "GET", url: `${V1}/credential-use-cases/domicile-cert/credential-types/DomicileCredential/certificate-preview`,
+      headers: auth(ucAdminToken),
+    });
+    expect(scoped.statusCode).toBe(200);
+    expect(pdfBuf(scoped).subarray(0, 5).toString("latin1")).toBe("%PDF-");
+  });
+
+  it("previews the built-in layout for a type with no certificate config at all", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    await seedUseCase(app, admin);
+    const res = await app.inject({
+      method: "GET", url: `${V1}/credential-use-cases/domicile-cert/credential-types/PlainCredential/certificate-preview`,
+      headers: auth(admin),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(pdfBuf(res).subarray(0, 5).toString("latin1")).toBe("%PDF-");
+  });
+
+  it("refuses a UseCaseAdmin scoped to a DIFFERENT use case (403), and 404s an unknown type name", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const admin2 = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    await seedUseCase(app, admin);
+    await seedUseCase(app, admin, "other-cert");
+    await onboardUser(app, admin, admin2, { email: "certpreview.other@x.dev", password: "secret1", role: "UseCaseAdmin", useCaseKey: "other-cert" });
+    const otherToken = await loginAs(app, "certpreview.other@x.dev", "secret1");
+
+    const wrongDesk = await app.inject({
+      method: "GET", url: `${V1}/credential-use-cases/domicile-cert/credential-types/DomicileCredential/certificate-preview`,
+      headers: auth(otherToken),
+    });
+    expect(wrongDesk.statusCode).toBe(403);
+
+    const unknownType = await app.inject({
+      method: "GET", url: `${V1}/credential-use-cases/domicile-cert/credential-types/NoSuchType/certificate-preview`,
+      headers: auth(admin),
+    });
+    expect(unknownType.statusCode).toBe(404);
+  });
+});
+
 describe("certificate helper functions", () => {
   it("humanizeKey title-cases camelCase / snake / kebab keys", () => {
     expect(humanizeKey("fullName")).toBe("Full Name");

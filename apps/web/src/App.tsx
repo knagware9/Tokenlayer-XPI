@@ -15,6 +15,7 @@ import { IdentityHome } from "./components/identity/IdentityHome.js";
 import { InvestorPortal } from "./components/tokenization/InvestorPortal.js";
 import { InvoiceRegister } from "./components/tokenization/InvoiceRegister.js";
 import { IssueUsecaseCredential } from "./components/identity/IssueUsecaseCredential.js";
+import { CredentialSchemas } from "./components/identity/CredentialSchemas.js";
 import { Login } from "./components/shared/Login.js";
 import { MyIdentity } from "./components/identity/MyIdentity.js";
 import { MyProfile } from "./components/shared/MyProfile.js";
@@ -262,6 +263,7 @@ export function App(): JSX.Element {
     const idItems: NavItem[] = [
       ...(r === "UseCaseAdmin" || r === "Issuer" ? [{ id: "identity-dashboard", label: "Issuance Dashboard", icon: "spark" as const }] : []),
       ...(r === "UseCaseAdmin" || r === "Issuer" ? [{ id: "issue-credentials", label: "Issue Credentials", icon: "doc" as const }] : []),
+      ...(r === "UseCaseAdmin" ? [{ id: "credential-schemas", label: "Credential Schemas", icon: "doc" as const }] : []),
       ...(r === "UseCaseAdmin" || r === "Verifier" ? [{ id: "verify-dashboard", label: "Verification Dashboard", icon: "spark" as const }] : []),
       ...(r === "UseCaseAdmin" || r === "Verifier" ? [{ id: "verify", label: "Verify Credentials", icon: "shield" as const }] : []),
       ...(r === "UseCaseAdmin" || r === "Issuer" ? [{ id: "approvals", label: "Approvals", icon: "check" as const }] : []),
@@ -279,6 +281,10 @@ export function App(): JSX.Element {
       idPanel = deskCredUC
         ? <IssueUsecaseCredential useCase={deskCredUC} onIssued={reloadDeskCredUC} />
         : <SectionHeader title="Issue Credentials" description="Loading this desk's credential use case…" />;
+    } else if (idActive === "credential-schemas") {
+      idPanel = deskCredUC
+        ? <CredentialSchemas useCase={deskCredUC} onChanged={reloadDeskCredUC} />
+        : <SectionHeader title="Credential Schemas" description="Loading this desk's credential use case…" />;
     } else if (idActive === "verify") {
       idPanel = <VerificationRequests />;
     } else if (idActive === "approvals") {
