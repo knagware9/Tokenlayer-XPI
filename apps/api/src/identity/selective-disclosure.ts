@@ -81,8 +81,8 @@ export function resolveDisclosures(
     if (!claims) return { ok: false, error: "UNKNOWN_CREDENTIAL", message: `'${credentialId}' is not one of the credentials being presented` };
     const out: Record<string, ResolvedDisclosure> = {};
     for (const [field, choice] of Object.entries(fields)) {
-      if (choice.kind === "withhold") continue;
       if (!(field in claims)) return { ok: false, error: "UNKNOWN_FIELD", message: `'${field}' is not a claim of credential '${credentialId}'` };
+      if (choice.kind === "withhold") continue;
       if (choice.kind === "value") {
         out[field] = { kind: "value", value: claims[field] };
       } else {

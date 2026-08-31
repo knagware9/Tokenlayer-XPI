@@ -71,6 +71,12 @@ describe("resolveDisclosures", () => {
     expect(r.ok).toBe(false);
     expect(!r.ok && r.error).toBe("UNKNOWN_FIELD");
   });
+  it("rejects withhold on an unknown field too — the existence check is unconditional", () => {
+    const d: Record<string, Record<string, DisclosureChoice>> = { cred_1: { notARealField: { kind: "withhold" } } };
+    const r = resolveDisclosures(d, CLAIMS);
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.error).toBe("UNKNOWN_FIELD");
+  });
   it("rejects a predicate on a non-numeric claim", () => {
     const d: Record<string, Record<string, DisclosureChoice>> = { cred_1: { holderName: { kind: "predicate", op: "eq", threshold: 1 } } };
     const r = resolveDisclosures(d, CLAIMS);
