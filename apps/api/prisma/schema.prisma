@@ -371,6 +371,8 @@ model VerificationRequest {
   presentationVpJwt      String? // the holder-signed VP, set at consent
   consentedAt            DateTime?
   consentedCredentialIds String? // JSON array, set at consent
+  requestedFields        String? // JSON: Record<type, Record<field, FieldRequest>>, set at create
+  consentedDisclosures   String? // JSON: Record<credentialId, Record<field, ResolvedDisclosure>>, set at consent
   verifierResult         String? // JSON verification result, set at verify
   verifiedAt             DateTime?
   createdAt              DateTime  @default(now())

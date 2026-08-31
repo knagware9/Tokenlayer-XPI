@@ -6,6 +6,7 @@
  * verifiable credentials and both products need that.
  */
 import type { CredentialUseCaseDefinition, UseCaseTemplate } from "@tokenlayer/core";
+import type { FieldRequest, ResolvedDisclosure } from "../../identity/selective-disclosure.js";
 
 export interface CredentialUseCaseRepository {
   create(def: CredentialUseCaseDefinition): Promise<CredentialUseCaseDefinition>;
@@ -37,6 +38,14 @@ export interface VerificationRequestRecord {
   presentationVpJwt: string | null;
   consentedAt: string | null;
   consentedCredentialIds: string[] | null;
+  /** The verifier's advisory per-field ask, set at create time. Never a floor
+   *  on disclosure — see `consentedDisclosures`. */
+  requestedFields: Record<string, Record<string, FieldRequest>> | null;
+  /** What the holder actually chose to disclose, resolved (predicates
+   *  evaluated to a boolean, never a raw value) at consent time. `null` means
+   *  "no `disclosures` was supplied" — every field of every consented
+   *  credential discloses in full, same as before this feature existed. */
+  consentedDisclosures: Record<string, Record<string, ResolvedDisclosure>> | null;
   verifierResult: Record<string, unknown> | null;
   verifiedAt: string | null;
   createdAt: string;
@@ -50,7 +59,7 @@ export interface VerificationRequestRepository {
   listByVerifierOrg(orgId: string, status?: string): Promise<VerificationRequestRecord[]>;
   /** Every stored request, unordered — dashboard aggregation input (callers sort/filter). */
   list(): Promise<VerificationRequestRecord[]>;
-  setConsented(id: string, input: { vpJwt: string; credentialIds: string[]; at: string }): Promise<VerificationRequestRecord>;
+  setConsented(id: string, input: { vpJwt: string; credentialIds: string[]; at: string; disclosures: Record<string, Record<string, ResolvedDisclosure>> | null }): Promise<VerificationRequestRecord>;
   setStatus(id: string, status: VerificationStatus): Promise<VerificationRequestRecord>;
   setVerifierResult(id: string, input: { result: Record<string, unknown>; at: string }): Promise<VerificationRequestRecord>;
 }

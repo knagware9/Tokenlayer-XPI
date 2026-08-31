@@ -8,6 +8,7 @@
 import { id, now } from "./common.js";
 import type { CredentialUseCaseDefinition, UseCaseTemplate } from "@tokenlayer/core";
 import type { CredentialUseCaseRepository, CredentialUseCaseTemplateRepository, VerificationRequestRecord, VerificationRequestRepository, VerificationStatus } from "../types/index.js";
+import type { ResolvedDisclosure } from "../../identity/selective-disclosure.js";
 
 export class MemoryCredentialUseCaseRepository implements CredentialUseCaseRepository {
   private store = new Map<string, CredentialUseCaseDefinition>();
@@ -60,10 +61,11 @@ export class MemoryVerificationRequestRepository implements VerificationRequestR
   async list(): Promise<VerificationRequestRecord[]> {
     return [...this.byId.values()];
   }
-  async setConsented(reqId: string, input: { vpJwt: string; credentialIds: string[]; at: string }): Promise<VerificationRequestRecord> {
+  async setConsented(reqId: string, input: { vpJwt: string; credentialIds: string[]; at: string; disclosures: Record<string, Record<string, ResolvedDisclosure>> | null }): Promise<VerificationRequestRecord> {
     const rec = this.byId.get(reqId);
     if (!rec) throw new Error(`unknown verification request '${reqId}'`);
     rec.status = "consented"; rec.presentationVpJwt = input.vpJwt; rec.consentedCredentialIds = input.credentialIds; rec.consentedAt = input.at;
+    rec.consentedDisclosures = input.disclosures;
     return rec;
   }
   async setStatus(reqId: string, status: VerificationStatus): Promise<VerificationRequestRecord> {

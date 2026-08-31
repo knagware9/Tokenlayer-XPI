@@ -8,6 +8,7 @@
 import { prisma } from "./client.js";
 import type { CredentialUseCaseDefinition, UseCaseTemplate } from "@tokenlayer/core";
 import type { CredentialUseCaseRepository, CredentialUseCaseTemplateRepository, VerificationRequestRecord, VerificationRequestRepository, VerificationStatus } from "../types/index.js";
+import type { FieldRequest, ResolvedDisclosure } from "../../identity/selective-disclosure.js";
 
 export function rowToCredentialUseCase(r: {
   key: string; name: string; description: string | null;
@@ -79,6 +80,7 @@ export class PrismaCredentialUseCaseTemplateRepository implements CredentialUseC
 const toVerificationRequest = (r: {
   id: string; verifierOrgId: string; holderDid: string; requestedTypes: string; purpose: string; challenge: string;
   status: string; presentationVpJwt: string | null; consentedAt: Date | null; consentedCredentialIds: string | null;
+  requestedFields: string | null; consentedDisclosures: string | null;
   verifierResult: string | null; verifiedAt: Date | null; createdAt: Date; expiresAt: Date;
   credentialUseCaseKey: string | null;
 }): VerificationRequestRecord => ({
@@ -87,6 +89,8 @@ const toVerificationRequest = (r: {
   status: r.status as VerificationStatus, presentationVpJwt: r.presentationVpJwt,
   consentedAt: r.consentedAt ? r.consentedAt.toISOString() : null,
   consentedCredentialIds: r.consentedCredentialIds ? (JSON.parse(r.consentedCredentialIds) as string[]) : null,
+  requestedFields: r.requestedFields ? (JSON.parse(r.requestedFields) as Record<string, Record<string, FieldRequest>>) : null,
+  consentedDisclosures: r.consentedDisclosures ? (JSON.parse(r.consentedDisclosures) as Record<string, Record<string, ResolvedDisclosure>>) : null,
   verifierResult: r.verifierResult ? (JSON.parse(r.verifierResult) as Record<string, unknown>) : null,
   verifiedAt: r.verifiedAt ? r.verifiedAt.toISOString() : null,
   createdAt: r.createdAt.toISOString(), expiresAt: r.expiresAt.toISOString(),
@@ -102,6 +106,8 @@ export class PrismaVerificationRequestRepository implements VerificationRequestR
         status: input.status, presentationVpJwt: input.presentationVpJwt,
         consentedAt: input.consentedAt ? new Date(input.consentedAt) : null,
         consentedCredentialIds: input.consentedCredentialIds ? JSON.stringify(input.consentedCredentialIds) : null,
+        requestedFields: input.requestedFields ? JSON.stringify(input.requestedFields) : null,
+        consentedDisclosures: input.consentedDisclosures ? JSON.stringify(input.consentedDisclosures) : null,
         verifierResult: input.verifierResult ? JSON.stringify(input.verifierResult) : null,
         verifiedAt: input.verifiedAt ? new Date(input.verifiedAt) : null,
         expiresAt: new Date(input.expiresAt),
@@ -122,8 +128,15 @@ export class PrismaVerificationRequestRepository implements VerificationRequestR
   async list(): Promise<VerificationRequestRecord[]> {
     return (await prisma.verificationRequest.findMany()).map(toVerificationRequest);
   }
-  async setConsented(id: string, input: { vpJwt: string; credentialIds: string[]; at: string }): Promise<VerificationRequestRecord> {
-    return toVerificationRequest(await prisma.verificationRequest.update({ where: { id }, data: { status: "consented", presentationVpJwt: input.vpJwt, consentedCredentialIds: JSON.stringify(input.credentialIds), consentedAt: new Date(input.at) } }));
+  async setConsented(id: string, input: { vpJwt: string; credentialIds: string[]; at: string; disclosures: Record<string, Record<string, ResolvedDisclosure>> | null }): Promise<VerificationRequestRecord> {
+    return toVerificationRequest(await prisma.verificationRequest.update({
+      where: { id },
+      data: {
+        status: "consented", presentationVpJwt: input.vpJwt,
+        consentedCredentialIds: JSON.stringify(input.credentialIds), consentedAt: new Date(input.at),
+        consentedDisclosures: input.disclosures ? JSON.stringify(input.disclosures) : null,
+      },
+    }));
   }
   async setStatus(id: string, status: VerificationStatus): Promise<VerificationRequestRecord> {
     return toVerificationRequest(await prisma.verificationRequest.update({ where: { id }, data: { status } }));
