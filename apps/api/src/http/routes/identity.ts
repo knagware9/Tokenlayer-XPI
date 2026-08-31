@@ -359,6 +359,40 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
   });
 
 
+  // Additive counterpart to the PATCH above: a use case's OWN UseCaseAdmin can
+  // append one new credential type without the authority (or the blast radius)
+  // of a full-definition replace — they can neither rebind the issuer/holder/
+  // verifier nor touch an existing type. PlatformAdmin already has full-replace
+  // PATCH for everything else, so this route is deliberately narrower than that,
+  // not an alternative path to it.
+  app.post("/credential-use-cases/:key/credential-types", { schema: S.addCredentialType, ...authScoped("usecases:provision") }, async (request, reply) => {
+    const claims = request.user as TokenClaims;
+    const key = (request.params as { key: string }).key;
+    if (!(claims.role === "UseCaseAdmin" && claims.useCaseKey === key)) {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "only this use case's UseCaseAdmin may add a credential type" });
+    }
+    const existing = await deps.credentialUseCases.get(key);
+    if (!existing) return notFound(reply, "credential use case not found");
+    const newType = request.body as CredentialTypeSpec;
+    if (existing.credentialTypes.some((t) => t.name === newType.name)) {
+      return reply.code(409).send({ error: "TYPE_EXISTS", message: `credential type '${newType.name}' already exists on this use case` });
+    }
+    const def = { ...existing, credentialTypes: [...existing.credentialTypes, newType] };
+    const known = await referencedOrgs(def);
+    try {
+      validateCredentialUseCase(def, { orgExists: (id) => known.has(id) });
+    } catch (err) {
+      return reply.code(400).send({ error: "INVALID_CREDENTIAL_USECASE", message: (err as Error).message });
+    }
+    const badBackground = await checkDefinitionBackgrounds(def);
+    if (badBackground) return reply.code(400).send(badBackground);
+    const violation = await credentialUseCaseCapabilityViolation(def, known);
+    if (violation) return orgCapabilityMissing(reply, violation.org, violation.missing);
+    const updated = await deps.credentialUseCases.update(key, def);
+    await deps.audit.append({ actorId: claims.id, action: "credential-usecase-updated" as LifecycleAction, payload: { key, addedCredentialType: newType.name } });
+    return reply.code(200).send(updated);
+  });
+
 
 
   // --- credential use-case TEMPLATE catalog (ID-G) ------------------------
@@ -1112,7 +1146,12 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
     const resolved = await resolveIssuer(request, reply, def, key); // same gate as issuing
     if (!resolved) return;
     const out: { kind: "user" | "org"; id: string; label: string; did: string; subLabel: string | null }[] = [];
-    const users = await deps.users.list();
+    // Scoped to holders onboarded UNDER THIS use case (u.useCaseKey === key) —
+    // "any-onboarded" means "any org type is fine", never "show every DID on the
+    // platform". An org-kind holder is a platform-wide entity, not onboarded per
+    // use case, so the org loop below is unaffected and keeps its own scoping via
+    // holderPolicyAllows.
+    const users = await deps.users.list(key);
     for (const u of users) {
       if (!u.did) continue;
       const org = u.orgId ? await deps.organizations.get(u.orgId) : null;

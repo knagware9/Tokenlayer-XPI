@@ -3,11 +3,20 @@ import { useAuth } from "../../auth.js";
 import { api, ApiError } from "../../api.js";
 import type { CredentialUseCase, CredentialTypeSpec, EligibleHolder } from "../../types.js";
 import { BatchCsv } from "../shared/BatchCsv.js";
+import { SchemaFieldEditor, fieldsToSchema, type FieldRow } from "../shared/SchemaFieldEditor.js";
 
 export function IssueUsecaseCredential({ useCase, onIssued }: { useCase: CredentialUseCase; onIssued: () => void }): JSX.Element {
+  const { user } = useAuth();
   const [mode, setMode] = useState<"single" | "batch">("single");
   const [typeName, setTypeName] = useState(useCase.credentialTypes[0]?.name ?? "");
   const spec: CredentialTypeSpec | undefined = useCase.credentialTypes.find((t) => t.name === typeName);
+  // The dropdown's selection can point at a type that has since been removed
+  // from a reloaded `useCase` (stale after a full-replace PATCH elsewhere) —
+  // fall back to the first available type rather than issuing nothing.
+  useEffect(() => {
+    if (!useCase.credentialTypes.some((t) => t.name === typeName)) setTypeName(useCase.credentialTypes[0]?.name ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [useCase.credentialTypes]);
 
   return (
     <div className="rounded-lg border border-slate-200 p-4 mt-3">
@@ -29,6 +38,92 @@ export function IssueUsecaseCredential({ useCase, onIssued }: { useCase: Credent
       ) : spec ? (
         <BatchIssueCredential useCase={useCase} spec={spec} onIssued={onIssued} />
       ) : null}
+      {user?.role === "UseCaseAdmin" && <AddCredentialType useCase={useCase} onAdded={onIssued} />}
+    </div>
+  );
+}
+
+const emptyTypeDraft = (): { name: string; title: string; validityDays: string; requiredApprovals: string; fields: FieldRow[] } =>
+  ({ name: "", title: "", validityDays: "365", requiredApprovals: "1", fields: [] });
+
+/** UseCaseAdmin-only: append a new credential type to THIS use case, without the
+ * risk of PlatformAdmin's full-definition PATCH. Collapsed by default so the
+ * common "issue a credential" path stays uncluttered. */
+function AddCredentialType({ useCase, onAdded }: { useCase: CredentialUseCase; onAdded: () => void }): JSX.Element {
+  const { token } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(emptyTypeDraft());
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(): Promise<void> {
+    setErr(null);
+    const name = draft.name.trim();
+    if (!name || !/^[A-Za-z][A-Za-z0-9]*$/.test(name)) { setErr("name must start with a letter and contain only letters/digits"); return; }
+    if (useCase.credentialTypes.some((t) => t.name === name)) { setErr(`'${name}' already exists on this use case`); return; }
+    const validityDays = Number(draft.validityDays);
+    if (!(validityDays > 0)) { setErr("validity days must be a positive number"); return; }
+    const requiredApprovals = Number(draft.requiredApprovals);
+    if (!(Number.isInteger(requiredApprovals) && requiredApprovals >= 1)) { setErr("required approvals must be a whole number, 1 or more"); return; }
+    const claimSchema = fieldsToSchema(draft.fields);
+    if (Object.keys(claimSchema.properties).length === 0) { setErr("add at least one claim field"); return; }
+    if (!token) return;
+    setBusy(true);
+    try {
+      await api.addCredentialType(token, useCase.key, {
+        name, title: draft.title.trim() || name, validityDays, requiredApprovals, claimSchema,
+      });
+      setDraft(emptyTypeDraft());
+      setOpen(false);
+      onAdded();
+    } catch (e) { setErr(e instanceof ApiError ? e.message : String(e)); }
+    finally { setBusy(false); }
+  }
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="mt-3 text-xs text-brand-600 hover:text-brand-700 font-medium"
+      >
+        + Add a credential schema to this use case
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-3 pt-3 border-t border-slate-100">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-sm font-medium">Add a credential schema</div>
+        <button onClick={() => { setOpen(false); setErr(null); }} className="text-xs text-slate-500 hover:text-slate-700">Cancel</button>
+      </div>
+      {err && <div className="text-sm text-rose-600 mb-2">{err}</div>}
+      <div className="grid grid-cols-2 gap-2 mb-2">
+        <div>
+          <label className="block text-xs text-slate-500 mb-1">Name (machine id, e.g. AddressProof)</label>
+          <input className="input w-full" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+        </div>
+        <div>
+          <label className="block text-xs text-slate-500 mb-1">Title (display name)</label>
+          <input className="input w-full" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
+        </div>
+        <div>
+          <label className="block text-xs text-slate-500 mb-1">Validity (days)</label>
+          <input className="input w-full" type="number" value={draft.validityDays} onChange={(e) => setDraft({ ...draft, validityDays: e.target.value })} />
+        </div>
+        <div>
+          <label className="block text-xs text-slate-500 mb-1">Required approvals</label>
+          <input className="input w-full" type="number" value={draft.requiredApprovals} onChange={(e) => setDraft({ ...draft, requiredApprovals: e.target.value })} />
+        </div>
+      </div>
+      <SchemaFieldEditor fields={draft.fields} onChange={(fields) => setDraft({ ...draft, fields })} />
+      <button
+        onClick={() => void submit()}
+        disabled={busy}
+        className="mt-3 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+      >
+        {busy ? "Adding…" : "Add credential schema"}
+      </button>
     </div>
   );
 }

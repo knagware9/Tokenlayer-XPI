@@ -1345,6 +1345,36 @@
         }
       }
     },
+    "/api/v1/credential-use-cases/{key}/credential-types": {
+      "post": {
+        "tags": [
+          "Credential Use Cases"
+        ],
+        "security": [
+          [
+            "apiKeyAuth"
+          ],
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": [
+          "usecases:provision"
+        ],
+        "parameters": [
+          "path:key!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "#CredentialUseCase",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error",
+          "409": "#Error"
+        }
+      }
+    },
     "/api/v1/credential-use-cases/{key}/credentials": {
       "post": {
         "tags": [

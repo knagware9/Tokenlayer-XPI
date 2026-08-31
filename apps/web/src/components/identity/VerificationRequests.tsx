@@ -24,10 +24,12 @@ const CHECK_ROWS = [
  * NOT_A_VERIFIER — the form simply surfaces that error for them.
  */
 export function VerificationRequests(): JSX.Element {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const [types, setTypes] = useState<CredentialTypeInfo[]>([]);
   const [useCases, setUseCases] = useState<CredentialUseCase[]>([]);
-  const [selectedKey, setSelectedKey] = useState("");
+  // A desk-scoped Verifier has one obvious use case — default to it instead of
+  // "none (generic)" so they don't have to hunt it out of the full platform list.
+  const [selectedKey, setSelectedKey] = useState(user?.useCaseKey ?? "");
   const [holderDid, setHolderDid] = useState("");
   const [picked, setPicked] = useState<Record<string, boolean>>({});
   const [fieldRequests, setFieldRequests] = useState<Record<string, Record<string, FieldRequest>>>({});
@@ -62,6 +64,13 @@ export function VerificationRequests(): JSX.Element {
     if (fromUseCase) return fromUseCase;
     return types.find((t) => t.type === typeName)?.claimSchema.properties ?? {};
   };
+  // A use case with exactly one credential schema needs no picker at all — request
+  // it automatically. One with more than one still asks which schema(s) to request.
+  useEffect(() => {
+    const [only] = typeNames;
+    if (typeNames.length === 1 && only) setPicked((p) => (p[only] ? p : { ...p, [only]: true }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedKey, typeNames.length]);
 
   async function submit(): Promise<void> {
     if (!token) return;
@@ -115,6 +124,7 @@ export function VerificationRequests(): JSX.Element {
           <option value="">— none (generic) —</option>
           {useCases.map((u) => <option key={u.key} value={u.key}>{u.name} ({u.key})</option>)}
         </select>
+        {typeNames.length > 1 && <label className="block text-xs text-slate-500 mb-1">Credential schema</label>}
         <div className="space-y-2 mb-2">
           {typeNames.map((t) => {
             const props = propertiesOf(t);
@@ -126,9 +136,13 @@ export function VerificationRequests(): JSX.Element {
             };
             return (
               <div key={t}>
-                <label className="text-sm flex items-center gap-1">
-                  <input type="checkbox" checked={!!picked[t]} onChange={(e) => setPicked({ ...picked, [t]: e.target.checked })} /> {t}
-                </label>
+                {typeNames.length > 1 ? (
+                  <label className="text-sm flex items-center gap-1">
+                    <input type="checkbox" checked={!!picked[t]} onChange={(e) => setPicked({ ...picked, [t]: e.target.checked })} /> {t}
+                  </label>
+                ) : (
+                  <div className="text-sm text-slate-600">Credential schema: <span className="font-medium text-slate-900">{t}</span></div>
+                )}
                 {picked[t] && Object.keys(props).length > 0 && (
                   <div className="ml-5 mt-1 space-y-1 border-l border-slate-100 pl-3">
                     <div className="text-[11px] uppercase tracking-wide text-slate-400">Request specific fields (optional)</div>

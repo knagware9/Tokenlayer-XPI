@@ -349,6 +349,92 @@ describe("scoped desk issuance", () => {
     const approve = await app.inject({ method: "POST", url: `${V1}/proposals/${proposalId}/approve`, headers: auth(admin2), payload: {} });
     expect(approve.statusCode).toBe(200);
   });
+
+  it("eligible-holders is scoped to holders onboarded under THIS use case, not every DID on the platform", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const admin2 = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    const keyA = await createCredUC(app, admin, "roster-uc-a");
+    const keyB = await createCredUC(app, admin, "roster-uc-b");
+
+    await onboardUser(app, admin, admin2, { email: "roster.a.holder@x.dev", password: "secret1", role: "Holder", useCaseKey: keyA });
+    await onboardUser(app, admin, admin2, { email: "roster.b.holder@x.dev", password: "secret1", role: "Holder", useCaseKey: keyB });
+
+    const rowsA = (await app.inject({ method: "GET", url: `${V1}/credential-use-cases/${keyA}/eligible-holders`, headers: auth(admin) }))
+      .json() as { kind: string; label: string }[];
+    const labelsA = rowsA.filter((r) => r.kind === "user").map((r) => r.label);
+    expect(labelsA).toContain("roster.a.holder@x.dev");
+    // The other use case's holder must NOT leak into this roster, even though
+    // both use cases have "any-onboarded" — that policy means "any org type",
+    // never "every DID-holding account regardless of which desk onboarded them".
+    expect(labelsA).not.toContain("roster.b.holder@x.dev");
+  });
+});
+
+describe("UseCaseAdmin adds a credential type to their own use case", () => {
+  it("the UseCaseAdmin of THIS use case can append a new credential type, additively", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const admin2 = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    const key = await createCredUC(app, admin, "addtype-uc");
+    await onboardUser(app, admin, admin2, { email: "addtype.admin@x.dev", password: "secret1", role: "UseCaseAdmin", useCaseKey: key });
+    const ucAdminToken = await loginAs(app, "addtype.admin@x.dev", "secret1");
+
+    const add = await app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/${key}/credential-types`, headers: auth(ucAdminToken),
+      payload: { name: "SecondType", title: "Second Type", validityDays: 180, requiredApprovals: 1,
+        claimSchema: { type: "object", required: ["b"], properties: { b: { type: "string" } } } },
+    });
+    expect(add.statusCode).toBe(200);
+    const types = (add.json() as { credentialTypes: { name: string }[] }).credentialTypes.map((t) => t.name);
+    // Additive: the ORIGINAL type ("T", from createCredUC) survives untouched.
+    expect(types).toEqual(["T", "SecondType"]);
+
+    // Persisted, not just echoed back.
+    const reread = await app.inject({ method: "GET", url: `${V1}/credential-use-cases/${key}`, headers: auth(admin) });
+    expect((reread.json() as { credentialTypes: { name: string }[] }).credentialTypes.map((t) => t.name)).toEqual(["T", "SecondType"]);
+  });
+
+  it("rejects a duplicate name (409), and refuses a UseCaseAdmin scoped to a DIFFERENT use case (403)", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const admin2 = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    const keyA = await createCredUC(app, admin, "addtype-uc-a");
+    const keyB = await createCredUC(app, admin, "addtype-uc-b");
+    await onboardUser(app, admin, admin2, { email: "addtype.a.admin@x.dev", password: "secret1", role: "UseCaseAdmin", useCaseKey: keyA });
+    const ucAdminA = await loginAs(app, "addtype.a.admin@x.dev", "secret1");
+
+    const dup = await app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/${keyA}/credential-types`, headers: auth(ucAdminA),
+      payload: { name: "T", title: "dup", validityDays: 180, requiredApprovals: 1,
+        claimSchema: { type: "object", required: [], properties: {} } },
+    });
+    expect(dup.statusCode).toBe(409);
+    expect(dup.json().error).toBe("TYPE_EXISTS");
+
+    const wrongDesk = await app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/${keyB}/credential-types`, headers: auth(ucAdminA),
+      payload: { name: "NewType", title: "new", validityDays: 180, requiredApprovals: 1,
+        claimSchema: { type: "object", required: [], properties: {} } },
+    });
+    expect(wrongDesk.statusCode).toBe(403);
+  });
+
+  it("an Issuer (not UseCaseAdmin) at the same desk cannot add a credential type", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const admin2 = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    const key = await createCredUC(app, admin, "addtype-issuer-uc");
+    await onboardUser(app, admin, admin2, { email: "addtype.issuer@x.dev", password: "secret1", role: "Issuer", useCaseKey: key });
+    const issuerToken = await loginAs(app, "addtype.issuer@x.dev", "secret1");
+
+    const res = await app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/${key}/credential-types`, headers: auth(issuerToken),
+      payload: { name: "NewType", title: "new", validityDays: 180, requiredApprovals: 1,
+        claimSchema: { type: "object", required: [], properties: {} } },
+    });
+    expect(res.statusCode).toBe(403);
+  });
 });
 
 describe("scoped desk revoke", () => {

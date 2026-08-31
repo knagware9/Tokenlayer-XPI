@@ -48,6 +48,20 @@ export const identitySchemas: Record<string, FastifySchema> = {
     body: { type: "object", additionalProperties: true },
     response: { 200: { $ref: "CredentialUseCase#" }, ...errs(400, 401, 403, 404) },
   },
+  addCredentialType: {
+    tags: ["Credential Use Cases"], summary: "Add a credential type to an existing use case (that use case's UseCaseAdmin)", security: eitherCredential,
+    description:
+      "Requires the `usecases:provision` scope **and** the UseCaseAdmin scoped to this exact use case (`claims.useCaseKey === key`) " +
+      "— a narrower, additive counterpart to `PATCH /credential-use-cases/{key}`, which is PlatformAdmin-only and replaces the " +
+      "whole definition. This route only APPENDS one new named credential type; every other field of the definition — issuer, " +
+      "holder policy, verifier, and the existing credential types — is read from storage and left untouched. The body is a full " +
+      "`CredentialTypeSpec` (`name`, `title`, `validityDays`, `requiredApprovals`, `claimSchema`, optional `certificate`). Answers " +
+      "**409** `TYPE_EXISTS` when the name is already taken on this use case, and the same `INVALID_CREDENTIAL_USECASE` / " +
+      "`BACKGROUND_IS_BRAND_LOGO` / `CERTIFICATE_LOGO_IS_BRAND_LOGO` 400s as the two routes above.",
+    params: { type: "object", required: ["key"], properties: { key: { type: "string" } } },
+    body: { type: "object", additionalProperties: true, required: ["name", "title", "validityDays", "claimSchema"] },
+    response: { 200: { $ref: "CredentialUseCase#" }, ...errs(400, 401, 403, 404, 409) },
+  },
   listUseCaseTemplates: {
     tags: ["Credential Use Cases"], summary: "List the credential-use-case template catalog (built-in + saved)", security: humanOnly,
     description: "Built-in catalog templates and saved ones together. The `body` skeleton is STRIPPED here — fetch a template by key to get it.",

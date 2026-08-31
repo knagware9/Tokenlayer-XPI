@@ -215,7 +215,7 @@ export function App(): JSX.Element {
       { id: "schemes", label: "Schemes", icon: "doc" },
       { id: "approvals", label: "Approvals", icon: "check" },
       ...(canManageUsers(user.role) ? [{ id: "users", label: "User Management", icon: "users" as const }] : []),
-      { id: "verify", label: "Verification", icon: "shield" },
+      { id: "verify", label: "Verify Credentials", icon: "shield" },
       { id: "identity", label: "Identity", icon: "shield" },
       { id: "identity-dashboard", label: "Identity Dashboard", icon: "spark" },
       { id: "networks", label: "Networks", icon: "chain" },
@@ -263,7 +263,7 @@ export function App(): JSX.Element {
       ...(r === "UseCaseAdmin" || r === "Issuer" ? [{ id: "identity-dashboard", label: "Issuance Dashboard", icon: "spark" as const }] : []),
       ...(r === "UseCaseAdmin" || r === "Issuer" ? [{ id: "issue-credentials", label: "Issue Credentials", icon: "doc" as const }] : []),
       ...(r === "UseCaseAdmin" || r === "Verifier" ? [{ id: "verify-dashboard", label: "Verification Dashboard", icon: "spark" as const }] : []),
-      ...(r === "UseCaseAdmin" || r === "Verifier" ? [{ id: "verify", label: "Verification", icon: "shield" as const }] : []),
+      ...(r === "UseCaseAdmin" || r === "Verifier" ? [{ id: "verify", label: "Verify Credentials", icon: "shield" as const }] : []),
       ...(r === "UseCaseAdmin" || r === "Issuer" ? [{ id: "approvals", label: "Approvals", icon: "check" as const }] : []),
       ...(canManageUsers(r) ? [{ id: "users", label: "User Management", icon: "users" as const }] : []),
       ...pinned,
@@ -323,7 +323,7 @@ export function App(): JSX.Element {
     // Schemes reads the ORG's issued credentials, so it is offered to the roles
     // that answer for the org — the same line Audit draws, for the same reason.
     ...(isPlatform || isOrgAdmin ? [{ id: "schemes", label: "Schemes", icon: "doc" as const }] : []),
-    ...((isPlatform || isOrgAdmin) && orgCan("Verifier") ? [{ id: "verify", label: "Verification", icon: "shield" as const }] : []),
+    ...((isPlatform || isOrgAdmin) && orgCan("Verifier") ? [{ id: "verify", label: "Verify Credentials", icon: "shield" as const }] : []),
     ...(isPlatform || isOrgAdmin ? [{ id: "identity", label: "Identity", icon: "shield" as const }] : []),
     ...(isPlatform || isOrgAdmin ? [{ id: "identity-dashboard", label: "Identity Dashboard", icon: "spark" as const }] : []),
     ...(isOrgAdmin && orgCan("Holder") ? [{ id: "org-wallet", label: "Organization Wallet", icon: "coins" as const }] : []),
