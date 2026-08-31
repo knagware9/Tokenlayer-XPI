@@ -264,6 +264,9 @@ export class PrismaProposalRepository implements ProposalRepository {
   async listByOrg(orgId: string, status?: string): Promise<ProposalRecord[]> {
     return (await prisma.proposal.findMany({ where: { orgId, ...(status ? { status } : {}) }, orderBy: { createdAt: "desc" } })).map(toProposal);
   }
+  async listByProposer(proposerId: string, status?: string): Promise<ProposalRecord[]> {
+    return (await prisma.proposal.findMany({ where: { proposerId, ...(status ? { status } : {}) }, orderBy: { createdAt: "desc" } })).map(toProposal);
+  }
   async addApproval(id: string, approval: ProposalApproval): Promise<ProposalRecord> {
     // Optimistic-concurrency append: read-modify-write is not atomic in SQL, so
     // two distinct approvers racing could clobber each other's approval. Guard the

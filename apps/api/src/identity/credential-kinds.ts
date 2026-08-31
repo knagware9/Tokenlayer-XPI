@@ -16,6 +16,18 @@ import type { ProposalRecord } from "../persistence/types/index.js";
 const orgScopedView = async (_deps: AppDeps, claims: TokenClaims, p: ProposalRecord): Promise<boolean> =>
   claims.role === "PlatformAdmin" || (claims.role === "OrgAdmin" && !!p.orgId && claims.orgId === p.orgId);
 
+/**
+ * `orgScopedView`, plus the proposer of THIS proposal — an Issuer who is not
+ * an OrgAdmin still gets no seat at `canApprove` (SELF_APPROVAL blocks their
+ * own proposal regardless, and they were never in `orgScopedView`'s audience
+ * to begin with), but they can at least see the outcome of what they
+ * proposed instead of a 404 that reads as "this proposal doesn't exist."
+ * Deliberately NOT used for `canApprove` — widening that would let a maker
+ * decide their own proposal, the exact thing maker-checker exists to prevent.
+ */
+const orgScopedOrOwnView = async (deps: AppDeps, claims: TokenClaims, p: ProposalRecord): Promise<boolean> =>
+  claims.id === p.proposerId || orgScopedView(deps, claims, p);
+
 export interface IssueCredentialPayload {
   type: string;
   subjectDid: string;
@@ -27,10 +39,10 @@ export interface IssueCredentialPayload {
 export const issueCredentialKind: ProposalKindHandler = {
   kind: "issue-credential",
   apiScope: "credentials:issue",
-  canView: orgScopedView,
-  // Anyone who may view it may decide it (the routes already exclude the
-  // proposer via SELF_APPROVAL). Viewing is limited to PlatformAdmin + the
-  // org's own OrgAdmins, which is exactly the approver set.
+  // The proposer may always see their own proposal (orgScopedOrOwnView), but
+  // deciding it is narrower: PlatformAdmin + the org's own OrgAdmins, with
+  // SELF_APPROVAL blocking any of those who happen to be the proposer too.
+  canView: orgScopedOrOwnView,
   canApprove: orgScopedView,
   async execute(ctx, _proposer, p) {
     const pl = p.payload as unknown as IssueCredentialPayload;
@@ -58,7 +70,7 @@ export interface RevokeCredentialPayload {
 export const revokeCredentialKind: ProposalKindHandler = {
   kind: "revoke-credential",
   apiScope: "credentials:revoke",
-  canView: orgScopedView,
+  canView: orgScopedOrOwnView,
   canApprove: orgScopedView,
   async execute(ctx, _proposer, p) {
     const pl = p.payload as unknown as RevokeCredentialPayload;

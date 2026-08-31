@@ -223,6 +223,17 @@ export interface ProposalRepository {
   list(useCaseKey?: string, status?: string): Promise<ProposalRecord[]>;
   /** Newest first, scoped to one org, optionally by status. */
   listByOrg(orgId: string, status?: string): Promise<ProposalRecord[]>;
+  /**
+   * Newest first, scoped to proposals THIS user raised, optionally by status.
+   * The `list`/`listByOrg` index (useCaseKey, orgId) never reaches an
+   * org-scoped credential proposal for a proposer who belongs to neither —
+   * a use-case-scoped desk user proposing against a DIFFERENT org's
+   * credential use case, the normal shape for a scoped Issuer. Without this,
+   * `orgScopedOrOwnView`'s widened `canView` has nothing to filter: the
+   * listing route's index narrowing excludes the proposal before canView is
+   * ever consulted.
+   */
+  listByProposer(proposerId: string, status?: string): Promise<ProposalRecord[]>;
   /** Append an approval; throws { code: "ALREADY_APPROVED" } if this userId already approved. */
   addApproval(id: string, approval: ProposalApproval): Promise<ProposalRecord>;
   /** Atomic CAS "pending"→`target` (approved | rejected). True iff this caller won the transition. */

@@ -116,6 +116,12 @@ export class MemoryProposalRepository implements ProposalRepository {
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .map((r) => this.clone(r));
   }
+  async listByProposer(proposerId: string, status?: string): Promise<ProposalRecord[]> {
+    return [...this.rows.values()]
+      .filter((r) => r.proposerId === proposerId && (!status || r.status === status))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map((r) => this.clone(r));
+  }
   // addApproval/claimApproved/setStatus are each a single synchronous mutation
   // (no await between check and write) → atomic w.r.t. concurrent requests, as
   // the CashflowRepository CAS methods rely on.

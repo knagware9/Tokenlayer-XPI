@@ -16,6 +16,16 @@ import type { ProposalRecord } from "../persistence/types/index.js";
 const orgScopedView = async (_deps: AppDeps, claims: TokenClaims, p: ProposalRecord): Promise<boolean> =>
   claims.role === "PlatformAdmin" || (claims.role === "OrgAdmin" && !!p.orgId && claims.orgId === p.orgId);
 
+/**
+ * `orgScopedView`, plus the proposer of THIS proposal. Mirrors
+ * credential-kinds.ts's identically-named helper: a scoped Issuer (not an
+ * OrgAdmin) can now see their own issuance proposal's outcome instead of a
+ * 404, but still cannot decide it — SELF_APPROVAL blocks that regardless,
+ * and this is deliberately never used for `canApprove`.
+ */
+const orgScopedOrOwnView = async (deps: AppDeps, claims: TokenClaims, p: ProposalRecord): Promise<boolean> =>
+  claims.id === p.proposerId || orgScopedView(deps, claims, p);
+
 export interface IssueUsecaseCredentialPayload {
   credentialUseCaseKey: string;
   credentialType: string;
@@ -29,7 +39,7 @@ export interface IssueUsecaseCredentialPayload {
 export const issueUsecaseCredentialKind: ProposalKindHandler = {
   kind: "issue-usecase-credential",
   apiScope: "credentials:issue",
-  canView: orgScopedView,
+  canView: orgScopedOrOwnView,
   canApprove: orgScopedView,
   async execute(ctx, _proposer, p) {
     const pl = p.payload as unknown as IssueUsecaseCredentialPayload;
@@ -82,7 +92,7 @@ interface CredentialBatchRowResult {
 export const issueUsecaseCredentialBatchKind: ProposalKindHandler = {
   kind: "issue-usecase-credential-batch",
   apiScope: "credentials:issue",
-  canView: orgScopedView,
+  canView: orgScopedOrOwnView,
   canApprove: orgScopedView,
   async execute(ctx, _proposer, p) {
     const deps = ctx.deps;

@@ -310,6 +310,45 @@ describe("scoped desk issuance", () => {
     });
     expect(issueOther.statusCode).toBe(403);
   });
+
+  it("the proposing Issuer can now see their own issuance proposal, but still cannot decide it", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const admin2 = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    const key = await createCredUC(app, admin, "uc-own-view");
+
+    await onboardUser(app, admin, admin2, { email: "desk.ownview.issuer@x.dev", password: "secret1", role: "Issuer", useCaseKey: key });
+    const issuerToken = await loginAs(app, "desk.ownview.issuer@x.dev", "secret1");
+    await onboardUser(app, admin, admin2, { email: "desk.ownview.holder@x.dev", password: "secret1", role: "Holder", useCaseKey: key });
+
+    const holders = await app.inject({ method: "GET", url: `${V1}/credential-use-cases/${key}/eligible-holders`, headers: auth(issuerToken) });
+    const subject = (holders.json() as { kind: "user" | "org"; id: string }[])[0]!;
+
+    const issue = await app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/${key}/credentials`, headers: auth(issuerToken),
+      payload: { credentialType: "T", subjectUserId: subject.id, claims: { a: "x" } },
+    });
+    expect(issue.statusCode).toBe(202);
+    const proposalId = issue.json().proposal.id as string;
+
+    // Before this widening the Issuer's own proposal was silently absent from
+    // this list — indistinguishable from one that never existed — because the
+    // index narrowing (useCaseKey/orgId) never reached an org-scoped
+    // credential proposal for a proposer who belongs to neither.
+    const list = await app.inject({ method: "GET", url: `${V1}/proposals`, headers: auth(issuerToken) });
+    expect(list.statusCode).toBe(200);
+    expect((list.json() as { id: string }[]).map((p) => p.id)).toContain(proposalId);
+
+    // Still cannot decide their own — SELF_APPROVAL, not the approve-audience
+    // check, since visibility alone never granted decide rights.
+    const selfApprove = await app.inject({ method: "POST", url: `${V1}/proposals/${proposalId}/approve`, headers: auth(issuerToken), payload: {} });
+    expect(selfApprove.statusCode).toBe(403);
+    expect(selfApprove.json().error).toBe("SELF_APPROVAL");
+
+    // A real checker still completes it normally.
+    const approve = await app.inject({ method: "POST", url: `${V1}/proposals/${proposalId}/approve`, headers: auth(admin2), payload: {} });
+    expect(approve.statusCode).toBe(200);
+  });
 });
 
 describe("scoped desk revoke", () => {

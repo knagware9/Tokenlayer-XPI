@@ -2121,14 +2121,25 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     const q = request.query as { status?: string; useCaseKey?: string };
     const rows = claims.role === "PlatformAdmin"
       ? await deps.proposals.list(q.useCaseKey, q.status)
-      // A caller sees their use-case proposals AND their org's proposals. Both are
-      // indexed; the __none__ sentinel keeps an unscoped user from matching every
-      // null-useCaseKey (credential) proposal.
+      // A caller sees their use-case proposals, their org's proposals, AND
+      // proposals they raised themselves. All three are indexed; the
+      // __none__ sentinel keeps an unscoped user from matching every
+      // null-useCaseKey (credential) proposal. The third source exists for
+      // orgScopedOrOwnView (credential-kinds.ts / credential-usecase-kinds.ts):
+      // a use-case-scoped desk user (e.g. a scoped Issuer) proposing against a
+      // DIFFERENT org's credential use case has neither that org's id nor a
+      // matching useCaseKey on the proposal (it's org-scoped, useCaseKey
+      // null) — without listByProposer, canView being widened to admit the
+      // proposer has nothing to filter, because the index above excludes the
+      // row before canView is ever consulted.
       : await (async () => {
         const byUseCase = await deps.proposals.list(claims.useCaseKey ?? NO_USE_CASE, q.status);
         const byOrg = claims.orgId ? await deps.proposals.listByOrg(claims.orgId, q.status) : [];
+        const byProposer = await deps.proposals.listByProposer(claims.id, q.status);
         const seen = new Set(byUseCase.map((p) => p.id));
-        return [...byUseCase, ...byOrg.filter((p) => !seen.has(p.id))];
+        const merged = [...byUseCase, ...byOrg.filter((p) => !seen.has(p.id))];
+        for (const p of byOrg) seen.add(p.id);
+        return [...merged, ...byProposer.filter((p) => !seen.has(p.id))];
       })();
     // THE SAME `canView` THE FETCH-ONE PATH USES. The index narrowing above is a
     // query optimisation, not the boundary: `deps.proposals.list(useCaseKey)`
