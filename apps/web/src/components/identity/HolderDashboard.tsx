@@ -1,42 +1,60 @@
-import { useEffect, useMemo, useState } from "react";
-import { api } from "../../api.js";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import { ApiError, api } from "../../api.js";
 import { useAuth } from "../../auth.js";
-import type { HeldCredential, VerificationRequest } from "../../types.js";
+import type { DisclosureChoice, HeldCredential, PredicateOp, VerificationRequest } from "../../types.js";
 import { SectionHeader } from "../shared/ui.js";
-import { VerificationInbox } from "./VerificationInbox.js";
+import { disclosableFields, defaultDisclosuresFor } from "./VerificationInbox.js";
 
-function Tile({ label, value, tone }: { label: string; value: number; tone?: string }): JSX.Element {
+function errMessage(err: unknown, fallback: string): string {
+  return err instanceof ApiError ? err.message : fallback;
+}
+
+function Tile({ label, value, tone, active, onClick }: { label: string; value: number; tone?: string; active: boolean; onClick: () => void }): JSX.Element {
   return (
-    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-4 animate-slide-up">
+    <button
+      type="button"
+      onClick={onClick}
+      className={`text-left w-full bg-white rounded-2xl border p-4 animate-slide-up shadow-sm transition-shadow hover:shadow ${active ? "border-brand-400 ring-1 ring-brand-300" : "border-slate-200/80 hover:border-slate-300"}`}
+    >
       <div className={`text-2xl font-bold tabular-nums font-display ${tone ?? "text-slate-900"}`}>{value.toLocaleString()}</div>
       <div className="text-[11px] font-semibold uppercase tracking-widest text-slate-400 mt-1">{label}</div>
-    </div>
+    </button>
   );
 }
 
+type Filter = "requests" | "credentials" | "consented";
+
 /**
- * Holder-scoped overview: the summary tiles (how many relying parties have
- * asked to see a credential, how many credentials this DID actually holds,
- * how many times consent was given) plus the actionable request list itself
- * — VerificationInbox, embedded — so a holder can review, choose disclosures,
- * consent, or reject without leaving this page. Reuses GET
- * /me/verification-requests and GET /me/credentials for the tile counts; the
- * embedded inbox fetches its own copy for its own list + actions, same as it
- * always has as a standalone page.
+ * Holder-scoped overview. The three tiles are toggles: clicking one reveals a
+ * table filtered to that category below (clicking again hides it). Each row
+ * has a View button that expands it inline — for a pending request, into the
+ * same per-field disclosure choices + Consent/Reject actions VerificationInbox
+ * has always offered (reusing its exported `disclosableFields`/
+ * `defaultDisclosuresFor` helpers rather than re-deriving that logic); for a
+ * held credential, into its claim values. Reuses GET /me/verification-requests
+ * and GET /me/credentials for both the tile counts and the tables — no new
+ * API surface needed.
  */
 export function HolderDashboard(): JSX.Element {
   const { token } = useAuth();
   const [requests, setRequests] = useState<VerificationRequest[] | null>(null);
   const [creds, setCreds] = useState<HeldCredential[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<Filter | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [picked, setPicked] = useState<Record<string, Record<string, boolean>>>({});
+  const [disclosures, setDisclosures] = useState<Record<string, Record<string, Record<string, DisclosureChoice>>>>({});
+  const [actionErr, setActionErr] = useState<string | null>(null);
+  const [actionMsg, setActionMsg] = useState<string | null>(null);
 
-  useEffect(() => {
+  const reload = (): void => {
     if (!token) return;
     setError(null);
     Promise.all([api.myVerificationRequests(token), api.myCredentials(token)])
       .then(([r, c]) => { setRequests(r); setCreds(c); })
       .catch(() => setError("Could not load your identity activity."));
-  }, [token]);
+  };
+  useEffect(reload, [token]);
 
   const counts = useMemo(() => {
     const rows = requests ?? [];
@@ -44,20 +62,230 @@ export function HolderDashboard(): JSX.Element {
     return { received: rows.length, consented };
   }, [requests]);
 
+  function toggleFilter(f: Filter): void {
+    setFilter((cur) => (cur === f ? null : f));
+    setExpanded(null);
+  }
+
+  async function consent(r: VerificationRequest): Promise<void> {
+    if (!token) return;
+    const sel = picked[r.id] ?? {};
+    const ids = Object.keys(sel).filter((k) => sel[k]);
+    if (ids.length === 0) return;
+    setActionErr(null); setActionMsg(null);
+    const disclosuresForConsent: Record<string, Record<string, DisclosureChoice>> = {};
+    for (const cid of ids) {
+      const fields = disclosures[r.id]?.[cid] ?? {};
+      if (Object.keys(fields).length > 0) disclosuresForConsent[cid] = fields;
+    }
+    try {
+      await api.consentVerification(token, r.id, ids, Object.keys(disclosuresForConsent).length > 0 ? disclosuresForConsent : undefined);
+      setActionMsg("Consented — the presentation was signed and released.");
+      setExpanded(null);
+      reload();
+    } catch (e) { setActionErr(errMessage(e, "Consent failed")); }
+  }
+  async function reject(r: VerificationRequest): Promise<void> {
+    if (!token) return;
+    setActionErr(null); setActionMsg(null);
+    try { await api.rejectVerification(token, r.id); setExpanded(null); reload(); } catch (e) { setActionErr(errMessage(e, "Reject failed")); }
+  }
+
   if (error) return <div><SectionHeader title="Dashboard" description={error} /></div>;
   if (!requests || !creds) return <div><SectionHeader title="Dashboard" description="Loading…" /></div>;
+
+  const filteredRequests = filter === "consented" ? requests.filter((r) => r.status === "consented") : requests;
 
   return (
     <div className="space-y-5">
       <SectionHeader title="Dashboard" description="Requests for your credentials, what you hold, and what you've shared." />
 
       <div className="grid grid-cols-3 gap-3">
-        <Tile label="Requests received for credential share" value={counts.received} />
-        <Tile label="Credentials received" value={creds.length} tone="text-sky-600" />
-        <Tile label="Consent shared" value={counts.consented} tone="text-emerald-600" />
+        <Tile label="Requests received for credential share" value={counts.received} active={filter === "requests"} onClick={() => toggleFilter("requests")} />
+        <Tile label="Credentials received" value={creds.length} tone="text-sky-600" active={filter === "credentials"} onClick={() => toggleFilter("credentials")} />
+        <Tile label="Consent shared" value={counts.consented} tone="text-emerald-600" active={filter === "consented"} onClick={() => toggleFilter("consented")} />
       </div>
 
-      <VerificationInbox />
+      {filter === "credentials" && (
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-400">
+              <tr>
+                <th className="text-left px-4 py-2 font-semibold">Type</th>
+                <th className="text-left px-4 py-2 font-semibold">Issuer</th>
+                <th className="text-left px-4 py-2 font-semibold">Issued</th>
+                <th className="text-left px-4 py-2 font-semibold">Status</th>
+                <th className="px-4 py-2"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {creds.length === 0 && <tr><td colSpan={5} className="px-4 py-4 text-slate-400">No credentials held yet.</td></tr>}
+              {creds.map((c) => (
+                <Fragment key={c.id}>
+                  <tr className="border-t border-slate-100">
+                    <td className="px-4 py-2">{c.type.filter((t) => t !== "VerifiableCredential").join(", ") || c.type.join(", ")}</td>
+                    <td className="px-4 py-2">{c.issuerName ?? c.issuerDid}</td>
+                    <td className="px-4 py-2">{new Date(c.issuedAt).toLocaleDateString()}</td>
+                    <td className="px-4 py-2">{c.revoked ? "Revoked" : "Active"}</td>
+                    <td className="px-4 py-2 text-right">
+                      <button className="rounded-lg border border-slate-200 px-3 py-1 text-xs" onClick={() => setExpanded((x) => (x === c.id ? null : c.id))}>{expanded === c.id ? "Hide" : "View"}</button>
+                    </td>
+                  </tr>
+                  {expanded === c.id && (
+                    <tr className="border-t border-slate-100 bg-slate-50/60">
+                      <td colSpan={5} className="px-4 py-3 text-xs text-slate-600">
+                        <div className="grid grid-cols-2 gap-2">
+                          {Object.entries(c.claims ?? {}).filter(([k]) => k !== "id").map(([k, v]) => (
+                            <div key={k}><span className="text-slate-400">{k}:</span> {String(v)}</div>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {(filter === "requests" || filter === "consented") && (
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+          {actionErr && <div className="text-sm text-rose-600 px-4 pt-3">{actionErr}</div>}
+          {actionMsg && <div className="text-sm text-emerald-600 px-4 pt-3">{actionMsg}</div>}
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-400">
+              <tr>
+                <th className="text-left px-4 py-2 font-semibold">Request</th>
+                <th className="text-left px-4 py-2 font-semibold">Type</th>
+                <th className="text-left px-4 py-2 font-semibold">Status</th>
+                <th className="px-4 py-2"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredRequests.length === 0 && <tr><td colSpan={4} className="px-4 py-4 text-slate-400">Nothing here.</td></tr>}
+              {filteredRequests.map((r) => {
+                const sel = picked[r.id] ?? {};
+                return (
+                  <Fragment key={r.id}>
+                    <tr className="border-t border-slate-100">
+                      <td className="px-4 py-2">{r.purpose}</td>
+                      <td className="px-4 py-2">{r.requestedTypes.join(", ")}</td>
+                      <td className="px-4 py-2 capitalize">{r.status}</td>
+                      <td className="px-4 py-2 text-right">
+                        <button className="rounded-lg border border-slate-200 px-3 py-1 text-xs" onClick={() => setExpanded((x) => (x === r.id ? null : r.id))}>{expanded === r.id ? "Hide" : "View"}</button>
+                      </td>
+                    </tr>
+                    {expanded === r.id && (
+                      <tr className="border-t border-slate-100 bg-slate-50/60">
+                        <td colSpan={4} className="px-4 py-3">
+                          {r.status !== "pending" ? (
+                            <div className="text-xs text-slate-500">
+                              {r.status}{r.verifiedAt ? ` · verified ${new Date(r.verifiedAt).toLocaleString()}` : ""}
+                            </div>
+                          ) : (r.eligibleCredentials ?? []).length === 0 ? (
+                            <div className="text-xs text-amber-600">You hold no unrevoked credential of the requested type(s).</div>
+                          ) : (
+                            <div className="space-y-2">
+                              {(r.eligibleCredentials ?? []).map((c) => {
+                                const claims = c.claims ?? {};
+                                const requestedForType = r.requestedFields?.[c.type] ?? {};
+                                const credDisclosures = disclosures[r.id]?.[c.id] ?? {};
+                                const toggleCredential = (checked: boolean): void => {
+                                  setPicked({ ...picked, [r.id]: { ...sel, [c.id]: checked } });
+                                  if (checked && !disclosures[r.id]?.[c.id]) {
+                                    const initial = defaultDisclosuresFor(claims, requestedForType);
+                                    setDisclosures({ ...disclosures, [r.id]: { ...disclosures[r.id], [c.id]: initial } });
+                                  }
+                                };
+                                const setFieldChoice = (field: string, choice: DisclosureChoice): void => {
+                                  setDisclosures({ ...disclosures, [r.id]: { ...disclosures[r.id], [c.id]: { ...credDisclosures, [field]: choice } } });
+                                };
+                                return (
+                                  <div key={c.id} className="text-xs">
+                                    <label className="flex items-center gap-1.5 font-medium">
+                                      <input type="checkbox" checked={!!sel[c.id]} onChange={(e) => toggleCredential(e.target.checked)} />
+                                      <span>{c.type} — {c.issuerName ?? c.issuerDid}</span>
+                                    </label>
+                                    {sel[c.id] && (
+                                      <div className="ml-5 mt-1 space-y-1 border-l border-slate-200 pl-3">
+                                        <div className="text-[11px] text-slate-400">
+                                          This only controls what the verifier receives — the credential itself is unchanged.
+                                        </div>
+                                        {disclosableFields(claims).map((field) => {
+                                          const value = claims[field];
+                                          const choice = credDisclosures[field] ?? { kind: "value" as const };
+                                          const isNumber = typeof value === "number";
+                                          const requested = requestedForType[field];
+                                          return (
+                                            <div key={field} className="flex items-center gap-2">
+                                              <span className="w-32 truncate">
+                                                {field}
+                                                {requested && <span className="text-brand-500"> · requested</span>}
+                                              </span>
+                                              <select
+                                                className="rounded border border-slate-200 px-1 py-0.5"
+                                                value={choice.kind}
+                                                onChange={(e) => {
+                                                  const kind = e.target.value as DisclosureChoice["kind"];
+                                                  if (kind === "value") setFieldChoice(field, { kind: "value" });
+                                                  else if (kind === "withhold") setFieldChoice(field, { kind: "withhold" });
+                                                  else setFieldChoice(field, { kind: "predicate", op: requested?.kind === "predicate" ? requested.op : "lte", threshold: requested?.kind === "predicate" ? requested.threshold : 0 });
+                                                }}
+                                              >
+                                                <option value="withhold">Withhold</option>
+                                                <option value="value">Share value</option>
+                                                {isNumber && <option value="predicate">Share as threshold check</option>}
+                                              </select>
+                                              {choice.kind === "predicate" && (
+                                                <>
+                                                  <select
+                                                    className="rounded border border-slate-200 px-1 py-0.5"
+                                                    value={choice.op}
+                                                    onChange={(e) => setFieldChoice(field, { kind: "predicate", op: e.target.value as PredicateOp, threshold: choice.threshold })}
+                                                  >
+                                                    <option value="lte">≤</option>
+                                                    <option value="gte">≥</option>
+                                                    <option value="lt">&lt;</option>
+                                                    <option value="gt">&gt;</option>
+                                                    <option value="eq">=</option>
+                                                  </select>
+                                                  <input
+                                                    type="number" className="w-16 rounded border border-slate-200 px-1 py-0.5"
+                                                    value={choice.threshold}
+                                                    onChange={(e) => {
+                                                      const n = Number(e.target.value);
+                                                      setFieldChoice(field, { kind: "predicate", op: choice.op, threshold: Number.isFinite(n) ? n : 0 });
+                                                    }}
+                                                  />
+                                                </>
+                                              )}
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                              <div className="flex gap-2 pt-1">
+                                <button className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs text-white disabled:opacity-40" disabled={!Object.values(sel).some(Boolean)} onClick={() => void consent(r)}>Consent &amp; present</button>
+                                <button className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-rose-600" onClick={() => void reject(r)}>Reject</button>
+                              </div>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
