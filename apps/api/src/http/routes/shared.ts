@@ -645,6 +645,11 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
           .map(async (c) => ({
             id: c.id, type: c.type, issuerDid: c.issuerDid, issuerName: await nameOf(c.issuerDid),
             issuedAt: c.issuedAt, expiresAt: c.expiresAt,
+            // So the holder's own consent UI can render one row per field
+            // without a second round-trip. No new exposure: this is the
+            // holder's own inbox for their own credentials, already readable
+            // in full via GET /me/credentials.
+            claims: c.subjectClaims,
           })),
       ),
     })));

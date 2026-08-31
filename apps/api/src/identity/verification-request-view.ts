@@ -14,6 +14,11 @@ export function vreqView(r: VerificationRequestRecord) {
   return {
     id: r.id, verifierOrgId: r.verifierOrgId, holderDid: r.holderDid, requestedTypes: r.requestedTypes,
     purpose: r.purpose, status: r.status, consentedCredentialIds: r.consentedCredentialIds,
+    // The verifier's own advisory ask — visible to both sides already via
+    // requestedTypes, so there's nothing sensitive here. NOT `consentedDisclosures`:
+    // that's the resolved, disclosed-or-not answer, and stays out of every general
+    // listing for the same reason `verifierResult` does (see the file comment above).
+    requestedFields: r.requestedFields,
     consentedAt: r.consentedAt, verifiedAt: r.verifiedAt, createdAt: r.createdAt, expiresAt: r.expiresAt,
     credentialUseCaseKey: r.credentialUseCaseKey,
   };
