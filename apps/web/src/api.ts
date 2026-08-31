@@ -1,4 +1,4 @@
-import type { AccountState, ActivityEvent, AnalyticsSummary, ApiKeyView, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, CertificateFieldPlacement, ChainInfo, ChainStatus, CompanyCategory, ContractCode, CredentialStatusInfo, CredentialTypeInfo, CredentialTypeSpec, CredentialUseCase, DidDocument, DidResolution, EligibleHolder, HeldCredential, IdentityDashboardData, IdentityRegistryInfo, IdentityResult, InvoiceRowResult, IssuedCredential, Listing, LoginKeyInfo, MintedApiKey, MintedWebhook, OrgCapabilities, OrgMember, OrgType, Organization, PlatformEvent, Portfolio, ProvisionResult, Proposal, QrLoginPoll, QrLoginStart, Role, SessionPrincipal, SessionUser, StagedInvoice, TokenInfo, TokenStandard, TokenizeResult, Trade, UseCase, UseCaseTemplate, UseCaseTemplateMeta, VerificationRequest, VerificationResult, WebhookDelivery, WebhookEndpoint } from "./types.js";
+import type { AccountState, ActivityEvent, AnalyticsSummary, ApiKeyView, Asset, AuditEntry, AuditSummary, AuditVerify, Cashflow, CashflowPreview, CertificateFieldPlacement, ChainInfo, ChainStatus, CompanyCategory, ContractCode, CredentialStatusInfo, CredentialTypeInfo, CredentialTypeSpec, CredentialUseCase, DidDocument, DidResolution, DisclosureChoice, EligibleHolder, FieldRequest, HeldCredential, IdentityDashboardData, IdentityRegistryInfo, IdentityResult, InvoiceRowResult, IssuedCredential, Listing, LoginKeyInfo, MintedApiKey, MintedWebhook, OrgCapabilities, OrgMember, OrgType, Organization, PlatformEvent, Portfolio, ProvisionResult, Proposal, QrLoginPoll, QrLoginStart, Role, SessionPrincipal, SessionUser, StagedInvoice, TokenInfo, TokenStandard, TokenizeResult, Trade, UseCase, UseCaseTemplate, UseCaseTemplateMeta, VerificationRequest, VerificationResult, WebhookDelivery, WebhookEndpoint } from "./types.js";
 
 export interface Currency { code: string; label: string; }
 export interface CashBalance { currency: string; address: string; amount: string; }
@@ -415,14 +415,14 @@ export const api = {
    * here, so the public portal must use this one.
    */
   resolveDid: (did: string) => request<DidResolution>(`/dids/${encodeURIComponent(did)}/resolve`, null),
-  createVerificationRequest: (token: string, body: { holderDid: string; requestedTypes: string[]; purpose: string; credentialUseCaseKey?: string }) =>
+  createVerificationRequest: (token: string, body: { holderDid: string; requestedTypes: string[]; purpose: string; credentialUseCaseKey?: string; requestedFields?: Record<string, Record<string, FieldRequest>> }) =>
     request<VerificationRequest>("/verification-requests", token, { method: "POST", body: JSON.stringify(body) }),
   myVerificationRequests: (token: string) => request<VerificationRequest[]>("/me/verification-requests", token),
   // The verifier's OUTBOUND list — the mirror of the holder inbox above, and the
   // only way back to a request whose id the page no longer holds.
   verificationRequests: (token: string) => request<VerificationRequest[]>("/verification-requests", token),
-  consentVerification: (token: string, id: string, credentialIds: string[]) =>
-    request<VerificationRequest>(`/verification-requests/${encodeURIComponent(id)}/consent`, token, { method: "POST", body: JSON.stringify({ credentialIds }) }),
+  consentVerification: (token: string, id: string, credentialIds: string[], disclosures?: Record<string, Record<string, DisclosureChoice>>) =>
+    request<VerificationRequest>(`/verification-requests/${encodeURIComponent(id)}/consent`, token, { method: "POST", body: JSON.stringify(disclosures ? { credentialIds, disclosures } : { credentialIds }) }),
   rejectVerification: (token: string, id: string) =>
     request<VerificationRequest>(`/verification-requests/${encodeURIComponent(id)}/reject`, token, { method: "POST", body: JSON.stringify({}) }),
   verifyVerification: (token: string, id: string) => request<VerificationResult>(`/verification-requests/${encodeURIComponent(id)}/verify`, token),

@@ -768,6 +768,10 @@ export interface IssuedCredential {
   acceptance?: string;
 }
 
+export type PredicateOp = "gte" | "lte" | "gt" | "lt" | "eq";
+export type FieldRequest = { kind: "value" } | { kind: "predicate"; op: PredicateOp; threshold: number };
+export type DisclosureChoice = { kind: "value" } | { kind: "predicate"; op: PredicateOp; threshold: number } | { kind: "withhold" };
+
 export interface VerificationRequest {
   id: string;
   verifierOrgId: string;
@@ -777,11 +781,12 @@ export interface VerificationRequest {
   credentialUseCaseKey?: string | null;
   status: "pending" | "consented" | "rejected" | "expired";
   consentedCredentialIds: string[] | null;
+  requestedFields?: Record<string, Record<string, FieldRequest>> | null;
   consentedAt: string | null;
   verifiedAt: string | null;
   createdAt: string;
   expiresAt: string;
-  eligibleCredentials?: { id: string; type: string; issuerDid: string; issuerName?: string | null; issuedAt: string; expiresAt: string | null }[];
+  eligibleCredentials?: { id: string; type: string; issuerDid: string; issuerName?: string | null; issuedAt: string; expiresAt: string | null; claims: Record<string, unknown> }[];
 }
 export interface StagedInvoice {
   id: string; useCaseKey: string; source: "upload" | "erp" | "manual";
