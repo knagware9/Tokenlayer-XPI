@@ -279,6 +279,24 @@ describe("capability enforcement (EN-A task A4)", () => {
     expect(granted.statusCode).toBe(201);
   });
 
+  it("gate 3b — authorization precedes input validation: a bogus requestedFields still gets 403, not 400, when the org lacks Verifier", async () => {
+    const app = await buildTestApp();
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const capped = await envOrg(app, platform, ID_ISSUER); // no Verifier role
+    expect((await app.inject({ method: "POST", url: `${V1}/credential-use-cases`, headers: auth(platform), payload: CUC("verify-uc-order") })).statusCode).toBe(201);
+    // requestedFields names a field that does not exist on KycCredential — a
+    // 400 UNKNOWN_FIELD from field validation would mean this caller learned
+    // something about the use case's shape before its own authorization was
+    // even checked. The capability gate must run first: 403, never 400.
+    const reqBody = {
+      holderDid: "did:key:z6MkExampleHolder", requestedTypes: ["KycCredential"], purpose: "kyc check",
+      credentialUseCaseKey: "verify-uc-order",
+      requestedFields: { KycCredential: { notAField: { kind: "value" } } },
+    };
+    const denied = await app.inject({ method: "POST", url: `${V1}/verification-requests`, headers: auth(capped.adminTok), payload: reqBody });
+    expectMissing(denied, capped.orgId, "Verifier");
+  });
+
   it("gate 4 — verifier binding at config time: listing a no-Verifier org 403; a legacy org lists fine", async () => {
     const app = await buildTestApp();
     const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");

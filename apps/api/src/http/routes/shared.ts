@@ -637,6 +637,17 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     // The holder needs the issuer's name to tell apart same-type credentials
     // from different issuers when picking which one to present.
     const nameOf = issuerNameResolver();
+    // `claims` on each eligible credential is full credential content — the
+    // same thing GET /me/credentials returns, and THAT route is gated on the
+    // DIFFERENT scope `credentials:read` (see just above). This route is
+    // gated on `verifications:read` alone, so a scoped machine principal
+    // holding only that scope must not receive it here — that would let
+    // `verifications:read` read what only `credentials:read` is supposed to
+    // grant. A human session carries no API key at all (`request.apiKey` is
+    // undefined) and is unrestricted the same way `requireScope` always is
+    // for a JWT caller — same pattern as `decidableByPrincipal` above.
+    const key = request.apiKey;
+    const canSeeClaims = !key || scopeAllows(key.scopes, "credentials:read");
     return Promise.all(rows.map(async (r) => ({
       ...vreqView(r),
       eligibleCredentials: await Promise.all(
@@ -646,10 +657,8 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
             id: c.id, type: c.type, issuerDid: c.issuerDid, issuerName: await nameOf(c.issuerDid),
             issuedAt: c.issuedAt, expiresAt: c.expiresAt,
             // So the holder's own consent UI can render one row per field
-            // without a second round-trip. No new exposure: this is the
-            // holder's own inbox for their own credentials, already readable
-            // in full via GET /me/credentials.
-            claims: c.subjectClaims,
+            // without a second round-trip, when the caller is allowed to see it.
+            ...(canSeeClaims ? { claims: c.subjectClaims } : {}),
           })),
       ),
     })));

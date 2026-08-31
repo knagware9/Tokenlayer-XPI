@@ -51,9 +51,14 @@ const FORBIDDEN_KEYS = new Set([
   "presentationVpJwt",
   "secret",
   "password",
+  // Selective disclosure: the holder's resolved per-field choices, including
+  // raw disclosed values for `kind: "value"` fields — carries the same class
+  // of private content as `vcJwt`/`presentationVpJwt` above.
+  "consentedDisclosures",
 ]);
 
-function redact(value: unknown): unknown {
+/** Exported for unit testing only — every real call site goes through `emitEvent`. */
+export function redact(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(redact);
   if (value && typeof value === "object") {
     const out: Record<string, unknown> = {};

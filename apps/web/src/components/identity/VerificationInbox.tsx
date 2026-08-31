@@ -1,11 +1,56 @@
 import { useEffect, useState } from "react";
 import { ApiError, api } from "../../api.js";
 import { useAuth } from "../../auth.js";
-import type { DisclosureChoice, PredicateOp, VerificationRequest } from "../../types.js";
+import type { DisclosureChoice, FieldRequest, PredicateOp, VerificationRequest } from "../../types.js";
 import { Card, Pill } from "../shared/ui.js";
 
 function errMessage(err: unknown, fallback: string): string {
   return err instanceof ApiError ? err.message : fallback;
+}
+
+/**
+ * Fields a holder may choose to disclose for a credential — every claim
+ * except the subject `id`. `id` is present on every credential's claims but
+ * is never a real `claimSchema` property, so a verifier can never actually
+ * request it (it would be refused as UNKNOWN_FIELD) — showing it in the
+ * holder's disclosure list would be confusing and inconsistent with that.
+ * `claims` can be absent (an older API deployment, or a caller who lacks
+ * `credentials:read` — see GET /me/verification-requests), so this always
+ * guards with `?? {}` rather than assuming the field exists.
+ */
+export function disclosableFields(claims: Record<string, unknown> | undefined | null): string[] {
+  return Object.keys(claims ?? {}).filter((f) => f !== "id");
+}
+
+/**
+ * The starting per-field disclosure choices when a holder checks a credential
+ * to present.
+ *
+ * BACKWARD COMPATIBILITY: every pre-existing verifier flow never sends
+ * `requestedFields` at all (it is a brand-new optional feature), so a field
+ * with no entry in `requestedForType` — which is every field, for such a
+ * request — must default to full VALUE disclosure. Defaulting to withhold
+ * instead would silently turn "consent" into `claims: {}` while `/verify`
+ * still reports `valid: true`, breaking every existing integration or UI flow
+ * the design spec promises keeps working byte-for-byte.
+ *
+ * A field the verifier's request DID name is still only a SUGGESTION: it
+ * pre-fills the holder's starting choice (value, or a predicate with the
+ * verifier's own op/threshold as a convenience starting point) — the holder
+ * can still change or override it before consenting.
+ */
+export function defaultDisclosuresFor(
+  claims: Record<string, unknown> | undefined | null,
+  requestedForType: Record<string, FieldRequest> | undefined,
+): Record<string, DisclosureChoice> {
+  const initial: Record<string, DisclosureChoice> = {};
+  for (const field of disclosableFields(claims)) {
+    const req = requestedForType?.[field];
+    initial[field] = req?.kind === "predicate"
+      ? { kind: "predicate", op: req.op, threshold: req.threshold }
+      : { kind: "value" };
+  }
+  return initial;
 }
 
 function truncateDid(v: string): string { return v.length > 28 ? `${v.slice(0, 18)}…${v.slice(-6)}` : v; }
@@ -79,19 +124,13 @@ export function VerificationInbox(): JSX.Element {
               {(r.eligibleCredentials ?? []).length === 0
                 ? <div className="text-xs text-amber-600">You hold no unrevoked credential of the requested type(s).</div>
                 : (r.eligibleCredentials ?? []).map((c) => {
+                    const claims = c.claims ?? {};
                     const requestedForType = r.requestedFields?.[c.type] ?? {};
                     const credDisclosures = disclosures[r.id]?.[c.id] ?? {};
                     const toggleCredential = (checked: boolean): void => {
                       setPicked({ ...picked, [r.id]: { ...sel, [c.id]: checked } });
                       if (checked && !disclosures[r.id]?.[c.id]) {
-                        // Default: a requested field matches the request (value or
-                        // predicate, as asked); everything else starts withheld —
-                        // least-disclosure by default.
-                        const initial: Record<string, DisclosureChoice> = {};
-                        for (const field of Object.keys(c.claims)) {
-                          const req = requestedForType[field];
-                          initial[field] = req ? (req.kind === "predicate" ? { kind: "predicate", op: req.op, threshold: req.threshold } : { kind: "value" }) : { kind: "withhold" };
-                        }
+                        const initial = defaultDisclosuresFor(claims, requestedForType);
                         setDisclosures({ ...disclosures, [r.id]: { ...disclosures[r.id], [c.id]: initial } });
                       }
                     };
@@ -106,8 +145,14 @@ export function VerificationInbox(): JSX.Element {
                         </label>
                         {sel[c.id] && (
                           <div className="ml-5 mt-1 space-y-1 border-l border-slate-100 pl-3">
-                            {Object.entries(c.claims).map(([field, value]) => {
-                              const choice = credDisclosures[field] ?? { kind: "withhold" as const };
+                            <div className="text-[11px] text-slate-400">
+                              This only controls what the verifier receives — the credential itself is unchanged.
+                            </div>
+                            {disclosableFields(claims).map((field) => {
+                              const value = claims[field];
+                              // Full value disclosure by default (see defaultDisclosuresFor) —
+                              // this fallback only matters before toggleCredential has run.
+                              const choice = credDisclosures[field] ?? { kind: "value" as const };
                               const isNumber = typeof value === "number";
                               const requested = requestedForType[field];
                               return (
@@ -146,7 +191,10 @@ export function VerificationInbox(): JSX.Element {
                                       <input
                                         type="number" className="w-20 rounded border border-slate-200 px-1 py-0.5"
                                         value={choice.threshold}
-                                        onChange={(e) => setFieldChoice(field, { kind: "predicate", op: choice.op, threshold: Number(e.target.value) })}
+                                        onChange={(e) => {
+                                          const n = Number(e.target.value);
+                                          setFieldChoice(field, { kind: "predicate", op: choice.op, threshold: Number.isFinite(n) ? n : 0 });
+                                        }}
                                       />
                                     </>
                                   )}

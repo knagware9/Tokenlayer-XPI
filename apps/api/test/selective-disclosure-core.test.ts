@@ -17,6 +17,12 @@ describe("evaluatePredicate", () => {
     expect(evaluatePredicate(7, "eq", 7)).toBe(true);
     expect(evaluatePredicate(7, "eq", 8)).toBe(false);
   });
+  it("throws rather than silently returning undefined for an unrecognized op", () => {
+    // The type system says this can't happen, but a malformed request body
+    // could reach here if earlier validation ever regressed — this function's
+    // return type claims `boolean`, so it must never hand back `undefined`.
+    expect(() => evaluatePredicate(2011, "between" as unknown as "lte", 2011)).toThrow();
+  });
 });
 
 const SCHEMAS = new Map([
@@ -47,6 +53,21 @@ describe("validateRequestedFields", () => {
     const req: Record<string, Record<string, FieldRequest>> = { DomicileCredential: { holderName: { kind: "predicate", op: "eq", threshold: 1 } } };
     const err = validateRequestedFields(req, SCHEMAS);
     expect(err?.error).toBe("INVALID_PREDICATE_FIELD");
+  });
+  it("rejects a bogus predicate op rather than letting it reach evaluatePredicate", () => {
+    const req = { DomicileCredential: { continuousResidenceSinceYear: { kind: "predicate", op: "between", threshold: 1 } } } as unknown as Record<string, Record<string, FieldRequest>>;
+    const err = validateRequestedFields(req, SCHEMAS);
+    expect(err?.error).toBe("INVALID_PREDICATE_OP");
+  });
+  it("rejects a non-numeric threshold", () => {
+    const req = { DomicileCredential: { continuousResidenceSinceYear: { kind: "predicate", op: "lte", threshold: "soon" } } } as unknown as Record<string, Record<string, FieldRequest>>;
+    const err = validateRequestedFields(req, SCHEMAS);
+    expect(err?.error).toBe("INVALID_PREDICATE_THRESHOLD");
+  });
+  it("rejects a bogus kind", () => {
+    const req = { DomicileCredential: { holderName: { kind: "maybe" } } } as unknown as Record<string, Record<string, FieldRequest>>;
+    const err = validateRequestedFields(req, SCHEMAS);
+    expect(err?.error).toBe("INVALID_FIELD_REQUEST");
   });
 });
 
@@ -82,6 +103,24 @@ describe("resolveDisclosures", () => {
     const r = resolveDisclosures(d, CLAIMS);
     expect(r.ok).toBe(false);
     expect(!r.ok && r.error).toBe("INVALID_PREDICATE_FIELD");
+  });
+  it("rejects a bogus predicate op rather than letting it reach evaluatePredicate", () => {
+    const d = { cred_1: { continuousResidenceSinceYear: { kind: "predicate", op: "between", threshold: 2011 } } } as unknown as Record<string, Record<string, DisclosureChoice>>;
+    const r = resolveDisclosures(d, CLAIMS);
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.error).toBe("INVALID_PREDICATE_OP");
+  });
+  it("rejects a non-numeric threshold", () => {
+    const d = { cred_1: { continuousResidenceSinceYear: { kind: "predicate", op: "lte", threshold: "soon" } } } as unknown as Record<string, Record<string, DisclosureChoice>>;
+    const r = resolveDisclosures(d, CLAIMS);
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.error).toBe("INVALID_PREDICATE_THRESHOLD");
+  });
+  it("rejects a bogus kind", () => {
+    const d = { cred_1: { holderName: { kind: "maybe" } } } as unknown as Record<string, Record<string, DisclosureChoice>>;
+    const r = resolveDisclosures(d, CLAIMS);
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.error).toBe("INVALID_DISCLOSURE_CHOICE");
   });
   it("resolves a value disclosure, a true predicate, a false predicate, and omits a withheld field", () => {
     const d: Record<string, Record<string, DisclosureChoice>> = {

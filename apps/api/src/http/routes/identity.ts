@@ -1662,14 +1662,19 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
     } else {
       requestSchemasByType = new Map<string, { properties: Record<string, { type: string }> }>(Object.values(CREDENTIAL_TYPES).map((t) => [t.type, t.claimSchema]));
     }
-    const orgFieldErr = validateRequestedFields(b.requestedFields, requestSchemasByType);
-    if (orgFieldErr) return reply.code(400).send(orgFieldErr);
 
     // EN-A: verifying is an identity-domain act requiring the Verifier role —
     // checked after the binding/orgType gates on BOTH paths (a legacy null
-    // envelope passes both predicates untouched).
+    // envelope passes both predicates untouched), and deliberately BEFORE
+    // `validateRequestedFields` below: authorization must precede input
+    // validation, so a caller who may not use this route at all gets 403
+    // rather than a 400 that discloses something about the use case's field
+    // shape before its own authorization was even checked.
     if (!orgRoleEnabled(org.capabilities, "Verifier")) return orgCapabilityMissing(reply, org, "Verifier");
     if (!orgDomainEnabled(org.capabilities, "identity")) return orgCapabilityMissing(reply, org, "identity");
+
+    const orgFieldErr = validateRequestedFields(b.requestedFields, requestSchemasByType);
+    if (orgFieldErr) return reply.code(400).send(orgFieldErr);
 
     const rec = await deps.verificationRequests.create({
       verifierOrgId: org.id, holderDid: b.holderDid, requestedTypes: b.requestedTypes, purpose: b.purpose,

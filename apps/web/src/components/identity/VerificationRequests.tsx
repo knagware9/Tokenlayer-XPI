@@ -166,7 +166,10 @@ export function VerificationRequests(): JSX.Element {
                                   <input
                                     type="number" className="w-20 rounded border border-slate-200 px-1 py-0.5"
                                     value={fr.threshold}
-                                    onChange={(e) => setField(field, { kind: "predicate", op: fr.op, threshold: Number(e.target.value) })}
+                                    onChange={(e) => {
+                                      const n = Number(e.target.value);
+                                      setField(field, { kind: "predicate", op: fr.op, threshold: Number.isFinite(n) ? n : 0 });
+                                    }}
                                   />
                                 </>
                               )}

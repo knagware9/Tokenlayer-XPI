@@ -200,4 +200,22 @@ describe("selective disclosure", () => {
     const result = (await verify(app, verifierToken, requestId)).json();
     expect(result.credentials[0].claims).toEqual({ holderName: "Ramesh Kumar", continuousResidenceSinceYear: 2010 });
   });
+
+  it("requestedFields is advisory even when specific: consenting WITHOUT a disclosures body still discloses in full", async () => {
+    // The verifier asks for a predicate on a specific field this time — proving
+    // that a specific ask, not just an empty one, still never blocks or
+    // partially discloses an old-shape consent.
+    const { app, holder, holderToken, verifierToken, credentialId } = await setup();
+    const created = await createRequest(app, verifierToken, {
+      holderDid: holder.did,
+      requestedFields: { DomicileCredential: { continuousResidenceSinceYear: { kind: "predicate", op: "lte", threshold: 2011 } } },
+    });
+    expect(created.statusCode).toBe(201);
+    const requestId = created.json().id as string;
+    const consented = await consent(app, holderToken, requestId, { credentialIds: [credentialId] }); // no `disclosures` key at all
+    expect(consented.statusCode).toBe(200);
+    const result = (await verify(app, verifierToken, requestId)).json();
+    expect(result.credentials[0].claims).toEqual({ holderName: "Ramesh Kumar", continuousResidenceSinceYear: 2010 });
+    expect(result.valid).toBe(true);
+  });
 });

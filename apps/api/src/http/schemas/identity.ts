@@ -6,7 +6,7 @@
  * fails if an entry here is referenced from another product's route file.
  */
 import type { FastifySchema } from "fastify";
-import { TOKEN_STANDARD, TOKEN_TYPE, errs, humanOnly, eitherCredential } from "./components.js";
+import { TOKEN_STANDARD, TOKEN_TYPE, errs, humanOnly, eitherCredential, REQUESTED_FIELDS_BODY_SCHEMA, DISCLOSURES_BODY_SCHEMA } from "./components.js";
 
 export const identitySchemas: Record<string, FastifySchema> = {
   credentialTemplates: { tags: ["Credential Use Cases"], summary: "Editable starter credential-type templates", security: humanOnly,
@@ -560,7 +560,14 @@ export const identitySchemas: Record<string, FastifySchema> = {
     tags: ["Verification"], summary: "A verifier org requests a credential presentation", security: eitherCredential,
     description:
       "Requires the `verifications:request` scope. Asks a holder to present credentials; nothing is disclosed until " +
-      "that holder consents.",
+      "that holder consents.\n\n" +
+      "`requestedFields` (optional) asks for specific claim fields, per credential type — a plain value, or, for a " +
+      "`number`-typed field, a threshold predicate (`gte`/`lte`/`gt`/`lt`/`eq` + `threshold`) instead of the raw " +
+      "value. **This is advisory only.** The holder always has final say per field at consent time and can " +
+      "disclose less than asked — or a predicate instead of a value, or vice versa — without being blocked from " +
+      "consenting at all. A field named here that doesn't exist on the type, or a predicate named on a non-numeric " +
+      "field, is refused with **400** `UNKNOWN_FIELD` / `INVALID_PREDICATE_FIELD` at create time. See " +
+      "`POST /verification-requests/{id}/consent` for the holder's side of this exchange.",
     body: {
       type: "object", additionalProperties: false, required: ["holderDid", "requestedTypes", "purpose"],
       properties: {
@@ -568,7 +575,7 @@ export const identitySchemas: Record<string, FastifySchema> = {
         requestedTypes: { type: "array", items: { type: "string" }, minItems: 1 },
         purpose: { type: "string", minLength: 1 },
         credentialUseCaseKey: { type: "string" },
-        requestedFields: { type: "object", additionalProperties: true },
+        requestedFields: REQUESTED_FIELDS_BODY_SCHEMA,
       },
     },
     response: { 201: { $ref: "VerificationRequest#" }, ...errs(400, 401, 403) },
@@ -600,13 +607,21 @@ export const identitySchemas: Record<string, FastifySchema> = {
       "verification scope. This route decrypts the holder's custodial signing key, signs a Verifiable Presentation " +
       "as them, and releases the selected credentials' contents to the verifier; the disclosure cannot be recalled. " +
       "A key that may merely read credentials must not be able to perform it, and `verifications:*` describes the " +
-      "VERIFIER's side of the exchange rather than the holder's.",
+      "VERIFIER's side of the exchange rather than the holder's.\n\n" +
+      "`disclosures` (optional) is the holder's per-field choice for each credential in `credentialIds`: share the " +
+      "value, share only a threshold-predicate result (numeric fields only — the raw value is read once to " +
+      "compute it and never stored or returned), or withhold it — independent of what the request's " +
+      "`requestedFields` asked for. **Omitting `disclosures` entirely, or omitting a credential/field from it, " +
+      "discloses that credential/field in full** — this is the pre-selective-disclosure default and never changes " +
+      "for a caller that never sends it. A field named here that doesn't exist on the credential's actual claims, " +
+      "or a predicate named on a non-numeric claim, is refused with **400** `UNKNOWN_FIELD` / " +
+      "`INVALID_PREDICATE_FIELD`. Consent is never blocked by disclosing fewer fields than requested.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: {
       type: "object", additionalProperties: false, required: ["credentialIds"],
       properties: {
         credentialIds: { type: "array", items: { type: "string" }, minItems: 1 },
-        disclosures: { type: "object", additionalProperties: true },
+        disclosures: DISCLOSURES_BODY_SCHEMA,
       },
     },
     // The request, now `consented`. The signed presentation itself is NOT
@@ -637,7 +652,7 @@ export const identitySchemas: Record<string, FastifySchema> = {
       200: {
         type: "object", additionalProperties: true,
         properties: {
-          valid: { type: "boolean", description: "The overall verdict: the presentation verified AND every requested type is covered by a valid credential." },
+          valid: { type: "boolean", description: "The overall verdict: the presentation verified AND every requested type is covered by a valid credential. This says nothing about which FIELDS were disclosed — selective disclosure means `valid: true` is fully compatible with a credential's `claims` being partially or entirely withheld; read each credential's own `claims` to see what was actually shared." },
           holderDid: { type: "string", nullable: true },
           reason: { type: "string", nullable: true, description: "Why the PRESENTATION failed, when it did. Per-credential reasons live on each entry." },
           purpose: { type: "string", description: "Echoed from the request, so the verdict is self-describing in a log." },
@@ -651,7 +666,17 @@ export const identitySchemas: Record<string, FastifySchema> = {
                 id: { type: "string", nullable: true, description: "The credential's id (its JWT `jti`). null when the presented JWT could not be decoded." },
                 type: { type: "string", nullable: true, description: "From OUR record. null for a credential this platform did not issue." },
                 issuer: { type: "string", nullable: true, description: "The issuer DID." },
-                claims: { type: "object", additionalProperties: true, nullable: true, description: "The disclosed subject claims — the actual payload the holder consented to share." },
+                claims: {
+                  type: "object", additionalProperties: true, nullable: true,
+                  description:
+                    "The disclosed subject claims — the actual payload the holder consented to share, keyed by " +
+                    "field. Each field is one of three shapes: the plain claim value (as issued — unchanged from " +
+                    "before selective disclosure existed); `{ predicate: { op, threshold, result } }` when the " +
+                    "holder chose to prove only a threshold check on a numeric field instead of sharing its value " +
+                    "(the raw value never appears anywhere in the response); or the field is simply ABSENT when " +
+                    "the holder withheld it entirely. A request consented before selective disclosure existed, or " +
+                    "consented with no `disclosures` at all, falls back to every field in full, unchanged.",
+                },
                 reason: { type: "string", nullable: true, description: "e.g. BAD_ISSUER_SIGNATURE, UNTRUSTED_ISSUER, CREDENTIAL_EXPIRED, SUBJECT_MISMATCH." },
                 valid: { type: "boolean" },
                 checks: {

@@ -786,7 +786,11 @@ export interface VerificationRequest {
   verifiedAt: string | null;
   createdAt: string;
   expiresAt: string;
-  eligibleCredentials?: { id: string; type: string; issuerDid: string; issuerName?: string | null; issuedAt: string; expiresAt: string | null; claims: Record<string, unknown> }[];
+  // `claims` is absent when the caller lacks `credentials:read` (a scoped API
+  // key holding only `verifications:read`) — see GET /me/verification-requests
+  // — and is also absent from any deployment predating the `claims` field
+  // entirely (the identity app can be deployed as a separately-versioned edge).
+  eligibleCredentials?: { id: string; type: string; issuerDid: string; issuerName?: string | null; issuedAt: string; expiresAt: string | null; claims?: Record<string, unknown> }[];
 }
 export interface StagedInvoice {
   id: string; useCaseKey: string; source: "upload" | "erp" | "manual";

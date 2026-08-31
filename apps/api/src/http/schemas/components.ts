@@ -17,6 +17,85 @@ import type { FastifySchema } from "fastify";
 const TOKEN_STANDARD = { type: "string", enum: ["ERC-20", "ERC-721", "ERC-3643"] };
 const TOKEN_TYPE = { type: "string", enum: ["fungible", "nonfungible"] };
 
+/**
+ * Selective disclosure's shared body shapes, matching
+ * `apps/api/src/identity/selective-disclosure.ts`'s `FieldRequest` and
+ * `DisclosureChoice` types — a real, typed structure instead of a loose
+ * `additionalProperties: true` bag. A malformed `kind`/`op`/`threshold` is now
+ * refused by AJV at the HTTP boundary, before it ever reaches
+ * `validateRequestedFields`/`resolveDisclosures` (which still validate the
+ * same shape again, defense-in-depth, for any caller of those functions that
+ * bypasses HTTP — e.g. a future non-Fastify caller).
+ *
+ * Defined HERE, not in schemas/identity.ts, purely so `schema-file-domains.test.ts`
+ * (which naively treats every 2-space-indented `key:` line in identity.ts as a
+ * top-level schema entry) does not mistake these nested fragments' own inner
+ * property lines for stranded/duplicate top-level schemas. `components.ts` is
+ * exactly the file this codebase already uses for cross-cutting JSON-Schema
+ * building blocks referenced by product schema files (see `errs`, `humanOnly`,
+ * `TOKEN_STANDARD` below) — that scan only reads `routes/schemas/{family}.ts`,
+ * never this file.
+ *
+ * Deliberately `if`/`then`, NOT `oneOf` over per-`kind` variants: Fastify's
+ * AJV instance runs with `removeAdditional: true` by default, which mutates
+ * the instance data as it tries (and rejects) EACH `oneOf` branch in turn —
+ * a branch that only declares `kind` strips `op`/`threshold` as "additional"
+ * while it is being tried, and that mutation is NOT undone when the branch
+ * fails and AJV moves on to try the next one. The net effect: a
+ * `{ kind: "predicate", op, threshold }` payload loses `op`/`threshold`
+ * before the `predicate` branch ever gets to see them, and a legitimate
+ * request is rejected as malformed. Declaring every possible property once
+ * (`op`/`threshold` are known properties regardless of `kind`) and gating
+ * their requiredness with `if`/`then` sidesteps this entirely — `removeAdditional`
+ * only ever strips properties this schema never declared at all.
+ */
+const PREDICATE_OP_ENUM = ["gte", "lte", "gt", "lt", "eq"] as const;
+
+const PREDICATE_REQUIRED_WHEN_KIND_IS_PREDICATE = {
+  if: { properties: { kind: { const: "predicate" } }, required: ["kind"] },
+  then: { required: ["op", "threshold"] },
+};
+
+/** `{ kind: "value" } | { kind: "predicate", op, threshold }` — one field's entry in `requestedFields`. */
+const FIELD_REQUEST_SCHEMA = {
+  type: "object", additionalProperties: false, required: ["kind"],
+  properties: {
+    kind: { type: "string", enum: ["value", "predicate"] },
+    op: { type: "string", enum: [...PREDICATE_OP_ENUM] },
+    threshold: { type: "number" },
+  },
+  ...PREDICATE_REQUIRED_WHEN_KIND_IS_PREDICATE,
+};
+
+/** Same as above plus `{ kind: "withhold" }` — one field's entry in `disclosures`, the holder's actual choice. */
+const DISCLOSURE_CHOICE_SCHEMA = {
+  type: "object", additionalProperties: false, required: ["kind"],
+  properties: {
+    kind: { type: "string", enum: ["value", "predicate", "withhold"] },
+    op: { type: "string", enum: [...PREDICATE_OP_ENUM] },
+    threshold: { type: "number" },
+  },
+  ...PREDICATE_REQUIRED_WHEN_KIND_IS_PREDICATE,
+};
+
+/** `Record<credentialType, Record<field, FieldRequest>>` — the verifier's advisory create-time ask. */
+const REQUESTED_FIELDS_BODY_SCHEMA = {
+  type: "object",
+  additionalProperties: {
+    type: "object",
+    additionalProperties: FIELD_REQUEST_SCHEMA,
+  },
+};
+
+/** `Record<credentialId, Record<field, DisclosureChoice>>` — the holder's actual consent-time choice. */
+const DISCLOSURES_BODY_SCHEMA = {
+  type: "object",
+  additionalProperties: {
+    type: "object",
+    additionalProperties: DISCLOSURE_CHOICE_SCHEMA,
+  },
+};
+
 /** Reusable component schemas, each with a stable $id. */
 export const components: Record<string, unknown>[] = [
   {
@@ -795,5 +874,5 @@ const humanOnly: SecurityRequirement[] = [{ bearerAuth: [] }];
 /** Either credential. Use for any route carrying `authScoped(...)`. */
 const eitherCredential: SecurityRequirement[] = [{ bearerAuth: [] }, { apiKeyAuth: [] }];
 
-export { TOKEN_STANDARD, TOKEN_TYPE, errs, humanOnly, eitherCredential };
+export { TOKEN_STANDARD, TOKEN_TYPE, errs, humanOnly, eitherCredential, REQUESTED_FIELDS_BODY_SCHEMA, DISCLOSURES_BODY_SCHEMA };
 export type { SecurityRequirement };
