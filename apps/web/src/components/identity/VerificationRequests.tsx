@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ApiError, api } from "../../api.js";
 import { useAuth } from "../../auth.js";
-import type { ChainInfo, CredentialTypeInfo, CredentialUseCase, VerificationRequest, VerificationResult } from "../../types.js";
+import type { ChainInfo, CredentialTypeInfo, CredentialUseCase, FieldRequest, PredicateOp, VerificationRequest, VerificationResult } from "../../types.js";
 import { TxHashRow } from "./CredentialCard.js";
 import { Card, EmptyState, Pill } from "../shared/ui.js";
 
@@ -30,6 +30,7 @@ export function VerificationRequests(): JSX.Element {
   const [selectedKey, setSelectedKey] = useState("");
   const [holderDid, setHolderDid] = useState("");
   const [picked, setPicked] = useState<Record<string, boolean>>({});
+  const [fieldRequests, setFieldRequests] = useState<Record<string, Record<string, FieldRequest>>>({});
   const [purpose, setPurpose] = useState("");
   const [reqId, setReqId] = useState<string | null>(null);
   const [result, setResult] = useState<VerificationResult | null>(null);
@@ -56,6 +57,11 @@ export function VerificationRequests(): JSX.Element {
   const selectedUseCase = useCases.find((u) => u.key === selectedKey);
   // The requestable types come from the selected use case, or the closed catalog when none.
   const typeNames = selectedUseCase ? selectedUseCase.credentialTypes.map((t) => t.name) : types.map((t) => t.type);
+  const propertiesOf = (typeName: string): Record<string, { type: string }> => {
+    const fromUseCase = selectedUseCase?.credentialTypes.find((t) => t.name === typeName)?.claimSchema.properties;
+    if (fromUseCase) return fromUseCase;
+    return types.find((t) => t.type === typeName)?.claimSchema.properties ?? {};
+  };
 
   async function submit(): Promise<void> {
     if (!token) return;
@@ -63,9 +69,15 @@ export function VerificationRequests(): JSX.Element {
     if (!holderDid || requestedTypes.length === 0 || !purpose) { setErr("holder DID, at least one type, and a purpose are required"); return; }
     setErr(null); setResult(null);
     try {
+      const requestedFieldsForSubmit: Record<string, Record<string, FieldRequest>> = {};
+      for (const t of requestedTypes) {
+        const fields = fieldRequests[t];
+        if (fields && Object.keys(fields).length > 0) requestedFieldsForSubmit[t] = fields;
+      }
       const r = await api.createVerificationRequest(token, {
         holderDid: holderDid.trim(), requestedTypes, purpose: purpose.trim(),
         ...(selectedKey ? { credentialUseCaseKey: selectedKey } : {}),
+        ...(Object.keys(requestedFieldsForSubmit).length > 0 ? { requestedFields: requestedFieldsForSubmit } : {}),
       });
       setReqId(r.id); setMsg(`Requested — waiting for the holder to consent (request ${r.id.slice(0, 8)}…).`);
       await refreshOutbox(token);
@@ -99,16 +111,75 @@ export function VerificationRequests(): JSX.Element {
         {msg && <div className="text-sm text-emerald-600 mb-2">{msg}</div>}
         <input className="input w-full mb-2" placeholder="Holder DID (did:key:…)" value={holderDid} onChange={(e) => setHolderDid(e.target.value)} />
         <label className="block text-xs text-slate-500 mb-1">Credential use case (optional)</label>
-        <select className="input w-full mb-2" value={selectedKey} onChange={(e) => { setSelectedKey(e.target.value); setPicked({}); }}>
+        <select className="input w-full mb-2" value={selectedKey} onChange={(e) => { setSelectedKey(e.target.value); setPicked({}); setFieldRequests({}); }}>
           <option value="">— none (generic) —</option>
           {useCases.map((u) => <option key={u.key} value={u.key}>{u.name} ({u.key})</option>)}
         </select>
-        <div className="flex flex-wrap gap-3 mb-2">
-          {typeNames.map((t) => (
-            <label key={t} className="text-sm flex items-center gap-1">
-              <input type="checkbox" checked={!!picked[t]} onChange={(e) => setPicked({ ...picked, [t]: e.target.checked })} /> {t}
-            </label>
-          ))}
+        <div className="space-y-2 mb-2">
+          {typeNames.map((t) => {
+            const props = propertiesOf(t);
+            const fields = fieldRequests[t] ?? {};
+            const setField = (field: string, fr: FieldRequest | null): void => {
+              const next = { ...fields };
+              if (fr) next[field] = fr; else delete next[field];
+              setFieldRequests({ ...fieldRequests, [t]: next });
+            };
+            return (
+              <div key={t}>
+                <label className="text-sm flex items-center gap-1">
+                  <input type="checkbox" checked={!!picked[t]} onChange={(e) => setPicked({ ...picked, [t]: e.target.checked })} /> {t}
+                </label>
+                {picked[t] && Object.keys(props).length > 0 && (
+                  <div className="ml-5 mt-1 space-y-1 border-l border-slate-100 pl-3">
+                    <div className="text-[11px] uppercase tracking-wide text-slate-400">Request specific fields (optional)</div>
+                    {Object.entries(props).map(([field, prop]) => {
+                      const fr = fields[field];
+                      return (
+                        <div key={field} className="flex items-center gap-2 text-xs">
+                          <label className="flex items-center gap-1">
+                            <input type="checkbox" checked={!!fr} onChange={(e) => setField(field, e.target.checked ? { kind: "value" } : null)} />
+                            {field}
+                          </label>
+                          {fr && prop.type === "number" && (
+                            <>
+                              <select
+                                className="rounded border border-slate-200 px-1 py-0.5"
+                                value={fr.kind === "predicate" ? "predicate" : "value"}
+                                onChange={(e) => setField(field, e.target.value === "predicate" ? { kind: "predicate", op: "lte", threshold: 0 } : { kind: "value" })}
+                              >
+                                <option value="value">as a value</option>
+                                <option value="predicate">as a threshold check</option>
+                              </select>
+                              {fr.kind === "predicate" && (
+                                <>
+                                  <select
+                                    className="rounded border border-slate-200 px-1 py-0.5"
+                                    value={fr.op}
+                                    onChange={(e) => setField(field, { kind: "predicate", op: e.target.value as PredicateOp, threshold: fr.threshold })}
+                                  >
+                                    <option value="lte">≤</option>
+                                    <option value="gte">≥</option>
+                                    <option value="lt">&lt;</option>
+                                    <option value="gt">&gt;</option>
+                                    <option value="eq">=</option>
+                                  </select>
+                                  <input
+                                    type="number" className="w-20 rounded border border-slate-200 px-1 py-0.5"
+                                    value={fr.threshold}
+                                    onChange={(e) => setField(field, { kind: "predicate", op: fr.op, threshold: Number(e.target.value) })}
+                                  />
+                                </>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
         <input className="input w-full mb-3" placeholder="Purpose (e.g. investor onboarding)" value={purpose} onChange={(e) => setPurpose(e.target.value)} />
         <div className="flex gap-2">
@@ -188,7 +259,19 @@ export function VerificationRequests(): JSX.Element {
                       {c.revokeTxHash && <TxHashRow label="Revoked" hash={c.revokeTxHash} chainId={c.anchorChainId} chains={chains} />}
                     </div>
                   )}
-                  {c.claims && <div className="text-xs text-slate-500 mt-2">{Object.entries(c.claims).map(([k, v]) => `${k}: ${String(v)}`).join(" · ")}</div>}
+                  {c.claims && (
+                    <div className="text-xs text-slate-500 mt-2">
+                      {Object.entries(c.claims).map(([k, v]) => {
+                        const isPredicate = v && typeof v === "object" && "predicate" in v;
+                        if (isPredicate) {
+                          const p = (v as { predicate: { op: string; threshold: number; result: boolean } }).predicate;
+                          const opSymbol = { gte: "≥", lte: "≤", gt: ">", lt: "<", eq: "=" }[p.op] ?? p.op;
+                          return `${k}: ${opSymbol} ${p.threshold} ${p.result ? "✓" : "✗"}`;
+                        }
+                        return `${k}: ${String(v)}`;
+                      }).join(" · ")}
+                    </div>
+                  )}
                 </div>
               );
             })}
