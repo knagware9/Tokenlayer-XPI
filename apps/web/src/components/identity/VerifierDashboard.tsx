@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ApiError, api } from "../../api.js";
 import { useAuth } from "../../auth.js";
 import type { VerificationRequest, VerificationResult } from "../../types.js";
@@ -32,6 +32,14 @@ function Tile({ label, value, tone, active, onClick }: { label: string; value: n
   );
 }
 
+function BackButton({ onClick }: { onClick: () => void }): JSX.Element {
+  return (
+    <button type="button" onClick={onClick} className="text-sm text-slate-500 hover:text-slate-800 inline-flex items-center gap-1.5">
+      ← Back to Dashboard
+    </button>
+  );
+}
+
 function claimsLine(claims: Record<string, unknown>): string {
   return Object.entries(claims).map(([k, v]) => {
     const isPredicate = v && typeof v === "object" && "predicate" in v;
@@ -48,15 +56,16 @@ type Filter = "sent" | "pending" | "verified" | "rejected" | "expired";
 
 /**
  * Verifier-scoped overview. The three tiles are toggles: clicking one reveals
- * a table filtered to that category below (clicking again hides it). Each row
- * has a View button that expands it inline to show the request's detail and,
- * once run, the verification result — the same per-credential check rows and
- * claims rendering VerificationRequests.tsx has always shown — and a Run
- * verification button for a consented-but-not-yet-verified row. `status`
- * never becomes "verified" — the request record stays "consented" once
- * verified, so "verified" here means `verifiedAt` is set, and "pending" means
- * it is not (whether or not the holder has consented yet). Reuses GET
- * /verification-requests for both the tile counts and the table.
+ * a table filtered to that category below (clicking again hides it). Each
+ * row's View button opens a SEPARATE detail page — not an inline expansion —
+ * showing the request's detail and, once run, the verification result (the
+ * same per-credential check rows and claims rendering VerificationRequests.tsx
+ * has always shown) plus a Run verification button for a consented-but-not-
+ * yet-verified request. `status` never becomes "verified" — the request
+ * record stays "consented" once verified, so "verified" here means
+ * `verifiedAt` is set, and "pending" means it is not (whether or not the
+ * holder has consented yet). Reuses GET /verification-requests for both the
+ * tile counts and the table.
  */
 export function VerifierDashboard(): JSX.Element {
   const { token } = useAuth();
@@ -65,7 +74,7 @@ export function VerifierDashboard(): JSX.Element {
   const [filter, setFilter] = useState<Filter | null>(null);
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
   const [results, setResults] = useState<Record<string, VerificationResult>>({});
   const [actionErr, setActionErr] = useState<string | null>(null);
 
@@ -87,7 +96,6 @@ export function VerifierDashboard(): JSX.Element {
 
   function toggleFilter(f: Filter): void {
     setFilter((cur) => (cur === f ? null : f));
-    setExpanded(null);
     setQuery("");
     setPage(1);
   }
@@ -98,7 +106,6 @@ export function VerifierDashboard(): JSX.Element {
     try {
       const result = await api.verifyVerification(token, id);
       setResults((r) => ({ ...r, [id]: result }));
-      setExpanded(id);
       reload();
     } catch (e) { setActionErr(errMessage(e, "Verification failed")); }
   }
@@ -119,6 +126,70 @@ export function VerifierDashboard(): JSX.Element {
     ? categoryRequests.filter((r) => r.purpose.toLowerCase().includes(q) || r.requestedTypes.some((t) => t.toLowerCase().includes(q)) || r.holderDid.toLowerCase().includes(q))
     : categoryRequests;
   const pagedRequests = filteredRequests.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  // ── Request detail page ─────────────────────────────────────────────────
+  if (detailId) {
+    const r = requests.find((x) => x.id === detailId);
+    if (!r) { setDetailId(null); return <></>; }
+    const result = results[r.id];
+    return (
+      <div className="space-y-5">
+        <BackButton onClick={() => setDetailId(null)} />
+        <SectionHeader title={r.purpose} description={`${r.requestedTypes.join(", ")} · holder ${r.holderDid.slice(0, 24)}…`} />
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5">
+          {actionErr && <div className="text-sm text-rose-600 mb-3">{actionErr}</div>}
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-xs text-slate-500">
+              created {new Date(r.createdAt).toLocaleString()}
+              {r.verifiedAt && ` · verified ${new Date(r.verifiedAt).toLocaleString()}`}
+            </div>
+            {r.status === "consented" && (
+              <button className="rounded-lg border border-slate-200 px-4 py-2 text-sm" onClick={() => void runVerify(r.id)}>Run verification</button>
+            )}
+          </div>
+          {!result ? (
+            <div className="text-sm text-slate-400">
+              {r.status !== "consented"
+                ? `Nothing to verify — request is ${r.status}.`
+                : r.verifiedAt
+                  ? "Already verified — click Run verification to see the result again."
+                  : "Not verified yet — click Run verification."}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div>
+                <span className={`font-medium text-sm ${result.valid ? "text-emerald-700" : "text-rose-700"}`}>{result.valid ? "Presentation is valid." : "Presentation did not fully verify."}</span>
+              </div>
+              {result.credentials.map((c, i) => {
+                const checks = c.checks;
+                const firstFail = checks && CHECK_ROWS.find(({ key }) => checks[key] === false)?.key;
+                return (
+                  <div key={i} className="border border-slate-200 rounded-lg p-3 text-sm">
+                    <div className="font-medium">{c.type ?? "unknown credential"} {c.reason && !firstFail && <span className="text-rose-600">· {c.reason}</span>}</div>
+                    {checks && (
+                      <div className="mt-1.5 space-y-1">
+                        {CHECK_ROWS.map(({ key, label }) => {
+                          const v = checks[key];
+                          return (
+                            <div key={key} className="flex items-center gap-1.5 text-xs">
+                              <span className={v === true ? "text-emerald-600" : v === "unknown" ? "text-slate-400" : "text-rose-600"}>{v === true ? "✓" : v === "unknown" ? "?" : "✗"}</span>
+                              <span className={v === false ? "text-rose-700" : "text-slate-700"}>{label}</span>
+                              {key === firstFail && c.reason && <span className="text-rose-500">— {c.reason}</span>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {c.claims && <div className="text-xs text-slate-500 mt-1.5">{claimsLine(c.claims)}</div>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">
@@ -154,7 +225,6 @@ export function VerifierDashboard(): JSX.Element {
 
       {filter && (
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-          {actionErr && <div className="text-sm text-rose-600 px-4 pt-3">{actionErr}</div>}
           <div className="px-4 pt-3 pb-1">
             <input value={query} onChange={(e) => onQueryChange(e.target.value)} placeholder="Search purpose, type, or holder DID…"
               className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs w-72 max-w-full" />
@@ -172,74 +242,20 @@ export function VerifierDashboard(): JSX.Element {
             </thead>
             <tbody>
               {filteredRequests.length === 0 && <tr><td colSpan={5} className="px-4 py-4 text-slate-400">{categoryRequests.length === 0 ? "Nothing here." : "No matches."}</td></tr>}
-              {pagedRequests.map((r) => {
-                const result = results[r.id];
-                return (
-                  <Fragment key={r.id}>
-                    <tr className="border-t border-slate-100">
-                      <td className="px-4 py-2">{r.purpose}</td>
-                      <td className="px-4 py-2">{r.requestedTypes.join(", ")}</td>
-                      <td className="px-4 py-2">{r.holderDid.slice(0, 20)}…</td>
-                      <td className="px-4 py-2 capitalize">{r.verifiedAt ? "verified" : r.status}</td>
-                      <td className="px-4 py-2 text-right whitespace-nowrap">
-                        {r.status === "consented" && (
-                          <button className="rounded-lg border border-slate-200 px-3 py-1 text-xs mr-2" onClick={() => void runVerify(r.id)}>Run verification</button>
-                        )}
-                        <button className="rounded-lg border border-slate-200 px-3 py-1 text-xs" onClick={() => setExpanded((x) => (x === r.id ? null : r.id))}>{expanded === r.id ? "Hide" : "View"}</button>
-                      </td>
-                    </tr>
-                    {expanded === r.id && (
-                      <tr className="border-t border-slate-100 bg-slate-50/60">
-                        <td colSpan={5} className="px-4 py-3 text-xs">
-                          <div className="text-slate-500 mb-2">
-                            created {new Date(r.createdAt).toLocaleString()}
-                            {r.verifiedAt && ` · verified ${new Date(r.verifiedAt).toLocaleString()}`}
-                          </div>
-                          {!result ? (
-                            <div className="text-slate-400">
-                              {r.status !== "consented"
-                                ? `Nothing to verify — request is ${r.status}.`
-                                : r.verifiedAt
-                                  ? "Already verified — click Run verification to see the result again."
-                                  : "Not verified yet — click Run verification."}
-                            </div>
-                          ) : (
-                            <div className="space-y-2">
-                              <div>
-                                <span className={`font-medium ${result.valid ? "text-emerald-700" : "text-rose-700"}`}>{result.valid ? "Presentation is valid." : "Presentation did not fully verify."}</span>
-                              </div>
-                              {result.credentials.map((c, i) => {
-                                const checks = c.checks;
-                                const firstFail = checks && CHECK_ROWS.find(({ key }) => checks[key] === false)?.key;
-                                return (
-                                  <div key={i} className="border border-slate-200 rounded-lg p-2">
-                                    <div className="font-medium">{c.type ?? "unknown credential"} {c.reason && !firstFail && <span className="text-rose-600">· {c.reason}</span>}</div>
-                                    {checks && (
-                                      <div className="mt-1 space-y-0.5">
-                                        {CHECK_ROWS.map(({ key, label }) => {
-                                          const v = checks[key];
-                                          return (
-                                            <div key={key} className="flex items-center gap-1.5">
-                                              <span className={v === true ? "text-emerald-600" : v === "unknown" ? "text-slate-400" : "text-rose-600"}>{v === true ? "✓" : v === "unknown" ? "?" : "✗"}</span>
-                                              <span className={v === false ? "text-rose-700" : "text-slate-700"}>{label}</span>
-                                              {key === firstFail && c.reason && <span className="text-rose-500">— {c.reason}</span>}
-                                            </div>
-                                          );
-                                        })}
-                                      </div>
-                                    )}
-                                    {c.claims && <div className="text-slate-500 mt-1">{claimsLine(c.claims)}</div>}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </td>
-                      </tr>
+              {pagedRequests.map((r) => (
+                <tr key={r.id} className="border-t border-slate-100 hover:bg-slate-50/70 transition-colors">
+                  <td className="px-4 py-2">{r.purpose}</td>
+                  <td className="px-4 py-2">{r.requestedTypes.join(", ")}</td>
+                  <td className="px-4 py-2">{r.holderDid.slice(0, 20)}…</td>
+                  <td className="px-4 py-2 capitalize">{r.verifiedAt ? "verified" : r.status}</td>
+                  <td className="px-4 py-2 text-right whitespace-nowrap">
+                    {r.status === "consented" && (
+                      <button className="rounded-lg border border-slate-200 px-3 py-1 text-xs mr-2" onClick={() => void runVerify(r.id)}>Run verification</button>
                     )}
-                  </Fragment>
-                );
-              })}
+                    <button className="rounded-lg border border-slate-200 px-3 py-1 text-xs" onClick={() => setDetailId(r.id)}>View</button>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
           </div>

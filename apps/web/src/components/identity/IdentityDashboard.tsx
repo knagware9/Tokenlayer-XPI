@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../../api.js";
 import { useAuth } from "../../auth.js";
 import type { DerivedCredentialStatus, IdentityDashboardData, Proposal } from "../../types.js";
@@ -45,6 +45,14 @@ function Tile({ label, value, tone, stagger, active, onClick }: { label: string;
   return <button type="button" onClick={onClick} className={`${shared} hover:shadow hover:border-slate-300 cursor-pointer`}>{body}</button>;
 }
 
+function BackButton({ onClick }: { onClick: () => void }): JSX.Element {
+  return (
+    <button type="button" onClick={onClick} className="text-sm text-slate-500 hover:text-slate-800 inline-flex items-center gap-1.5">
+      ← Back to Dashboard
+    </button>
+  );
+}
+
 function ActivityStrip({ days }: { days: { date: string; issued: number }[] }): JSX.Element {
   const max = Math.max(1, ...days.map((d) => d.issued));
   return (
@@ -79,10 +87,10 @@ export function IdentityDashboard(): JSX.Element {
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [proposals, setProposals] = useState<Proposal[] | null>(null);
-  const [boardExpanded, setBoardExpanded] = useState<string | null>(null);
+  const [boardDetailId, setBoardDetailId] = useState<string | null>(null);
   const [boardPage, setBoardPage] = useState(1);
   const [proposalFilter, setProposalFilter] = useState<"all" | "executed" | "failed" | null>(null);
-  const [proposalExpanded, setProposalExpanded] = useState<string | null>(null);
+  const [proposalDetailId, setProposalDetailId] = useState<string | null>(null);
   const [proposalPage, setProposalPage] = useState(1);
 
   useEffect(() => {
@@ -131,12 +139,59 @@ export function IdentityDashboard(): JSX.Element {
   }
   function toggleProposalFilter(f: "all" | "executed" | "failed"): void {
     setProposalFilter((cur) => (cur === f ? null : f));
-    setProposalExpanded(null);
+    setProposalDetailId(null);
     setProposalPage(1);
   }
 
   if (error) return <div><SectionHeader title="Identity Dashboard" description={error} /></div>;
   if (!data) return <div><SectionHeader title="Identity Dashboard" description="Loading…" /></div>;
+
+  if (boardDetailId) {
+    const r = data.board.find((row) => row.credentialId === boardDetailId);
+    if (!r) { setBoardDetailId(null); return <></>; }
+    return (
+      <div className="space-y-4">
+        <BackButton onClick={() => setBoardDetailId(null)} />
+        <SectionHeader title={r.type} description={`${r.holderLabel} · ${STATUS_META[r.status].label}`} />
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-3 max-w-2xl">
+          <div className="flex items-center justify-between">
+            <StatusPill status={r.status} />
+            {r.acceptanceNote && <div className="text-xs text-rose-500">{r.acceptanceNote}</div>}
+          </div>
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div><div className="text-[11px] uppercase tracking-wide text-slate-400">Credential id</div><div className="font-data text-slate-700 break-all">{r.credentialId}</div></div>
+            <div><div className="text-[11px] uppercase tracking-wide text-slate-400">Holder DID</div><div className="font-data text-slate-700 break-all">{r.holderDid}</div></div>
+            <div><div className="text-[11px] uppercase tracking-wide text-slate-400">Use case</div><div className="text-slate-700">{r.useCaseName} <span className="text-slate-400">({r.useCaseKey})</span></div></div>
+            <div><div className="text-[11px] uppercase tracking-wide text-slate-400">Issued</div><div className="text-slate-700 font-data">{new Date(r.issuedAt).toLocaleString()}</div></div>
+            <div><div className="text-[11px] uppercase tracking-wide text-slate-400">Expires</div><div className="text-slate-700 font-data">{r.expiresAt ? new Date(r.expiresAt).toLocaleString() : "—"}</div></div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (proposalDetailId) {
+    const p = (proposals ?? []).find((row) => row.id === proposalDetailId);
+    if (!p) { setProposalDetailId(null); return <></>; }
+    return (
+      <div className="space-y-4">
+        <BackButton onClick={() => setProposalDetailId(null)} />
+        <SectionHeader title={p.kind} description={`${p.proposerLabel} · ${p.status}`} />
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-3 max-w-2xl text-sm">
+          {p.error && <div className="text-rose-600">{p.error}</div>}
+          <div className="grid grid-cols-2 gap-1.5">
+            {Object.entries(p.payload).filter(([k]) => k !== "claims").map(([k, v]) => (
+              <div key={k} className="min-w-0"><span className="text-slate-400">{k}:</span> <span className="text-slate-700 break-all">{typeof v === "object" ? JSON.stringify(v) : String(v)}</span></div>
+            ))}
+          </div>
+          <div className="text-[11px] text-slate-400 border-t border-slate-100 pt-2">
+            Created {new Date(p.createdAt).toLocaleString()} · {p.approvals.length}/{p.required} approval{p.required === 1 ? "" : "s"}
+            {p.decidedAt && ` · decided ${new Date(p.decidedAt).toLocaleString()}`}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const t = data.totals;
   return (
@@ -191,33 +246,15 @@ export function IdentityDashboard(): JSX.Element {
               <tbody>
                 {pagedIssuanceRows.length === 0 && <tr><td colSpan={5} className="px-3 py-4 text-center text-slate-400">Nothing here.</td></tr>}
                 {pagedIssuanceRows.map((p) => (
-                  <Fragment key={p.id}>
-                    <tr className="border-t border-slate-100">
-                      <td className="px-3 py-2 text-slate-700">{p.kind}</td>
-                      <td className="px-3 py-2 text-slate-500">{p.proposerLabel}</td>
-                      <td className="px-3 py-2 capitalize text-slate-700">{p.status}</td>
-                      <td className="px-3 py-2 text-slate-400 font-data">{new Date(p.createdAt).toLocaleString()}</td>
-                      <td className="px-3 py-2 text-right">
-                        <button className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px]" onClick={() => setProposalExpanded((x) => (x === p.id ? null : p.id))}>{proposalExpanded === p.id ? "Hide" : "View"}</button>
-                      </td>
-                    </tr>
-                    {proposalExpanded === p.id && (
-                      <tr className="border-t border-slate-100 bg-slate-50/60">
-                        <td colSpan={5} className="px-3 py-3 text-slate-600">
-                          {p.error && <div className="text-rose-600 mb-1.5">{p.error}</div>}
-                          <div className="grid grid-cols-2 gap-1.5">
-                            {Object.entries(p.payload).filter(([k]) => k !== "claims").map(([k, v]) => (
-                              <div key={k}><span className="text-slate-400">{k}:</span> {typeof v === "object" ? JSON.stringify(v) : String(v)}</div>
-                            ))}
-                          </div>
-                          <div className="mt-1.5 text-[11px] text-slate-400">
-                            {p.approvals.length}/{p.required} approval{p.required === 1 ? "" : "s"}
-                            {p.decidedAt && ` · decided ${new Date(p.decidedAt).toLocaleString()}`}
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
+                  <tr key={p.id} className="border-t border-slate-100">
+                    <td className="px-3 py-2 text-slate-700">{p.kind}</td>
+                    <td className="px-3 py-2 text-slate-500">{p.proposerLabel}</td>
+                    <td className="px-3 py-2 capitalize text-slate-700">{p.status}</td>
+                    <td className="px-3 py-2 text-slate-400 font-data">{new Date(p.createdAt).toLocaleString()}</td>
+                    <td className="px-3 py-2 text-right">
+                      <button className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px]" onClick={() => setProposalDetailId(p.id)}>View</button>
+                    </td>
+                  </tr>
                 ))}
               </tbody>
             </table>
@@ -297,31 +334,20 @@ export function IdentityDashboard(): JSX.Element {
             </thead>
             <tbody>
               {pagedRows.map((r) => (
-                <Fragment key={r.credentialId}>
-                  <tr className="border-t border-slate-100 hover:bg-slate-50/70 transition-colors">
-                    <td className="px-3 py-2 text-slate-700 font-medium text-xs">{r.holderLabel}</td>
-                    <td className="px-3 py-2 text-slate-700 text-xs">{r.type}</td>
-                    <td className="px-3 py-2 text-slate-400 text-xs">{r.useCaseName}</td>
-                    <td className="px-3 py-2 text-slate-400 text-xs font-data">{new Date(r.issuedAt).toLocaleDateString()}</td>
-                    <td className="px-3 py-2 text-slate-400 text-xs font-data">{r.expiresAt ? new Date(r.expiresAt).toLocaleDateString() : "—"}</td>
-                    <td className="px-3 py-2">
-                      <StatusPill status={r.status} />
-                      {r.acceptanceNote && <div className="text-[11px] text-rose-500 mt-0.5">{r.acceptanceNote}</div>}
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <button className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px]" onClick={() => setBoardExpanded((x) => (x === r.credentialId ? null : r.credentialId))}>{boardExpanded === r.credentialId ? "Hide" : "View"}</button>
-                    </td>
-                  </tr>
-                  {boardExpanded === r.credentialId && (
-                    <tr className="border-t border-slate-100 bg-slate-50/60">
-                      <td colSpan={7} className="px-3 py-3 text-xs text-slate-600">
-                        <div><span className="text-slate-400">Credential id:</span> <span className="font-data">{r.credentialId}</span></div>
-                        <div><span className="text-slate-400">Holder DID:</span> <span className="font-data">{r.holderDid}</span></div>
-                        <div><span className="text-slate-400">Use case key:</span> {r.useCaseKey}</div>
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
+                <tr key={r.credentialId} className="border-t border-slate-100 hover:bg-slate-50/70 transition-colors">
+                  <td className="px-3 py-2 text-slate-700 font-medium text-xs">{r.holderLabel}</td>
+                  <td className="px-3 py-2 text-slate-700 text-xs">{r.type}</td>
+                  <td className="px-3 py-2 text-slate-400 text-xs">{r.useCaseName}</td>
+                  <td className="px-3 py-2 text-slate-400 text-xs font-data">{new Date(r.issuedAt).toLocaleDateString()}</td>
+                  <td className="px-3 py-2 text-slate-400 text-xs font-data">{r.expiresAt ? new Date(r.expiresAt).toLocaleDateString() : "—"}</td>
+                  <td className="px-3 py-2">
+                    <StatusPill status={r.status} />
+                    {r.acceptanceNote && <div className="text-[11px] text-rose-500 mt-0.5">{r.acceptanceNote}</div>}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <button className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px]" onClick={() => setBoardDetailId(r.credentialId)}>View</button>
+                  </td>
+                </tr>
               ))}
               {rows.length === 0 && (
                 <tr><td colSpan={7} className="px-3 py-6 text-center text-slate-400 text-xs">No credentials match.</td></tr>
