@@ -183,10 +183,10 @@ export function App(): JSX.Element {
       view === "profile" ? <MyProfile onSelect={setView} />
       : view === "credentials" ? <MyIdentity />
       : view === "requests" ? <VerificationInbox />
-      : view === "holder-dashboard" ? <HolderDashboard onNavigate={setView} />
+      : view === "holder-dashboard" ? <HolderDashboard />
       : activeId === "credentials" ? <MyIdentity />
       : activeId === "requests" ? <VerificationInbox />
-      : activeId === "holder-dashboard" ? <HolderDashboard onNavigate={setView} />
+      : activeId === "holder-dashboard" ? <HolderDashboard />
       : activeId === "profile" ? <MyProfile onSelect={setView} />
       : <InvestorPortal useCases={useCases} tab={buyerTab} onTabChange={(t) => setView(t === "activity" ? "transactions" : t)} />;
     return <AppShell items={items} active={activeId} onSelect={handleSelect}>{panel}</AppShell>;
@@ -262,7 +262,7 @@ export function App(): JSX.Element {
     if (idActive === "identity-dashboard") {
       idPanel = <IdentityDashboard />;
     } else if (idActive === "verify-dashboard") {
-      idPanel = <VerifierDashboard onNavigate={setView} />;
+      idPanel = <VerifierDashboard />;
     } else if (idActive === "issue-credentials") {
       idPanel = deskCredUC
         ? <IssueUsecaseCredential useCase={deskCredUC} onIssued={reloadDeskCredUC} />
