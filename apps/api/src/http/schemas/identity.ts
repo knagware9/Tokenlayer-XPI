@@ -568,6 +568,7 @@ export const identitySchemas: Record<string, FastifySchema> = {
         requestedTypes: { type: "array", items: { type: "string" }, minItems: 1 },
         purpose: { type: "string", minLength: 1 },
         credentialUseCaseKey: { type: "string" },
+        requestedFields: { type: "object", additionalProperties: true },
       },
     },
     response: { 201: { $ref: "VerificationRequest#" }, ...errs(400, 401, 403) },
@@ -601,7 +602,13 @@ export const identitySchemas: Record<string, FastifySchema> = {
       "A key that may merely read credentials must not be able to perform it, and `verifications:*` describes the " +
       "VERIFIER's side of the exchange rather than the holder's.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
-    body: { type: "object", additionalProperties: false, required: ["credentialIds"], properties: { credentialIds: { type: "array", items: { type: "string" }, minItems: 1 } } },
+    body: {
+      type: "object", additionalProperties: false, required: ["credentialIds"],
+      properties: {
+        credentialIds: { type: "array", items: { type: "string" }, minItems: 1 },
+        disclosures: { type: "object", additionalProperties: true },
+      },
+    },
     // The request, now `consented`. The signed presentation itself is NOT
     // returned — it is held for the verifier, who reads its verdict from
     // GET /verification-requests/{id}/verify.

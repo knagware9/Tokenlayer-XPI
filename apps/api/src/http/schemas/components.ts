@@ -734,6 +734,13 @@ export const components: Record<string, unknown>[] = [
       createdAt: { type: "string" },
       expiresAt: { type: "string" },
       credentialUseCaseKey: { type: "string", nullable: true },
+      // The verifier's advisory per-field ask, set at create time — never a
+      // floor on what the holder discloses.
+      requestedFields: {
+        type: "object", nullable: true,
+        description: "Per requested credential type, per field: { kind: \"value\" } or { kind: \"predicate\", op, threshold }.",
+        additionalProperties: true,
+      },
       // Added by GET /me/verification-requests only — the holder's own view,
       // which pre-computes what they could consent with. Absent elsewhere.
       eligibleCredentials: {
@@ -749,6 +756,7 @@ export const components: Record<string, unknown>[] = [
             issuerName: { type: "string", nullable: true },
             issuedAt: { type: "string" },
             expiresAt: { type: "string", nullable: true },
+            claims: { type: "object", additionalProperties: true },
           },
         },
       },

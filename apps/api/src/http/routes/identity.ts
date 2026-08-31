@@ -38,6 +38,7 @@ import { API_KEY_BCRYPT_ROUNDS, invalidateVerifiedPrefix, mintSecret } from "../
 import { BRAND_LOGO_PRUNE_GRACE_MS, pruneSupersededBrandLogos } from "../../shared/brand-logo-prune.js";
 import { S } from "../schemas/index.js";
 import { holdsValidCredential, IDENTITY_CREDENTIAL_TYPE } from "../../identity/identity-assertions.js";
+import { redactClaims, resolveDisclosures, validateRequestedFields, type DisclosureChoice, type FieldRequest } from "../../identity/selective-disclosure.js";
 import { actorOf, claimsOf, contextOf, isPositiveIntString, machinePrincipal, notFound, requirePrincipal, requireScope, scopedToCaller, type TokenClaims } from "../support.js";
 import { NO_USE_CASE, canAdministerUser, BCRYPT_ROUNDS, LOGIN_WINDOW_MS, MAX_DOC_BYTES, DOC_UPLOAD_BODY_LIMIT, ALLOWED_DOC_TYPES, storeUploadedDocument, orgOwnsDocument, decodeVcJti, devKeyFromSeed, orgView, orgCapabilityMissing } from "./common.js";
 import type { BrandLogoErrorCode, RouteContext } from "./context.js";
@@ -1573,7 +1574,7 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
   // --- verification (verifier-request → holder-consent → verify) -----------
   app.post("/verification-requests", { schema: S.createVerificationRequest, ...authScoped("verifications:request") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
-    const b = request.body as { holderDid: string; requestedTypes: string[]; purpose: string; credentialUseCaseKey?: string };
+    const b = request.body as { holderDid: string; requestedTypes: string[]; purpose: string; credentialUseCaseKey?: string; requestedFields?: Record<string, Record<string, FieldRequest>> };
 
     // F5 — a use-case-scoped Verifier desk user (no org). Authorized purely by
     // role + useCaseKey: they may only verify their OWN credential use case, and
@@ -1604,11 +1605,15 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
       if (!b.requestedTypes.every((t) => names.has(t))) {
         return reply.code(400).send({ error: "TYPES_NOT_IN_USECASE", message: "a requested type is not part of this use case" });
       }
+      const schemasByType = new Map<string, { properties: Record<string, { type: string }> }>(def.credentialTypes.map((t) => [t.name, t.claimSchema]));
+      const fieldErr = validateRequestedFields(b.requestedFields, schemasByType);
+      if (fieldErr) return reply.code(400).send(fieldErr);
       const rec = await deps.verificationRequests.create({
         verifierOrgId: "", holderDid: b.holderDid, requestedTypes: b.requestedTypes, purpose: b.purpose,
         credentialUseCaseKey: key,
         challenge: randomUUID(), status: "pending", presentationVpJwt: null, consentedAt: null,
-        consentedCredentialIds: null, verifierResult: null, verifiedAt: null,
+        consentedCredentialIds: null, requestedFields: b.requestedFields ?? null, consentedDisclosures: null,
+        verifierResult: null, verifiedAt: null,
         expiresAt: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
       });
       await deps.audit.append({ actorId: claims.id, action: "verification-requested" as LifecycleAction, payload: { requestId: rec.id, verifierUserId: claims.id, holderDid: b.holderDid, types: b.requestedTypes, credentialUseCaseKey: rec.credentialUseCaseKey } });
@@ -1637,6 +1642,7 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
     const org = await deps.organizations.get(claims.orgId);
     if (!org) return reply.code(403).send({ error: "NOT_A_VERIFIER", message: "your organization is not found" });
 
+    let requestSchemasByType: Map<string, { properties: Record<string, { type: string }> }>;
     if (b.credentialUseCaseKey) {
       // Use-case-aware: gate by the Verifier binding (replaces the org-type gate)
       // and require every requested type to belong to the use case.
@@ -1649,10 +1655,15 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
       if (!b.requestedTypes.every((t) => names.has(t))) {
         return reply.code(400).send({ error: "TYPES_NOT_IN_USECASE", message: "a requested type is not part of this use case" });
       }
+      requestSchemasByType = new Map<string, { properties: Record<string, { type: string }> }>(def.credentialTypes.map((t) => [t.name, t.claimSchema]));
     } else if (org.orgType !== "verifier") {
       // Legacy generic flow: still requires a verifier org-type.
       return reply.code(403).send({ error: "NOT_A_VERIFIER", message: "your organization is not a verifier" });
+    } else {
+      requestSchemasByType = new Map<string, { properties: Record<string, { type: string }> }>(Object.values(CREDENTIAL_TYPES).map((t) => [t.type, t.claimSchema]));
     }
+    const orgFieldErr = validateRequestedFields(b.requestedFields, requestSchemasByType);
+    if (orgFieldErr) return reply.code(400).send(orgFieldErr);
 
     // EN-A: verifying is an identity-domain act requiring the Verifier role —
     // checked after the binding/orgType gates on BOTH paths (a legacy null
@@ -1664,7 +1675,8 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
       verifierOrgId: org.id, holderDid: b.holderDid, requestedTypes: b.requestedTypes, purpose: b.purpose,
       credentialUseCaseKey: b.credentialUseCaseKey ?? null,
       challenge: randomUUID(), status: "pending", presentationVpJwt: null, consentedAt: null,
-      consentedCredentialIds: null, verifierResult: null, verifiedAt: null,
+      consentedCredentialIds: null, requestedFields: b.requestedFields ?? null, consentedDisclosures: null,
+      verifierResult: null, verifiedAt: null,
       expiresAt: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
     });
     await deps.audit.append({ actorId: claims.id, action: "verification-requested" as LifecycleAction, payload: { requestId: rec.id, verifierOrgId: org.id, holderDid: b.holderDid, types: b.requestedTypes, credentialUseCaseKey: rec.credentialUseCaseKey } });
@@ -1746,7 +1758,7 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
   app.post("/verification-requests/:id/consent", { schema: S.consentVerificationRequest, ...authScoped("credentials:present") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const { id } = request.params as { id: string };
-    const { credentialIds } = request.body as { credentialIds: string[] };
+    const { credentialIds, disclosures } = request.body as { credentialIds: string[]; disclosures?: Record<string, Record<string, DisclosureChoice>> };
     const r = await deps.verificationRequests.get(id);
     if (!r) return notFound(reply, "verification request not found");
     // Holder ONLY — one person authorizing disclosure of their OWN credentials.
@@ -1768,6 +1780,9 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
         return reply.code(400).send({ error: "CREDENTIAL_NOT_ELIGIBLE", message: `credential '${credentialIds[i]}' is not an eligible, unrevoked, accepted, requested-type credential you hold` });
       }
     }
+    const claimsByCredentialId = new Map<string, Record<string, unknown>>(chosen.map((c, i) => [credentialIds[i]!, c!.subjectClaims]));
+    const disclosureResult = resolveDisclosures(disclosures, claimsByCredentialId);
+    if (!disclosureResult.ok) return reply.code(400).send({ error: disclosureResult.error, message: disclosureResult.message });
     // Custodial VP signing: the caller IS the holder, so resolve their own seed.
     const holderUser = await deps.users.findById(claims.id);
     if (!holderUser?.didSeedEncrypted) {
@@ -1778,7 +1793,7 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
       holderDid: r.holderDid, holderKey: holderKey.privateKey,
       vcJwts: chosen.map((c) => c!.vcJwt), challenge: r.challenge, now: Math.floor(Date.now() / 1000),
     });
-    const updated = await deps.verificationRequests.setConsented(r.id, { vpJwt, credentialIds, at: new Date().toISOString() });
+    const updated = await deps.verificationRequests.setConsented(r.id, { vpJwt, credentialIds, at: new Date().toISOString(), disclosures: disclosureResult.resolved });
     await deps.audit.append({ actorId: claims.id, action: "verification-consented" as LifecycleAction, payload: { requestId: r.id, verifierOrgId: r.verifierOrgId, credentialIds } });
     return vreqView(updated);
   });
@@ -1882,8 +1897,9 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
       };
       const issuerDid = c.credential?.issuer ?? null;
       const resMeta = issuerDid ? resolutions.get(issuerDid)?.didDocumentMetadata : undefined;
+      const resolvedForThisCredential = jti ? r.consentedDisclosures?.[jti] : undefined;
       return {
-        id: jti, type, issuer: issuerDid, claims: c.credential?.claims ?? null,
+        id: jti, type, issuer: issuerDid, claims: redactClaims(c.credential?.claims ?? null, resolvedForThisCredential),
         reason: c.reason ?? null, checks, valid: c.valid && notRevoked,
         issuerResolution: resMeta && resMeta.source === "chain"
           ? { registered: resMeta.registered, active: resMeta.active, chainId: resMeta.chainId }

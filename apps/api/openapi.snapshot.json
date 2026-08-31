@@ -271,6 +271,7 @@
       "holderDid",
       "id",
       "purpose",
+      "requestedFields",
       "requestedTypes",
       "status",
       "verifiedAt",
