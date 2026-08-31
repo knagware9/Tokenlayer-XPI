@@ -53,6 +53,16 @@ if [ "$WANT_BESU" = 1 ]; then
   TOK_COMPOSE="$TOK_COMPOSE -f docker-compose.tokenization.besu.yml"
 fi
 
+# tokenization-api's "identity-api" network alias (see that overlay file) is
+# only safe when no REAL identity-api is also going up on xi-net — i.e. only
+# when tokenization is the one and only stack this run brings up. Applying it
+# alongside a linked identity stack makes Docker's embedded DNS round-robin
+# "identity-api" between two unrelated databases (see the overlay's own
+# comment for the failure mode this caused once, in production use).
+if [ "$WANT_TOKENIZATION" = 1 ] && [ "$WANT_IDENTITY" = 0 ]; then
+  TOK_COMPOSE="$TOK_COMPOSE -f docker-compose.tokenization.standalone-identity.yml"
+fi
+
 command -v docker >/dev/null || die "docker is not on PATH"
 
 # ── Secrets, once, and kept ──────────────────────────────────────────────────

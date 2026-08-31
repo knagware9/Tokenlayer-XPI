@@ -1,0 +1,36 @@
+# ============================================================================
+# SHARED-DATABASE IDENTITY ALIAS — an overlay, applied by
+# `scripts/stack-up.sh tokenization` (tokenization brought up WITHOUT
+# identity, i.e. no `identity` argument alongside it).
+#
+#   docker compose -p xi-tokenization \
+#     -f docker-compose.tokenization.yml \
+#     -f docker-compose.tokenization.standalone-identity.yml up -d
+#
+# WHY AN OVERLAY AND NOT A DEFAULT. ALIAS "identity-api", DELIBERATELY. Not
+# the service-to-service seam (IDENTITY_SERVICE_URL/KEY in the base file) —
+# this is the identity-issuer PERSONA EDGE's own upstream, which
+# gen-persona-edges.ts hardcodes to that hostname for any "identity" domain
+# persona. Aliasing it here points an identity-issuer console (deployed from
+# docker-compose.identity.yml with --no-deps, so no second identity-api ever
+# starts) at THIS container instead of a separate identity.db — a one-off
+# wiring for a deployment that wants a genuinely separate identity-issuer
+# console while keeping ONE shared user/credential database.
+#
+# THIS MUST NEVER BE APPLIED ALONGSIDE A REAL identity-api (its own
+# container, its own database — i.e. whenever `docker-compose.identity.yml`'s
+# own identity-api is also on xi-net, which is what `scripts/stack-up.sh
+# identity tokenization` brings up). Two containers answering to the same
+# "identity-api" hostname makes Docker's embedded DNS round-robin between two
+# unrelated databases, so a login can silently land on the wrong one from one
+# request to the next — surfacing as inconsistent user ids, spurious
+# "session is no longer valid", or credentials that intermittently look
+# invalid, all without any single request failing outright. stack-up.sh is
+# the guard: it only ever adds this file to the tokenization-standalone
+# branch, never to the linked-with-identity branch.
+# ============================================================================
+services:
+  tokenization-api:
+    networks:
+      xi-net:
+        aliases: [identity-api]

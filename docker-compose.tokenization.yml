@@ -83,18 +83,17 @@ services:
       IDENTITY_SERVICE_URL: ${IDENTITY_SERVICE_URL:-}
       IDENTITY_SERVICE_KEY: ${IDENTITY_SERVICE_KEY:-}
     volumes: [tokenization-data:/data]
-    # ALIAS "identity-api", DELIBERATELY. Not the service-to-service seam above —
-    # this is the identity-issuer PERSONA EDGE's own upstream, which
-    # gen-persona-edges.ts hardcodes to that hostname for any "identity" domain
-    # persona. Aliasing it here points an identity-issuer console (deployed from
-    # docker-compose.identity.yml with --no-deps, so no second identity-api ever
-    # starts) at THIS container instead of a separate identity.db — a one-off
-    # wiring for a deployment that wants a genuinely separate identity-issuer
-    # console while keeping ONE shared user/credential database. A real split
-    # deployment (its own identity-api, its own database) must never alias this.
-    networks:
-      xi-net:
-        aliases: [identity-api]
+    # NO "identity-api" alias here BY DEFAULT — that is an OPT-IN overlay
+    # (docker-compose.tokenization.standalone-identity.yml), not a default.
+    # Two containers answering to the same hostname on xi-net makes Docker's
+    # embedded DNS round-robin between two unrelated databases, so a login can
+    # silently land on the wrong one from one request to the next (surfaces as
+    # inconsistent user ids, spurious "session is no longer valid", or
+    # credentials that intermittently look invalid) — exactly what happens if
+    # this alias is ever present alongside a REAL identity-api (its own
+    # container, its own database, wired in above via IDENTITY_SERVICE_URL).
+    # See that overlay file for what the alias is for and when it is safe.
+    networks: [xi-net]
     restart: unless-stopped
 
   tokenization-issuer-edge:
