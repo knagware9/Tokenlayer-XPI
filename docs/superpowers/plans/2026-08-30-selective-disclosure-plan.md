@@ -1028,6 +1028,18 @@ describe("selective disclosure", () => {
     expect(res.json().error).toBe("UNKNOWN_FIELD");
   });
 
+  it("the holder's inbox carries claims on each eligible credential, so the consent UI needs no second round-trip", async () => {
+    const { app, holder, holderToken, verifierToken, credentialId } = await setup();
+    const created = await createRequest(app, verifierToken, { holderDid: holder.did });
+    const requestId = created.json().id as string;
+    const inboxRes = await app.inject({ method: "GET", url: `${V1}/me/verification-requests`, headers: auth(holderToken) });
+    expect(inboxRes.statusCode).toBe(200);
+    const rows = inboxRes.json() as Array<{ id: string; eligibleCredentials: Array<{ id: string; claims: Record<string, unknown> }> }>;
+    const row = rows.find((r) => r.id === requestId)!;
+    const eligible = row.eligibleCredentials.find((c) => c.id === credentialId)!;
+    expect(eligible.claims).toEqual({ holderName: "Ramesh Kumar", continuousResidenceSinceYear: 2010 });
+  });
+
   it("disclosing a predicate on a non-numeric field is refused at consent time", async () => {
     const { app, holder, holderToken, verifierToken, credentialId } = await setup();
     const created = await createRequest(app, verifierToken, { holderDid: holder.did });
@@ -1135,7 +1147,7 @@ describe("selective disclosure", () => {
 - [ ] **Step 7: Run the tests**
 
 Run: `cd apps/api && npx vitest run test/selective-disclosure.test.ts`
-Expected: PASS — 9 tests
+Expected: PASS — 10 tests
 
 - [ ] **Step 8: Run the full API suite to check for regressions**
 
