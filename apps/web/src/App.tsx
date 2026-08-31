@@ -61,7 +61,14 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     if (!token) return;
-    void Promise.all([api.chains(token), api.useCases(token)]).then(([c, u]) => { setChains(c); setUseCases(u); });
+    // chains and useCases fetched independently, not as one Promise.all: an
+    // identity-only persona's edge grants /chains but not /use-cases (a
+    // tokenization-only concept — see personas.ts), so bundling them let that
+    // persona's permitted /chains fetch get blanked by the /use-cases
+    // rejection it was always going to hit. Same isolation reasoning as the
+    // /config fetch below.
+    void api.chains(token).then(setChains).catch(() => { setChains([]); });
+    void api.useCases(token).then(setUseCases).catch(() => { setUseCases([]); });
     // Isolated from chains/useCases: a /config failure must not blank the dashboard —
     // it only falls back to all domains, leaving the rest of the app fully functional.
     void api.config(token).then((cfg) => {
@@ -176,10 +183,10 @@ export function App(): JSX.Element {
       view === "profile" ? <MyProfile onSelect={setView} />
       : view === "credentials" ? <MyIdentity />
       : view === "requests" ? <VerificationInbox />
-      : view === "holder-dashboard" ? <HolderDashboard />
+      : view === "holder-dashboard" ? <HolderDashboard onNavigate={setView} />
       : activeId === "credentials" ? <MyIdentity />
       : activeId === "requests" ? <VerificationInbox />
-      : activeId === "holder-dashboard" ? <HolderDashboard />
+      : activeId === "holder-dashboard" ? <HolderDashboard onNavigate={setView} />
       : activeId === "profile" ? <MyProfile onSelect={setView} />
       : <InvestorPortal useCases={useCases} tab={buyerTab} onTabChange={(t) => setView(t === "activity" ? "transactions" : t)} />;
     return <AppShell items={items} active={activeId} onSelect={handleSelect}>{panel}</AppShell>;
