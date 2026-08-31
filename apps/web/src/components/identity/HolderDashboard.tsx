@@ -2,8 +2,10 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import { ApiError, api } from "../../api.js";
 import { useAuth } from "../../auth.js";
 import type { DisclosureChoice, HeldCredential, PredicateOp, VerificationRequest } from "../../types.js";
-import { SectionHeader } from "../shared/ui.js";
+import { Pager, SectionHeader } from "../shared/ui.js";
 import { disclosableFields, defaultDisclosuresFor } from "./VerificationInbox.js";
+
+const PAGE_SIZE = 5;
 
 function errMessage(err: unknown, fallback: string): string {
   return err instanceof ApiError ? err.message : fallback;
@@ -41,6 +43,8 @@ export function HolderDashboard(): JSX.Element {
   const [creds, setCreds] = useState<HeldCredential[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter | null>(null);
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [picked, setPicked] = useState<Record<string, Record<string, boolean>>>({});
   const [disclosures, setDisclosures] = useState<Record<string, Record<string, Record<string, DisclosureChoice>>>>({});
@@ -65,6 +69,8 @@ export function HolderDashboard(): JSX.Element {
   function toggleFilter(f: Filter): void {
     setFilter((cur) => (cur === f ? null : f));
     setExpanded(null);
+    setQuery("");
+    setPage(1);
   }
 
   async function consent(r: VerificationRequest): Promise<void> {
@@ -94,7 +100,19 @@ export function HolderDashboard(): JSX.Element {
   if (error) return <div><SectionHeader title="Dashboard" description={error} /></div>;
   if (!requests || !creds) return <div><SectionHeader title="Dashboard" description="Loading…" /></div>;
 
-  const filteredRequests = filter === "consented" ? requests.filter((r) => r.status === "consented") : requests;
+  function onQueryChange(v: string): void { setQuery(v); setPage(1); }
+
+  const q = query.trim().toLowerCase();
+  const categoryRequests = filter === "consented" ? requests.filter((r) => r.status === "consented") : requests;
+  const filteredRequests = q
+    ? categoryRequests.filter((r) => r.purpose.toLowerCase().includes(q) || r.requestedTypes.some((t) => t.toLowerCase().includes(q)))
+    : categoryRequests;
+  const pagedRequests = filteredRequests.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const filteredCreds = q
+    ? creds.filter((c) => c.type.some((t) => t.toLowerCase().includes(q)) || (c.issuerName ?? c.issuerDid).toLowerCase().includes(q))
+    : creds;
+  const pagedCreds = filteredCreds.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <div className="space-y-5">
@@ -107,7 +125,12 @@ export function HolderDashboard(): JSX.Element {
       </div>
 
       {filter === "credentials" && (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden overflow-x-auto">
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+          <div className="px-4 pt-3 pb-1">
+            <input value={query} onChange={(e) => onQueryChange(e.target.value)} placeholder="Search type or issuer…"
+              className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs w-64 max-w-full" />
+          </div>
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-400">
               <tr>
@@ -119,8 +142,8 @@ export function HolderDashboard(): JSX.Element {
               </tr>
             </thead>
             <tbody>
-              {creds.length === 0 && <tr><td colSpan={5} className="px-4 py-4 text-slate-400">No credentials held yet.</td></tr>}
-              {creds.map((c) => (
+              {filteredCreds.length === 0 && <tr><td colSpan={5} className="px-4 py-4 text-slate-400">{creds.length === 0 ? "No credentials held yet." : "No matches."}</td></tr>}
+              {pagedCreds.map((c) => (
                 <Fragment key={c.id}>
                   <tr className="border-t border-slate-100">
                     <td className="px-4 py-2">{c.type.filter((t) => t !== "VerifiableCredential").join(", ") || c.type.join(", ")}</td>
@@ -146,6 +169,8 @@ export function HolderDashboard(): JSX.Element {
               ))}
             </tbody>
           </table>
+          </div>
+          <Pager page={page} pageSize={PAGE_SIZE} total={filteredCreds.length} onPage={setPage} />
         </div>
       )}
 
@@ -153,6 +178,10 @@ export function HolderDashboard(): JSX.Element {
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
           {actionErr && <div className="text-sm text-rose-600 px-4 pt-3">{actionErr}</div>}
           {actionMsg && <div className="text-sm text-emerald-600 px-4 pt-3">{actionMsg}</div>}
+          <div className="px-4 pt-3 pb-1">
+            <input value={query} onChange={(e) => onQueryChange(e.target.value)} placeholder="Search purpose or type…"
+              className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs w-64 max-w-full" />
+          </div>
           <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-400">
@@ -164,8 +193,8 @@ export function HolderDashboard(): JSX.Element {
               </tr>
             </thead>
             <tbody>
-              {filteredRequests.length === 0 && <tr><td colSpan={4} className="px-4 py-4 text-slate-400">Nothing here.</td></tr>}
-              {filteredRequests.map((r) => {
+              {filteredRequests.length === 0 && <tr><td colSpan={4} className="px-4 py-4 text-slate-400">{requests.length === 0 ? "Nothing here." : "No matches."}</td></tr>}
+              {pagedRequests.map((r) => {
                 const sel = picked[r.id] ?? {};
                 return (
                   <Fragment key={r.id}>
@@ -284,6 +313,7 @@ export function HolderDashboard(): JSX.Element {
             </tbody>
           </table>
           </div>
+          <Pager page={page} pageSize={PAGE_SIZE} total={filteredRequests.length} onPage={setPage} />
         </div>
       )}
     </div>

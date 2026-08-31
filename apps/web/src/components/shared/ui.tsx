@@ -585,3 +585,26 @@ export function DataBadge(props: { value: string; chars?: number }): JSX.Element
     </button>
   );
 }
+
+// ─── Pager ────────────────────────────────────────────────────────────────────
+
+/** Prev/Next pager for a client-side-filtered table. `total` is the row count AFTER filtering, before slicing to the page. */
+export function Pager(props: { page: number; pageSize: number; total: number; onPage: (p: number) => void }): JSX.Element | null {
+  const { page, pageSize, total, onPage } = props;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  if (pageCount <= 1) return null;
+  const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const to = Math.min(page * pageSize, total);
+  return (
+    <div className="flex items-center justify-between gap-3 px-4 py-2 border-t border-slate-100 text-xs text-slate-500">
+      <span>{from}–{to} of {total}</span>
+      <div className="flex items-center gap-1.5">
+        <button type="button" disabled={page <= 1} onClick={() => onPage(page - 1)}
+          className="rounded-lg border border-slate-200 px-2.5 py-1 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50">Prev</button>
+        <span className="tabular-nums">Page {page} of {pageCount}</span>
+        <button type="button" disabled={page >= pageCount} onClick={() => onPage(page + 1)}
+          className="rounded-lg border border-slate-200 px-2.5 py-1 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50">Next</button>
+      </div>
+    </div>
+  );
+}

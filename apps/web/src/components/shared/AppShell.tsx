@@ -7,7 +7,7 @@ import { brandCssVars } from "../../lib/shared/branding.js";
 import { Logo } from "./Logo.js";
 import { Icon, type IconName } from "./ui.js";
 
-export type NavItem = { id: string; label: string; icon: IconName; pinned?: boolean };
+export type NavItem = { id: string; label: string; icon: IconName; pinned?: boolean; badge?: number };
 
 /**
  * EN-E: the org's mark as an object URL, or null.
@@ -141,6 +141,11 @@ export function AppShell({
         )}
         <Icon name={item.icon} className={`w-4.5 h-4.5 shrink-0 transition-colors ${isActive ? "text-brand-400" : "text-slate-500 group-hover:text-slate-300"}`} />
         <span className="truncate">{item.label}</span>
+        {!!item.badge && (
+          <span className="ml-auto shrink-0 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full bg-amber-400 text-ink text-[11px] font-bold tabular-nums">
+            {item.badge > 99 ? "99+" : item.badge}
+          </span>
+        )}
       </button>
     );
   };

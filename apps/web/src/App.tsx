@@ -53,6 +53,18 @@ export function App(): JSX.Element {
   // The credential use case this desk operates, loaded only for an identity-domain
   // desk user (drives the Issue Credentials surface). Null otherwise.
   const [deskCredUC, setDeskCredUC] = useState<CredentialUseCase | null>(null);
+  // How many verification requests are waiting on THIS holder's consent — shown
+  // as a nav badge so it's visible without opening Verification Requests first.
+  // Refetched on login and whenever the holder returns to either view that would
+  // have changed it (consenting/rejecting), not on every render.
+  const [pendingHolderRequests, setPendingHolderRequests] = useState(0);
+  const onHolderRequestsView = view === "requests" || view === "holder-dashboard";
+  useEffect(() => {
+    if (!token || (user?.role !== "Buyer" && user?.role !== "Holder")) { setPendingHolderRequests(0); return; }
+    void api.myVerificationRequests(token)
+      .then((rows) => setPendingHolderRequests(rows.filter((r) => r.status === "pending").length))
+      .catch(() => undefined);
+  }, [token, user?.role, onHolderRequestsView]);
 
   const reloadUseCases = (): void => { if (token) void api.useCases(token).then(setUseCases); };
   const reloadDeskCredUC = (): void => {
@@ -169,7 +181,7 @@ export function App(): JSX.Element {
       { id: "portfolio", label: "My Portfolio", icon: "coins" },
       { id: "offerings", label: "Marketplace", icon: "spark" },
       { id: "transactions", label: "Recent Transactions", icon: "arrow" },
-      { id: "requests", label: "Verification Requests", icon: "check" },
+      { id: "requests", label: "Verification Requests", icon: "check", badge: pendingHolderRequests },
       ...pinned,
     ];
     const buyerTab: "offerings" | "portfolio" | "activity" =

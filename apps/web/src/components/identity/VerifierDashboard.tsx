@@ -2,7 +2,9 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import { ApiError, api } from "../../api.js";
 import { useAuth } from "../../auth.js";
 import type { VerificationRequest, VerificationResult } from "../../types.js";
-import { SectionHeader } from "../shared/ui.js";
+import { Pager, SectionHeader } from "../shared/ui.js";
+
+const PAGE_SIZE = 5;
 
 function errMessage(err: unknown, fallback: string): string {
   return err instanceof ApiError ? err.message : fallback;
@@ -42,7 +44,7 @@ function claimsLine(claims: Record<string, unknown>): string {
   }).join(" · ");
 }
 
-type Filter = "sent" | "pending" | "verified";
+type Filter = "sent" | "pending" | "verified" | "rejected" | "expired";
 
 /**
  * Verifier-scoped overview. The three tiles are toggles: clicking one reveals
@@ -61,6 +63,8 @@ export function VerifierDashboard(): JSX.Element {
   const [requests, setRequests] = useState<VerificationRequest[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter | null>(null);
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [results, setResults] = useState<Record<string, VerificationResult>>({});
   const [actionErr, setActionErr] = useState<string | null>(null);
@@ -84,6 +88,8 @@ export function VerifierDashboard(): JSX.Element {
   function toggleFilter(f: Filter): void {
     setFilter((cur) => (cur === f ? null : f));
     setExpanded(null);
+    setQuery("");
+    setPage(1);
   }
 
   async function runVerify(id: string): Promise<void> {
@@ -100,10 +106,19 @@ export function VerifierDashboard(): JSX.Element {
   if (error) return <div><SectionHeader title="Dashboard" description={error} /></div>;
   if (!requests) return <div><SectionHeader title="Dashboard" description="Loading…" /></div>;
 
-  const filteredRequests =
+  function onQueryChange(v: string): void { setQuery(v); setPage(1); }
+
+  const categoryRequests =
     filter === "pending" ? requests.filter((r) => !r.verifiedAt)
       : filter === "verified" ? requests.filter((r) => r.verifiedAt)
-        : requests;
+        : filter === "rejected" ? requests.filter((r) => !r.verifiedAt && r.status === "rejected")
+          : filter === "expired" ? requests.filter((r) => !r.verifiedAt && r.status === "expired")
+            : requests;
+  const q = query.trim().toLowerCase();
+  const filteredRequests = q
+    ? categoryRequests.filter((r) => r.purpose.toLowerCase().includes(q) || r.requestedTypes.some((t) => t.toLowerCase().includes(q)) || r.holderDid.toLowerCase().includes(q))
+    : categoryRequests;
+  const pagedRequests = filteredRequests.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <div className="space-y-5">
@@ -118,15 +133,21 @@ export function VerifierDashboard(): JSX.Element {
       {(counts.rejected > 0 || counts.expired > 0) && (
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5">
           <h2 className="font-bold text-slate-900 text-sm mb-3 font-display">Not verified</h2>
-          <div className="grid grid-cols-2 gap-3 text-center max-w-xs">
-            <div className="flex flex-col gap-0.5">
+          <div className="grid grid-cols-2 gap-3 max-w-xs">
+            <button
+              type="button" onClick={() => toggleFilter("rejected")}
+              className={`text-center flex flex-col gap-0.5 rounded-xl border p-2 transition-colors ${filter === "rejected" ? "border-brand-400 ring-1 ring-brand-300" : "border-transparent hover:bg-slate-50"}`}
+            >
               <div className="text-xl font-bold tabular-nums font-display text-slate-600">{counts.rejected}</div>
               <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Rejected by holder</div>
-            </div>
-            <div className="flex flex-col gap-0.5">
+            </button>
+            <button
+              type="button" onClick={() => toggleFilter("expired")}
+              className={`text-center flex flex-col gap-0.5 rounded-xl border p-2 transition-colors ${filter === "expired" ? "border-brand-400 ring-1 ring-brand-300" : "border-transparent hover:bg-slate-50"}`}
+            >
               <div className="text-xl font-bold tabular-nums font-display text-slate-400">{counts.expired}</div>
               <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Expired</div>
-            </div>
+            </button>
           </div>
         </div>
       )}
@@ -134,6 +155,10 @@ export function VerifierDashboard(): JSX.Element {
       {filter && (
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
           {actionErr && <div className="text-sm text-rose-600 px-4 pt-3">{actionErr}</div>}
+          <div className="px-4 pt-3 pb-1">
+            <input value={query} onChange={(e) => onQueryChange(e.target.value)} placeholder="Search purpose, type, or holder DID…"
+              className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs w-72 max-w-full" />
+          </div>
           <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-400">
@@ -146,8 +171,8 @@ export function VerifierDashboard(): JSX.Element {
               </tr>
             </thead>
             <tbody>
-              {filteredRequests.length === 0 && <tr><td colSpan={5} className="px-4 py-4 text-slate-400">Nothing here.</td></tr>}
-              {filteredRequests.map((r) => {
+              {filteredRequests.length === 0 && <tr><td colSpan={5} className="px-4 py-4 text-slate-400">{categoryRequests.length === 0 ? "Nothing here." : "No matches."}</td></tr>}
+              {pagedRequests.map((r) => {
                 const result = results[r.id];
                 return (
                   <Fragment key={r.id}>
@@ -218,6 +243,7 @@ export function VerifierDashboard(): JSX.Element {
             </tbody>
           </table>
           </div>
+          <Pager page={page} pageSize={PAGE_SIZE} total={filteredRequests.length} onPage={setPage} />
         </div>
       )}
     </div>
