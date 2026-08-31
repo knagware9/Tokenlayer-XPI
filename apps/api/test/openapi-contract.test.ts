@@ -414,6 +414,7 @@ const INTEGRATION_SURFACE = new Set([
 /** Integration-surface routes whose response is deliberately not enumerated. */
 const DOCUMENTATION_DEFERRED: Record<string, string> = {
   "GET /credentials/:id/certificate.pdf": "returns opaque PDF bytes, not a JSON object",
+  "GET /credentials/:id/qr.svg": "returns opaque SVG markup, not a JSON object",
   // EN-F's designer preview. Same answer as the route above and for the same
   // reason: the 200 is a rendered PDF. Declaring a JSON 2xx here would be a
   // false statement about the response, not a more complete one.
@@ -554,7 +555,14 @@ describe("every 202 route explains the proposal", () => {
  * sentence from an instruction, and neither can a reader skimming — reword it
  * to name the route that DOES answer the question instead.
  */
-const NOT_API_PATHS: Record<string, string> = {};
+const NOT_API_PATHS: Record<string, string> = {
+  // The web app's own route, not an API path — S.credentialQr's description
+  // names it because that is genuinely where the QR sends a scanning phone,
+  // and an integrator reading the API doc needs to know that destination is
+  // NOT one of these routes (raw JSON status, a PDF download) even though it
+  // is not documented here either.
+  "/verify?id={id}": "the public verification PORTAL — a web app route, not part of this API document",
+};
 
 type Prose = { where: string; text: string };
 

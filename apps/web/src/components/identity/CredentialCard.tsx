@@ -42,6 +42,7 @@ export function CredentialCard({ credential: c, status, onAcceptanceAction, chai
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [showChangesBox, setShowChangesBox] = useState(false);
+  const [showQr, setShowQr] = useState(false);
   const [note, setNote] = useState("");
 
   const needsReview = c.acceptance === "pending" || c.acceptance === "changes_requested";
@@ -176,7 +177,20 @@ export function CredentialCard({ credential: c, status, onAcceptanceAction, chai
               onClick={() => void navigator.clipboard.writeText(`${window.location.origin}/verify?id=${encodeURIComponent(c.id)}`)}>
               Copy verification link
             </button>
+            <button className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-medium hover:border-brand-400"
+              onClick={() => setShowQr((v) => !v)}>
+              {showQr ? "Hide QR" : "Show QR"}
+            </button>
           </div>
+          {showQr && (
+            <div className="flex flex-col items-center gap-1 pt-1">
+              {/* Same public link "Copy verification link" copies, as a QR a
+                  verifier's phone camera can scan in person — no account, no
+                  claims disclosed, just the live validity check. */}
+              <img src={api.credentialQrUrl(c.id)} alt="Scan to verify this credential" className="h-32 w-32 rounded border border-slate-200 bg-white p-1" />
+              <div className="text-[10px] text-slate-400">Scan with a phone camera to verify</div>
+            </div>
+          )}
         </div>
       )}
     </div>

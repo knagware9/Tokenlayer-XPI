@@ -209,6 +209,11 @@ export const PERSONAS: readonly PersonaDef[] = [
       // than in STAFF_BASELINE so a tokenization edge never carries them.
       { prefix: "/orgs/:id/credentials", methods: ["GET"], why: "this authority's own register of what it has issued" },
       { prefix: "/orgs/:id/wallet", methods: ["GET"], why: "credentials the organization itself holds" },
+      // "My identity" (surfaced as "credentials" above): this desk operator has
+      // a DID too, minted at onboarding, and can hold credentials like any other
+      // subject. Without these two the nav item it's granted 404s at the edge.
+      { prefix: "/me/credentials", methods: "ALL", why: "view own held credentials; accept/reject/request-changes on one's own pending ones" },
+      { prefix: "/me/verification-requests", methods: ["GET"], exact: true, why: "the caller's own inbox of requests to present a credential" },
     ],
   },
   {
@@ -224,12 +229,18 @@ export const PERSONAS: readonly PersonaDef[] = [
     allow: [
       { prefix: "/verification-requests", methods: "ALL", why: "raise a request, read the inbox, run the verification" },
       // NOT `/credentials` — a verifier must never reach revoke or the issuance
-      // request queue. Only the two read paths it genuinely needs.
+      // request queue. Only the read paths it genuinely needs.
       { prefix: "/credentials/:id/status", methods: ["GET"], why: "the chain-backed revocation check" },
+      { prefix: "/credentials/:id/qr.svg", methods: ["GET"], why: "the scannable QR on its own \"My Credentials\" card" },
       { prefix: "/credential-use-cases", methods: ["GET"], why: "pick which programme's credential to ask for" },
       { prefix: "/credential-types", methods: ["GET"], why: "the credential-type vocabulary" },
       { prefix: "/dids", methods: ["GET"], why: "resolve the holder's DID and the issuer's" },
       { prefix: "/registry", methods: ["GET"], why: "name the registry that answered a revocation check" },
+      // "My identity" (surfaced as "credentials" above): this desk operator has
+      // a DID too, minted at onboarding, and can hold credentials like any other
+      // subject. Without these two the nav item it's granted 404s at the edge.
+      { prefix: "/me/credentials", methods: "ALL", why: "view own held credentials; accept/reject/request-changes on one's own pending ones" },
+      { prefix: "/me/verification-requests", methods: ["GET"], exact: true, why: "the caller's own inbox of requests to present a credential" },
     ],
   },
   {
@@ -250,6 +261,7 @@ export const PERSONAS: readonly PersonaDef[] = [
       { prefix: "/verification-requests/:id/reject", methods: ["POST"], why: "decline to share" },
       { prefix: "/credentials/:id/certificate.pdf", methods: ["GET"], why: "download one's own certificate" },
       { prefix: "/credentials/:id/status", methods: ["GET"], why: "see whether one's own credential is still in force" },
+      { prefix: "/credentials/:id/qr.svg", methods: ["GET"], why: "the scannable QR a verifier scans in person" },
       { prefix: "/dids", methods: ["GET"], why: "show and resolve one's own DID" },
     ],
   },

@@ -1483,6 +1483,21 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
   });
 
 
+  // PUBLIC capability URL, same posture as /status: a QR a verifier's phone
+  // camera can scan with no account, encoding the public verification portal's
+  // link — never the certificate.pdf/status routes directly, so scanning always
+  // lands on the human-readable page rather than raw JSON or a PDF download.
+  app.get("/credentials/:id/qr.svg", { schema: S.credentialQr }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const cred = await deps.credentials.get(id);
+    if (!cred) return notFound(reply, "credential not found");
+    const verifyUrl = `${deps.publicWebUrl}/verify?id=${encodeURIComponent(id)}`;
+    const svg = await qrcode.toString(verifyUrl, { type: "svg", margin: 1, width: 240 });
+    reply.type("image/svg+xml");
+    return svg;
+  });
+
+
   // PUBLIC capability URL (the unguessable credential id is the token, same
   // posture as /status). Renders a human-readable PDF certificate on the fly
   // when the credential's type has certificate.enabled. Reflects live status.

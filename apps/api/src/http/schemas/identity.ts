@@ -523,6 +523,17 @@ export const identitySchemas: Record<string, FastifySchema> = {
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: { ...errs(404) },
   },
+  credentialQr: {
+    tags: ["Credentials"], summary: "Public: a scannable QR encoding this credential's verification link",
+    description:
+      "Public — same posture as `/credentials/{id}/status`: the unguessable credential id is the token, and a " +
+      "verifier's phone camera must be able to resolve this with no account. Encodes " +
+      "`{publicWebUrl}/verify?id={id}` — the public verification portal's own URL shape, the same one the " +
+      "\"Copy verification link\" action in the wallet builds — never the credential's claims, which stay behind " +
+      "the holder's consent.",
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    response: { ...errs(404) },
+  },
   identityRegistry: {
     tags: ["Identity"], summary: "The deployed on-chain identity registries (null when none)", security: humanOnly,
     response: { 200: { type: "object", nullable: true, additionalProperties: true }, ...errs(401) },

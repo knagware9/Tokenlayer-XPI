@@ -137,6 +137,48 @@ describe("credential PDF certificate route", () => {
   });
 });
 
+describe("credential QR route", () => {
+  it("renders an SVG QR that encodes the public verification link, with no auth", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const admin2 = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    await seedUseCase(app, admin);
+    const subject = await subjectWithDid(app);
+    // NOT certificate-enabled: the QR is a property of the CREDENTIAL, not of
+    // whether its type prints a PDF — a plain credential still needs a way for
+    // a verifier to scan and check it.
+    await issueAndApprove(app, admin, admin2, "domicile-cert", "PlainCredential", subject.id, { fullName: "No Cert" });
+
+    const subjTok = await loginAs(app, subject.email, subject.password);
+    const held = await app.inject({ method: "GET", url: `${V1}/me/credentials`, headers: auth(subjTok) });
+    const cred = (held.json() as { id: string; type: string[] }[]).find((c) => c.type.includes("PlainCredential"))!;
+
+    // No `auth(...)` header at all — this is the public capability URL a phone
+    // camera scans, same posture as /status and /certificate.pdf.
+    const res = await app.inject({ method: "GET", url: `${V1}/credentials/${cred.id}/qr.svg` });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/^image\/svg\+xml/);
+    expect(res.body).toContain("<svg");
+
+    // A QR image is pixel modules, not literal text — the only honest way to
+    // check the id is actually encoded (not a static/shared image) is to prove
+    // a DIFFERENT credential id produces DIFFERENT module data.
+    await issueAndApprove(app, admin, admin2, "domicile-cert", "PlainCredential", subject.id, { fullName: "Second" });
+    const held2 = await app.inject({ method: "GET", url: `${V1}/me/credentials`, headers: auth(subjTok) });
+    const cred2 = (held2.json() as { id: string; type: string[] }[]).filter((c) => c.type.includes("PlainCredential"))
+      .find((c) => c.id !== cred.id)!;
+    const res2 = await app.inject({ method: "GET", url: `${V1}/credentials/${cred2.id}/qr.svg` });
+    expect(res2.statusCode).toBe(200);
+    expect(res2.body).not.toBe(res.body);
+  });
+
+  it("404s for an unknown credential id", async () => {
+    const app = await buildTestApp();
+    const res = await app.inject({ method: "GET", url: `${V1}/credentials/does-not-exist/qr.svg` });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
 describe("certificate helper functions", () => {
   it("humanizeKey title-cases camelCase / snake / kebab keys", () => {
     expect(humanizeKey("fullName")).toBe("Full Name");

@@ -395,6 +395,45 @@ describe("UseCaseAdmin adds a credential type to their own use case", () => {
     expect((reread.json() as { credentialTypes: { name: string }[] }).credentialTypes.map((t) => t.name)).toEqual(["T", "SecondType"]);
   });
 
+  it("a schema added this way can carry a certificate design, printable exactly like one authored at creation", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const admin2 = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    const key = await createCredUC(app, admin, "addtype-cert-uc");
+    await onboardUser(app, admin, admin2, { email: "addtype.cert.admin@x.dev", password: "secret1", role: "UseCaseAdmin", useCaseKey: key });
+    const ucAdminToken = await loginAs(app, "addtype.cert.admin@x.dev", "secret1");
+
+    const add = await app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/${key}/credential-types`, headers: auth(ucAdminToken),
+      payload: {
+        name: "PrintableType", title: "Printable Type", validityDays: 180, requiredApprovals: 1,
+        claimSchema: { type: "object", required: ["holderName"], properties: { holderName: { type: "string" } } },
+        certificate: { enabled: true, heading: "Certificate of Printable Type" },
+      },
+    });
+    expect(add.statusCode).toBe(200);
+
+    await onboardUser(app, admin, admin2, { email: "addtype.cert.issuer@x.dev", password: "secret1", role: "Issuer", useCaseKey: key });
+    const issuerToken = await loginAs(app, "addtype.cert.issuer@x.dev", "secret1");
+    const holder = await onboardUser(app, admin, admin2, { email: "addtype.cert.holder@x.dev", password: "secret1", role: "Holder", useCaseKey: key });
+
+    const issue = await app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/${key}/credentials`, headers: auth(issuerToken),
+      payload: { credentialType: "PrintableType", subjectUserId: holder.id, claims: { holderName: "Test Holder" } },
+    });
+    expect(issue.statusCode).toBe(202);
+    const approve = await app.inject({ method: "POST", url: `${V1}/proposals/${issue.json().proposal.id}/approve`, headers: auth(admin2), payload: {} });
+    expect(approve.statusCode).toBe(200);
+
+    const holderToken = await loginAs(app, "addtype.cert.holder@x.dev", "secret1");
+    const held = await app.inject({ method: "GET", url: `${V1}/me/credentials`, headers: auth(holderToken) });
+    const cred = (held.json() as { id: string; type: string[] }[]).find((c) => c.type.includes("PrintableType"))!;
+
+    const pdf = await app.inject({ method: "GET", url: `${V1}/credentials/${cred.id}/certificate.pdf` });
+    expect(pdf.statusCode).toBe(200);
+    expect(pdf.headers["content-type"]).toMatch(/^application\/pdf/);
+  });
+
   it("rejects a duplicate name (409), and refuses a UseCaseAdmin scoped to a DIFFERENT use case (403)", async () => {
     const app = await buildTestApp();
     const admin = await loginAs(app, "admin@tokenlayer.dev", "admin123");

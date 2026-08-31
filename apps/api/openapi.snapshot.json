@@ -1504,6 +1504,22 @@
         }
       }
     },
+    "/api/v1/credentials/{id}/qr.svg": {
+      "get": {
+        "tags": [
+          "Credentials"
+        ],
+        "security": null,
+        "scopes": null,
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": false,
+        "responses": {
+          "404": "#Error"
+        }
+      }
+    },
     "/api/v1/credentials/{id}/revoke": {
       "post": {
         "tags": [

@@ -97,6 +97,7 @@ const DELIBERATELY_UNSCOPED: Record<string, string> = {
   "GET /dids/:did/resolve": "public by design; a DID document is public key material",
   "GET /credentials/:id/status": "public by design; a third-party verifier holding only the VC must resolve its status",
   "GET /credentials/:id/certificate.pdf": "public by design; the certificate is the credential's own presentation",
+  "GET /credentials/:id/qr.svg": "public by design; a verifier's phone camera must resolve it with no account, same posture as /status",
 
   // --- the caller's own session/device state -------------------------------
   "GET /me": "the caller's OWN claims — the identity the key already proved",

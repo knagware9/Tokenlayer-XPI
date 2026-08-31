@@ -385,6 +385,7 @@ export const api = {
     return request<{ events: PlatformEvent[]; nextAfter: number }>(`/events${qs ? `?${qs}` : ""}`, token);
   },
   certificateUrl: (id: string): string => `${BASE}/credentials/${encodeURIComponent(id)}/certificate.pdf`,
+  credentialQrUrl: (id: string): string => `${BASE}/credentials/${encodeURIComponent(id)}/qr.svg`,
   didResolveUrl: (did: string): string => `${BASE}/dids/${encodeURIComponent(did)}/resolve`,
   myCredentials: (token: string) => request<HeldCredential[]>("/me/credentials", token),
   orgWallet: (token: string, orgId: string) => request<HeldCredential[]>(`/orgs/${encodeURIComponent(orgId)}/wallet`, token),

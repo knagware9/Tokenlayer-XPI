@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../../auth.js";
 import { api, ApiError } from "../../api.js";
-import type { CredentialUseCase, CredentialTypeSpec, EligibleHolder } from "../../types.js";
+import type { CertificateFieldPlacement, CredentialUseCase, CredentialTypeSpec, EligibleHolder } from "../../types.js";
 import { BatchCsv } from "../shared/BatchCsv.js";
 import { SchemaFieldEditor, fieldsToSchema, type FieldRow } from "../shared/SchemaFieldEditor.js";
+import { CertificateDesigner } from "./CertificateDesigner.js";
+import { withoutStalePlacements } from "../../lib/identity/certificate-layout.js";
 
 export function IssueUsecaseCredential({ useCase, onIssued }: { useCase: CredentialUseCase; onIssued: () => void }): JSX.Element {
   const { user } = useAuth();
@@ -43,18 +45,88 @@ export function IssueUsecaseCredential({ useCase, onIssued }: { useCase: Credent
   );
 }
 
-const emptyTypeDraft = (): { name: string; title: string; validityDays: string; requiredApprovals: string; fields: FieldRow[] } =>
-  ({ name: "", title: "", validityDays: "365", requiredApprovals: "1", fields: [] });
+interface NewTypeDraft {
+  name: string; title: string; validityDays: string; requiredApprovals: string; fields: FieldRow[];
+  certEnabled: boolean; certHeading: string; certSubheading: string; certClaimKeys: string[];
+  certLogoDocumentId: string; certBackgroundDocumentId: string; certBackgroundSha256: string;
+  certPlacements: CertificateFieldPlacement[];
+}
+const emptyTypeDraft = (): NewTypeDraft => ({
+  name: "", title: "", validityDays: "365", requiredApprovals: "1", fields: [],
+  certEnabled: false, certHeading: "", certSubheading: "", certClaimKeys: [],
+  certLogoDocumentId: "", certBackgroundDocumentId: "", certBackgroundSha256: "", certPlacements: [],
+});
+const claimKeysOf = (d: NewTypeDraft): string[] => d.fields.map((f) => f.name.trim()).filter(Boolean);
 
 /** UseCaseAdmin-only: append a new credential type to THIS use case, without the
  * risk of PlatformAdmin's full-definition PATCH. Collapsed by default so the
- * common "issue a credential" path stays uncluttered. */
+ * common "issue a credential" path stays uncluttered. Certificate design mirrors
+ * the same step in CredentialUseCaseBuilder's wizard — same fields, same
+ * CertificateDesigner — so a schema added here is printable exactly like one
+ * authored at use-case creation. */
 function AddCredentialType({ useCase, onAdded }: { useCase: CredentialUseCase; onAdded: () => void }): JSX.Element {
   const { token } = useAuth();
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(emptyTypeDraft());
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Same object-URL-per-artwork-id fetch/cleanup pattern as the wizard — the
+  // background route needs a bearer token, so the canvas gets a fetched blob
+  // URL rather than a bare <img src>.
+  const [artworkUrl, setArtworkUrl] = useState<string | null>(null);
+  const artworkUrlRef = useRef<string | null>(null);
+  artworkUrlRef.current = artworkUrl;
+  useEffect(() => {
+    if (!token || !draft.certBackgroundDocumentId) { setArtworkUrl(null); return; }
+    let cancelled = false;
+    void api.downloadDocument(token, draft.certBackgroundDocumentId)
+      .then((b) => { if (!cancelled) setArtworkUrl(URL.createObjectURL(b)); })
+      .catch(() => { if (!cancelled) setArtworkUrl(null); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, draft.certBackgroundDocumentId]);
+  useEffect(() => () => { if (artworkUrlRef.current) URL.revokeObjectURL(artworkUrlRef.current); }, []);
+
+  async function uploadArtwork(file: File): Promise<void> {
+    if (!token) return;
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let bin = ""; for (let n = 0; n < bytes.length; n++) bin += String.fromCharCode(bytes[n] as number);
+    try {
+      const r = await api.uploadDocument(token, file.type, btoa(bin));
+      setDraft((d) => ({ ...d, certBackgroundDocumentId: r.id, certBackgroundSha256: r.sha256 }));
+    } catch { setErr("artwork upload failed"); }
+  }
+
+  async function previewCertificate(): Promise<void> {
+    if (!token) return;
+    const placements = withoutStalePlacements(draft.certPlacements, claimKeysOf(draft));
+    try {
+      const blob = await api.previewCertificate(token, {
+        credentialType: {
+          name: draft.name.trim() || "Draft", title: draft.title.trim() || draft.name.trim() || "Draft",
+          validityDays: Number(draft.validityDays) || 1, requiredApprovals: Number(draft.requiredApprovals) || 1,
+          claimSchema: fieldsToSchema(draft.fields),
+          certificate: {
+            enabled: true,
+            heading: draft.certHeading.trim() || undefined,
+            subheading: draft.certSubheading.trim() || undefined,
+            claimOrder: draft.certClaimKeys.length ? draft.certClaimKeys : undefined,
+            logoDocumentId: draft.certLogoDocumentId || undefined,
+            ...(draft.certBackgroundDocumentId
+              ? { background: { documentId: draft.certBackgroundDocumentId, ...(draft.certBackgroundSha256 ? { sha256: draft.certBackgroundSha256 } : {}) } }
+              : {}),
+            ...(placements.length ? { placements } : {}),
+          },
+        },
+      });
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank");
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e) { setErr(e instanceof Error ? e.message : "preview failed"); }
+  }
+
+  const toggle = (list: string[], v: string): string[] => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
 
   async function submit(): Promise<void> {
     setErr(null);
@@ -68,10 +140,22 @@ function AddCredentialType({ useCase, onAdded }: { useCase: CredentialUseCase; o
     const claimSchema = fieldsToSchema(draft.fields);
     if (Object.keys(claimSchema.properties).length === 0) { setErr("add at least one claim field"); return; }
     if (!token) return;
+    const placements = withoutStalePlacements(draft.certPlacements, claimKeysOf(draft));
     setBusy(true);
     try {
       await api.addCredentialType(token, useCase.key, {
         name, title: draft.title.trim() || name, validityDays, requiredApprovals, claimSchema,
+        ...(draft.certEnabled ? { certificate: {
+          enabled: true,
+          heading: draft.certHeading.trim() || undefined,
+          subheading: draft.certSubheading.trim() || undefined,
+          claimOrder: draft.certClaimKeys.length ? draft.certClaimKeys : undefined,
+          logoDocumentId: draft.certLogoDocumentId || undefined,
+          ...(draft.certBackgroundDocumentId
+            ? { background: { documentId: draft.certBackgroundDocumentId, ...(draft.certBackgroundSha256 ? { sha256: draft.certBackgroundSha256 } : {}) } }
+            : {}),
+          ...(placements.length ? { placements } : {}),
+        } } : {}),
       });
       setDraft(emptyTypeDraft());
       setOpen(false);
@@ -117,6 +201,56 @@ function AddCredentialType({ useCase, onAdded }: { useCase: CredentialUseCase; o
         </div>
       </div>
       <SchemaFieldEditor fields={draft.fields} onChange={(fields) => setDraft({ ...draft, fields })} />
+
+      <div className="mt-3 rounded-lg border border-slate-200 p-3 space-y-2">
+        <label className="flex items-center gap-2 text-xs font-medium">
+          <input type="checkbox" checked={draft.certEnabled} onChange={(e) => setDraft({ ...draft, certEnabled: e.target.checked })} />
+          Issue PDF certificate for this credential type
+        </label>
+        {draft.certEnabled && (
+          <div className="space-y-2 pl-1">
+            <input className="w-full rounded border-slate-300 text-xs" placeholder="Certificate heading (e.g. Certificate of Domicile)"
+              value={draft.certHeading} onChange={(e) => setDraft({ ...draft, certHeading: e.target.value })} />
+            <input className="w-full rounded border-slate-300 text-xs" placeholder="Subheading (e.g. issuing authority)"
+              value={draft.certSubheading} onChange={(e) => setDraft({ ...draft, certSubheading: e.target.value })} />
+            <div className="text-[11px] text-slate-500">Claims to show (none selected ⇒ all):</div>
+            <div className="flex flex-wrap gap-1.5">
+              {claimKeysOf(draft).map((k) => (
+                <button type="button" key={k}
+                  className={`rounded-full border px-2 py-0.5 text-[11px] ${draft.certClaimKeys.includes(k) ? "border-brand-400 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-500"}`}
+                  onClick={() => setDraft({ ...draft, certClaimKeys: toggle(draft.certClaimKeys, k) })}>{k}</button>
+              ))}
+            </div>
+            <label className="block text-[11px] text-slate-500">
+              Logo / seal (optional):
+              <input type="file" accept="image/png,image/jpeg" className="mt-1 block text-[11px]"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0]; if (!file || !token) return;
+                  const bytes = new Uint8Array(await file.arrayBuffer());
+                  let bin = ""; for (let n = 0; n < bytes.length; n++) bin += String.fromCharCode(bytes[n] as number);
+                  try { const r = await api.uploadDocument(token, file.type, btoa(bin)); setDraft((d) => ({ ...d, certLogoDocumentId: r.id })); }
+                  catch { setErr("logo upload failed"); }
+                }} />
+              {draft.certLogoDocumentId && <span className="ml-2 text-emerald-600">✓ uploaded</span>}
+            </label>
+            <details className="rounded border border-slate-200 p-2">
+              <summary className="cursor-pointer text-[11px] font-medium text-brand-700">Design certificate →</summary>
+              <div className="mt-2">
+                <CertificateDesigner
+                  backgroundDocumentId={draft.certBackgroundDocumentId || null}
+                  artworkObjectUrl={artworkUrl}
+                  placements={draft.certPlacements}
+                  claimKeys={claimKeysOf(draft)}
+                  onChange={(next) => setDraft((d) => ({ ...d, certPlacements: next }))}
+                  onUploadArtwork={(file) => { void uploadArtwork(file); }}
+                  onPreview={() => { void previewCertificate(); }}
+                />
+              </div>
+            </details>
+          </div>
+        )}
+      </div>
+
       <button
         onClick={() => void submit()}
         disabled={busy}
