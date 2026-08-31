@@ -262,7 +262,7 @@ export function App(): JSX.Element {
     if (idActive === "identity-dashboard") {
       idPanel = <IdentityDashboard />;
     } else if (idActive === "verify-dashboard") {
-      idPanel = <VerifierDashboard />;
+      idPanel = <VerifierDashboard onNavigate={setView} />;
     } else if (idActive === "issue-credentials") {
       idPanel = deskCredUC
         ? <IssueUsecaseCredential useCase={deskCredUC} onIssued={reloadDeskCredUC} />

@@ -4,12 +4,19 @@ import { useAuth } from "../../auth.js";
 import type { VerificationRequest } from "../../types.js";
 import { SectionHeader } from "../shared/ui.js";
 
-function Tile({ label, value, tone }: { label: string; value: number; tone?: string }): JSX.Element {
-  return (
-    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-4 animate-slide-up">
+function Tile({ label, value, tone, onClick }: { label: string; value: number; tone?: string; onClick?: () => void }): JSX.Element {
+  const shared = "bg-white rounded-2xl border border-slate-200/80 shadow-sm p-4 animate-slide-up";
+  const body = (
+    <>
       <div className={`text-2xl font-bold tabular-nums font-display ${tone ?? "text-slate-900"}`}>{value.toLocaleString()}</div>
       <div className="text-[11px] font-semibold uppercase tracking-widest text-slate-400 mt-1">{label}</div>
-    </div>
+    </>
+  );
+  if (!onClick) return <div className={shared}>{body}</div>;
+  return (
+    <button type="button" onClick={onClick} className={`${shared} text-left w-full hover:border-slate-300 hover:shadow transition-shadow cursor-pointer`}>
+      {body}
+    </button>
   );
 }
 
@@ -22,7 +29,7 @@ function Tile({ label, value, tone }: { label: string; value: number; tone?: str
  * yet). Data reuses GET /verification-requests, the same outbox the Verification
  * page's "Your requests" panel already renders — no new API surface needed.
  */
-export function VerifierDashboard(): JSX.Element {
+export function VerifierDashboard({ onNavigate }: { onNavigate?: (view: string) => void }): JSX.Element {
   const { token } = useAuth();
   const [requests, setRequests] = useState<VerificationRequest[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -50,9 +57,9 @@ export function VerifierDashboard(): JSX.Element {
       <SectionHeader title="Dashboard" description="Presentation requests this desk has sent, and where each one stands." />
 
       <div className="grid grid-cols-3 gap-3">
-        <Tile label="Verification request sent" value={counts.sent} />
-        <Tile label="Verification pending" value={counts.pending} tone="text-amber-600" />
-        <Tile label="Verified" value={counts.verified} tone="text-emerald-600" />
+        <Tile label="Verification request sent" value={counts.sent} onClick={onNavigate ? () => onNavigate("verify") : undefined} />
+        <Tile label="Verification pending" value={counts.pending} tone="text-amber-600" onClick={onNavigate ? () => onNavigate("verify") : undefined} />
+        <Tile label="Verified" value={counts.verified} tone="text-emerald-600" onClick={onNavigate ? () => onNavigate("verify") : undefined} />
       </div>
 
       {(counts.rejected > 0 || counts.expired > 0) && (
