@@ -61,12 +61,21 @@ export function App(): JSX.Element {
   // have changed it (consenting/rejecting), not on every render.
   const [pendingHolderRequests, setPendingHolderRequests] = useState(0);
   const onHolderRequestsView = view === "requests" || view === "holder-dashboard";
+  // A split-topology persona (e.g. tokenization-marketplace) that doesn't
+  // surface "requests" at all has no grant for /me/verification-requests
+  // either — fetching it there always fails (CORS-shaped, since the route
+  // was never registered for that persona's edge) and only ever logs noise.
+  // No active persona means the combined console, where every surface exists.
+  const holderRequestsSurfaced = !activePersona() || activePersona()!.surfaces.includes("requests");
   useEffect(() => {
-    if (!token || (user?.role !== "Buyer" && user?.role !== "Holder")) { setPendingHolderRequests(0); return; }
+    if (!token || !holderRequestsSurfaced || (user?.role !== "Buyer" && user?.role !== "Holder")) {
+      setPendingHolderRequests(0);
+      return;
+    }
     void api.myVerificationRequests(token)
       .then((rows) => setPendingHolderRequests(rows.filter((r) => r.status === "pending").length))
       .catch(() => undefined);
-  }, [token, user?.role, onHolderRequestsView]);
+  }, [token, user?.role, onHolderRequestsView, holderRequestsSurfaced]);
 
   const reloadUseCases = (): void => { if (token) void api.useCases(token).then(setUseCases); };
   const reloadDeskCredUC = (): void => {
@@ -93,9 +102,17 @@ export function App(): JSX.Element {
     }).catch(() => { setEnabledDomains(DOMAIN_KEYS); });
   }, [token]);
 
-  // Scoped users are clamped to their own use case's path.
+  // Scoped users are clamped to their own use case's path. A PlatformAdmin who
+  // just authenticated from /login or /signup must leave that path too: routeKey
+  // doubles as THEIR use-case scope below (`activeUseCase`, and the view-reset
+  // effect further down) since they can navigate to any use case's dashboard by
+  // URL — left on "login"/"signup" verbatim, every scoped fetch on first render
+  // asks for a use case named "login", which does not exist, and the console
+  // renders a silently-empty "No assets yet" on every fresh admin sign-in.
   useEffect(() => {
-    if (user && user.useCaseKey && routeKey !== user.useCaseKey) navigate(`/${user.useCaseKey}`);
+    if (!user) return;
+    if (user.useCaseKey && routeKey !== user.useCaseKey) { navigate(`/${user.useCaseKey}`); return; }
+    if (routeKey === "login" || routeKey === "signup") navigate("/");
   }, [user, routeKey, navigate]);
 
   // Load the desk's own credential use case for identity-domain operators.
