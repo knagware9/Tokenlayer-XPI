@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { buildTestApp, V1, loginAs, auth } from "./helpers.js";
+import { buildTestApp, V1, loginAs, auth, onboardUser, treasuryAddressOf } from "./helpers.js";
 
 const UC = "invoice-tokenization";
+const HOLDER = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"; // Carol — seeded account, linkable
 
 const inv = (n: string, amount: number) => ({
   invoiceNumber: n, invoiceDate: "2026-07-01", buyerName: "JSW Steel Limited",
@@ -28,10 +29,13 @@ async function issue(
  * asset's OWN supply, folded from its own audit stream — not a raw chain
  * read, which would pool every asset sharing that contract together.
  *
- * GET /assets/:id/accounts's `balance` is NOT covered here — it's still a
- * live (pooled) chain read, on purpose for now: see the comment on that route
- * in tokenization.ts for why the audit fold can't be dropped in as-is there
- * without breaking the escrow-lifecycle assertions in market.test.ts.
+ * GET /assets/:id/accounts's `balance` is covered too, via a SEPARATE fold
+ * (foldAssetRawBalances) that stays literal about escrow legs — list/
+ * cancel-listing/secondary-buy really do move balance on the ledger, unlike
+ * the economic-ownership fold portfolio/holder-count views use (see
+ * holders.ts) — proven by the escrow-lifecycle test below matching what
+ * market.test.ts already asserts for a single asset, now checked to not leak
+ * onto a sibling asset either.
  */
 describe("per-asset supply/balance isolation on a shared simulated contract", () => {
   it("GET /assets/:id reports each asset's own totalSupply, not another asset's sharing the same contract", async () => {
@@ -66,5 +70,72 @@ describe("per-asset supply/balance isolation on a shared simulated contract", ()
     // the treasury — each asset's own, not the other's.
     expect(rowA.availableSupply).toBe("8000");
     expect(rowB.availableSupply).toBe("1500");
+  });
+
+  it("GET /assets/:id/accounts doesn't leak a holder's balance from one asset onto a sibling sharing the same contract", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "m1.admin@tokenlayer.dev", "m1admin123");
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    // invoice-tokenization is IN-jurisdiction-gated — HOLDER needs a linked,
+    // KYC'd user before it can receive a transfer at all (same setup cashflows.test.ts uses).
+    await onboardUser(app, admin, platform, { email: "supply-isolation.holder@x.dev", password: "secret1", role: "Buyer", walletAddress: HOLDER, kyc: { legalName: "Isolation Test Holder", country: "IN" } });
+
+    const assetA = await issue(app, admin, "INV-HOLD-A", 500000, "10000");
+    const assetB = await issue(app, admin, "INV-HOLD-B", 200000, "3000");
+
+    // Move ALL of asset A's supply to HOLDER — none of it is asset B's.
+    const treasury = await treasuryAddressOf(app, platform, UC);
+    await app.inject({ method: "POST", url: `${V1}/assets/${assetA}/actions/allow`, headers: auth(admin), payload: { account: HOLDER } });
+    const xfer = await app.inject({
+      method: "POST", url: `${V1}/assets/${assetA}/actions/transfer`, headers: auth(admin),
+      payload: { from: treasury, to: HOLDER, amount: "10000" },
+    });
+    expect(xfer.statusCode).toBe(200);
+
+    type Row = { address: string; balance: string };
+    const accountsA: Row[] = (await app.inject({ method: "GET", url: `${V1}/assets/${assetA}/accounts`, headers: auth(admin) })).json();
+    const accountsB: Row[] = (await app.inject({ method: "GET", url: `${V1}/assets/${assetB}/accounts`, headers: auth(admin) })).json();
+
+    expect(accountsA.find((r) => r.address.toLowerCase() === HOLDER.toLowerCase())?.balance).toBe("10000");
+    // HOLDER never touched asset B — must not show up with a phantom balance
+    // (or at all, since a "0" balance means the row is filtered out entirely).
+    const holderOnB = accountsB.find((r) => r.address.toLowerCase() === HOLDER.toLowerCase());
+    expect(holderOnB?.balance ?? "0").toBe("0");
+  });
+
+  it("GET /assets/:id/accounts reflects an escrowed listing literally, without leaking it onto a sibling asset", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "m1.admin@tokenlayer.dev", "m1admin123");
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    await onboardUser(app, admin, platform, { email: "escrow-isolation.holder@x.dev", password: "secret1", role: "Buyer", walletAddress: HOLDER, kyc: { legalName: "Escrow Isolation Holder", country: "IN" } });
+
+    const sale = { unitPrice: "10", currency: "CBDC-INR" };
+    const assetA = await issue(app, admin, "INV-ESCROW-A", 500000, "10000", sale);
+    const assetB = await issue(app, admin, "INV-ESCROW-B", 200000, "3000", sale);
+
+    const treasury = await treasuryAddressOf(app, platform, UC);
+    await app.inject({ method: "POST", url: `${V1}/assets/${assetA}/actions/allow`, headers: auth(admin), payload: { account: HOLDER } });
+    await app.inject({
+      method: "POST", url: `${V1}/assets/${assetA}/actions/transfer`, headers: auth(admin),
+      payload: { from: treasury, to: HOLDER, amount: "10000" },
+    });
+
+    const holderToken = await loginAs(app, "escrow-isolation.holder@x.dev", "secret1");
+    const listRes = await app.inject({
+      method: "POST", url: `${V1}/assets/${assetA}/listings`, headers: auth(holderToken),
+      payload: { quantity: "4000", unitPrice: "12", currency: "CBDC-INR" },
+    });
+    expect(listRes.statusCode).toBe(201);
+
+    type Row = { address: string; balance: string };
+    const accountsA: Row[] = (await app.inject({ method: "GET", url: `${V1}/assets/${assetA}/accounts`, headers: auth(admin) })).json();
+    const accountsB: Row[] = (await app.inject({ method: "GET", url: `${V1}/assets/${assetB}/accounts`, headers: auth(admin) })).json();
+
+    // The listing is a real ledger transfer to escrow — asset A's own table
+    // shows it literally: HOLDER's balance dropped by the listed amount, the
+    // same way market.test.ts's single-asset escrow assertions expect.
+    expect(accountsA.find((r) => r.address.toLowerCase() === HOLDER.toLowerCase())?.balance).toBe("6000");
+    // HOLDER never touched asset B — must not show up with a phantom balance.
+    expect(accountsB.find((r) => r.address.toLowerCase() === HOLDER.toLowerCase())?.balance ?? "0").toBe("0");
   });
 });

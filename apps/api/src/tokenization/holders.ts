@@ -112,6 +112,84 @@ export function createFold(): Fold {
   return { state, step };
 }
 
+/**
+ * Fold an asset's audit entries into LITERAL on-chain balances — every
+ * transfer-shaped action (transfer/buy/list/cancel-listing) moves balance
+ * exactly as the underlying ledger transfer did, escrow legs included.
+ *
+ * This is the raw-ledger view, deliberately DIFFERENT from `createFold`'s
+ * economic-ownership one: that fold treats `list`/`cancel-listing` as a
+ * no-op and debits a secondary `buy`'s SELLER rather than the escrow
+ * account, so a seller's escrowed-but-unsold units still count as theirs —
+ * correct for portfolio/holder-count/holder-limit purposes, wrong for a
+ * literal "what does this address currently hold" table. Here, a seller's
+ * balance really does drop the moment they list, and a secondary buy's `to`
+ * receives from the escrow account it actually came from, because that is
+ * what the ledger transfer underneath the audit entry did.
+ */
+export function foldAssetRawBalances(entries: AuditEntryRecord[]): Map<string, bigint> {
+  const balances = new Map<string, bigint>();
+  const owners = new Map<string, string>(); // tokenId → current owner (NFT only)
+  const bump = (addr: unknown, delta: bigint): void => {
+    if (typeof addr !== "string" || addr === "") return;
+    balances.set(addr, (balances.get(addr) ?? 0n) + delta);
+  };
+  for (const e of entries) {
+    const p = e.payload ?? {};
+    const tokenId = typeof p.tokenId === "string" ? p.tokenId : null;
+    switch (e.action) {
+      case "mint": {
+        if (tokenId) {
+          if (!owners.has(tokenId)) { owners.set(tokenId, String(p.to)); bump(p.to, 1n); }
+        } else {
+          bump(p.to, amountOf(p, "amount"));
+        }
+        break;
+      }
+      case "transfer":
+      case "buy": {
+        // Literal `from`/`to` — NOT the `secondary`/`seller` override
+        // `createFold` applies for a secondary buy: on the raw ledger the
+        // tokens actually moved out of the escrow account named in `from`.
+        if (tokenId) {
+          const cur = owners.get(tokenId) ?? (typeof p.from === "string" ? p.from : undefined);
+          bump(cur, -1n);
+          owners.set(tokenId, String(p.to));
+          bump(p.to, 1n);
+        } else {
+          const amt = amountOf(p, "amount");
+          bump(p.from, -amt);
+          bump(p.to, amt);
+        }
+        break;
+      }
+      case "list": {
+        const amt = amountOf(p, "amount");
+        bump(p.seller, -amt);
+        bump(p.escrow, amt);
+        break;
+      }
+      case "cancel-listing": {
+        const amt = amountOf(p, "amount");
+        bump(p.escrow, -amt);
+        bump(p.seller, amt);
+        break;
+      }
+      case "burn": {
+        if (tokenId) {
+          if (owners.has(tokenId)) { bump(owners.get(tokenId), -1n); owners.delete(tokenId); }
+        } else {
+          bump(p.from, -amountOf(p, "amount"));
+        }
+        break;
+      }
+      default:
+        break; // issue/freeze/unfreeze/allow/disallow/read: no balance effect
+    }
+  }
+  return balances;
+}
+
 /** Distinct addresses with a strictly positive net balance across a set of assets. */
 export function collectPositiveHolders(states: AssetState[]): Set<string> {
   // Deduplicate a holder across assets by address: an address counts once if it

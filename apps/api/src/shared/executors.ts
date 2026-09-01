@@ -11,7 +11,7 @@ import type { Actor, TxReceipt } from "@tokenlayer/core";
 import { splitProRata } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { emitEvent, ownerOrgOfUseCase } from "./events.js";
-import { foldAsset, type AssetState } from "../tokenization/holders.js";
+import { foldAsset, foldAssetRawBalances, type AssetState } from "../tokenization/holders.js";
 import { contextOf } from "../http/support.js";
 import { recordSubmission } from "./ledger-transactions.js";
 import type { AssetRecord, CashflowRecord } from "../persistence/types/index.js";
@@ -34,23 +34,36 @@ interface Logger {
 }
 
 /**
- * Net supply + current positive balances, folded from THIS asset's own audit
- * stream — never a live chain read. Every asset issued under one use case
- * shares that use case's single deployed contract (one contract per use
- * case, not per asset — true on a real EVM chain too, see ComplianceToken.sol:
- * a flat `totalSupply`/`balanceOf` with no asset dimension), so a raw
- * `adapter.totalSupply`/`balanceOf` call pools together every asset sharing
- * that contract instead of answering for just this one. listByAsset returns
- * DESC — sort ASC before folding.
+ * THIS asset's own audit entries, chronological (listByAsset returns DESC).
+ * Every asset issued under one use case shares that use case's single
+ * deployed contract (one contract per use case, not per asset — true on a
+ * real EVM chain too, see ComplianceToken.sol: a flat `totalSupply`/
+ * `balanceOf` with no asset dimension), so a raw `adapter.totalSupply`/
+ * `balanceOf` call pools together every asset sharing that contract instead
+ * of answering for just this one — everything below folds THIS asset's own
+ * audit stream instead, never a live chain read.
  */
-export async function assetStateOf(deps: AppDeps, assetId: string): Promise<AssetState> {
+async function assetAuditEntriesOf(deps: AppDeps, assetId: string) {
   const { items } = await deps.audit.listByAsset(assetId, { limit: 100000 });
-  const asc = [...items].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  return foldAsset(asc);
+  return [...items].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+/** Net supply + current positive balances, economic-ownership view — see foldAsset. */
+export async function assetStateOf(deps: AppDeps, assetId: string): Promise<AssetState> {
+  return foldAsset(await assetAuditEntriesOf(deps, assetId));
 }
 
 export async function assetBalancesOf(deps: AppDeps, assetId: string): Promise<Map<string, bigint>> {
   return (await assetStateOf(deps, assetId)).balances;
+}
+
+/**
+ * THIS asset's own current balances, LITERAL — escrow legs (list/cancel-
+ * listing/secondary-buy) included, unlike assetBalancesOf's economic-
+ * ownership view. See foldAssetRawBalances for why the two must differ.
+ */
+export async function assetRawBalancesOf(deps: AppDeps, assetId: string): Promise<Map<string, bigint>> {
+  return foldAssetRawBalances(await assetAuditEntriesOf(deps, assetId));
 }
 
 /** Case-insensitive balance lookup — address casing is not canonical. */

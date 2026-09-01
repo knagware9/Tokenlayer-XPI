@@ -32,7 +32,7 @@ import { provisionTreasury } from "../../shared/wallets.js";
 import { computeActivity, computePortfolio } from "../../tokenization/investor.js";
 import { readErpInvoices, stageInvoice } from "../../tokenization/invoice-register.js";
 import { settlementStatus } from "../../tokenization/asset-settlement.js";
-import { assetBalancesOf, assetStateOf, balanceOfAddress, coded, CodedError, dropPayerShare, executeCashflowCore, executeIssueActivation, runGatedAction } from "../../shared/executors.js";
+import { assetBalancesOf, assetRawBalancesOf, assetStateOf, balanceOfAddress, coded, CodedError, dropPayerShare, executeCashflowCore, executeIssueActivation, runGatedAction } from "../../shared/executors.js";
 import { recordSubmission } from "../../shared/ledger-transactions.js";
 import { proposalKind } from "../../shared/proposal-kinds.js";
 import type { OnboardUserPayload } from "../../shared/user-kinds.js";
@@ -717,23 +717,21 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
     // Accounts linked to this use case's users (null = PlatformAdmin sees all).
     const linked = claims.role === "PlatformAdmin" ? null : new Set((await scopedAccounts(claims)).map((a) => a.id));
     const all = await deps.accounts.list();
-    // STILL a live chain read, unlike totalSupply/availableSupply above — and
-    // so still pooled across every asset sharing this use case's contract on a
-    // simulated chain (see assetStateOf's comment). The audit fold that fixes
-    // that pooling (foldAsset) deliberately treats `list`/`cancel-listing` as a
-    // no-op for economic-ownership views (a seller's escrowed-but-unsold units
-    // still count as theirs — see holders.ts), so it cannot stand in here: this
-    // table is meant to show literal on-chain balances, escrow moves included
-    // (proven by market.test.ts's escrow-lifecycle assertions). Giving this
-    // table correct PER-ASSET literal balances needs a fold that also treats
-    // list/cancel-listing/buy's escrow leg as real transfers — a distinct,
-    // not-yet-written variant of foldAsset, not a plug-in of the existing one.
+    // Balance is THIS asset's own literal on-chain figure, folded from its own
+    // audit stream — never a live chain read (see assetRawBalancesOf; escrow
+    // legs are included on purpose, unlike assetBalancesOf's economic-
+    // ownership view, so this still matches what a listing/cancel/secondary-
+    // buy actually did to the ledger). Frozen/allowed stay live chain reads:
+    // those are compliance flags on the use case's shared contract, not an
+    // amount, and are genuinely meant to apply to every asset that contract
+    // issues, not one asset alone.
+    const rawBalances = await assetRawBalancesOf(deps, asset.id).catch(() => new Map<string, bigint>());
     const rows = await Promise.all(
       all.map(async (acct) => ({
         id: acct.id,
         address: acct.address,
         label: acct.label,
-        balance: await adapter.balanceOf(ref, acct.address).catch(() => "0"),
+        balance: balanceOfAddress(rawBalances, acct.address).toString(),
         frozen: await adapter.isFrozen(ref, acct.address).catch(() => false),
         allowed: await adapter.isAllowed(ref, acct.address).catch(() => false),
       })),
