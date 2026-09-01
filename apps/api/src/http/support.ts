@@ -2,6 +2,7 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import { PolicyError, scopeAllows, type Actor, type ApiScope, type AssetContext, type Role } from "@tokenlayer/core";
 import { cachedVerification, prefixOf, rememberVerification, secretMatches } from "../shared/api-keys.js";
 import type { ApiKeyRepository, AssetRecord, UserRecord, UserRepository } from "../persistence/types/index.js";
+import { captureException } from "../shared/observability.js";
 
 export interface TokenClaims {
   id: string;
@@ -362,7 +363,10 @@ export function errorHandler(err: any, _req: FastifyRequest, reply: FastifyReply
   }
   // Adapter/ledger reverts and unexpected errors: log internally, return a generic
   // message so raw RPC/contract/library internals are not disclosed to clients.
+  // Reported to error tracking too — everything above this point is an expected
+  // client-facing failure (policy/validation/4xx), not a bug worth paging on.
   console.error("[request-failed]", err);
+  captureException(err);
   return reply.code(400).send({ error: "REQUEST_FAILED", message: "the request could not be completed" });
 }
 

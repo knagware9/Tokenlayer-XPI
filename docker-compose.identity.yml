@@ -69,6 +69,10 @@ services:
       BESU_OPERATOR_KEY: ${BESU_OPERATOR_KEY:-}
       TRUSTED_KYC_ISSUERS: ${TRUSTED_KYC_ISSUERS:-}
       DEV_KYC_ISSUER_SEED: ${DEV_KYC_ISSUER_SEED:-}
+      # Error tracking (Sentry). Unset (the default) is a total no-op — see
+      # apps/api/src/shared/observability.ts.
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-}
     volumes: [identity-data:/data]
     networks: [xi-net]
     restart: unless-stopped
@@ -127,6 +131,8 @@ services:
       args:
         VITE_API_URL: ${IDENTITY_ISSUER_API_URL:-http://localhost:4110}
         VITE_APP_PERSONA: identity-issuer
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
+        VITE_SENTRY_ENVIRONMENT: ${VITE_SENTRY_ENVIRONMENT:-}
     ports: ["${IDENTITY_ISSUER_WEB_PORT:-8090}:80"]
     depends_on: [identity-issuer-edge]
     networks: [xi-net]
@@ -144,6 +150,8 @@ services:
       args:
         VITE_API_URL: ${IDENTITY_VERIFIER_API_URL:-http://localhost:4111}
         VITE_APP_PERSONA: identity-verifier
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
+        VITE_SENTRY_ENVIRONMENT: ${VITE_SENTRY_ENVIRONMENT:-}
     ports: ["${IDENTITY_VERIFIER_WEB_PORT:-8091}:80"]
     depends_on: [identity-verifier-edge]
     networks: [xi-net]
@@ -161,6 +169,8 @@ services:
       args:
         VITE_API_URL: ${IDENTITY_HOLDER_API_URL:-http://localhost:4112}
         VITE_APP_PERSONA: identity-holder
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
+        VITE_SENTRY_ENVIRONMENT: ${VITE_SENTRY_ENVIRONMENT:-}
     ports: ["${IDENTITY_HOLDER_WEB_PORT:-8092}:80"]
     depends_on: [identity-holder-edge]
     networks: [xi-net]

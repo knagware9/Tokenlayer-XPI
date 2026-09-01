@@ -62,6 +62,10 @@ export interface Env {
   nodeEnv: string;
   jwtSecret: string;
   corsOrigins: string[];
+  /** Error tracking (Sentry). Unset ⇒ observability is a total no-op. See shared/observability.ts. */
+  sentryDsn?: string;
+  /** Defaults to nodeEnv; set explicitly to distinguish deployments sharing one Sentry project (e.g. per persona). */
+  sentryEnvironment: string;
   evmRpcUrl?: string;
   evmOperatorKey?: string;
   /**
@@ -221,6 +225,8 @@ export const env: Env = {
   jwtSecret,
   // Comma-separated allowlist; defaults to the local dashboard origin.
   corsOrigins: (process.env.CORS_ORIGINS ?? "http://localhost:5173").split(",").map((s) => s.trim()).filter(Boolean),
+  sentryDsn: process.env.SENTRY_DSN?.trim() || undefined,
+  sentryEnvironment: process.env.SENTRY_ENVIRONMENT?.trim() || process.env.NODE_ENV || "development",
   evmRpcUrl: process.env.EVM_RPC_URL,
   evmOperatorKey: process.env.EVM_OPERATOR_KEY,
   platformFeeAccount,

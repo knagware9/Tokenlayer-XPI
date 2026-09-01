@@ -82,6 +82,10 @@ services:
       # allowlist precisely so no browser can reach it.
       IDENTITY_SERVICE_URL: ${IDENTITY_SERVICE_URL:-}
       IDENTITY_SERVICE_KEY: ${IDENTITY_SERVICE_KEY:-}
+      # Error tracking (Sentry). Unset (the default) is a total no-op — see
+      # apps/api/src/shared/observability.ts.
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-}
     volumes: [tokenization-data:/data]
     # A raw HTTP GET, not a dedicated route: the API has none, every real route
     # needs auth, and ANY response (even a 401) proves Fastify is up and
@@ -150,6 +154,8 @@ services:
       args:
         VITE_API_URL: ${TOKENIZATION_ISSUER_API_URL:-http://localhost:4120}
         VITE_APP_PERSONA: tokenization-issuer
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
+        VITE_SENTRY_ENVIRONMENT: ${VITE_SENTRY_ENVIRONMENT:-}
     ports: ["${TOKENIZATION_ISSUER_WEB_PORT:-8100}:80"]
     depends_on: [tokenization-issuer-edge]
     networks: [xi-net]
@@ -167,6 +173,8 @@ services:
       args:
         VITE_API_URL: ${TOKENIZATION_MARKETPLACE_API_URL:-http://localhost:4121}
         VITE_APP_PERSONA: tokenization-marketplace
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
+        VITE_SENTRY_ENVIRONMENT: ${VITE_SENTRY_ENVIRONMENT:-}
     ports: ["${TOKENIZATION_MARKETPLACE_WEB_PORT:-8101}:80"]
     depends_on: [tokenization-marketplace-edge]
     networks: [xi-net]
@@ -184,6 +192,8 @@ services:
       args:
         VITE_API_URL: ${TOKENIZATION_ADMIN_API_URL:-http://localhost:4122}
         VITE_APP_PERSONA: tokenization-admin
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
+        VITE_SENTRY_ENVIRONMENT: ${VITE_SENTRY_ENVIRONMENT:-}
     ports: ["${TOKENIZATION_ADMIN_WEB_PORT:-8102}:80"]
     depends_on: [tokenization-admin-edge]
     networks: [xi-net]

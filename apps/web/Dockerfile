@@ -21,6 +21,13 @@ ENV VITE_API_URL=$VITE_API_URL
 ARG VITE_APP_PERSONA=
 ENV VITE_APP_PERSONA=$VITE_APP_PERSONA
 
+# Error tracking (Sentry), also baked in at build time. Unset (the default) is a
+# total no-op — see main.tsx.
+ARG VITE_SENTRY_DSN=
+ENV VITE_SENTRY_DSN=$VITE_SENTRY_DSN
+ARG VITE_SENTRY_ENVIRONMENT=
+ENV VITE_SENTRY_ENVIRONMENT=$VITE_SENTRY_ENVIRONMENT
+
 RUN pnpm --filter @tokenlayer/web build
 
 FROM nginx:1.27-alpine AS runtime

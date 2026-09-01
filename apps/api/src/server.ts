@@ -45,8 +45,12 @@ import { provisionTreasury } from "./shared/wallets.js";
 import { createHttpSender, startDispatcher } from "./webhooks/dispatcher.js";
 import { createSecretBox } from "./webhooks/secret-box.js";
 import { startConfirmer } from "./shared/ledger-confirmer.js";
+import { captureFatalAndFlush, initObservability } from "./shared/observability.js";
 
 async function main(): Promise<void> {
+  // Before anything else can throw — boot failures (a down chain, a bad
+  // migration) are exactly the kind of thing a pilot operator needs paged on.
+  initObservability({ dsn: env.sentryDsn, environment: env.sentryEnvironment });
   const rbac = new RbacPolicy();
   const chains = buildChainRegistry();
   await chains.assertConnectivity(); // fail fast: configured EVM chains must be reachable
@@ -339,7 +343,8 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
   console.error(err);
+  await captureFatalAndFlush(err);
   process.exit(1);
 });

@@ -22,6 +22,7 @@ export {
   type PersonaKey, type PersonaDomain, type PersonaDef, type PersonaRule, type MethodSet, type HttpMethod,
 } from "./shared/personas.js";
 export { EVENT_TYPES, isEventType, validateEventTypes, type EventType, type EventSubscription } from "./shared/events.js";
+export { scrubEvent, type ScrubbableEvent } from "./shared/pii-scrub.js";
 // Explicit re-export (not `export *`) because identity's `IssueInput` would
 // otherwise collide with lifecycle-engine's asset `IssueInput` (TS2308).
 export {
