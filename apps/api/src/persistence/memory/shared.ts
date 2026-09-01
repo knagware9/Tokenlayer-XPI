@@ -158,10 +158,10 @@ export class MemoryProposalRepository implements ProposalRepository {
 
 export class MemoryDocumentRepository implements DocumentRepository {
   private readonly docs = new Map<string, DocumentRecord>();
-  async create({ contentType, bytes, ownerOrgId, purpose }: { contentType: string; bytes: Buffer; ownerOrgId: string | null; purpose: DocumentPurpose | null }) {
+  async create({ contentType, bytes, ownerOrgId, purpose, uploadedBy }: { contentType: string; bytes: Buffer; ownerOrgId: string | null; purpose: DocumentPurpose | null; uploadedBy: string | null }) {
     const docId = randomUUID();
     const sha256 = "0x" + createHash("sha256").update(bytes).digest("hex");
-    this.docs.set(docId, { id: docId, contentType, sha256, size: bytes.length, bytes, createdAt: now(), ownerOrgId, purpose });
+    this.docs.set(docId, { id: docId, contentType, sha256, size: bytes.length, bytes, createdAt: now(), ownerOrgId, purpose, uploadedBy });
     return { id: docId, sha256, size: bytes.length };
   }
   async get(docId: string): Promise<DocumentRecord | null> {

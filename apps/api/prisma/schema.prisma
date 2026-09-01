@@ -258,6 +258,17 @@ model Document {
   // a null row never is — there is no honest way to guess what a legacy row
   // was for.
   purpose     String?
+  // WHO uploaded these bytes — distinct from `ownerOrgId` (which ORG owns
+  // them, or none). An org-less desk operator (a UseCaseAdmin/Issuer with no
+  // org — see identity.ts's checkBackgroundDocument) can never satisfy an
+  // ownerOrgId match, so without this a document they uploaded themselves is
+  // unreferenceable even by them. Narrower than widening the org check: this
+  // only ever grants "the exact person who uploaded it", never "anyone in
+  // roughly the right role" — the arbitrary-document-disclosure shape this
+  // file's own history warns about. Nullable for the same reason ownerOrgId
+  // is: no honest way to guess the uploader of a row written before this
+  // column existed.
+  uploadedBy  String?
 
   // The prune's own query: every row a given org owns for a given purpose.
   // The table carries up to 5 MB of inline `bytes` per row, so a scan here

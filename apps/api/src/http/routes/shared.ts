@@ -773,7 +773,7 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     // Unowned by definition: this runs BEFORE the organization exists. Nothing
     // can later claim these bytes on ownership grounds, which is right — a KYB
     // certificate is reviewed by the platform, never re-served to a tenant.
-    const doc = await storeUploadedDocument(deps.documents, request.body as { contentType: string; dataBase64: string }, null, null);
+    const doc = await storeUploadedDocument(deps.documents, request.body as { contentType: string; dataBase64: string }, null, null, null);
     return reply.code(201).send({ id: doc.id, sha256: doc.sha256, size: doc.size });
   });
 
@@ -1155,7 +1155,7 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     // `claims.orgId` (the platform org, or none) would record the wrong owner —
     // which the artwork review established is an authorization fact, not a
     // label. `id` is already proven to be a real org two lines up.
-    const doc = await storeUploadedDocument(deps.documents, b, id, "brand-logo");
+    const doc = await storeUploadedDocument(deps.documents, b, id, "brand-logo", (request.user as TokenClaims).id);
 
     // THE PRUNE RUNS AFTER THE STORE, NEVER BEFORE. The old mark is not dropped
     // until the new bytes are safely written — a prune-first ordering would, on
@@ -2310,7 +2310,7 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     // The uploader's own org, or null for a desk operator who belongs to none.
     // Null here is not a loophole: every ownership gate requires a non-null
     // match, so an unowned document is referenceable only by a PlatformAdmin.
-    const doc = await storeUploadedDocument(deps.documents, request.body as { contentType: string; dataBase64: string }, (request.user as TokenClaims).orgId ?? null, null);
+    const doc = await storeUploadedDocument(deps.documents, request.body as { contentType: string; dataBase64: string }, (request.user as TokenClaims).orgId ?? null, null, (request.user as TokenClaims).id);
     return reply.code(201).send({ id: doc.id, url: `/api/v1/documents/${doc.id}`, sha256: doc.sha256, size: doc.size });
   });
 

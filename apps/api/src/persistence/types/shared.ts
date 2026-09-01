@@ -145,6 +145,17 @@ export interface DocumentRecord {
    * `POST /orgs/{id}/branding/logo` writes a non-null value today.
    */
   purpose: DocumentPurpose | null;
+  /**
+   * WHO uploaded these bytes — distinct from `ownerOrgId` (which ORG owns
+   * them, or none). Lets an org-less desk operator (a UseCaseAdmin/Issuer
+   * with no org, who can never satisfy an ownerOrgId match) reference a
+   * document they personally uploaded, without widening what anyone ELSE in
+   * their role may see — see orgOwnsDocument's own comment on why a role-wide
+   * widening here would be the arbitrary-document-disclosure shape this
+   * codebase has already been burned by once. Null for the same reason
+   * ownerOrgId is: no honest way to guess the uploader of a pre-column row.
+   */
+  uploadedBy: string | null;
 }
 
 /**
@@ -163,7 +174,7 @@ export interface DocumentRepository {
    *  refused access to on ownership grounds, and one that forgets the purpose
    *  writes a mark the prune cannot see. An optional parameter is how both get
    *  forgotten. */
-  create(input: { contentType: string; bytes: Buffer; ownerOrgId: string | null; purpose: DocumentPurpose | null }): Promise<{ id: string; sha256: string; size: number }>;
+  create(input: { contentType: string; bytes: Buffer; ownerOrgId: string | null; purpose: DocumentPurpose | null; uploadedBy: string | null }): Promise<{ id: string; sha256: string; size: number }>;
   get(id: string): Promise<DocumentRecord | null>;
   /** Every document this org owns with this purpose, WITHOUT bytes. OLDEST
    *  FIRST (`createdAt` ascending) — the memory repository's Map insertion

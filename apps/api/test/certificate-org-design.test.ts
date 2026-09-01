@@ -54,8 +54,8 @@ async function world(opts: { ownerOrgId?: string | null } = {}): Promise<World> 
 
 /** Store a document DIRECTLY through the repository — the point of several tests
  *  below is that the HTTP document store refuses an OrgAdmin. */
-async function storeDoc(h: TestAppHandle, contentType: string, b64: string, ownerOrgId: string | null = null): Promise<{ id: string; sha256: string }> {
-  const d = await h.deps.documents.create({ contentType, bytes: Buffer.from(b64, "base64"), ownerOrgId, purpose: null });
+async function storeDoc(h: TestAppHandle, contentType: string, b64: string, ownerOrgId: string | null = null, uploadedBy: string | null = null): Promise<{ id: string; sha256: string }> {
+  const d = await h.deps.documents.create({ contentType, bytes: Buffer.from(b64, "base64"), ownerOrgId, purpose: null, uploadedBy });
   return { id: d.id, sha256: d.sha256 };
 }
 
@@ -773,5 +773,105 @@ describe("EN-F finding 7 review — a digest is not a capability", () => {
     expect(foreign.json().error).toBe(ghost.json().error);
     // And nothing leaks the content type of a document the caller may not read.
     expect(foreign.payload).not.toContain("application/pdf");
+  });
+
+  it("an org-less UseCaseAdmin can now preview a certificate design against artwork they uploaded themselves", async () => {
+    // The gap this closes: a desk operator with no org gets ownerOrgId: null
+    // stamped on everything they upload (see DocumentRecord's own comment), and
+    // "null owns nothing" means they could never satisfy the ownership check —
+    // not even for bytes they uploaded seconds ago. Role gate widened
+    // (UseCaseAdmin, scoped) AND the ownership check gained a narrow `uploadedBy`
+    // escape hatch — deliberately NOT a role-wide widening, so this test also
+    // proves it stays narrow: a DIFFERENT org-less desk operator, or one who
+    // didn't upload the bytes, still gets the built-in layout, not the artwork.
+    const tag = Math.random().toString(36).slice(2, 10);
+    const h = await buildTestAppWithRepos();
+    const key = `orgless-${tag}`;
+    await h.deps.credentialUseCases.create({
+      key, name: "Org-less Programme",
+      credentialTypes: [{
+        name: "CourseCompletion", title: "Course Completion", validityDays: 365, requiredApprovals: 1,
+        claimSchema: { type: "object", required: ["fullName"], properties: { fullName: { type: "string" } } },
+        certificate: { enabled: true },
+      }],
+      issuer: { kind: "platform" },
+      holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
+      ownerOrgId: null,
+    } as never);
+    const deskEmail = `desk-${tag}@tokenlayer.dev`;
+    const deskPassword = `desk-${tag}`;
+    const deskUser = await h.users.create({
+      email: deskEmail, passwordHash: bcrypt.hashSync(deskPassword, TEST_ROUNDS), role: "UseCaseAdmin",
+      useCaseKey: key, accountId: null, active: true, kycStatus: "approved", kyc: null, orgId: null, kind: "human",
+    });
+    const desk = await loginAs(h.app, deskEmail, deskPassword);
+
+    const otherEmail = `other-${tag}@tokenlayer.dev`;
+    const otherPassword = `other-${tag}`;
+    await h.users.create({
+      email: otherEmail, passwordHash: bcrypt.hashSync(otherPassword, TEST_ROUNDS), role: "UseCaseAdmin",
+      useCaseKey: key, accountId: null, active: true, kycStatus: "approved", kyc: null, orgId: null, kind: "human",
+    });
+    const other = await loginAs(h.app, otherEmail, otherPassword);
+
+    // Uploaded by the desk operator themselves — ownerOrgId null, exactly the
+    // shape an org-less UseCaseAdmin's own upload gets.
+    const mine = await storeDoc(h, "image/png", PNG_2x1_B64, null, deskUser.id);
+
+    const draft = (bg: unknown) => ({
+      credentialType: {
+        name: "CourseCompletion", title: "C", validityDays: 365, requiredApprovals: 1,
+        claimSchema: { type: "object", required: ["fullName"], properties: { fullName: { type: "string" } } },
+        certificate: { enabled: true, background: bg, placements: [] },
+      },
+    });
+
+    // The uploader previews their OWN artwork — the artwork's own page size.
+    const own = await h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/preview-certificate`,
+      headers: auth(desk), payload: draft({ documentId: mine.id }),
+    });
+    expect(own.statusCode).toBe(200);
+    expect(/MediaBox \[0 0 841.89 420.9[45]\d*\]/.test(own.rawPayload.toString("latin1"))).toBe(true);
+
+    // A DIFFERENT org-less desk operator (same use case, did not upload it)
+    // gets the built-in layout instead — the escape hatch does not widen to
+    // "any UseCaseAdmin", only to "the person who uploaded these exact bytes".
+    const notMine = await h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/preview-certificate`,
+      headers: auth(other), payload: draft({ documentId: mine.id }),
+    });
+    expect(notMine.statusCode).toBe(200);
+    expect(/MediaBox \[0 0 595.28 841.89\]/.test(notMine.rawPayload.toString("latin1"))).toBe(true);
+  });
+
+  it("the widened role gate still refuses a role the gate never named", async () => {
+    const tag = Math.random().toString(36).slice(2, 10);
+    const h = await buildTestAppWithRepos();
+    const key = `roles-${tag}`;
+    await h.deps.credentialUseCases.create({
+      key, name: "Roles Programme",
+      credentialTypes: [{
+        name: "CourseCompletion", title: "Course Completion", validityDays: 365, requiredApprovals: 1,
+        claimSchema: { type: "object", required: ["fullName"], properties: { fullName: { type: "string" } } },
+        certificate: { enabled: true },
+      }],
+      issuer: { kind: "platform" },
+      holderPolicy: { who: "any-onboarded" }, verifier: { kind: "any" },
+      ownerOrgId: null,
+    } as never);
+    const email = `issuer-${tag}@tokenlayer.dev`;
+    const password = `issuer-${tag}`;
+    await h.users.create({
+      email, passwordHash: bcrypt.hashSync(password, TEST_ROUNDS), role: "Issuer",
+      useCaseKey: key, accountId: null, active: true, kycStatus: "approved", kyc: null, orgId: null, kind: "human",
+    });
+    const issuer = await loginAs(h.app, email, password);
+    const r = await h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/preview-certificate`,
+      headers: auth(issuer),
+      payload: { credentialType: { name: "CourseCompletion", title: "C", validityDays: 365, requiredApprovals: 1, claimSchema: { type: "object", required: [], properties: {} }, certificate: { enabled: true, placements: [] } } },
+    });
+    expect(r.statusCode).toBe(403);
   });
 });

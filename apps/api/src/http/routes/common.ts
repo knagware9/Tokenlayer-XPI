@@ -108,6 +108,7 @@ export async function storeUploadedDocument(
   body: { contentType: string; dataBase64: string },
   ownerOrgId: string | null,
   purpose: DocumentPurpose | null,
+  uploadedBy: string | null,
 ): Promise<{ id: string; sha256: string; size: number }> {
   if (!ALLOWED_DOC_TYPES.has(body.contentType)) {
     throw coded(415, "UNSUPPORTED_DOCUMENT_TYPE", `contentType must be one of: ${[...ALLOWED_DOC_TYPES].join(", ")}`);
@@ -115,7 +116,7 @@ export async function storeUploadedDocument(
   const bytes = Buffer.from(body.dataBase64, "base64");
   if (bytes.length === 0) throw coded(400, "BAD_DOCUMENT", "empty document");
   if (bytes.length > MAX_DOC_BYTES) throw coded(413, "DOCUMENT_TOO_LARGE", `max ${MAX_DOC_BYTES} bytes`);
-  return documents.create({ contentType: body.contentType, bytes, ownerOrgId, purpose });
+  return documents.create({ contentType: body.contentType, bytes, ownerOrgId, purpose, uploadedBy });
 }
 
 /**

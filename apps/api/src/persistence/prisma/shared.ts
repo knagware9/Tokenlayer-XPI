@@ -162,19 +162,19 @@ function toAuditRecord(r: {
  * no-op. Binding to this narrower, locally-declared shape instead makes
  * `purpose` required, so omitting it is a compile error here specifically.
  */
-type DocumentCreateData = { contentType: string; sha256: string; size: number; bytes: Buffer; ownerOrgId: string | null; purpose: DocumentPurpose | null };
+type DocumentCreateData = { contentType: string; sha256: string; size: number; bytes: Buffer; ownerOrgId: string | null; purpose: DocumentPurpose | null; uploadedBy: string | null };
 
 export class PrismaDocumentRepository implements DocumentRepository {
-  async create({ contentType, bytes, ownerOrgId, purpose }: { contentType: string; bytes: Buffer; ownerOrgId: string | null; purpose: DocumentPurpose | null }): Promise<{ id: string; sha256: string; size: number }> {
+  async create({ contentType, bytes, ownerOrgId, purpose, uploadedBy }: { contentType: string; bytes: Buffer; ownerOrgId: string | null; purpose: DocumentPurpose | null; uploadedBy: string | null }): Promise<{ id: string; sha256: string; size: number }> {
     const sha256 = "0x" + createHash("sha256").update(bytes).digest("hex");
-    const data: DocumentCreateData = { contentType, sha256, size: bytes.length, bytes, ownerOrgId, purpose };
+    const data: DocumentCreateData = { contentType, sha256, size: bytes.length, bytes, ownerOrgId, purpose, uploadedBy };
     const row = await prisma.document.create({ data });
     return { id: row.id, sha256, size: bytes.length };
   }
   async get(id: string): Promise<DocumentRecord | null> {
     const r = await prisma.document.findUnique({ where: { id } });
     return r
-      ? { id: r.id, contentType: r.contentType, sha256: r.sha256, size: r.size, bytes: Buffer.from(r.bytes), createdAt: r.createdAt.toISOString(), ownerOrgId: r.ownerOrgId ?? null, purpose: r.purpose === "brand-logo" ? "brand-logo" : null }
+      ? { id: r.id, contentType: r.contentType, sha256: r.sha256, size: r.size, bytes: Buffer.from(r.bytes), createdAt: r.createdAt.toISOString(), ownerOrgId: r.ownerOrgId ?? null, purpose: r.purpose === "brand-logo" ? "brand-logo" : null, uploadedBy: r.uploadedBy ?? null }
       : null;
   }
   async listByOwnerPurpose(ownerOrgId: string, purpose: DocumentPurpose): Promise<DocumentSummary[]> {

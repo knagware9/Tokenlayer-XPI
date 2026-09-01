@@ -156,7 +156,7 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
    */
   async function checkBackgroundDocument(
     background: { documentId?: unknown; sha256?: unknown } | null | undefined,
-    opts: { requirePin: boolean; owner?: { orgId: string | null | undefined; bypass: boolean } },
+    opts: { requirePin: boolean; owner?: { orgId: string | null | undefined; bypass: boolean; uploadedBy?: string } },
   ): Promise<{ error: string; message: string } | null> {
     if (!background || typeof background.documentId !== "string") return null;
     const documentId = background.documentId;
@@ -193,7 +193,15 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
     // principal `canReadDoc` refuses outright — and the content type was in the
     // message. A caller who may not use these bytes learns nothing about them
     // beyond the id they already had.
-    if (opts.owner && !opts.owner.bypass && !orgOwnsDocument(doc, opts.owner.orgId)) {
+    // An org-less desk operator (no `orgId` at all) can never satisfy
+    // `orgOwnsDocument` — it fails closed on a null/empty orgId by design (see
+    // its own comment). `uploadedBy` is the narrow escape hatch: it grants
+    // exactly "the exact person who uploaded these exact bytes", never
+    // "anyone in roughly the right role" — the arbitrary-document-disclosure
+    // shape this route's own history (above) already warns about, so it is
+    // checked as an OR against ownership, never a replacement for it.
+    const uploadedByCaller = !!opts.owner?.uploadedBy && doc.uploadedBy === opts.owner.uploadedBy;
+    if (opts.owner && !opts.owner.bypass && !uploadedByCaller && !orgOwnsDocument(doc, opts.owner.orgId)) {
       return { error: "BACKGROUND_DOCUMENT_NOT_FOUND", message: `certificate background document '${documentId}' not found` };
     }
     // A MARK IS NOT ARTWORK — see `brandLogoRefusal` above for why this rule
@@ -607,8 +615,17 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
     // The mutating-route coverage oracle asks "is it authScoped?" and the
     // answer was confidently yes. The question was wrong — the same shape as
     // EN-B's decide-time scope hole and EN-D2's null-as-allow.
-    if (actor.role !== "PlatformAdmin" && actor.role !== "OrgAdmin") {
-      return reply.code(403).send({ error: "FORBIDDEN", message: "only a platform admin or org admin may preview a certificate design" });
+    //
+    // UseCaseAdmin joined this gate later, deliberately narrower than the
+    // other two: a UseCaseAdmin role is BY CONSTRUCTION scoped to exactly one
+    // use case (`actor.useCaseKey`), so this can only ever preview a design
+    // for their own desk — never an arbitrary programme the way an unscoped
+    // OrgAdmin/PlatformAdmin call can. The ownership check just below is what
+    // actually decides which BACKGROUND DOCUMENT they may reference; this is
+    // only "may this role reach the route at all".
+    const isScopedUseCaseAdmin = actor.role === "UseCaseAdmin" && !!actor.useCaseKey;
+    if (actor.role !== "PlatformAdmin" && actor.role !== "OrgAdmin" && !isScopedUseCaseAdmin) {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "only a platform admin, org admin, or a use case's own admin may preview a certificate design" });
     }
     const b = request.body as { credentialType: CredentialTypeSpec; sampleClaims?: Record<string, unknown> };
     const spec = b.credentialType;
@@ -625,7 +642,7 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
     // door never required one.
     const badBackground = await checkBackgroundDocument(spec.certificate?.background, {
       requirePin: false,
-      owner: { orgId: actor.orgId, bypass: actor.role === "PlatformAdmin" },
+      owner: { orgId: actor.orgId, bypass: actor.role === "PlatformAdmin", uploadedBy: actor.id },
     });
     // ARTWORK YOU MAY NOT USE IS TREATED EXACTLY AS ARTWORK THAT IS NOT THERE.
     //
@@ -882,7 +899,7 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
     // OWNED BY THE PROGRAMME'S ORG, not by the uploader: a PlatformAdmin
     // uploading artwork for a tenant is acting for that tenant, and the design
     // route checks the same org, so the two agree by construction.
-    const doc = await storeUploadedDocument(deps.documents, b, existing.ownerOrgId ?? null, null);
+    const doc = await storeUploadedDocument(deps.documents, b, existing.ownerOrgId ?? null, null, (request.user as TokenClaims).id);
     return reply.code(201).send({ documentId: doc.id, sha256: doc.sha256, size: doc.size });
   });
 
