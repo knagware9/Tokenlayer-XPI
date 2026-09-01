@@ -103,4 +103,55 @@ describe("investor portal endpoints", () => {
     expect(r.statusCode).toBe(400);
     expect(r.json().error).toBe("NO_WALLET");
   });
+
+  it("secondary market: the seller's own history shows 'listed' then 'sold' — not nothing", async () => {
+    // The gap this test closes: a holder who lists units and has them taken by
+    // another investor used to show up NOWHERE in their own /me/activity — the
+    // trade happened and is fully recorded in the audit log, just never
+    // surfaced from the seller's side of it. See investor.ts's `list`/`sold`
+    // branches in computeActivity.
+    // NOT the "BOB" constant other tests in this file use — that address is
+    // already claimed by a SEEDED demo user (bond.buyer@tokenlayer.dev, no
+    // KYC — see seed.ts) — reusing it here made a genuinely fresh onboarding
+    // silently share an account with that stale user, and the compliance
+    // provider's `.find()` returned whichever one Map iteration order put
+    // first. Omitting `walletAddress` entirely sidesteps this: Buyer is
+    // wallet-eligible, so resolveAccountId mints a guaranteed-fresh address.
+    const app = await buildTestApp();
+    const { admin, investor: seller } = await investorSetup(app); // Carol, linked to INVESTOR_WALLET
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    const issued = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(admin), payload: { useCaseKey: "invoice-tokenization", name: "INV-SOLD-1", chainId: "fabric", initialSupply: "1000", metadata: inv("INV-SOLD-1"), sale: { unitPrice: "900", currency: "CBDC-INR" } } });
+    const assetId = issued.json().asset.id;
+    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: auth(admin), payload: { account: INVESTOR_WALLET } });
+    await app.inject({ method: "POST", url: `${V1}/cash/credit`, headers: auth(platform), payload: { account: INVESTOR_WALLET, currency: "CBDC-INR", amount: "500000" } });
+    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/buy`, headers: auth(seller), payload: { quantity: "200" } });
+
+    const bobUser = await onboardUser(app, admin, platform, { email: "bob.buyer@x.dev", password: "secret1", role: "Buyer", kyc: { legalName: "Bob Buyer", country: "IN" } });
+    const buyer = await loginAs(app, "bob.buyer@x.dev", "secret1");
+    const bobAccts = await app.inject({ method: "GET", url: `${V1}/accounts`, headers: auth(admin) });
+    const bobWallet = (bobAccts.json() as { id: string; address: string }[]).find((a) => a.id === bobUser.accountId)!.address;
+    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: auth(admin), payload: { account: bobWallet } });
+    await app.inject({ method: "POST", url: `${V1}/cash/credit`, headers: auth(platform), payload: { account: bobWallet, currency: "CBDC-INR", amount: "500000" } });
+
+    const listed = await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/listings`, headers: auth(seller), payload: { quantity: "50", unitPrice: "950", currency: "CBDC-INR" } });
+    expect(listed.statusCode).toBe(201);
+    const listingId = listed.json().id;
+    const taken = await app.inject({ method: "POST", url: `${V1}/listings/${listingId}/take`, headers: auth(buyer), payload: { quantity: "50" } });
+    expect(taken.statusCode, taken.payload).toBe(200);
+
+    const sellerActivity = (await app.inject({ method: "GET", url: `${V1}/me/activity`, headers: auth(seller) })).json();
+    const listedEvent = sellerActivity.find((e: { kind: string }) => e.kind === "listed");
+    const soldEvent = sellerActivity.find((e: { kind: string }) => e.kind === "sold");
+    expect(listedEvent).toBeDefined();
+    expect(listedEvent.units).toBe("50");
+    expect(soldEvent).toBeDefined();
+    expect(soldEvent.units).toBe("50");
+    expect(soldEvent.amount).toBe("47500"); // 50 × 950
+
+    // The buyer's own side is unaffected by this fix — still "subscribed",
+    // same label a primary purchase gets.
+    const buyerActivity = (await app.inject({ method: "GET", url: `${V1}/me/activity`, headers: auth(buyer) })).json();
+    expect(buyerActivity.find((e: { kind: string }) => e.kind === "subscribed")).toBeDefined();
+    expect(buyerActivity.some((e: { kind: string }) => e.kind === "sold")).toBe(false);
+  });
 });

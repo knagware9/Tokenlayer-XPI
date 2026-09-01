@@ -336,7 +336,7 @@ function InvestorActivity({ useCases }: { useCases: UseCase[] }): JSX.Element {
         <EmptyState icon="spark" title="No activity yet" hint="Purchases, transfers and coupon payments show up here." />
       </div>
     );
-  const tone: Record<ActivityEvent["kind"], string> = { subscribed: "bg-brand-50 text-brand-700", received: "bg-emerald-100 text-emerald-700", sent: "bg-slate-100 text-slate-600", coupon: "bg-amber-100 text-amber-700", redemption: "bg-violet-100 text-violet-700" };
+  const tone: Record<ActivityEvent["kind"], string> = { subscribed: "bg-brand-50 text-brand-700", received: "bg-emerald-100 text-emerald-700", sent: "bg-slate-100 text-slate-600", coupon: "bg-amber-100 text-amber-700", redemption: "bg-violet-100 text-violet-700", listed: "bg-sky-100 text-sky-700", sold: "bg-emerald-100 text-emerald-700" };
   const projectOf = (key: string): string => useCases.find((u) => u.key === key)?.name ?? key;
   return (
     <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-x-auto">

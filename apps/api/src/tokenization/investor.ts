@@ -20,7 +20,7 @@ export interface Portfolio {
   totalByCurrency: Record<string, string>;
 }
 export interface ActivityEvent {
-  id: string; at: string; kind: "subscribed" | "received" | "sent" | "coupon" | "redemption";
+  id: string; at: string; kind: "subscribed" | "received" | "sent" | "coupon" | "redemption" | "listed" | "sold";
   assetId: string; assetName: string; useCaseKey: string; chainId: string;
   units: string | null; tokenId: string | null;
   amount: string | null; currency: string | null; txHash: string | null;
@@ -109,7 +109,19 @@ export async function computeActivity(deps: AppDeps, wallet: string, useCaseKey?
         to: typeof p.to === "string" ? p.to : null,
       };
       if (e.action === "buy" && eq(p.to, wallet)) {
+        // Same "subscribed" label whether this was a primary offering or a
+        // secondary-market take — from the BUYER's own side it is still an
+        // acquisition. The seller's own side (below) is what "sold" describes.
         events.push({ ...base, kind: "subscribed", units: p.amount != null ? String(p.amount) : null, amount: typeof p.cost === "string" ? p.cost : null, currency: typeof p.currency === "string" ? p.currency : null });
+      } else if (e.action === "buy" && p.secondary === true && eq(p.seller, wallet)) {
+        // The seller's own side of a secondary-market take: `from` in the
+        // recorded event is the pooled escrow account, not this wallet, so this
+        // branch (keyed on `seller`, same field the balance fold already reads
+        // to debit the right party — see holders.ts's own `buy` case) is the
+        // only way a listing being taken ever reaches the seller's own history.
+        events.push({ ...base, kind: "sold", units: p.amount != null ? String(p.amount) : null, amount: typeof p.cost === "string" ? p.cost : null, currency: typeof p.currency === "string" ? p.currency : null });
+      } else if (e.action === "list" && eq(p.seller, wallet)) {
+        events.push({ ...base, kind: "listed", units: p.amount != null ? String(p.amount) : null, amount: null, currency: null });
       } else if ((e.action === "mint" || e.action === "transfer") && eq(p.to, wallet)) {
         const u = p.amount ?? p.tokenId;
         events.push({ ...base, kind: "received", units: u != null ? String(u) : null, amount: null, currency: null });

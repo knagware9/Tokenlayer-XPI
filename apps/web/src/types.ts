@@ -339,7 +339,7 @@ export interface Portfolio {
   totalByCurrency: Record<string, string>;
 }
 export interface ActivityEvent {
-  id: string; at: string; kind: "subscribed" | "received" | "sent" | "coupon" | "redemption";
+  id: string; at: string; kind: "subscribed" | "received" | "sent" | "coupon" | "redemption" | "listed" | "sold";
   assetId: string; assetName: string; useCaseKey: string; chainId: string;
   units: string | null; tokenId: string | null; amount: string | null;
   currency: string | null; txHash: string | null;
