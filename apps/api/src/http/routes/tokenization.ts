@@ -32,7 +32,7 @@ import { provisionTreasury } from "../../shared/wallets.js";
 import { computeActivity, computePortfolio } from "../../tokenization/investor.js";
 import { readErpInvoices, stageInvoice } from "../../tokenization/invoice-register.js";
 import { settlementStatus } from "../../tokenization/asset-settlement.js";
-import { assetBalancesOf, coded, CodedError, dropPayerShare, executeCashflowCore, executeIssueActivation, runGatedAction } from "../../shared/executors.js";
+import { assetBalancesOf, assetStateOf, balanceOfAddress, coded, CodedError, dropPayerShare, executeCashflowCore, executeIssueActivation, runGatedAction } from "../../shared/executors.js";
 import { recordSubmission } from "../../shared/ledger-transactions.js";
 import { proposalKind } from "../../shared/proposal-kinds.js";
 import type { OnboardUserPayload } from "../../shared/user-kinds.js";
@@ -678,16 +678,15 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
     const q = request.query as { useCaseKey?: string; chainId?: string; status?: string; limit: number; offset: number };
     const useCaseKey = claims.role === "PlatformAdmin" ? q.useCaseKey : claims.useCaseKey ?? NO_USE_CASE;
     const { items, total } = await deps.assets.list({ useCaseKey, chainId: q.chainId, status: q.status }, { limit: q.limit, offset: q.offset });
-    // Enrich each row with on-chain total supply and the treasury's remaining
-    // sellable balance, so the marketplace can show supply + availability.
-    const actor = actorOf(request);
+    // Enrich each row with ITS OWN total supply and the treasury's remaining
+    // sellable balance — folded from this asset's own audit stream, not a live
+    // chain read (see assetStateOf: assets sharing a use case's contract also
+    // share its raw on-chain supply/balance).
     const data = await Promise.all(
       items.map(async (a) => {
-        const ctx = contextOf(a);
-        const totalSupply = await deps.engine.totalSupply(actor, ctx).catch(() => null);
-        const availableSupply = a.treasuryAccount
-          ? await deps.engine.balanceOf(actor, ctx, a.treasuryAccount).catch(() => null)
-          : null;
+        const state = await assetStateOf(deps, a.id).catch(() => null);
+        const totalSupply = state ? state.supply.toString() : null;
+        const availableSupply = state && a.treasuryAccount ? balanceOfAddress(state.balances, a.treasuryAccount).toString() : null;
         const settlement = await settlementStatus(deps, a);
         return { ...a, totalSupply, availableSupply, settlement };
       }),
@@ -699,7 +698,11 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
   app.get("/assets/:id", { schema: S.getAsset, ...authScoped("assets:read") }, async (request, reply) => {
     const asset = await scopedAsset(request, reply, "read");
     if (!asset) return reply;
-    const totalSupply = await deps.engine.totalSupply(actorOf(request), contextOf(asset)).catch(() => null);
+    // THIS asset's own supply, folded from its own audit stream — see
+    // assetStateOf for why a live chain read pools across every asset sharing
+    // the use case's contract.
+    const state = await assetStateOf(deps, asset.id).catch(() => null);
+    const totalSupply = state ? state.supply.toString() : null;
     const settlement = await settlementStatus(deps, asset);
     return { ...asset, totalSupply, settlement };
   });
@@ -714,6 +717,17 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
     // Accounts linked to this use case's users (null = PlatformAdmin sees all).
     const linked = claims.role === "PlatformAdmin" ? null : new Set((await scopedAccounts(claims)).map((a) => a.id));
     const all = await deps.accounts.list();
+    // STILL a live chain read, unlike totalSupply/availableSupply above — and
+    // so still pooled across every asset sharing this use case's contract on a
+    // simulated chain (see assetStateOf's comment). The audit fold that fixes
+    // that pooling (foldAsset) deliberately treats `list`/`cancel-listing` as a
+    // no-op for economic-ownership views (a seller's escrowed-but-unsold units
+    // still count as theirs — see holders.ts), so it cannot stand in here: this
+    // table is meant to show literal on-chain balances, escrow moves included
+    // (proven by market.test.ts's escrow-lifecycle assertions). Giving this
+    // table correct PER-ASSET literal balances needs a fold that also treats
+    // list/cancel-listing/buy's escrow leg as real transfers — a distinct,
+    // not-yet-written variant of foldAsset, not a plug-in of the existing one.
     const rows = await Promise.all(
       all.map(async (acct) => ({
         id: acct.id,

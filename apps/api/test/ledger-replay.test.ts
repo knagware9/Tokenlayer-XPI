@@ -44,11 +44,16 @@ describe("rehydrateSimulatedLedgers — surviving a simulated-chain restart", ()
     const useCaseDef = await deps.useCases.get("invoice-tokenization");
     await deps.engine.deployUseCaseContract(useCaseDef, "fabric");
 
-    const wiped = (await app.inject({ method: "GET", url: `${V1}/assets/${assetId}`, headers: auth(admin) })).json();
-    expect(wiped.totalSupply).toBe("0"); // sanity: the wipe simulation actually wiped it
-    const accountsWiped = (await app.inject({ method: "GET", url: `${V1}/assets/${assetId}/accounts`, headers: auth(admin) })).json();
-    const investorRowWiped = accountsWiped.find((a: { address: string }) => a.address.toLowerCase() === INVESTOR_WALLET.toLowerCase());
-    expect(investorRowWiped?.balance ?? "0").toBe("0");
+    // Sanity-check the wipe on the RAW LEDGER directly, bypassing the API: its
+    // totalSupply/accounts fields are folded from the audit log (untouched by
+    // this wipe, on purpose — see assetStateOf), so they would not show it.
+    const ref = { id: assetId, chainId: asset.chainId, contractRef: asset.contractRef };
+    const wipedAdapter = deps.chains.resolveAdapter("fabric");
+    expect(await wipedAdapter.totalSupply(ref)).toBe("0");
+    expect(await wipedAdapter.balanceOf(ref, INVESTOR_WALLET)).toBe("0");
+    // The API layer stays correct straight through the wipe — it never observed it.
+    const duringWipe = (await app.inject({ method: "GET", url: `${V1}/assets/${assetId}`, headers: auth(admin) })).json();
+    expect(duringWipe.totalSupply).toBe("1000");
 
     const result = await rehydrateSimulatedLedgers(deps);
     expect(result.contracts).toBeGreaterThan(0);

@@ -11,7 +11,7 @@ import type { Actor, TxReceipt } from "@tokenlayer/core";
 import { splitProRata } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { emitEvent, ownerOrgOfUseCase } from "./events.js";
-import { foldAsset } from "../tokenization/holders.js";
+import { foldAsset, type AssetState } from "../tokenization/holders.js";
 import { contextOf } from "../http/support.js";
 import { recordSubmission } from "./ledger-transactions.js";
 import type { AssetRecord, CashflowRecord } from "../persistence/types/index.js";
@@ -33,11 +33,32 @@ interface Logger {
   error(obj: unknown, msg: string): void;
 }
 
-/** Current positive balances from the audit fold. listByAsset returns DESC — sort ASC before folding. */
-export async function assetBalancesOf(deps: AppDeps, assetId: string): Promise<Map<string, bigint>> {
+/**
+ * Net supply + current positive balances, folded from THIS asset's own audit
+ * stream — never a live chain read. Every asset issued under one use case
+ * shares that use case's single deployed contract (one contract per use
+ * case, not per asset — true on a real EVM chain too, see ComplianceToken.sol:
+ * a flat `totalSupply`/`balanceOf` with no asset dimension), so a raw
+ * `adapter.totalSupply`/`balanceOf` call pools together every asset sharing
+ * that contract instead of answering for just this one. listByAsset returns
+ * DESC — sort ASC before folding.
+ */
+export async function assetStateOf(deps: AppDeps, assetId: string): Promise<AssetState> {
   const { items } = await deps.audit.listByAsset(assetId, { limit: 100000 });
   const asc = [...items].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  return foldAsset(asc).balances;
+  return foldAsset(asc);
+}
+
+export async function assetBalancesOf(deps: AppDeps, assetId: string): Promise<Map<string, bigint>> {
+  return (await assetStateOf(deps, assetId)).balances;
+}
+
+/** Case-insensitive balance lookup — address casing is not canonical. */
+export function balanceOfAddress(balances: Map<string, bigint>, address: string): bigint {
+  const lower = address.toLowerCase();
+  let total = 0n;
+  for (const [addr, bal] of balances) if (addr.toLowerCase() === lower) total += bal;
+  return total;
 }
 
 /** Drop the payer's own pro-rata share (case-insensitive; address casing is not canonical). */
