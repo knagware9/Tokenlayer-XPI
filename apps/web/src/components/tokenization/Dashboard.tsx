@@ -11,7 +11,15 @@ import { AssetDetail } from "./AssetDetail.js";
 import { availability } from "./AssetList.js";
 
 const ASSET_PAGE_SIZE = 8;
+const HOLDER_PAGE_SIZE = 8;
 type AvailFilter = "all" | "available" | "sold-out" | "not-listed";
+
+/** One holder's stake in one asset — the per-asset row `AssetDetail`'s own
+ *  Holders table shows, pivoted here into "what does this ACCOUNT hold". */
+interface Holding { assetId: string; assetName: string; assetSymbol: string; balance: string; frozen: boolean; allowed: boolean }
+interface Holder { address: string; label: string; holdings: Holding[] }
+
+function truncateAddr(v: string): string { return v.length > 16 ? `${v.slice(0, 8)}…${v.slice(-6)}` : v; }
 
 /** A small fixed palette so a given ledger keeps the same colour across charts. */
 const LEDGER_COLORS: Record<string, string> = { besu: "#10b981", mst: "#6366f1", fabric: "#f59e0b", canton: "#8b5cf6" };
@@ -43,6 +51,12 @@ export function Dashboard({ useCaseKey, useCases, chains }: { useCaseKey?: strin
   const [assetQuery, setAssetQuery] = useState("");
   const [assetPage, setAssetPage] = useState(1);
   const [detailAssetId, setDetailAssetId] = useState<string | null>(null);
+  const [holders, setHolders] = useState<Holder[] | null>(null);
+  const [holdersLoading, setHoldersLoading] = useState(false);
+  const [showHolders, setShowHolders] = useState(false);
+  const [holderQuery, setHolderQuery] = useState("");
+  const [holderPage, setHolderPage] = useState(1);
+  const [detailHolderAddress, setDetailHolderAddress] = useState<string | null>(null);
   // A stat card's target section is often already fully in view on a short page —
   // scrollIntoView then produces no visible motion at all, and the click reads as
   // dead. The flash gives every click a visible result whether or not it scrolled.
@@ -71,6 +85,33 @@ export function Dashboard({ useCaseKey, useCases, chains }: { useCaseKey?: strin
   };
   useEffect(reloadAssets, [token, useCaseKey]);
 
+  // Lazy: there is no single "holders of this use case" endpoint, only a
+  // per-asset one — building the roster means one call per asset, so it only
+  // runs once the Holders tile is actually opened, not on every dashboard load.
+  useEffect(() => {
+    if (!showHolders || !token || !assets || holders !== null) return;
+    setHoldersLoading(true);
+    void Promise.all(assets.map((a) =>
+      api.assetAccounts(token, a.id)
+        .then((accs) => accs
+          .filter((acc) => { try { return BigInt(acc.balance || "0") > 0n; } catch { return acc.balance !== "0"; } })
+          .map((acc) => ({ ...acc, assetId: a.id, assetName: a.name, assetSymbol: a.symbol })))
+        .catch(() => []),
+    )).then((perAsset) => {
+      const byAddress = new Map<string, Holder>();
+      for (const rows of perAsset) {
+        for (const r of rows) {
+          const holding: Holding = { assetId: r.assetId, assetName: r.assetName, assetSymbol: r.assetSymbol, balance: r.balance, frozen: r.frozen, allowed: r.allowed };
+          const existing = byAddress.get(r.address);
+          if (existing) existing.holdings.push(holding);
+          else byAddress.set(r.address, { address: r.address, label: r.label, holdings: [holding] });
+        }
+      }
+      setHolders([...byAddress.values()]);
+      setHoldersLoading(false);
+    });
+  }, [showHolders, token, assets, holders]);
+
   if (detailAssetId) {
     return (
       <AssetDetail
@@ -80,6 +121,63 @@ export function Dashboard({ useCaseKey, useCases, chains }: { useCaseKey?: strin
         onBack={() => setDetailAssetId(null)}
         onChanged={reloadAssets}
       />
+    );
+  }
+
+  if (detailHolderAddress) {
+    const h = holders?.find((x) => x.address === detailHolderAddress);
+    if (!h) { setDetailHolderAddress(null); return <></>; }
+    return (
+      <div className="space-y-4">
+        <button type="button" onClick={() => setDetailHolderAddress(null)} className="text-sm text-slate-500 hover:text-slate-800 inline-flex items-center gap-1.5">
+          ← Back to holders
+        </button>
+        <div>
+          <h2 className="font-display text-lg font-bold text-slate-900">{h.label}</h2>
+          <p className="text-xs font-mono text-slate-400 break-all">{h.address}</p>
+        </div>
+        <Card title={`Holdings (${h.holdings.length})`}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="text-[10px] text-slate-400 uppercase tracking-widest">
+                <tr>
+                  <th className="text-left font-semibold px-3 py-2">Asset</th>
+                  <th className="text-right font-semibold px-3 py-2">Balance</th>
+                  <th className="text-left font-semibold px-3 py-2">Chain</th>
+                  <th className="text-left font-semibold px-3 py-2">State</th>
+                  <th className="px-3 py-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {h.holdings.map((hold) => {
+                  const asset = (assets ?? []).find((a) => a.id === hold.assetId);
+                  const chain = chains.find((c) => c.id === asset?.chainId);
+                  return (
+                    <tr key={hold.assetId} className="border-t border-slate-100">
+                      <td className="px-3 py-2">
+                        <div className="font-medium text-slate-800">{hold.assetName}</div>
+                        <div className="text-slate-400">{hold.assetSymbol}</div>
+                      </td>
+                      <td className="px-3 py-2 text-right font-data tabular-nums text-slate-700">{fmtInt(hold.balance)}</td>
+                      <td className="px-3 py-2 text-slate-600">{chain?.label ?? asset?.chainId ?? "—"}</td>
+                      <td className="px-3 py-2">
+                        {hold.frozen && <Pill tone="danger">frozen</Pill>}
+                        {!hold.frozen && hold.allowed && <Pill tone="ok">allowed</Pill>}
+                        {!hold.frozen && !hold.allowed && <span className="text-slate-300">—</span>}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <button onClick={() => setDetailAssetId(hold.assetId)} className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-medium hover:border-brand-400">
+                          View asset
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      </div>
     );
   }
 
@@ -120,6 +218,11 @@ export function Dashboard({ useCaseKey, useCases, chains }: { useCaseKey?: strin
     setShowAssets(true);
     scrollTo("dash-assets");
   };
+  const openHolders = (): void => {
+    setHolderPage(1);
+    setShowHolders(true);
+    scrollTo("dash-holders");
+  };
 
   const q = assetQuery.trim().toLowerCase();
   const filteredAssets = (assets ?? []).filter((a) =>
@@ -128,16 +231,18 @@ export function Dashboard({ useCaseKey, useCases, chains }: { useCaseKey?: strin
   const pagedAssets = filteredAssets.slice((assetPage - 1) * ASSET_PAGE_SIZE, assetPage * ASSET_PAGE_SIZE);
   const chainOf = (id: string): ChainInfo | undefined => chains.find((c) => c.id === id);
 
+  const hq = holderQuery.trim().toLowerCase();
+  const filteredHolders = (holders ?? []).filter((h) =>
+    !hq || h.label.toLowerCase().includes(hq) || h.address.toLowerCase().includes(hq));
+  const pagedHolders = filteredHolders.slice((holderPage - 1) * HOLDER_PAGE_SIZE, holderPage * HOLDER_PAGE_SIZE);
+
   return (
     <div className="space-y-4">
       {/* headline cards — click to drill into the matching breakdown */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <Stat icon="coins" label="Tokenized value" value={fmtMoney(t.valueByCurrency)} sub={`${t.assets} assets · ${t.useCases} use case${t.useCases === 1 ? "" : "s"}`} onClick={() => openAssets("all")} stagger={1} />
         <Stat icon="spark" label="Total supply" value={fmtInt(t.supply)} sub="minted − burned" onClick={() => openAssets("all")} stagger={2} />
-        {/* Holders has no per-holder breakdown on this page (that lives per-asset, in
-            the asset's own Holders table) — open the assets table so a click leads
-            somewhere with a View into that detail, rather than a dead end. */}
-        <Stat icon="users" label="Holders" value={String(t.holders)} sub="distinct accounts" onClick={() => openAssets("all")} stagger={3} />
+        <Stat icon="users" label="Holders" value={String(t.holders)} sub="distinct accounts" onClick={openHolders} stagger={3} />
         <Stat icon="arrow" label={`Traded (${data.activity.length}d)`} value={fmtMoney(t.tradedByCurrency)} sub={`${t.trades} trade${t.trades === 1 ? "" : "s"}`} onClick={() => scrollTo("dash-recent")} stagger={4} />
       </div>
 
@@ -214,6 +319,55 @@ export function Dashboard({ useCaseKey, useCases, chains }: { useCaseKey?: strin
                   </table>
                 </div>
                 <Pager page={assetPage} pageSize={ASSET_PAGE_SIZE} total={filteredAssets.length} onPage={setAssetPage} />
+              </>
+            )}
+          </Card>
+        </div>
+      )}
+
+      {showHolders && (
+        <div id="dash-holders" className={flash("dash-holders")}>
+          <Card title="Holders">
+            <input
+              value={holderQuery}
+              onChange={(e) => { setHolderQuery(e.target.value); setHolderPage(1); }}
+              placeholder="Search name or address…"
+              className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs w-full mb-3"
+            />
+            {holdersLoading || holders === null ? (
+              <Skeleton lines={4} />
+            ) : filteredHolders.length === 0 ? (
+              <EmptyState icon="users" title="No holders match" hint="Try a different search term, or nobody holds a balance yet." />
+            ) : (
+              <>
+                <div className="overflow-x-auto rounded-lg border border-slate-200">
+                  <table className="w-full text-xs">
+                    <thead className="text-[10px] text-slate-400 bg-slate-50/80 uppercase tracking-widest">
+                      <tr>
+                        <th className="text-left font-semibold px-3 py-2.5">Account</th>
+                        <th className="text-right font-semibold px-3 py-2.5">Assets held</th>
+                        <th className="px-3 py-2.5"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pagedHolders.map((h) => (
+                        <tr key={h.address} className="border-t border-slate-100 hover:bg-slate-50/70 transition-colors">
+                          <td className="px-3 py-2">
+                            <div className="font-medium text-slate-800">{h.label}</div>
+                            <div className="text-slate-400 font-mono">{truncateAddr(h.address)}</div>
+                          </td>
+                          <td className="px-3 py-2 text-right font-data tabular-nums text-slate-700">{h.holdings.length}</td>
+                          <td className="px-3 py-2 text-right">
+                            <button onClick={() => setDetailHolderAddress(h.address)} className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-medium hover:border-brand-400">
+                              View
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <Pager page={holderPage} pageSize={HOLDER_PAGE_SIZE} total={filteredHolders.length} onPage={setHolderPage} />
               </>
             )}
           </Card>
