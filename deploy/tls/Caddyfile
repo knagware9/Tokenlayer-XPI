@@ -1,0 +1,61 @@
+# TLS termination for every persona container, fronting the six existing
+# HTTP-only edges/webs untouched — see deploy/tls/README.md for how this
+# fits into the stack and why it's a separate layer rather than a change to
+# the generated nginx configs in deploy/persona-edges/.
+#
+# Caddy requests and renews Let's Encrypt certificates automatically for
+# every hostname below the first time it starts, PROVIDED that hostname's
+# DNS A/AAAA record already points at this host and ports 80+443 are
+# reachable from the internet (Let's Encrypt's HTTP-01 challenge needs both).
+# Nothing here needs a cert file, a private key, or a renewal cron — that is
+# the whole point of this layer.
+#
+# Replace {$DOMAIN} (set it in the environment Caddy runs with, e.g. via
+# docker-compose.tls.yml's `environment:`) with the domain you actually
+# control. The subdomain scheme below is a starting point, not a requirement
+# — rename freely, just keep each block's reverse_proxy target matching the
+# service name + port from docker-compose.identity.yml / .tokenization.yml.
+
+# ── Identity ──────────────────────────────────────────────────────────────
+issuer.identity.{$DOMAIN} {
+	reverse_proxy identity-issuer-web:80
+}
+issuer-api.identity.{$DOMAIN} {
+	reverse_proxy identity-issuer-edge:80
+}
+
+verifier.identity.{$DOMAIN} {
+	reverse_proxy identity-verifier-web:80
+}
+verifier-api.identity.{$DOMAIN} {
+	reverse_proxy identity-verifier-edge:80
+}
+
+holder.identity.{$DOMAIN} {
+	reverse_proxy identity-holder-web:80
+}
+holder-api.identity.{$DOMAIN} {
+	reverse_proxy identity-holder-edge:80
+}
+
+# ── Tokenization ──────────────────────────────────────────────────────────
+issuer.tokenize.{$DOMAIN} {
+	reverse_proxy tokenization-issuer-web:80
+}
+issuer-api.tokenize.{$DOMAIN} {
+	reverse_proxy tokenization-issuer-edge:80
+}
+
+marketplace.tokenize.{$DOMAIN} {
+	reverse_proxy tokenization-marketplace-web:80
+}
+marketplace-api.tokenize.{$DOMAIN} {
+	reverse_proxy tokenization-marketplace-edge:80
+}
+
+admin.tokenize.{$DOMAIN} {
+	reverse_proxy tokenization-admin-web:80
+}
+admin-api.tokenize.{$DOMAIN} {
+	reverse_proxy tokenization-admin-edge:80
+}

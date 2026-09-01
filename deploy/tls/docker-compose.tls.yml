@@ -1,0 +1,38 @@
+# Optional TLS-termination layer — see deploy/tls/README.md.
+#
+# Adds one Caddy container to the SAME external network the identity and
+# tokenization stacks already join (xi-net, created by scripts/stack-up.sh),
+# so it can reverse-proxy to every persona container by its compose service
+# name with no other wiring. Neither docker-compose.identity.yml nor
+# docker-compose.tokenization.yml is touched by this file.
+#
+# Usage, after the identity/tokenization stacks are already up:
+#   DOMAIN=example.com docker compose -f deploy/tls/docker-compose.tls.yml up -d
+#
+# DOMAIN must be a real domain whose DNS you control, with A/AAAA records for
+# every hostname in Caddyfile pointing at this host, and ports 80+443 open —
+# Caddy needs both to complete Let's Encrypt's HTTP-01 challenge.
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN to a real domain you control, e.g. DOMAIN=example.com}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data # ACME account key + issued certs — keep this across restarts
+      - caddy-config:/config
+    networks:
+      - xi-net
+
+volumes:
+  caddy-data:
+  caddy-config:
+
+networks:
+  xi-net:
+    external: true
