@@ -138,6 +138,9 @@ const TRY_IT_SAFE: Record<string, string> = {
   "GET /identity/dashboard":
     "`holderLabels.set(...)` is Map.prototype.set on a lookup table built inside the handler — an in-memory join " +
     "for the response it is about to return. Nothing leaves the request.",
+  "GET /reconciliation":
+    "`.settledSupply(` matches `.set…(` on identifier text alone — it is `deps.ledgerTransactions.settledSupply`, " +
+    "a read-only sum over already-confirmed transactions (apps/api/src/persistence/memory/shared.ts), not a mutation.",
 };
 
 const key = (h: Handler): string => `${h.method.toUpperCase()} ${h.path}`;

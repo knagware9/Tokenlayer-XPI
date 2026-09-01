@@ -106,7 +106,11 @@ describe("end-user apps get self-service and nothing else", () => {
     expect(personaAllows(market, "POST", "/assets")).toBe(false);
     expect(personaAllows(market, "POST", "/assets/:id/actions/:action")).toBe(false);
     expect(personaAllows(market, "POST", "/use-cases")).toBe(false);
-    expect(personaAllows(market, "GET", "/use-cases")).toBe(false);
+    // GET is allowed, deliberately: AssetDetail (opened from a holding's View
+    // button) needs the asset's use case to know its compliance/lifecycle
+    // rules — without it the page can only ever show a loading skeleton for
+    // this persona. Read-only; only POST (define/reconfigure) stays refused.
+    expect(personaAllows(market, "GET", "/use-cases")).toBe(true);
     expect(personaAllows(market, "POST", "/cash/credit")).toBe(false);
   });
 
@@ -164,11 +168,22 @@ describe("the products do not reach each other", () => {
     }
   });
 
-  it.each(personasForDomain("tokenization").map((x) => x.key))("%s admits no identity route", (key) => {
+  it.each(personasForDomain("tokenization").map((x) => x.key))("%s admits no identity-PRODUCT route", (key) => {
     const persona = p(key);
-    for (const route of ["/credential-use-cases", "/credentials/:id/status", "/verification-requests", "/me/credentials", "/registry"]) {
+    // NOT `/me/credentials` — that one is deliberately shared. A tokenization
+    // staff member has a DID too, minted at onboarding, and can hold
+    // credentials like any other subject ("My Credentials" in every persona's
+    // pinned nav) — each tokenization staff persona's own `allow` list grants
+    // it explicitly, on purpose, while the identity PRODUCT's operator
+    // surface (issue/verify/revoke) never does.
+    for (const route of ["/credential-use-cases", "/credentials/:id/status", "/verification-requests", "/registry"]) {
       expect(personaAllows(persona, "GET", route)).toBe(false);
     }
+  });
+
+  it.each(["tokenization-issuer", "tokenization-admin"])("%s still reaches its OWN /me/credentials — the deliberate exception", (key) => {
+    const persona = p(key);
+    expect(personaAllows(persona, "GET", "/me/credentials")).toBe(true);
   });
 
   it("and the machine-to-machine identity oracle is on nobody's edge", () => {
