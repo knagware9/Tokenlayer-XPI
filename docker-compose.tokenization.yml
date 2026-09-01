@@ -56,8 +56,15 @@ services:
       # service is a contradiction" guard in apps/api/src/env.ts. stack-up.sh
       # sets this override itself when it links both stacks together.
       ENABLED_DOMAINS: ${ENABLED_DOMAINS:-tokenization,identity}
-      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET — e.g. openssl rand -hex 32}
-      DID_MASTER_KEY: ${DID_MASTER_KEY:?Set DID_MASTER_KEY — organization DID seeds are encrypted with it}
+      # PERSONAS_-prefixed, not the plain names — see the same-named guard's
+      # comment in docker-compose.identity.yml for why: the repo root's plain
+      # `.env` (single-stack docker-compose.yml) has its OWN JWT_SECRET/
+      # DID_MASTER_KEY, and Compose auto-loads that file for ANY invocation in
+      # this directory. A distinct name makes a direct `docker compose -f
+      # docker-compose.tokenization.yml up` that skips scripts/stack-up.sh fail
+      # loudly instead of silently booting with the wrong secrets.
+      JWT_SECRET: ${PERSONAS_JWT_SECRET:?Set PERSONAS_JWT_SECRET in .env.personas — start via scripts/stack-up.sh, not a direct docker compose call}
+      DID_MASTER_KEY: ${PERSONAS_DID_MASTER_KEY:?Set PERSONAS_DID_MASTER_KEY in .env.personas — start via scripts/stack-up.sh, not a direct docker compose call}
       # :8090 is identity-issuer-web — see the "identity-api" alias below; it
       # talks to THIS container, so it needs the same CORS grant a tokenization
       # persona web app gets.

@@ -50,8 +50,18 @@ services:
       NODE_ENV: production
       DATABASE_URL: "file:/data/identity.db"
       ENABLED_DOMAINS: identity
-      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET — e.g. openssl rand -hex 32}
-      DID_MASTER_KEY: ${DID_MASTER_KEY:?Set DID_MASTER_KEY — custodial DID seeds are encrypted with it}
+      # PERSONAS_-prefixed and NOT just JWT_SECRET/DID_MASTER_KEY: the repo root
+      # also has a plain `.env` for the single-stack docker-compose.yml, with
+      # its OWN, different JWT_SECRET/DID_MASTER_KEY. Compose auto-loads that
+      # `.env` for ANY compose invocation in this directory, including a bare
+      # `docker compose -f docker-compose.identity.yml up` that skips
+      # scripts/stack-up.sh. Sharing the plain names let that shortcut silently
+      # boot identity-api with the single-stack's secrets — wrong JWT_SECRET
+      # (invalidates every session) and wrong DID_MASTER_KEY (undecryptable
+      # custodial seeds) — with no error. The distinct name means that shortcut
+      # now fails loudly instead, via the `:?` guard below.
+      JWT_SECRET: ${PERSONAS_JWT_SECRET:?Set PERSONAS_JWT_SECRET in .env.personas — start via scripts/stack-up.sh, not a direct docker compose call}
+      DID_MASTER_KEY: ${PERSONAS_DID_MASTER_KEY:?Set PERSONAS_DID_MASTER_KEY in .env.personas — start via scripts/stack-up.sh, not a direct docker compose call}
       # Every persona web app that talks to this product, and no others.
       CORS_ORIGINS: ${IDENTITY_WEB_ORIGINS:-http://localhost:8090,http://localhost:8091,http://localhost:8092}
       CHAIN_STRICT: ${CHAIN_STRICT:-0}
@@ -67,7 +77,11 @@ services:
       MST_OPERATOR_KEY: ${MST_OPERATOR_KEY:-}
       BESU_RPC_URL: ${BESU_RPC_URL:-}
       BESU_OPERATOR_KEY: ${BESU_OPERATOR_KEY:-}
-      TRUSTED_KYC_ISSUERS: ${TRUSTED_KYC_ISSUERS:-}
+      # Also PERSONAS_-prefixed: unlike the two guards above this one degrades
+      # silently (empty ⇒ fail-closed, no issuer trusted) rather than refusing
+      # to boot, so picking up the single-stack .env's unrelated demo-issuer
+      # DID by accident would be a quiet correctness bug, not a loud one.
+      TRUSTED_KYC_ISSUERS: ${PERSONAS_TRUSTED_KYC_ISSUERS:-}
       DEV_KYC_ISSUER_SEED: ${DEV_KYC_ISSUER_SEED:-}
       # Error tracking (Sentry). Unset (the default) is a total no-op — see
       # apps/api/src/shared/observability.ts.

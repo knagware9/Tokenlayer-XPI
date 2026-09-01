@@ -14,7 +14,10 @@ edges.
 
 `JWT_SECRET`, `DID_MASTER_KEY`, `BESU_OPERATOR_KEY`, `MST_OPERATOR_KEY` and the
 `IDENTITY_SERVICE_KEY` peer credential. They live only in git-ignored env files
-(`.env`, `.env.personas`), are generated per machine, and must stay there.
+(`.env` for the single-stack `docker-compose.yml`; `.env.personas` for the
+split persona stacks, which name its versions `PERSONAS_JWT_SECRET` /
+`PERSONAS_DID_MASTER_KEY` so they can never be confused with `.env`'s), are
+generated per machine, and must stay there.
 
 `DID_MASTER_KEY` deserves a specific warning: every organization's custodial DID
 seed is encrypted under it. Rotating it does not lock you out cleanly — the
