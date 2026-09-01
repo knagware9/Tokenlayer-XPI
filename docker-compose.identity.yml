@@ -72,6 +72,15 @@ services:
     volumes: [identity-data:/data]
     networks: [xi-net]
     restart: unless-stopped
+    # A raw HTTP GET, not a dedicated route: the API has none, every real route
+    # needs auth, and ANY response (even a 401) proves Fastify is up and
+    # routing — that's the bar a liveness check needs to clear.
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:4000/', r => process.exit(r.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   identity-issuer-edge:
     build: { <<: *edge-build, args: { PERSONA: identity-issuer } }
@@ -79,6 +88,12 @@ services:
     depends_on: [identity-api]
     networks: [xi-net]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
 
   identity-verifier-edge:
     build: { <<: *edge-build, args: { PERSONA: identity-verifier } }
@@ -86,6 +101,12 @@ services:
     depends_on: [identity-api]
     networks: [xi-net]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
 
   identity-holder-edge:
     build: { <<: *edge-build, args: { PERSONA: identity-holder } }
@@ -93,6 +114,12 @@ services:
     depends_on: [identity-api]
     networks: [xi-net]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
 
   identity-issuer-web:
     build:
@@ -104,6 +131,12 @@ services:
     depends_on: [identity-issuer-edge]
     networks: [xi-net]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
 
   identity-verifier-web:
     build:
@@ -115,6 +148,12 @@ services:
     depends_on: [identity-verifier-edge]
     networks: [xi-net]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
 
   identity-holder-web:
     build:
@@ -126,6 +165,12 @@ services:
     depends_on: [identity-holder-edge]
     networks: [xi-net]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
 
 volumes:
   identity-data:

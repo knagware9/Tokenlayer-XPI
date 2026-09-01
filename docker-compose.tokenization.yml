@@ -83,6 +83,15 @@ services:
       IDENTITY_SERVICE_URL: ${IDENTITY_SERVICE_URL:-}
       IDENTITY_SERVICE_KEY: ${IDENTITY_SERVICE_KEY:-}
     volumes: [tokenization-data:/data]
+    # A raw HTTP GET, not a dedicated route: the API has none, every real route
+    # needs auth, and ANY response (even a 401) proves Fastify is up and
+    # routing — that's the bar a liveness check needs to clear.
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:4000/', r => process.exit(r.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     # NO "identity-api" alias here BY DEFAULT — that is an OPT-IN overlay
     # (docker-compose.tokenization.standalone-identity.yml), not a default.
     # Two containers answering to the same hostname on xi-net makes Docker's
@@ -102,6 +111,12 @@ services:
     depends_on: [tokenization-api]
     networks: [xi-net]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
 
   tokenization-marketplace-edge:
     build: { <<: *edge-build, args: { PERSONA: tokenization-marketplace } }
@@ -109,6 +124,12 @@ services:
     depends_on: [tokenization-api]
     networks: [xi-net]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
 
   tokenization-admin-edge:
     build: { <<: *edge-build, args: { PERSONA: tokenization-admin } }
@@ -116,6 +137,12 @@ services:
     depends_on: [tokenization-api]
     networks: [xi-net]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
 
   tokenization-issuer-web:
     build:
@@ -127,6 +154,12 @@ services:
     depends_on: [tokenization-issuer-edge]
     networks: [xi-net]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
 
   tokenization-marketplace-web:
     build:
@@ -138,6 +171,12 @@ services:
     depends_on: [tokenization-marketplace-edge]
     networks: [xi-net]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
 
   tokenization-admin-web:
     build:
@@ -149,6 +188,12 @@ services:
     depends_on: [tokenization-admin-edge]
     networks: [xi-net]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
 
 volumes:
   tokenization-data:
