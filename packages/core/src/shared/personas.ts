@@ -327,6 +327,10 @@ export const PERSONAS: readonly PersonaDef[] = [
       { prefix: "/listings", methods: "ALL", why: "take another holder's listing off the secondary market" },
       { prefix: "/cash/balances", methods: ["GET"], why: "own settlement balance" },
       { prefix: "/currencies", methods: ["GET"], why: "render prices in the right currency" },
+      // READ-ONLY: the asset detail page (shared with the staff consoles) needs
+      // an asset's use case to know its compliance/lifecycle rules — without it,
+      // it can only ever show a loading skeleton for this persona.
+      { prefix: "/use-cases", methods: ["GET"], why: "the use case's compliance/lifecycle rules, to render an asset's detail page" },
     ],
   },
   {

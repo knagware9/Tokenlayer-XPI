@@ -72,10 +72,10 @@ export function MyHoldings({ onSelect }: { onSelect: (id: string) => void }): JS
                     e.stopPropagation();
                     onSelect(h.asset.id);
                   }}
-                  title="Sell on the asset's market"
-                  className="text-xs font-medium text-brand-600 hover:underline"
+                  title="View the asset's detail, including its sell options"
+                  className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-medium hover:border-brand-400"
                 >
-                  Sell
+                  View
                 </button>
               </td>
             </tr>

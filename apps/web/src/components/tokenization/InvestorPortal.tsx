@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError, describeApiError } from "../../api.js";
 import { useAuth } from "../../auth.js";
-import type { ActivityEvent, Asset, Holding, Listing, Portfolio, UseCase } from "../../types.js";
+import type { ActivityEvent, Asset, ChainInfo, Holding, Listing, Portfolio, UseCase } from "../../types.js";
 import { Card, EmptyState, Skeleton, StatCard } from "../shared/ui.js";
+import { AssetDetail } from "./AssetDetail.js";
 
 type Tab = "offerings" | "portfolio" | "activity";
 
@@ -18,7 +19,7 @@ function ago(iso: string): string {
 /** Investor experience for role Buyer: Offerings · Portfolio · Activity.
  * When `tab` is supplied the tab is driven by the shell (its centered tab row
  * is hidden); otherwise it self-manages the tab with an internal row. */
-export function InvestorPortal({ useCases, tab: controlledTab, onTabChange }: { useCases: UseCase[]; tab?: Tab; onTabChange?: (tab: Tab) => void }): JSX.Element {
+export function InvestorPortal({ useCases, chains, tab: controlledTab, onTabChange }: { useCases: UseCase[]; chains: ChainInfo[]; tab?: Tab; onTabChange?: (tab: Tab) => void }): JSX.Element {
   const [internalTab, setInternalTab] = useState<Tab>("offerings");
   const tab = controlledTab ?? internalTab;
   const tabs: { id: Tab; label: string }[] = [
@@ -36,7 +37,7 @@ export function InvestorPortal({ useCases, tab: controlledTab, onTabChange }: { 
         </div>
       )}
       {tab === "offerings" && <InvestorOfferings useCases={useCases} onSubscribed={() => { setInternalTab("portfolio"); onTabChange?.("portfolio"); }} />}
-      {tab === "portfolio" && <InvestorPortfolio />}
+      {tab === "portfolio" && <InvestorPortfolio useCases={useCases} chains={chains} />}
       {tab === "activity" && <InvestorActivity useCases={useCases} />}
     </div>
   );
@@ -157,12 +158,13 @@ function InvestorOfferings({ useCases, onSubscribed }: { useCases: UseCase[]; on
   );
 }
 
-function InvestorPortfolio(): JSX.Element {
+function InvestorPortfolio({ useCases, chains }: { useCases: UseCase[]; chains: ChainInfo[] }): JSX.Element {
   const { token } = useAuth();
   const [pf, setPf] = useState<Portfolio | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [selling, setSelling] = useState<Holding | null>(null);
+  const [detailAssetId, setDetailAssetId] = useState<string | null>(null);
   const reload = useCallback(async () => {
     if (!token) return;
     try {
@@ -173,6 +175,9 @@ function InvestorPortfolio(): JSX.Element {
     }
   }, [token]);
   useEffect(() => { void reload(); }, [reload]);
+  if (detailAssetId) {
+    return <AssetDetail assetId={detailAssetId} useCases={useCases} chains={chains} onBack={() => setDetailAssetId(null)} onChanged={reload} />;
+  }
   if (error === "NO_WALLET") return <NoWallet />;
   if (error) return <p className="text-sm text-red-600">{error}</p>;
   if (!pf)
@@ -194,11 +199,16 @@ function InvestorPortfolio(): JSX.Element {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {pf.holdings.map((h) => (
-              <tr key={h.assetId}>
+              <tr key={h.assetId} className="hover:bg-slate-50 cursor-pointer" onClick={() => setDetailAssetId(h.assetId)}>
                 <td className="px-4 py-2.5 font-medium text-slate-800">{h.name} <span className="text-slate-400 font-normal">{h.symbol}</span></td>
                 <td className="px-4 py-2.5 text-right font-mono">{fmt(h.units)}</td>
                 <td className="px-4 py-2.5 text-right font-mono">{h.value ? `${fmt(h.value)} ${h.currency}` : "—"}</td>
-                <td className="px-4 py-2.5 text-right"><button onClick={() => setSelling(h)} className="text-xs text-brand-600 hover:text-brand-700 font-medium">Sell</button></td>
+                <td className="px-4 py-2.5 text-right">
+                  <div className="flex justify-end gap-3">
+                    <button onClick={(e) => { e.stopPropagation(); setSelling(h); }} className="text-xs text-brand-600 hover:text-brand-700 font-medium">Sell</button>
+                    <button onClick={(e) => { e.stopPropagation(); setDetailAssetId(h.assetId); }} className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-medium hover:border-brand-400">View</button>
+                  </div>
+                </td>
               </tr>
             ))}
             {pf.holdings.length === 0 && (

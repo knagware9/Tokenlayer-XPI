@@ -201,7 +201,7 @@ export function App(): JSX.Element {
       : activeId === "requests" ? <VerificationInbox />
       : activeId === "holder-dashboard" ? <HolderDashboard />
       : activeId === "profile" ? <MyProfile onSelect={setView} />
-      : <InvestorPortal useCases={useCases} tab={buyerTab} onTabChange={(t) => setView(t === "activity" ? "transactions" : t)} />;
+      : <InvestorPortal useCases={useCases} chains={chains} tab={buyerTab} onTabChange={(t) => setView(t === "activity" ? "transactions" : t)} />;
     return <AppShell items={items} active={activeId} onSelect={handleSelect}>{panel}</AppShell>;
   }
 
