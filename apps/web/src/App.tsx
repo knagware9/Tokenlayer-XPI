@@ -6,7 +6,7 @@ import { ApprovalsPanel } from "./components/shared/ApprovalsPanel.js";
 import { AppShell, type NavItem } from "./components/shared/AppShell.js";
 import { activePersona, landingView, narrowToPersona } from "./lib/shared/persona.js";
 import { PersonaHome } from "./components/shared/PersonaHome.js";
-import { AssetManagement } from "./components/tokenization/AssetManagement.js";
+import { AssetManagement, isInvoiceUseCase } from "./components/tokenization/AssetManagement.js";
 import { Dashboard } from "./components/tokenization/Dashboard.js";
 import { Developers } from "./components/shared/Developers.js";
 import { Home } from "./components/shared/Home.js";
@@ -317,7 +317,11 @@ export function App(): JSX.Element {
     ...(isPlatform ? [{ id: "back", label: "← All use cases", icon: "arrow" as const }] : []),
     { id: "dashboard", label: isOrgAdmin ? "Configure Use Case" : "Dashboard", icon: isOrgAdmin ? "code" : "spark" },
     { id: "assets", label: "Asset Ledger", icon: "coins" },
-    ...(showInvoices ? [{ id: "invoices", label: "Invoice Portal", icon: "doc" as const }] : []),
+    // The label follows the same isInvoiceUseCase split InvoiceRegister.tsx's own
+    // heading already makes: "Invoice Portal" only where the use case genuinely
+    // is invoices — every other use case (gold, bonds, generic assets, ...) gets
+    // the generic name for the same batch-upload/ERP-pull/selective-tokenize flow.
+    ...(showInvoices ? [{ id: "invoices", label: isInvoiceUseCase(activeUseCaseObj) ? "Invoice Portal" : "Batch Asset Upload", icon: "doc" as const }] : []),
     { id: "approvals", label: "Approvals", icon: "check" },
     ...(canManageUsers(user.role) ? [{ id: "users", label: "User Management", icon: "users" as const }] : []),
     ...(isPlatform || isOrgAdmin ? [{ id: "organizations", label: "Organizations", icon: "users" as const }] : []),
@@ -356,7 +360,7 @@ export function App(): JSX.Element {
       ? <InvoiceRegister useCase={activeUseCaseObj} chains={chains} />
       : (
         <div>
-          <SectionHeader title="Invoice Portal" description="Select a use case to view its staged asset register." />
+          <SectionHeader title="Batch Asset Upload" description="Select a use case to view its staged asset register." />
         </div>
       );
   } else if (activeId === "approvals") {
