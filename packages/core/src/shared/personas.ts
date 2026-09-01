@@ -275,7 +275,7 @@ export const PERSONAS: readonly PersonaDef[] = [
     description: "An issuer configures use cases, stages invoices and mints assets onto a ledger.",
     defaultView: "dashboard",
     surfaces: [
-      "dashboard", "use-cases", "create", "assets", "invoices", "credentials",
+      "dashboard", "use-cases", "create", "assets", "invoices", "activity", "credentials",
       "organizations", "developers", "users", "approvals", "audit", "profile", "logout", "back",
     ],
     allow: [

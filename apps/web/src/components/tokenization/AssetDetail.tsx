@@ -868,7 +868,7 @@ function OpForm({
  * when the chain exposes one; otherwise renders it as plain text. Simulated
  * chains have no explorer, so their refs/hashes stay non-clickable.
  */
-function ExplorerLink({
+export function ExplorerLink({
   chain,
   kind,
   value,
@@ -909,7 +909,7 @@ function Pill({ tone, children }: { tone: "red" | "green" | "gray"; children: Re
   );
 }
 
-function summarize(e: AuditEntry): string {
+export function summarize(e: AuditEntry): string {
   const p = e.payload;
   if (e.action === "issue") return `${String(p.name ?? "")} (${String(p.tokenStandard ?? p.useCaseKey ?? "")})`;
   if (e.action === "mint") return p.tokenId ? `#${String(p.tokenId)} → ${short(p.to)}` : `${String(p.amount)} → ${short(p.to)}`;
@@ -920,7 +920,7 @@ function summarize(e: AuditEntry): string {
   return "";
 }
 
-function short(v: unknown): string {
+export function short(v: unknown): string {
   const s = String(v ?? "");
   return s.length > 12 ? `${s.slice(0, 8)}…${s.slice(-4)}` : s;
 }

@@ -63,6 +63,23 @@ export interface VerificationCounts {
   verifiedInvalid: number;
 }
 
+/** One row per credential/verification lifecycle EVENT — as opposed to `board`,
+ *  which is one row per credential's CURRENT state. Desk roles have no route to
+ *  the org-wide `/events` webhook log (it is ORG-grained, not use-case-grained
+ *  — same reasoning as tokenization's Audit console being withheld from a
+ *  scoped desk); this is their use-case-scoped equivalent. */
+export interface RecentIdentityEvent {
+  at: string;
+  kind: "issued" | "revoked" | "verification-requested" | "verification-decided";
+  credentialId: string | null;
+  useCaseKey: string;
+  useCaseName: string;
+  type: string;
+  holderLabel: string;
+  summary: string;
+  txHash: string | null;
+}
+
 export interface IdentityDashboard {
   totals: StatusCounts;
   byUseCase: DashboardUseCase[];
@@ -70,6 +87,7 @@ export interface IdentityDashboard {
   boardTotal: number;
   activity: ActivityDayRow[];
   verification: VerificationCounts;
+  recent: RecentIdentityEvent[];
 }
 
 export interface IdentityDashboardInput {
@@ -179,5 +197,44 @@ export function computeIdentityDashboard(input: IdentityDashboardInput): Identit
     }
   }
 
-  return { totals, byUseCase, board, boardTotal: creds.length, activity, verification };
+  const RECENT_CAP = 100;
+  const recent: RecentIdentityEvent[] = [];
+  for (const c of creds) {
+    const useCaseName = nameByKey.get(c.credentialUseCaseKey!) ?? c.credentialUseCaseKey!;
+    const holderLabel = input.holderLabels.get(c.holderDid) ?? truncateDid(c.holderDid);
+    recent.push({
+      at: c.issuedAt, kind: "issued", credentialId: c.id, useCaseKey: c.credentialUseCaseKey!, useCaseName,
+      type: c.type, holderLabel, summary: `${c.type} issued to ${holderLabel}`, txHash: c.anchorTxHash,
+    });
+    if (c.revoked && c.revokedAt) {
+      recent.push({
+        at: c.revokedAt, kind: "revoked", credentialId: c.id, useCaseKey: c.credentialUseCaseKey!, useCaseName,
+        type: c.type, holderLabel, summary: c.revokedReason ? `${c.type} revoked — ${c.revokedReason}` : `${c.type} revoked`, txHash: c.revokeTxHash,
+      });
+    }
+  }
+  for (const v of vreqs) {
+    const useCaseName = nameByKey.get(v.credentialUseCaseKey!) ?? v.credentialUseCaseKey!;
+    const holderLabel = input.holderLabels.get(v.holderDid) ?? truncateDid(v.holderDid);
+    const types = v.requestedTypes.join(", ");
+    recent.push({
+      at: v.createdAt, kind: "verification-requested", credentialId: null, useCaseKey: v.credentialUseCaseKey!, useCaseName,
+      type: types, holderLabel, summary: `requested ${types} from ${holderLabel} — ${v.purpose}`, txHash: null,
+    });
+    const decidedAt = v.verifiedAt ?? (v.status !== "pending" ? v.consentedAt : null);
+    if (decidedAt) {
+      const outcome =
+        v.status === "rejected" ? "declined by holder"
+        : v.status === "expired" ? "expired"
+        : v.verifierResult ? (v.verifierResult.valid === true ? "verified — valid" : "verified — invalid")
+        : "consented, awaiting verifier";
+      recent.push({
+        at: decidedAt, kind: "verification-decided", credentialId: null, useCaseKey: v.credentialUseCaseKey!, useCaseName,
+        type: types, holderLabel, summary: `${types} from ${holderLabel} — ${outcome}`, txHash: null,
+      });
+    }
+  }
+  recent.sort((a, b) => b.at.localeCompare(a.at));
+
+  return { totals, byUseCase, board, boardTotal: creds.length, activity, verification, recent: recent.slice(0, RECENT_CAP) };
 }

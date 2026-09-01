@@ -35,6 +35,50 @@ function BackButton({ onClick }: { onClick: () => void }): JSX.Element {
 type Filter = "requests" | "credentials" | "consented";
 type Detail = { kind: "request"; id: string } | { kind: "credential"; id: string } | null;
 
+interface TimelineEvent {
+  at: string;
+  kind: "credential-issued" | "credential-revoked" | "verification-requested" | "verification-decided";
+  summary: string;
+  txHash?: string | null;
+}
+
+/**
+ * The single chronological "issued → verified → revoked" history the holder
+ * previously had to piece together across three separate panels (credential
+ * list, verification inbox, and each item's own detail page). Built purely
+ * client-side from data BOTH panels already fetch (GET /me/credentials, GET
+ * /me/verification-requests) — no new API surface. Deliberately shows the
+ * verification's STATUS only, never `verifierResult` — the holder-facing
+ * VerificationRequest type never carries it (see vreqView server-side), and
+ * this view must not become a second door to the verifier's private judgment.
+ */
+function buildTimeline(requests: VerificationRequest[], creds: HeldCredential[]): TimelineEvent[] {
+  const events: TimelineEvent[] = [];
+  for (const c of creds) {
+    const label = c.type.filter((t) => t !== "VerifiableCredential").join(", ") || c.type.join(", ");
+    const issuer = c.issuerName ?? c.issuerDid;
+    events.push({ at: c.issuedAt, kind: "credential-issued", summary: `${label} issued by ${issuer}`, txHash: c.anchorTxHash });
+    if (c.revoked && c.revokedAt) {
+      events.push({ at: c.revokedAt, kind: "credential-revoked", summary: c.revokedReason ? `${label} revoked — ${c.revokedReason}` : `${label} revoked`, txHash: c.revokeTxHash });
+    }
+  }
+  for (const r of requests) {
+    const types = r.requestedTypes.join(", ");
+    events.push({ at: r.createdAt, kind: "verification-requested", summary: `${types} requested — ${r.purpose}` });
+    const decidedAt = r.verifiedAt ?? (r.status !== "pending" ? r.consentedAt : null);
+    if (decidedAt) {
+      const outcome = r.status === "rejected" ? "declined" : r.status === "expired" ? "expired" : r.verifiedAt ? "verified" : "consented";
+      events.push({ at: decidedAt, kind: "verification-decided", summary: `${types} — ${outcome}` });
+    }
+  }
+  return events.sort((a, b) => b.at.localeCompare(a.at));
+}
+
+const TIMELINE_KIND_LABEL: Record<TimelineEvent["kind"], string> = {
+  "credential-issued": "Issued", "credential-revoked": "Revoked",
+  "verification-requested": "Verify requested", "verification-decided": "Verify decided",
+};
+
 /**
  * Holder-scoped overview. The three tiles are toggles: clicking one reveals a
  * table filtered to that category below (clicking again hides it). Each row's
@@ -61,6 +105,8 @@ export function HolderDashboard(): JSX.Element {
   const [disclosures, setDisclosures] = useState<Record<string, Record<string, Record<string, DisclosureChoice>>>>({});
   const [actionErr, setActionErr] = useState<string | null>(null);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
+  const [timelineQuery, setTimelineQuery] = useState("");
+  const [timelinePage, setTimelinePage] = useState(1);
 
   const reload = (): void => {
     if (!token) return;
@@ -76,6 +122,10 @@ export function HolderDashboard(): JSX.Element {
     const consented = rows.filter((r) => r.status === "consented").length;
     return { received: rows.length, consented };
   }, [requests]);
+  // Hooks must run unconditionally on every render — computed here, ABOVE the
+  // early `if (!requests || !creds) return …` guard below, even though the
+  // early-loading render never uses the result.
+  const timeline = useMemo(() => buildTimeline(requests ?? [], creds ?? []), [requests, creds]);
 
   function toggleFilter(f: Filter): void {
     setFilter((cur) => (cur === f ? null : f));
@@ -123,6 +173,10 @@ export function HolderDashboard(): JSX.Element {
     ? creds.filter((c) => c.type.some((t) => t.toLowerCase().includes(q)) || (c.issuerName ?? c.issuerDid).toLowerCase().includes(q))
     : creds;
   const pagedCreds = filteredCreds.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const tq = timelineQuery.trim().toLowerCase();
+  const filteredTimeline = tq ? timeline.filter((e) => e.summary.toLowerCase().includes(tq)) : timeline;
+  const pagedTimeline = filteredTimeline.slice((timelinePage - 1) * PAGE_SIZE, timelinePage * PAGE_SIZE);
 
   // ── Request detail page ─────────────────────────────────────────────────
   if (detail?.kind === "request") {
@@ -267,6 +321,42 @@ export function HolderDashboard(): JSX.Element {
         <Tile label="Requests received for credential share" value={counts.received} active={filter === "requests"} onClick={() => toggleFilter("requests")} />
         <Tile label="Credentials received" value={creds.length} tone="text-sky-600" active={filter === "credentials"} onClick={() => toggleFilter("credentials")} />
         <Tile label="Consent shared" value={counts.consented} tone="text-emerald-600" active={filter === "consented"} onClick={() => toggleFilter("consented")} />
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+        <div className="flex flex-wrap items-center gap-2 px-4 pt-3 pb-1">
+          <div className="mr-auto">
+            <div className="text-sm font-semibold text-slate-900">Recent activity</div>
+            <div className="text-xs text-slate-400">Every credential you've received or lost, and every share request you've answered — newest first.</div>
+          </div>
+          <input value={timelineQuery} onChange={(e) => { setTimelineQuery(e.target.value); setTimelinePage(1); }} placeholder="Search…"
+            className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs w-48 max-w-full" />
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-400">
+              <tr>
+                <th className="text-left px-4 py-2 font-semibold">Kind</th>
+                <th className="text-left px-4 py-2 font-semibold">Summary</th>
+                <th className="text-left px-4 py-2 font-semibold">When</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredTimeline.length === 0 && <tr><td colSpan={3} className="px-4 py-4 text-slate-400">Nothing here yet.</td></tr>}
+              {pagedTimeline.map((e, i) => (
+                <tr key={`${e.at}-${i}`} className="border-t border-slate-100">
+                  <td className="px-4 py-2 font-medium text-slate-700">{TIMELINE_KIND_LABEL[e.kind]}</td>
+                  <td className="px-4 py-2 text-slate-600">
+                    {e.summary}
+                    {e.txHash && <span className="ml-2 font-data text-[10px] text-slate-400">{e.txHash.slice(0, 14)}…</span>}
+                  </td>
+                  <td className="px-4 py-2 text-slate-400" title={new Date(e.at).toLocaleString()}>{new Date(e.at).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <Pager page={timelinePage} pageSize={PAGE_SIZE} total={filteredTimeline.length} onPage={setTimelinePage} />
       </div>
 
       {filter === "credentials" && (

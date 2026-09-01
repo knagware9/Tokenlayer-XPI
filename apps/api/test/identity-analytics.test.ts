@@ -155,5 +155,73 @@ describe("computeIdentityDashboard", () => {
     expect(d.activity).toHaveLength(30);
     expect(d.activity.every((a) => a.issued === 0)).toBe(true);
     expect(d.verification).toEqual({ pending: 0, consented: 0, rejected: 0, expired: 0, verifiedValid: 0, verifiedInvalid: 0 });
+    expect(d.recent).toEqual([]);
+  });
+});
+
+describe("computeIdentityDashboard.recent", () => {
+  it("a credential contributes one 'issued' event, newest first", () => {
+    const d = fold({ credentials: [
+      cred("c1", { issuedAt: "2026-08-01T00:00:00.000Z" }),
+      cred("c2", { issuedAt: "2026-08-03T00:00:00.000Z" }),
+    ] });
+    expect(d.recent.map((e) => e.kind)).toEqual(["issued", "issued"]);
+    expect(d.recent[0]!.credentialId).toBe("c2"); // newest first
+    expect(d.recent[0]!.at).toBe("2026-08-03T00:00:00.000Z");
+  });
+
+  it("a revoked credential ALSO contributes a 'revoked' event, carrying revokeTxHash and the reason", () => {
+    const d = fold({ credentials: [
+      cred("c1", { issuedAt: "2026-08-01T00:00:00.000Z", revoked: true, revokedAt: "2026-08-05T00:00:00.000Z", revokedReason: "compromised", revokeTxHash: "0xrevoke" }),
+    ] });
+    expect(d.recent).toHaveLength(2);
+    const revoked = d.recent.find((e) => e.kind === "revoked")!;
+    expect(revoked.at).toBe("2026-08-05T00:00:00.000Z");
+    expect(revoked.txHash).toBe("0xrevoke");
+    expect(revoked.summary).toContain("compromised");
+  });
+
+  it("a still-live credential contributes no 'revoked' event", () => {
+    const d = fold({ credentials: [cred("c1")] });
+    expect(d.recent.map((e) => e.kind)).toEqual(["issued"]);
+  });
+
+  it("an issued credential carries its anchorTxHash", () => {
+    const d = fold({ credentials: [cred("c1", { anchorTxHash: "0xanchor" })] });
+    expect(d.recent[0]!.txHash).toBe("0xanchor");
+  });
+
+  it("a verification request contributes 'verification-requested', and a decided one also contributes 'verification-decided'", () => {
+    const d = fold({ verifications: [
+      vreq("v1", { createdAt: "2026-08-01T00:00:00.000Z", status: "pending" }),
+      vreq("v2", { createdAt: "2026-08-02T00:00:00.000Z", status: "consented", consentedAt: "2026-08-03T00:00:00.000Z", verifierResult: { valid: true } }),
+    ] });
+    const kinds = d.recent.map((e) => e.kind).sort();
+    expect(kinds).toEqual(["verification-decided", "verification-requested", "verification-requested"]);
+    const decided = d.recent.find((e) => e.kind === "verification-decided")!;
+    expect(decided.at).toBe("2026-08-03T00:00:00.000Z");
+    expect(decided.summary).toContain("valid");
+  });
+
+  it("a pending verification request contributes no 'verification-decided' event", () => {
+    const d = fold({ verifications: [vreq("v1", { status: "pending" })] });
+    expect(d.recent.map((e) => e.kind)).toEqual(["verification-requested"]);
+  });
+
+  it("events outside the scoped use cases are excluded, same as totals", () => {
+    const d = fold({
+      credentials: [cred("c1"), cred("c2", { credentialUseCaseKey: "other" })],
+      verifications: [vreq("v1"), vreq("v2", { credentialUseCaseKey: "other" })],
+    });
+    expect(d.recent.every((e) => e.useCaseKey === "uc-a")).toBe(true);
+    expect(d.recent).toHaveLength(2); // c1 issued + v1 requested
+  });
+
+  it("caps at 100 events, keeping the newest", () => {
+    const many = Array.from({ length: 60 }, (_, i) =>
+      cred(`c${i}`, { issuedAt: `2026-08-01T00:${String(i).padStart(2, "0")}:00.000Z`, revoked: true, revokedAt: `2026-08-02T00:${String(i).padStart(2, "0")}:00.000Z` }));
+    const d = fold({ credentials: many }); // 60 credentials × 2 events (issued + revoked) = 120
+    expect(d.recent).toHaveLength(100);
+    expect(d.recent[0]!.at >= d.recent[d.recent.length - 1]!.at).toBe(true); // newest-first order held
   });
 });

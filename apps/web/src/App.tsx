@@ -8,6 +8,7 @@ import { activePersona, landingView, narrowToPersona } from "./lib/shared/person
 import { PersonaHome } from "./components/shared/PersonaHome.js";
 import { AssetManagement, isInvoiceUseCase } from "./components/tokenization/AssetManagement.js";
 import { Dashboard } from "./components/tokenization/Dashboard.js";
+import { DeskActivity } from "./components/tokenization/DeskActivity.js";
 import { Developers } from "./components/shared/Developers.js";
 import { Home } from "./components/shared/Home.js";
 import { IdentityDashboard } from "./components/identity/IdentityDashboard.js";
@@ -322,6 +323,11 @@ export function App(): JSX.Element {
     // is invoices — every other use case (gold, bonds, generic assets, ...) gets
     // the generic name for the same batch-upload/ERP-pull/selective-tokenize flow.
     ...(showInvoices ? [{ id: "invoices", label: isInvoiceUseCase(activeUseCaseObj) ? "Invoice Portal" : "Batch Asset Upload", icon: "doc" as const }] : []),
+    // The use-case-scoped equivalent of Audit for the desk roles Audit is
+    // withheld from (see the comment on that item below) — every mint,
+    // transfer, buy, allow, freeze and burn across THIS use case's own
+    // assets, not the org-wide event stream they have no route to open.
+    ...(!isPlatform && !isOrgAdmin ? [{ id: "activity", label: "Activity", icon: "shield" as const }] : []),
     { id: "approvals", label: "Approvals", icon: "check" },
     ...(canManageUsers(user.role) ? [{ id: "users", label: "User Management", icon: "users" as const }] : []),
     ...(isPlatform || isOrgAdmin ? [{ id: "organizations", label: "Organizations", icon: "users" as const }] : []),
@@ -363,6 +369,10 @@ export function App(): JSX.Element {
           <SectionHeader title="Batch Asset Upload" description="Select a use case to view its staged asset register." />
         </div>
       );
+  } else if (activeId === "activity") {
+    panel = activeUseCase
+      ? <DeskActivity useCaseKey={activeUseCase} useCases={useCases} chains={chains} />
+      : <SectionHeader title="Activity" description="Select a use case to view its activity." />;
   } else if (activeId === "approvals") {
     panel = <ApprovalsPanel />;
   } else if (activeId === "users") {

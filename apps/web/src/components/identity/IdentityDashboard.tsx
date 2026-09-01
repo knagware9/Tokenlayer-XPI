@@ -92,6 +92,8 @@ export function IdentityDashboard(): JSX.Element {
   const [proposalFilter, setProposalFilter] = useState<"all" | "executed" | "failed" | null>(null);
   const [proposalDetailId, setProposalDetailId] = useState<string | null>(null);
   const [proposalPage, setProposalPage] = useState(1);
+  const [activityQuery, setActivityQuery] = useState("");
+  const [activityPage, setActivityPage] = useState(1);
 
   useEffect(() => {
     if (!token) return;
@@ -132,6 +134,16 @@ export function IdentityDashboard(): JSX.Element {
     return all;
   }, [proposals, proposalFilter]);
   const pagedIssuanceRows = issuanceRows.slice((proposalPage - 1) * PAGE_SIZE, proposalPage * PAGE_SIZE);
+
+  const activityRows = useMemo(() => {
+    if (!data) return [];
+    const q = activityQuery.trim().toLowerCase();
+    return !q ? data.recent : data.recent.filter((e) => `${e.kind} ${e.type} ${e.holderLabel} ${e.summary}`.toLowerCase().includes(q));
+  }, [data, activityQuery]);
+  const pagedActivityRows = activityRows.slice((activityPage - 1) * PAGE_SIZE, activityPage * PAGE_SIZE);
+  const ACTIVITY_KIND_LABEL: Record<string, string> = {
+    issued: "Issued", revoked: "Revoked", "verification-requested": "Verify requested", "verification-decided": "Verify decided",
+  };
 
   function toggleStatusFilter(s: DerivedCredentialStatus | "all"): void {
     setStatusFilter((cur) => (cur === s ? "all" : s));
@@ -287,6 +299,44 @@ export function IdentityDashboard(): JSX.Element {
             ))}
           </div>
         </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-3 animate-slide-up stagger-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="font-bold text-slate-900 text-sm mr-auto font-display">Recent activity</h2>
+          <p className="text-xs text-slate-500 w-full -mt-1 mb-1">Every credential issued or revoked, and every verification requested or decided, across your identity use cases — newest first.</p>
+          <input value={activityQuery} onChange={(e) => { setActivityQuery(e.target.value); setActivityPage(1); }} placeholder="Search holder, type…"
+            className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs" />
+        </div>
+        <div className="overflow-x-auto rounded-lg border border-slate-200">
+          <table className="w-full text-xs">
+            <thead className="text-[10px] text-slate-400 bg-slate-50/80 uppercase tracking-widest">
+              <tr>
+                <th className="text-left font-semibold px-3 py-2.5">Kind</th>
+                <th className="text-left font-semibold px-3 py-2.5">Summary</th>
+                <th className="text-left font-semibold px-3 py-2.5">Use case</th>
+                <th className="text-left font-semibold px-3 py-2.5">When</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pagedActivityRows.map((e, i) => (
+                <tr key={`${e.at}-${i}`} className="border-t border-slate-100 hover:bg-slate-50/70 transition-colors">
+                  <td className="px-3 py-2 text-slate-700 font-medium text-xs">{ACTIVITY_KIND_LABEL[e.kind]}</td>
+                  <td className="px-3 py-2 text-slate-700 text-xs">
+                    {e.summary}
+                    {e.txHash && <span className="ml-2 font-data text-[10px] text-slate-400">{e.txHash.slice(0, 14)}…</span>}
+                  </td>
+                  <td className="px-3 py-2 text-slate-400 text-xs">{e.useCaseName}</td>
+                  <td className="px-3 py-2 text-slate-400 text-xs font-data" title={new Date(e.at).toLocaleString()}>{new Date(e.at).toLocaleString()}</td>
+                </tr>
+              ))}
+              {activityRows.length === 0 && (
+                <tr><td colSpan={4} className="px-3 py-6 text-center text-slate-400 text-xs">No activity yet.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <Pager page={activityPage} pageSize={PAGE_SIZE} total={activityRows.length} onPage={setActivityPage} />
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-3 animate-slide-up stagger-4">

@@ -879,6 +879,18 @@ export interface IdentityBoardRow {
   acceptanceNote: string | null;
 }
 
+export interface RecentIdentityEvent {
+  at: string;
+  kind: "issued" | "revoked" | "verification-requested" | "verification-decided";
+  credentialId: string | null;
+  useCaseKey: string;
+  useCaseName: string;
+  type: string;
+  holderLabel: string;
+  summary: string;
+  txHash: string | null;
+}
+
 export interface IdentityDashboardData {
   totals: IdentityStatusCounts;
   byUseCase: { key: string; name: string; counts: IdentityStatusCounts; byType: { type: string; counts: IdentityStatusCounts }[] }[];
@@ -886,4 +898,5 @@ export interface IdentityDashboardData {
   boardTotal: number;
   activity: { date: string; issued: number }[];
   verification: { pending: number; consented: number; rejected: number; expired: number; verifiedValid: number; verifiedInvalid: number };
+  recent: RecentIdentityEvent[];
 }

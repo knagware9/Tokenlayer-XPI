@@ -51,7 +51,7 @@ export const PERSONAS: WebPersona[] = [
     key: "tokenization-issuer", shell: "console", domain: "tokenization", label: "Issuer Desk",
     description: "An issuer configures use cases, stages invoices and mints assets onto a ledger.",
     defaultView: "dashboard",
-    surfaces: ["dashboard", "use-cases", "create", "assets", "invoices", "credentials",
+    surfaces: ["dashboard", "use-cases", "create", "assets", "invoices", "activity", "credentials",
       "organizations", "developers", "users", "approvals", "audit", "profile", "logout", "back"],
   },
   {
