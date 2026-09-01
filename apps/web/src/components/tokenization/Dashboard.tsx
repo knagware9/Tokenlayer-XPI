@@ -143,6 +143,8 @@ export function Dashboard({ useCaseKey, useCases, chains }: { useCaseKey?: strin
                 <tr>
                   <th className="text-left font-semibold px-3 py-2">Asset</th>
                   <th className="text-right font-semibold px-3 py-2">Balance</th>
+                  <th className="text-right font-semibold px-3 py-2">Price</th>
+                  <th className="text-right font-semibold px-3 py-2">Value</th>
                   <th className="text-left font-semibold px-3 py-2">Chain</th>
                   <th className="text-left font-semibold px-3 py-2">State</th>
                   <th className="px-3 py-2"></th>
@@ -152,6 +154,11 @@ export function Dashboard({ useCaseKey, useCases, chains }: { useCaseKey?: strin
                 {h.holdings.map((hold) => {
                   const asset = (assets ?? []).find((a) => a.id === hold.assetId);
                   const chain = chains.find((c) => c.id === asset?.chainId);
+                  // Not listed for sale ⇒ no price, so no value either — same
+                  // "—" the Assets table already shows for an unpriced asset,
+                  // never a fabricated 0.
+                  const priced = asset?.unitPrice && asset.currency;
+                  const value = priced ? Number(hold.balance) * Number(asset.unitPrice) : null;
                   return (
                     <tr key={hold.assetId} className="border-t border-slate-100">
                       <td className="px-3 py-2">
@@ -159,6 +166,8 @@ export function Dashboard({ useCaseKey, useCases, chains }: { useCaseKey?: strin
                         <div className="text-slate-400">{hold.assetSymbol}</div>
                       </td>
                       <td className="px-3 py-2 text-right font-data tabular-nums text-slate-700">{fmtInt(hold.balance)}</td>
+                      <td className="px-3 py-2 text-right text-slate-600">{priced ? `${asset.unitPrice} ${asset.currency}` : "—"}</td>
+                      <td className="px-3 py-2 text-right font-data tabular-nums text-slate-700">{value !== null && Number.isFinite(value) ? `${value.toLocaleString()} ${asset!.currency}` : "—"}</td>
                       <td className="px-3 py-2 text-slate-600">{chain?.label ?? asset?.chainId ?? "—"}</td>
                       <td className="px-3 py-2">
                         {hold.frozen && <Pill tone="danger">frozen</Pill>}
