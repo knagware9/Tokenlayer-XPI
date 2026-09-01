@@ -138,4 +138,71 @@ describe("per-asset supply/balance isolation on a shared simulated contract", ()
     // HOLDER never touched asset B — must not show up with a phantom balance.
     expect(accountsB.find((r) => r.address.toLowerCase() === HOLDER.toLowerCase())?.balance ?? "0").toBe("0");
   });
+
+  it("POST /assets/:id/buy: a sibling asset's unsold treasury can't mask this asset's own exhausted supply", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "m1.admin@tokenlayer.dev", "m1admin123");
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    await onboardUser(app, admin, platform, { email: "buy-isolation.buyer@x.dev", password: "secret1", role: "Buyer", walletAddress: HOLDER, kyc: { legalName: "Buy Isolation Buyer", country: "IN" } });
+
+    const sale = { unitPrice: "1", currency: "CBDC-INR" };
+    // Asset A: large, mostly-unsold supply sitting in the SAME treasury address.
+    const assetA = await issue(app, admin, "INV-BUY-A", 500000, "100000", sale);
+    // Asset B: tiny supply — this is the one we'll fully exhaust.
+    const assetB = await issue(app, admin, "INV-BUY-B", 200000, "10", sale);
+
+    await app.inject({ method: "POST", url: `${V1}/assets/${assetB}/actions/allow`, headers: auth(admin), payload: { account: HOLDER } });
+    await app.inject({ method: "POST", url: `${V1}/cash/credit`, headers: auth(platform), payload: { account: HOLDER, currency: "CBDC-INR", amount: "1000" } });
+    const buyerToken = await loginAs(app, "buy-isolation.buyer@x.dev", "secret1");
+
+    // Buy asset B's ENTIRE supply — its own treasury is now exhausted.
+    const buyAll = await app.inject({ method: "POST", url: `${V1}/assets/${assetB}/buy`, headers: auth(buyerToken), payload: { quantity: "10" } });
+    expect(buyAll.statusCode).toBe(200);
+
+    // One more unit of asset B must be refused — asset A's own 100000 unsold
+    // units (same treasury address) must not be able to fill it.
+    const buyOneMore = await app.inject({ method: "POST", url: `${V1}/assets/${assetB}/buy`, headers: auth(buyerToken), payload: { quantity: "1" } });
+    expect(buyOneMore.statusCode).toBe(400);
+    expect(buyOneMore.json().error).toBe("INSUFFICIENT_TREASURY");
+
+    // Asset A itself was never touched by any of this.
+    const list = await app.inject({ method: "GET", url: `${V1}/assets?useCaseKey=${UC}&limit=100`, headers: auth(admin) });
+    const rowA = (list.json().data as { id: string; availableSupply: string }[]).find((r) => r.id === assetA);
+    expect(rowA?.availableSupply).toBe("100000");
+  });
+
+  it("POST /assets/:id/listings: holding a sibling asset can't satisfy this asset's own balance check", async () => {
+    const app = await buildTestApp();
+    const admin = await loginAs(app, "m1.admin@tokenlayer.dev", "m1admin123");
+    const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    await onboardUser(app, admin, platform, { email: "list-isolation.holder@x.dev", password: "secret1", role: "Buyer", walletAddress: HOLDER, kyc: { legalName: "List Isolation Holder", country: "IN" } });
+
+    const assetA = await issue(app, admin, "INV-LISTCHECK-A", 500000, "10000");
+    const assetB = await issue(app, admin, "INV-LISTCHECK-B", 200000, "10000");
+
+    // HOLDER receives units of asset A ONLY — never touches asset B.
+    const treasury = await treasuryAddressOf(app, platform, UC);
+    await app.inject({ method: "POST", url: `${V1}/assets/${assetA}/actions/allow`, headers: auth(admin), payload: { account: HOLDER } });
+    await app.inject({
+      method: "POST", url: `${V1}/assets/${assetA}/actions/transfer`, headers: auth(admin),
+      payload: { from: treasury, to: HOLDER, amount: "5000" },
+    });
+
+    const holderToken = await loginAs(app, "list-isolation.holder@x.dev", "secret1");
+    // Listing asset A's own tokens still works.
+    const listA = await app.inject({
+      method: "POST", url: `${V1}/assets/${assetA}/listings`, headers: auth(holderToken),
+      payload: { quantity: "1000", unitPrice: "10", currency: "CBDC-INR" },
+    });
+    expect(listA.statusCode).toBe(201);
+
+    // Listing asset B — which HOLDER never holds a single unit of — must be
+    // refused, not silently filled from asset A's balance on the shared contract.
+    const listB = await app.inject({
+      method: "POST", url: `${V1}/assets/${assetB}/listings`, headers: auth(holderToken),
+      payload: { quantity: "1000", unitPrice: "10", currency: "CBDC-INR" },
+    });
+    expect(listB.statusCode).toBe(400);
+    expect(listB.json().error).toBe("INSUFFICIENT_BALANCE");
+  });
 });

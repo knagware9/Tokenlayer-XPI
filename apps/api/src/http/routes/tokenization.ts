@@ -949,7 +949,6 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
     if (!isPositiveIntString(quantity)) return reply.code(400).send({ error: "INVALID_QUANTITY", message: "quantity must be a positive integer" });
     const cost = (BigInt(unitPrice) * BigInt(quantity)).toString();
     const ctx = contextOf(asset);
-    const adapter = deps.chains.resolveAdapter(asset.chainId);
 
     // Marketplace fee: a slice of the payment goes to the platform fee account,
     // the remainder to the treasury. Disabled (fee = 0) unless the use case sets
@@ -964,7 +963,13 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
     if (BigInt(await deps.cash.balanceOf(currency, wallet)) < BigInt(cost)) {
       return reply.code(400).send({ error: "INSUFFICIENT_FUNDS", message: `you need ${cost} ${currency}` });
     }
-    if (BigInt(await adapter.balanceOf(ctx.ref, treasuryAccount).catch(() => "0")) < BigInt(quantity)) {
+    // THIS asset's own remaining treasury balance, folded from its own audit
+    // stream — not a live chain read. A sibling asset sharing the same
+    // treasury address on the same simulated (or real, one-contract-per-use-
+    // case) chain would otherwise mask an exhausted treasury with its own
+    // unsold balance, or block a sale this asset's treasury could fulfil.
+    const treasuryState = await assetStateOf(deps, asset.id).catch(() => null);
+    if (!treasuryState || balanceOfAddress(treasuryState.balances, treasuryAccount) < BigInt(quantity)) {
       return reply.code(400).send({ error: "INSUFFICIENT_TREASURY", message: "the treasury does not hold enough tokens" });
     }
 
@@ -1091,8 +1096,14 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
 
     const ctx = contextOf(asset);
     // Clean pre-check: the engine would reject the escrow transfer anyway, but a
-    // typed INSUFFICIENT_BALANCE beats an opaque ledger revert.
-    if (BigInt(await deps.engine.balanceOf(actor, ctx, seller).catch(() => "0")) < BigInt(quantity)) {
+    // typed INSUFFICIENT_BALANCE beats an opaque ledger revert. THIS asset's own
+    // LITERAL balance (not a live chain read, and not the economic-ownership
+    // fold — a prior open listing already escrowed out of it): a sibling asset
+    // sharing the same contract would otherwise let a seller list tokens they
+    // hold of a DIFFERENT asset, or block a listing the raw transfer could
+    // actually fulfil.
+    const rawBalances = await assetRawBalancesOf(deps, asset.id).catch(() => new Map<string, bigint>());
+    if (balanceOfAddress(rawBalances, seller) < BigInt(quantity)) {
       return reply.code(400).send({ error: "INSUFFICIENT_BALANCE", message: `you hold fewer than ${quantity} tokens of this asset` });
     }
 
