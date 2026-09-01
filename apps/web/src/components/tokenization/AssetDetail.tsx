@@ -20,6 +20,7 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
   const [accounts, setAccounts] = useState<AccountState[]>([]);
   const [tokens, setTokens] = useState<TokenInfo[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
+  const [auditDetail, setAuditDetail] = useState<AuditEntry | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -457,6 +458,12 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
                 )}
               </span>
               <span className="text-[11px] text-slate-400">{new Date(e.createdAt).toLocaleTimeString()}</span>
+              <button
+                className="shrink-0 rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] text-slate-600 hover:border-brand-500"
+                onClick={() => setAuditDetail(e)}
+              >
+                View
+              </button>
             </li>
           ))}
           {/* Stays a one-liner. `EmptyState` is a PANEL primitive — a 48px icon
@@ -492,6 +499,8 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
           {fundSuccess && <p className="text-sm text-emerald-600">{fundSuccess}</p>}
         </div>
       )}
+
+      {auditDetail && <AuditEntryModal entry={auditDetail} chain={chain} onClose={() => setAuditDetail(null)} />}
     </div>
   );
 }
@@ -886,6 +895,63 @@ export function ExplorerLink({
     <a href={href} target="_blank" rel="noreferrer" className="text-brand-600 hover:underline" title={`View on ${chain.label} explorer`}>
       {children}
     </a>
+  );
+}
+
+/** Full detail for one audit-trail entry: every payload field, untruncated. */
+function AuditEntryModal({ entry, chain, onClose }: { entry: AuditEntry; chain?: ChainInfo; onClose: () => void }): JSX.Element {
+  const fields = Object.entries(entry.payload).filter(([, v]) => v !== null && v !== undefined);
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4 z-50" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-lg space-y-4 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between">
+          <div>
+            <span className="text-[11px] font-semibold text-brand-600 uppercase tracking-wide">{entry.action}</span>
+            <h3 className="text-sm font-semibold text-slate-900 mt-0.5">{new Date(entry.createdAt).toLocaleString()}</h3>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 text-sm">✕</button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 text-xs">
+          <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2">
+            <div className="text-slate-400 uppercase tracking-wide text-[10px]">Chain</div>
+            <div className="text-slate-700 font-medium"><ChainPill chain={chain} /></div>
+          </div>
+          <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2">
+            <div className="text-slate-400 uppercase tracking-wide text-[10px]">Actor</div>
+            <div className="text-slate-700 font-medium font-mono truncate" title={entry.actorId}>{entry.actorId}</div>
+          </div>
+          {entry.txHash && (
+            <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 col-span-2">
+              <div className="text-slate-400 uppercase tracking-wide text-[10px]">Transaction</div>
+              <div className="text-slate-700 font-medium font-mono break-all">
+                <ExplorerLink chain={chain} kind="tx" value={entry.txHash}>{entry.txHash}</ExplorerLink>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {fields.length > 0 && (
+          <div>
+            <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-2">Details</div>
+            <dl className="divide-y divide-slate-100 rounded-lg border border-slate-200 overflow-hidden">
+              {fields.map(([k, v]) => (
+                <div key={k} className="flex justify-between gap-4 px-3 py-2 text-xs">
+                  <dt className="text-slate-500 shrink-0">{k}</dt>
+                  <dd className="text-slate-800 font-mono text-right break-all">
+                    {typeof v === "object" ? JSON.stringify(v) : String(v)}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        )}
+
+        <div className="flex justify-end">
+          <button onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-1.5 text-sm text-slate-600 hover:border-slate-400">Close</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
