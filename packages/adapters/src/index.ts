@@ -5,6 +5,7 @@ export {
   CantonLedgerAdapter,
 } from "./simulated-adapter.js";
 export { SimulatedLedger } from "./simulated-ledger.js";
+export type { LedgerHydration } from "./simulated-ledger.js";
 export { EvmLedgerAdapter } from "./evm-adapter.js";
 export type { EvmAdapterConfig, GasMode } from "./evm-adapter.js";
 export * from "./credential-anchor.js";

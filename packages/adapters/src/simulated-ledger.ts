@@ -15,6 +15,12 @@ interface AssetState {
 }
 
 /**
+ * A contract's full state, as reconstructed from its durable audit trail
+ * rather than produced by a live operation. See `SimulatedLedger.hydrate`.
+ */
+export type LedgerHydration = AssetState;
+
+/**
  * An in-memory ledger that mirrors the on-chain compliance contracts' rules for
  * both fungible and non-fungible tokens (allowlist + freeze enforcement). It is
  * the shared engine behind the mock, Fabric, and Canton adapters, so those DLTs
@@ -40,6 +46,29 @@ export class SimulatedLedger {
     const a = this.assets.get(ref);
     if (!a) throw new Error(`simulated: unknown asset '${ref}'`);
     return a;
+  }
+
+  /**
+   * Replace this contract's ENTIRE state with reconstructed historical data,
+   * bypassing every mutation-time invariant (allowlist, sufficient balance,
+   * frozen). The caller is installing state already known to be true from a
+   * durable audit trail — e.g. after a process restart wiped this in-memory
+   * ledger — not simulating a fresh operation subject to those rules.
+   * Creates the contract if it does not exist yet, overwrites it otherwise.
+   * Copies every collection so the caller's own working copy is never aliased
+   * into ledger state a later mutation could then reach back and corrupt.
+   */
+  hydrate(contractRef: string, state: LedgerHydration): void {
+    this.assets.set(contractRef, {
+      tokenType: state.tokenType,
+      allowlistEnabled: state.allowlistEnabled,
+      balances: new Map(state.balances),
+      supply: state.supply,
+      owners: new Map(state.owners),
+      uris: new Map(state.uris),
+      frozen: new Set(state.frozen),
+      allowed: new Set(state.allowed),
+    });
   }
 
   // --- fungible ------------------------------------------------------------

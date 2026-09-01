@@ -6,7 +6,9 @@ import type {
   LedgerAdapter,
   TxReceipt,
 } from "@tokenlayer/core";
-import { SimulatedLedger } from "./simulated-ledger.js";
+import { SimulatedLedger, type LedgerHydration } from "./simulated-ledger.js";
+
+export type { LedgerHydration } from "./simulated-ledger.js";
 
 /**
  * Base adapter for any simulated DLT. Owns a SimulatedLedger and synthesises
@@ -87,6 +89,12 @@ export abstract class SimulatedAdapter implements LedgerAdapter {
   }
   async isAllowed(ref: AssetRef, account: string): Promise<boolean> {
     return this.ledger.isAllowed(ref.contractRef, account);
+  }
+
+  /** See SimulatedLedger.hydrate — reconstructs this contract's state from a
+   *  durable audit trail rather than a live operation (used at boot). */
+  hydrate(ref: AssetRef, state: LedgerHydration): void {
+    this.ledger.hydrate(ref.contractRef, state);
   }
 
   /** Record an off-ledger hash as a synthesised on-ledger anchor transaction. */

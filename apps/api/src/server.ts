@@ -40,6 +40,7 @@ import { resolveIdentityRegistry } from "./identity/registry.js";
 import { seedDefaults } from "./shared/seed.js";
 import { seedUseCases } from "./tokenization/use-cases.js";
 import { backfillTreasuries } from "./shared/treasury-backfill.js";
+import { rehydrateSimulatedLedgers } from "./tokenization/ledger-replay.js";
 import { provisionTreasury } from "./shared/wallets.js";
 import { createHttpSender, startDispatcher } from "./webhooks/dispatcher.js";
 import { createSecretBox } from "./webhooks/secret-box.js";
@@ -203,6 +204,15 @@ async function main(): Promise<void> {
       console.log(
         `[treasury] boot backfill: ${backfilled.ownersAssigned} use case(s) assigned an owner, ${backfilled.treasuriesAssigned} assigned a treasury`,
       );
+    }
+    // seedUseCases just re-deployed every simulated-chain contract, which wipes
+    // its in-memory balances/supply/allowlist back to empty — replay the audit
+    // trail on top so a restart is invisible to totalSupply, balanceOf, and
+    // allow/freeze reads (the Buyer's own portfolio already survives a restart
+    // because it reads the same audit log instead of live ledger state).
+    const rehydrated = await rehydrateSimulatedLedgers(deps);
+    if (rehydrated.contracts > 0) {
+      console.log(`[ledger-replay] rehydrated ${rehydrated.contracts} simulated contract(s) from ${rehydrated.entries} audit entries`);
     }
   }
   // Demo operators get a real identity so their profile/credentials pages are
