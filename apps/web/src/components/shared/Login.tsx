@@ -92,7 +92,7 @@ export function Login(): JSX.Element {
   }
 
   // Single-device passwordless: start a session and sign+authenticate it locally.
-  async function useThisDevice(): Promise<void> {
+  async function signInWithThisDevice(): Promise<void> {
     stopPolling();
     setQrError(null);
     setQrSvg(null);
@@ -231,7 +231,7 @@ export function Login(): JSX.Element {
                   {hasKey && (
                     <button
                       type="button"
-                      onClick={() => void useThisDevice()}
+                      onClick={() => void signInWithThisDevice()}
                       disabled={qrBusy}
                       className="flex-1 rounded-lg border border-slate-300 text-slate-700 py-2.5 text-sm font-medium hover:bg-slate-50 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-colors"
                     >

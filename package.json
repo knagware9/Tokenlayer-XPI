@@ -8,6 +8,7 @@
     "build": "pnpm -r --filter \"./packages/*\" --filter \"./apps/*\" run build",
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",
+    "lint": "eslint apps packages",
     "api:dev": "pnpm --filter @tokenlayer/api dev",
     "web:dev": "pnpm --filter @tokenlayer/web dev",
     "chain:node": "pnpm --filter @tokenlayer/contracts node",
@@ -16,8 +17,12 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "eslint": "10.9.1",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.11.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
+    "typescript-eslint": "8.69.0",
     "vitest": "^2.1.8"
   },
   "engines": {
