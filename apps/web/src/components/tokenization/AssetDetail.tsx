@@ -82,21 +82,25 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
     void api.currencies(token).then(setAvailCurrencies).catch(() => {});
   }, [token]);
 
+  const useCase = asset ? useCases.find((u) => u.key === asset.useCaseKey) : undefined;
+  const role = user?.role ?? "Auditor";
+  const chain = asset ? chains.find((c) => c.id === asset.chainId) : undefined;
+
   // Resolve the use case's treasury Account id to its wallet address. `accounts`
   // (per-asset holders) already carries balance/allowed/frozen for it once it
   // has any activity; this fills in the address even before that — an Issuer
   // needs the address to fund/allow a brand-new treasury, not just after.
+  // Gated to the staff roles that can see the Fund CBDC panel below (`canSeeTreasury`):
+  // self-service personas (e.g. Buyer on tokenization-marketplace) have no grant
+  // for the plain /accounts route, so an ungated fetch always failed CORS-shaped.
+  const canSeeTreasury = (["Issuer", "UseCaseAdmin", "PlatformAdmin"] as string[]).includes(role);
   const treasuryAccountId = asset ? useCases.find((u) => u.key === asset.useCaseKey)?.treasuryAccountId : undefined;
   useEffect(() => {
-    if (!token || !treasuryAccountId) { setTreasuryAddress(null); return; }
+    if (!token || !treasuryAccountId || !canSeeTreasury) { setTreasuryAddress(null); return; }
     void api.accounts(token)
       .then((all) => setTreasuryAddress(all.find((a) => a.id === treasuryAccountId)?.address ?? null))
       .catch(() => setTreasuryAddress(null));
-  }, [token, treasuryAccountId]);
-
-  const useCase = asset ? useCases.find((u) => u.key === asset.useCaseKey) : undefined;
-  const role = user?.role ?? "Auditor";
-  const chain = asset ? chains.find((c) => c.id === asset.chainId) : undefined;
+  }, [token, treasuryAccountId, canSeeTreasury]);
 
   // Prefill the List-for-sale form: the asset's current price if it already has
   // one, else the use case's default sale terms.
@@ -186,7 +190,6 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
   const canAllow = useCase.compliance.allowlist && can(role, "allow");
   const canFreeze = useCase.lifecycle.freeze && can(role, "freeze");
   const safeQty = /^\d+$/.test(buyQty) ? buyQty : null;
-  const canSeeTreasury = (["Issuer", "UseCaseAdmin", "PlatformAdmin"] as string[]).includes(role);
   const treasuryAcc = treasuryAddress ? accounts.find((a) => a.address === treasuryAddress) : undefined;
 
   return (
