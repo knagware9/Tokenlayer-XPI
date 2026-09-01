@@ -554,14 +554,21 @@ function TokenizeForm({ count, isInvoiceUC, chainIds, chainLabel, defaultChainId
   onClose: () => void;
   onSubmit: (body: { chainId: string; parValue?: number; initialSupply?: string; sale?: { unitPrice: string; currency: string } }) => Promise<void>;
 }): JSX.Element {
+  const { token } = useAuth();
   const [chainId, setChainId] = useState(chainIds.includes(defaultChainId) ? defaultChainId : chainIds[0] ?? "");
   const [parValue, setParValue] = useState("1000");
   const [initialSupply, setInitialSupply] = useState("1");
   const [listForSale, setListForSale] = useState(false);
   const [unitPrice, setUnitPrice] = useState(saleDefault?.unitPrice ?? "");
   const [currency, setCurrency] = useState(saleDefault?.currency ?? "");
+  const [availCurrencies, setAvailCurrencies] = useState<{ code: string; label: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const noun = isInvoiceUC ? "invoice" : "row";
+
+  useEffect(() => {
+    if (!token) return;
+    void api.currencies(token).then(setAvailCurrencies).catch(() => {});
+  }, [token]);
 
   async function submit(e: React.FormEvent): Promise<void> {
     e.preventDefault();
@@ -615,7 +622,10 @@ function TokenizeForm({ count, isInvoiceUC, chainIds, chainLabel, defaultChainId
             </label>
             <label className="block">
               <span className="block text-xs font-medium text-slate-600 mb-1">Currency</span>
-              <input className="input" value={currency} onChange={(e) => setCurrency(e.target.value)} disabled={busy} />
+              <select className="select" value={currency} onChange={(e) => setCurrency(e.target.value)} disabled={busy}>
+                <option value="">Currency…</option>
+                {availCurrencies.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}
+              </select>
             </label>
           </div>
         )}

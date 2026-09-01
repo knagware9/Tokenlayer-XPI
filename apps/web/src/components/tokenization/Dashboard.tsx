@@ -2,11 +2,16 @@ import { useEffect, useState } from "react";
 import { api } from "../../api.js";
 import { useAuth } from "../../auth.js";
 import { useRoute } from "../../router.js";
-import type { AnalyticsSummary } from "../../types.js";
+import type { AnalyticsSummary, Asset, ChainInfo, UseCase } from "../../types.js";
 import { AreaChart } from "../charts/AreaChart.js";
 import { BarChart } from "../charts/BarChart.js";
 import { Donut, type DonutSlice } from "../charts/Donut.js";
-import { Card, EmptyState, Skeleton, StatCard, type IconName } from "../shared/ui.js";
+import { Card, EmptyState, Pager, Pill, Skeleton, StatCard, type IconName } from "../shared/ui.js";
+import { AssetDetail } from "./AssetDetail.js";
+import { availability } from "./AssetList.js";
+
+const ASSET_PAGE_SIZE = 8;
+type AvailFilter = "all" | "available" | "sold-out" | "not-listed";
 
 /** A small fixed palette so a given ledger keeps the same colour across charts. */
 const LEDGER_COLORS: Record<string, string> = { besu: "#10b981", mst: "#6366f1", fabric: "#f59e0b", canton: "#8b5cf6" };
@@ -27,11 +32,17 @@ function fmtMoney(byCurrency: Record<string, string>): string {
   return parts.map(([cur, amt]) => `${fmtInt(amt)} ${cur}`).join(" · ");
 }
 
-export function Dashboard({ useCaseKey, onNavigate }: { useCaseKey?: string; onNavigate?: (id: string) => void }): JSX.Element {
+export function Dashboard({ useCaseKey, useCases, chains }: { useCaseKey?: string; useCases: UseCase[]; chains: ChainInfo[] }): JSX.Element {
   const { token } = useAuth();
   const { navigate } = useRoute();
   const [data, setData] = useState<AnalyticsSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [assets, setAssets] = useState<Asset[] | null>(null);
+  const [showAssets, setShowAssets] = useState(false);
+  const [availFilter, setAvailFilter] = useState<AvailFilter>("all");
+  const [assetQuery, setAssetQuery] = useState("");
+  const [assetPage, setAssetPage] = useState(1);
+  const [detailAssetId, setDetailAssetId] = useState<string | null>(null);
   // A stat card's target section is often already fully in view on a short page —
   // scrollIntoView then produces no visible motion at all, and the click reads as
   // dead. The flash gives every click a visible result whether or not it scrolled.
@@ -53,6 +64,24 @@ export function Dashboard({ useCaseKey, onNavigate }: { useCaseKey?: string; onN
       .then(setData)
       .catch(() => setError("Could not load analytics"));
   }, [token, useCaseKey]);
+
+  const reloadAssets = (): void => {
+    if (!token) return;
+    void api.assets(token, useCaseKey).then(setAssets).catch(() => setAssets([]));
+  };
+  useEffect(reloadAssets, [token, useCaseKey]);
+
+  if (detailAssetId) {
+    return (
+      <AssetDetail
+        assetId={detailAssetId}
+        useCases={useCases}
+        chains={chains}
+        onBack={() => setDetailAssetId(null)}
+        onChanged={reloadAssets}
+      />
+    );
+  }
 
   if (error) return <Card><p className="text-sm text-red-600">{error}</p></Card>;
   if (!data)
@@ -85,18 +114,111 @@ export function Dashboard({ useCaseKey, onNavigate }: { useCaseKey?: string; onN
   const ledgerSlices: DonutSlice[] = data.byLedger.map((l) => ({ label: l.chainId, value: Number(l.supply), color: colorFor(l.chainId) }));
   const activityPoints = data.activity.map((a) => ({ label: a.date, value: a.count }));
 
+  const openAssets = (filter: AvailFilter): void => {
+    setAvailFilter(filter);
+    setAssetPage(1);
+    setShowAssets(true);
+    scrollTo("dash-assets");
+  };
+
+  const q = assetQuery.trim().toLowerCase();
+  const filteredAssets = (assets ?? []).filter((a) =>
+    (availFilter === "all" || availability(a) === availFilter) &&
+    (!q || a.name.toLowerCase().includes(q) || a.symbol.toLowerCase().includes(q)));
+  const pagedAssets = filteredAssets.slice((assetPage - 1) * ASSET_PAGE_SIZE, assetPage * ASSET_PAGE_SIZE);
+  const chainOf = (id: string): ChainInfo | undefined => chains.find((c) => c.id === id);
+
   return (
     <div className="space-y-4">
       {/* headline cards — click to drill into the matching breakdown */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <Stat icon="coins" label="Tokenized value" value={fmtMoney(t.valueByCurrency)} sub={`${t.assets} assets · ${t.useCases} use case${t.useCases === 1 ? "" : "s"}`} onClick={() => (data.scope === "platform" ? scrollTo("dash-usecases") : onNavigate?.("assets"))} stagger={1} />
-        <Stat icon="spark" label="Total supply" value={fmtInt(t.supply)} sub="minted − burned" onClick={() => scrollTo("dash-ledger")} stagger={2} />
-        {/* "Holders" has no per-holder breakdown on this page (that lives per-asset, in
-            the asset's own Holders table) — jump there instead of a scroll target with
-            nothing about holders on it. */}
-        <Stat icon="users" label="Holders" value={String(t.holders)} sub="distinct accounts" onClick={() => (data.scope === "platform" ? scrollTo("dash-usecases") : onNavigate?.("assets"))} stagger={3} />
+        <Stat icon="coins" label="Tokenized value" value={fmtMoney(t.valueByCurrency)} sub={`${t.assets} assets · ${t.useCases} use case${t.useCases === 1 ? "" : "s"}`} onClick={() => openAssets("all")} stagger={1} />
+        <Stat icon="spark" label="Total supply" value={fmtInt(t.supply)} sub="minted − burned" onClick={() => openAssets("all")} stagger={2} />
+        {/* Holders has no per-holder breakdown on this page (that lives per-asset, in
+            the asset's own Holders table) — open the assets table so a click leads
+            somewhere with a View into that detail, rather than a dead end. */}
+        <Stat icon="users" label="Holders" value={String(t.holders)} sub="distinct accounts" onClick={() => openAssets("all")} stagger={3} />
         <Stat icon="arrow" label={`Traded (${data.activity.length}d)`} value={fmtMoney(t.tradedByCurrency)} sub={`${t.trades} trade${t.trades === 1 ? "" : "s"}`} onClick={() => scrollTo("dash-recent")} stagger={4} />
       </div>
+
+      {showAssets && (
+        <div id="dash-assets" className={flash("dash-assets")}>
+          <Card title="Assets">
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+              <input
+                value={assetQuery}
+                onChange={(e) => { setAssetQuery(e.target.value); setAssetPage(1); }}
+                placeholder="Search name or symbol…"
+                className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs flex-1 min-w-[160px]"
+              />
+              {([
+                ["all", "All"], ["available", "Listed"], ["sold-out", "Sold out"], ["not-listed", "Not listed"],
+              ] as const).map(([key, label]) => (
+                <button key={key} onClick={() => { setAvailFilter(key); setAssetPage(1); }}
+                  className={`rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${availFilter === key ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {assets === null ? (
+              <Skeleton lines={4} />
+            ) : filteredAssets.length === 0 ? (
+              <EmptyState icon="coins" title="No assets match" hint="Try a different filter or search term." />
+            ) : (
+              <>
+                <div className="overflow-x-auto rounded-lg border border-slate-200">
+                  <table className="w-full text-xs">
+                    <thead className="text-[10px] text-slate-400 bg-slate-50/80 uppercase tracking-widest">
+                      <tr>
+                        <th className="text-left font-semibold px-3 py-2.5">Asset</th>
+                        <th className="text-left font-semibold px-3 py-2.5">Type</th>
+                        <th className="text-right font-semibold px-3 py-2.5">Price</th>
+                        <th className="text-right font-semibold px-3 py-2.5">Supply</th>
+                        <th className="text-left font-semibold px-3 py-2.5">Chain</th>
+                        <th className="text-left font-semibold px-3 py-2.5">Availability</th>
+                        <th className="px-3 py-2.5"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pagedAssets.map((a) => {
+                        const avail = availability(a);
+                        const chain = chainOf(a.chainId);
+                        return (
+                          <tr key={a.id} className="border-t border-slate-100 hover:bg-slate-50/70 transition-colors">
+                            <td className="px-3 py-2">
+                              <div className="font-medium text-slate-800">{a.name}</div>
+                              <div className="text-slate-400">{a.symbol}</div>
+                            </td>
+                            <td className="px-3 py-2 text-slate-600">{a.tokenType}</td>
+                            <td className="px-3 py-2 text-right text-slate-700">{a.unitPrice ? `${a.unitPrice} ${a.currency}` : "—"}</td>
+                            <td className="px-3 py-2 text-right font-data tabular-nums text-slate-700">{a.totalSupply ? fmtInt(a.totalSupply) : "—"}</td>
+                            <td className="px-3 py-2">
+                              <span title={a.contractRef}>
+                                <Pill tone={chain?.mode === "real" ? "ok" : "muted"}>{chain?.label ?? a.chainId}</Pill>
+                              </span>
+                            </td>
+                            <td className="px-3 py-2">
+                              {avail === "available" && <Pill tone="ok">Available</Pill>}
+                              {avail === "sold-out" && <Pill tone="warn">Sold out</Pill>}
+                              {avail === "not-listed" && <Pill tone="muted">Not listed</Pill>}
+                            </td>
+                            <td className="px-3 py-2 text-right">
+                              <button onClick={() => setDetailAssetId(a.id)} className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-medium hover:border-brand-400">
+                                View
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <Pager page={assetPage} pageSize={ASSET_PAGE_SIZE} total={filteredAssets.length} onPage={setAssetPage} />
+              </>
+            )}
+          </Card>
+        </div>
+      )}
 
       <div className="grid lg:grid-cols-2 gap-4">
         <div id="dash-ledger" className={flash("dash-ledger")}>

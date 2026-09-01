@@ -52,7 +52,7 @@ export function PlatformHome({ useCases, chains, onReloadUseCases, view }: { use
       {tab === "overview" && (
         <div>
           <SectionHeader title="Platform overview" description="Cross-ledger issuance, holders and trading at a glance." />
-          <Dashboard />
+          <Dashboard useCases={useCases} chains={chains} />
         </div>
       )}
 

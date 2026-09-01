@@ -13,7 +13,7 @@ interface Props {
 }
 
 /** Is the asset listed for sale with treasury stock still available to buy? */
-function availability(a: Asset): "available" | "sold-out" | "not-listed" {
+export function availability(a: Asset): "available" | "sold-out" | "not-listed" {
   if (!a.unitPrice || !a.currency) return "not-listed";
   if (a.availableSupply == null) return "available"; // priced but balance unknown
   try {

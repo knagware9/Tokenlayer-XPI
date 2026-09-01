@@ -317,7 +317,7 @@ export function App(): JSX.Element {
     ...(isPlatform ? [{ id: "back", label: "← All use cases", icon: "arrow" as const }] : []),
     { id: "dashboard", label: isOrgAdmin ? "Configure Use Case" : "Dashboard", icon: isOrgAdmin ? "code" : "spark" },
     { id: "assets", label: "Asset Ledger", icon: "coins" },
-    ...(showInvoices ? [{ id: "invoices", label: "Batch Register", icon: "doc" as const }] : []),
+    ...(showInvoices ? [{ id: "invoices", label: "Invoice Portal", icon: "doc" as const }] : []),
     { id: "approvals", label: "Approvals", icon: "check" },
     ...(canManageUsers(user.role) ? [{ id: "users", label: "User Management", icon: "users" as const }] : []),
     ...(isPlatform || isOrgAdmin ? [{ id: "organizations", label: "Organizations", icon: "users" as const }] : []),
@@ -356,7 +356,7 @@ export function App(): JSX.Element {
       ? <InvoiceRegister useCase={activeUseCaseObj} chains={chains} />
       : (
         <div>
-          <SectionHeader title="Batch Register" description="Select a use case to view its staged asset register." />
+          <SectionHeader title="Invoice Portal" description="Select a use case to view its staged asset register." />
         </div>
       );
   } else if (activeId === "approvals") {
@@ -394,7 +394,7 @@ export function App(): JSX.Element {
       </div>
     );
   } else {
-    panel = <Dashboard useCaseKey={activeUseCase} onNavigate={handleSelect} />;
+    panel = <Dashboard useCaseKey={activeUseCase} useCases={useCases} chains={chains} />;
   }
 
   return <AppShell items={visible} active={activeId} onSelect={handleSelect} domains={branchDomains} activeDomain={effDomain} onDomainChange={onDomainChange}>{panel}</AppShell>;
