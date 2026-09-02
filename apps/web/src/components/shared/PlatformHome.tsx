@@ -93,7 +93,7 @@ export function PlatformHome({ useCases, chains, onReloadUseCases, view }: { use
   );
 }
 
-function UseCasesTab({ useCases, chains, onChanged }: { useCases: UseCase[]; chains: ChainInfo[]; onChanged: () => void }): JSX.Element {
+export function UseCasesTab({ useCases, chains, onChanged }: { useCases: UseCase[]; chains: ChainInfo[]; onChanged: () => void }): JSX.Element {
   const { navigate } = useRoute();
   const [codeFor, setCodeFor] = useState<UseCase | null>(null);
 

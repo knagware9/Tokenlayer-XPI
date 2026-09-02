@@ -86,6 +86,31 @@ describe("OrgAdmin operational rights (merged with UseCaseAdmin)", () => {
     expect(unfreeze.statusCode).toBe(200);
   });
 
+  it("GET /assets merges results across every use case an OrgAdmin's org owns (no useCaseKey of its own to filter by)", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await platformAdmin(h);
+    const orgId = await makeOrg(h, admin, "Multi UC Org");
+    const orgAdmin = await makeOrgAdmin(h, admin, orgId, "multiuc@oprights.example");
+    const keyA = await ownedUseCase(h, admin, orgAdmin, "multi-uc-a");
+    const keyB = await ownedUseCase(h, admin, orgAdmin, "multi-uc-b");
+    const otherOrgId = await makeOrg(h, admin, "Stranger UC Org");
+    const strangerAdmin = await makeOrgAdmin(h, admin, otherOrgId, "strangeruc@oprights.example");
+    const keyStranger = await ownedUseCase(h, admin, strangerAdmin, "multi-uc-stranger");
+
+    for (const [token, key, name] of [[orgAdmin, keyA, "A Note"], [orgAdmin, keyB, "B Note"], [strangerAdmin, keyStranger, "Stranger Note"]] as const) {
+      const res = await h.app.inject({
+        method: "POST", url: `${V1}/assets`, headers: auth(token),
+        payload: { useCaseKey: key, name, symbol: "NTS", chainId: "fabric", metadata: {} },
+      });
+      if (res.statusCode !== 201) throw new Error(`issue ${name} failed: ${res.statusCode} ${res.payload}`);
+    }
+
+    const list = await h.app.inject({ method: "GET", url: `${V1}/assets?limit=100&offset=0`, headers: auth(orgAdmin) });
+    expect(list.statusCode).toBe(200);
+    const names = (list.json().data as { name: string }[]).map((a) => a.name).sort();
+    expect(names).toEqual(["A Note", "B Note"]); // both of ITS OWN use cases, never the stranger org's
+  });
+
   it("an OrgAdmin is refused (scope) on a use case a DIFFERENT org owns", async () => {
     const h = await buildTestAppWithRepos();
     const admin = await platformAdmin(h);

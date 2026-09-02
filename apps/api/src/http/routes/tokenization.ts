@@ -683,8 +683,26 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
   app.get("/assets", { schema: S.listAssets, ...authScoped("assets:read") }, async (request) => {
     const claims = request.user as TokenClaims;
     const q = request.query as { useCaseKey?: string; chainId?: string; status?: string; limit: number; offset: number };
-    const useCaseKey = claims.role === "PlatformAdmin" ? q.useCaseKey : claims.useCaseKey ?? NO_USE_CASE;
-    const { items, total } = await deps.assets.list({ useCaseKey, chainId: q.chainId, status: q.status }, { limit: q.limit, offset: q.offset });
+    let items: AssetRecord[];
+    let total: number;
+    if (claims.role === "OrgAdmin" && claims.orgId) {
+      // An OrgAdmin has no single useCaseKey to filter by (it may own several) —
+      // the repository filters on exactly one, so fetch per owned key and merge
+      // in memory. Demo/early-stage scale: fine for the handful of use cases one
+      // org owns; would need a real multi-key repository filter at real scale.
+      const ownedKeys = q.useCaseKey
+        ? [q.useCaseKey] // caller narrowed to one of their own; scopedToCaller below still guards it
+        : (await deps.useCases.list()).filter((u) => u.ownerOrgId === claims.orgId).map((u) => u.key);
+      const perKey = await Promise.all(
+        ownedKeys.map((k) => deps.assets.list({ useCaseKey: k, chainId: q.chainId, status: q.status }, { limit: 100000, offset: 0 })),
+      );
+      const merged = perKey.flatMap((p) => p.items);
+      total = merged.length;
+      items = merged.slice(q.offset, q.offset + q.limit);
+    } else {
+      const useCaseKey = claims.role === "PlatformAdmin" ? q.useCaseKey : claims.useCaseKey ?? NO_USE_CASE;
+      ({ items, total } = await deps.assets.list({ useCaseKey, chainId: q.chainId, status: q.status }, { limit: q.limit, offset: q.offset }));
+    }
     // Enrich each row with ITS OWN total supply and the treasury's remaining
     // sellable balance — folded from this asset's own audit stream, not a live
     // chain read (see assetStateOf: assets sharing a use case's contract also

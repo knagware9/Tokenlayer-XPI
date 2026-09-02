@@ -93,7 +93,7 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
   // Gated to the staff roles that can see the Fund CBDC panel below (`canSeeTreasury`):
   // self-service personas (e.g. Buyer on tokenization-marketplace) have no grant
   // for the plain /accounts route, so an ungated fetch always failed CORS-shaped.
-  const canSeeTreasury = (["Issuer", "UseCaseAdmin", "PlatformAdmin"] as string[]).includes(role);
+  const canSeeTreasury = (["Issuer", "UseCaseAdmin", "OrgAdmin", "PlatformAdmin"] as string[]).includes(role);
   const treasuryAccountId = asset ? useCases.find((u) => u.key === asset.useCaseKey)?.treasuryAccountId : undefined;
   useEffect(() => {
     if (!token || !treasuryAccountId || !canSeeTreasury) { setTreasuryAddress(null); return; }
@@ -477,7 +477,7 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
         </ol>
       </div>
 
-      {(["Issuer", "UseCaseAdmin", "PlatformAdmin"] as string[]).includes(role) && accounts.length > 0 && (
+      {(["Issuer", "UseCaseAdmin", "OrgAdmin", "PlatformAdmin"] as string[]).includes(role) && accounts.length > 0 && (
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-3">
           <div className="text-sm font-semibold text-slate-800">Fund CBDC</div>
           <div className="grid grid-cols-3 gap-3">

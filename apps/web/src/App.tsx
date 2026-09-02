@@ -22,7 +22,7 @@ import { MyIdentity } from "./components/identity/MyIdentity.js";
 import { MyProfile } from "./components/shared/MyProfile.js";
 import { Organizations } from "./components/shared/Organizations.js";
 import { OrganizationWallet } from "./components/identity/OrganizationWallet.js";
-import { PlatformHome, type PlatformTab } from "./components/shared/PlatformHome.js";
+import { PlatformHome, UseCasesTab, type PlatformTab } from "./components/shared/PlatformHome.js";
 import { AuditConsole } from "./components/shared/AuditConsole.js";
 import { PublicVerify } from "./components/identity/PublicVerify.js";
 import { SchemeConsole } from "./components/identity/SchemeConsole.js";
@@ -157,7 +157,11 @@ export function App(): JSX.Element {
 
   const isPlatform = user.role === "PlatformAdmin";
   const isOrgAdmin = user.role === "OrgAdmin";
-  const activeUseCase = isPlatform ? routeKey : user.useCaseKey ?? "";
+  // OrgAdmin now operates every use case its org owns (merged with UseCaseAdmin's
+  // rights) — an org can own more than one, so like PlatformAdmin it needs the
+  // URL-driven picker instead of a single fixed useCaseKey (which OrgAdmin, being
+  // org- not use-case-scoped, never carries).
+  const activeUseCase = isPlatform || isOrgAdmin ? routeKey : user.useCaseKey ?? "";
 
   const handleSelect = (id: string): void => {
     // The panel being replaced may be holding something that unmounting would
@@ -332,7 +336,9 @@ export function App(): JSX.Element {
   const orgCan = (role: OrgOperatingRole): boolean => envelope === null || envelope.roles.includes(role);
 
   const items: NavItem[] = [
-    ...(isPlatform ? [{ id: "back", label: "← All use cases", icon: "arrow" as const }] : []),
+    // OrgAdmin gets this too now: it can be scoped into any of its org's use
+    // cases via the picker below, and needs the same way back out.
+    ...(isPlatform || isOrgAdmin ? [{ id: "back", label: "← All use cases", icon: "arrow" as const }] : []),
     { id: "dashboard", label: isOrgAdmin ? "Configure Use Case" : "Dashboard", icon: isOrgAdmin ? "code" : "spark" },
     { id: "assets", label: "Asset Ledger", icon: "coins" },
     // The label follows the same isInvoiceUseCase split InvoiceRegister.tsx's own
@@ -377,7 +383,13 @@ export function App(): JSX.Element {
   // persisted domain, where `view` may point at a surface hidden in the active domain.
   let panel: JSX.Element;
   if (activeId === "assets") {
-    panel = <AssetManagement useCaseKey={activeUseCase} useCases={useCases} chains={chains} />;
+    // OrgAdmin with no use case selected yet: AssetManagement needs one
+    // concrete useCaseKey (it may own several), so show the picker instead —
+    // clicking a card navigates to `/<key>`, which sets activeUseCase and
+    // re-renders this same branch with AssetManagement properly scoped.
+    panel = (isOrgAdmin && !activeUseCase)
+      ? <UseCasesTab useCases={useCases} chains={chains} onChanged={reloadUseCases} />
+      : <AssetManagement useCaseKey={activeUseCase} useCases={useCases} chains={chains} />;
   } else if (activeId === "invoices") {
     panel = activeUseCaseObj
       ? <InvoiceRegister useCase={activeUseCaseObj} chains={chains} />

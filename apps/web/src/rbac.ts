@@ -18,7 +18,9 @@ export type Action =
 // The server remains the source of truth and re-checks every request.
 const MATRIX: Record<Role, Action[]> = {
   PlatformAdmin: ["issue", "mint", "transfer", "burn", "freeze", "unfreeze", "allow", "disallow", "buy", "list", "cancel-listing", "read"],
-  OrgAdmin: ["read"],
+  // Same operator set as UseCaseAdmin, not FULL (buy/list/cancel-listing stay
+  // investor-only) — OrgAdmin now runs every use case its org owns directly.
+  OrgAdmin: ["issue", "mint", "transfer", "burn", "freeze", "unfreeze", "allow", "disallow", "read"],
   // Manages the use case, not the investor side of it — keeps every operator
   // action but not the marketplace-investor actions (buy/list/cancel-listing).
   UseCaseAdmin: ["issue", "mint", "transfer", "burn", "freeze", "unfreeze", "allow", "disallow", "read"],
