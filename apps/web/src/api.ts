@@ -287,8 +287,8 @@ export const api = {
     request<Organization & { issuerDid: string | null; orgCredentialId: string | null }>(`/orgs/${encodeURIComponent(id)}/approve`, token, { method: "POST", body: JSON.stringify({}) }),
   rejectOrg: (token: string, id: string, reason: string) =>
     request<Organization>(`/orgs/${encodeURIComponent(id)}/reject`, token, { method: "POST", body: JSON.stringify({ reason }) }),
-  createOrg: (token: string, body: { name: string; orgType: OrgType; registrationId?: string; jurisdiction?: string }) =>
-    request<Organization>("/orgs", token, { method: "POST", body: JSON.stringify(body) }),
+  createOrg: (token: string, body: { name: string; orgType: OrgType; registrationId?: string; jurisdiction?: string; admin?: { name: string; email: string; password: string } }) =>
+    request<Organization & { adminEmail: string | null; issuerDid: string | null; orgCredentialId: string | null }>("/orgs", token, { method: "POST", body: JSON.stringify(body) }),
   org: (token: string, id: string) => request<Organization>(`/orgs/${encodeURIComponent(id)}`, token),
   // EN-A capability envelope. PATCH is the PlatformAdmin's direct grant (`null`
   // clears back to unrestricted legacy); the request route is the OrgAdmin's

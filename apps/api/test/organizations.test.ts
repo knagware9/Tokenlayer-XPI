@@ -45,6 +45,46 @@ describe("POST /orgs", () => {
     expect(res.statusCode).toBe(503);
     await prod.close();
   });
+
+  it("with an admin block: creates the org ACTIVE and its admin can log in immediately", async () => {
+    const res = await createOrg(admin, {
+      name: "Direct-Create Corp", orgType: "corporate",
+      admin: { name: "Priya Founder", email: "priya@direct-create.example", password: "correcthorse1" },
+    });
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    expect(body.status).toBe("active");
+    expect(body.verified).toBe(true);
+    expect(body.adminEmail).toBe("priya@direct-create.example");
+    expect(body.issuerDid).toBeTruthy();
+    expect(body.orgCredentialId).toBeTruthy();
+
+    // The new admin can log in right away — no pending-approval step.
+    const adminToken = await loginAs(app, "priya@direct-create.example", "correcthorse1");
+    const me = await app.inject({ method: "GET", url: `${V1}/orgs`, headers: auth(adminToken) });
+    expect(me.statusCode).toBe(200);
+    expect(me.json()[0].name).toBe("Direct-Create Corp");
+
+    // The org's own DID holds the platform-signed OrganizationCredential —
+    // same shape the KYB approval ceremony produces.
+    const org = await app.inject({ method: "GET", url: `${V1}/orgs/${body.id}`, headers: auth(admin) });
+    expect(org.json().credentials.some((c: { type: string; issuerDid: string }) => c.type === "OrganizationCredential" && c.issuerDid === body.issuerDid)).toBe(true);
+  });
+
+  it("without an admin block: still creates a bare org with no login (existing behavior)", async () => {
+    const res = await createOrg(admin, { name: "Bare Org", orgType: "corporate" });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().adminEmail).toBeNull();
+  });
+
+  it("409s EMAIL_TAKEN when the admin email is already registered", async () => {
+    const res = await createOrg(admin, {
+      name: "Dup Admin Email Org", orgType: "corporate",
+      admin: { name: "Someone", email: "admin@tokenlayer.dev", password: "correcthorse1" },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe("EMAIL_TAKEN");
+  });
 });
 
 describe("GET /orgs, GET /orgs/:id", () => {

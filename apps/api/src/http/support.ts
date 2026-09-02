@@ -1,5 +1,5 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { PolicyError, scopeAllows, type Actor, type ApiScope, type AssetContext, type Role } from "@tokenlayer/core";
+import { PolicyError, scopeAllows, type Actor, type ApiScope, type AssetContext, type Role, type UseCaseSource } from "@tokenlayer/core";
 import { cachedVerification, prefixOf, rememberVerification, secretMatches } from "../shared/api-keys.js";
 import type { ApiKeyRepository, AssetRecord, UserRecord, UserRepository } from "../persistence/types/index.js";
 import { captureException } from "../shared/observability.js";
@@ -370,9 +370,22 @@ export function errorHandler(err: any, _req: FastifyRequest, reply: FastifyReply
   return reply.code(400).send({ error: "REQUEST_FAILED", message: "the request could not be completed" });
 }
 
-/** True if the caller may see/act on a resource governed by `useCaseKey`. */
-export function scopedToCaller(claims: TokenClaims, useCaseKey: string): boolean {
-  return claims.role === "PlatformAdmin" || claims.useCaseKey === useCaseKey;
+/**
+ * True if the caller may see/act on a resource governed by `useCaseKey`.
+ *
+ * An OrgAdmin carries no `useCaseKey` of its own (unlike UseCaseAdmin, which
+ * is pinned to exactly one) — it governs a whole org, which may own several
+ * use cases, so its scope is resolved by OWNERSHIP instead: is this use
+ * case's `ownerOrgId` the caller's own org? That needs a lookup, which is why
+ * this is async — every caller already awaits it. Mirrors the filter
+ * `GET /use-cases` already applies for OrgAdmin's list view; this is the same
+ * check, just reachable per-resource instead of only at the list.
+ */
+export async function scopedToCaller(claims: TokenClaims, useCaseKey: string, useCases: Pick<UseCaseSource, "get">): Promise<boolean> {
+  if (claims.role === "PlatformAdmin" || claims.useCaseKey === useCaseKey) return true;
+  if (claims.role !== "OrgAdmin" || !claims.orgId) return false;
+  const uc = await useCases.get(useCaseKey).catch(() => null);
+  return uc?.ownerOrgId === claims.orgId;
 }
 
 /** True when `s` is a positive integer string (no sign, no decimals, > 0). */

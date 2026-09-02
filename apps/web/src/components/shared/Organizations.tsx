@@ -726,22 +726,34 @@ function CreateOrg({ onCreated }: { onCreated: () => void }): JSX.Element {
   const [orgType, setOrgType] = useState<OrgType>("bank");
   const [registrationId, setRegistrationId] = useState("");
   const [jurisdiction, setJurisdiction] = useState("");
+  const [withAdmin, setWithAdmin] = useState(false);
+  const [adminName, setAdminName] = useState("");
+  const [adminEmail, setAdminEmail] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function create(e: React.FormEvent): Promise<void> {
     e.preventDefault();
-    setError(null);
+    setError(null); setNotice(null);
     if (!name.trim()) { setError("Name is required"); return; }
+    if (withAdmin && (!adminName.trim() || !adminEmail.trim() || adminPassword.length < 8)) {
+      setError("Admin name, email, and an 8+ character password are required");
+      return;
+    }
     setBusy(true);
     try {
-      await api.createOrg(token!, {
+      const org = await api.createOrg(token!, {
         name: name.trim(),
         orgType,
         registrationId: registrationId.trim() || undefined,
         jurisdiction: jurisdiction.trim() || undefined,
+        admin: withAdmin ? { name: adminName.trim(), email: adminEmail.trim(), password: adminPassword } : undefined,
       });
       setName(""); setRegistrationId(""); setJurisdiction("");
+      setAdminName(""); setAdminEmail(""); setAdminPassword(""); setWithAdmin(false);
+      if (org.adminEmail) setNotice(`${org.name} is active — ${org.adminEmail} can log in now.`);
       onCreated();
     } catch (err) {
       setError(errMessage(err, "Create failed"));
@@ -761,7 +773,19 @@ function CreateOrg({ onCreated }: { onCreated: () => void }): JSX.Element {
         <input className="input" placeholder="registration id (optional)" value={registrationId} onChange={(e) => setRegistrationId(e.target.value)} />
         <input className="input" placeholder="jurisdiction (optional, e.g. IN)" value={jurisdiction} onChange={(e) => setJurisdiction(e.target.value)} />
       </div>
+      <label className="flex items-center gap-2 text-sm text-slate-700">
+        <input type="checkbox" checked={withAdmin} onChange={(e) => setWithAdmin(e.target.checked)} />
+        Set up its admin login now (active immediately — no approval queue)
+      </label>
+      {withAdmin && (
+        <div className="grid grid-cols-3 gap-4 pl-6">
+          <input className="input" placeholder="admin name" value={adminName} onChange={(e) => setAdminName(e.target.value)} />
+          <input className="input" type="email" placeholder="admin email" value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} />
+          <input className="input" type="password" placeholder="admin password (8+ chars)" value={adminPassword} onChange={(e) => setAdminPassword(e.target.value)} />
+        </div>
+      )}
       {error && <p className="text-sm text-red-600">{error}</p>}
+      {notice && <p className="text-sm text-emerald-700">{notice}</p>}
       <button type="submit" disabled={busy} className="rounded-lg bg-brand-600 text-white py-1.5 px-4 text-sm font-medium hover:bg-brand-700 disabled:opacity-40">
         Create organization
       </button>

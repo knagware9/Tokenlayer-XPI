@@ -65,7 +65,7 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
       notFound(reply, "asset not found");
       return null;
     }
-    if (!scopedToCaller(request.user as TokenClaims, asset.useCaseKey)) {
+    if (!(await scopedToCaller(request.user as TokenClaims, asset.useCaseKey, deps.useCases))) {
       if (mode === "read") notFound(reply, "asset not found");
       else reply.code(403).send({ error: "WRONG_USE_CASE", message: "asset belongs to another use case" });
       return null;
@@ -78,13 +78,20 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
   // the wallets linked to users in their own use case (no cross-tenant account enumeration),
   // plus their own use case's treasury — org-owned, so no User is ever linked to it, but an
   // Issuer/UseCaseAdmin still needs to see its address to fund and allow it in the first place.
+  // An OrgAdmin has no single `useCaseKey` of its own (it may own several) — gather
+  // across every use case its org owns instead, same reach `scopedToCaller` grants it.
   async function scopedAccounts(claims: TokenClaims) {
     const all = await deps.accounts.list();
     if (claims.role === "PlatformAdmin") return all;
-    const users = await deps.users.list(claims.useCaseKey ?? NO_USE_CASE);
-    const allowed = new Set(users.map((u) => u.accountId).filter((id): id is string => !!id));
-    if (claims.useCaseKey) {
-      const useCase = await deps.useCases.get(claims.useCaseKey).catch(() => null);
+    const useCaseKeys =
+      claims.role === "OrgAdmin" && claims.orgId
+        ? (await deps.useCases.list()).filter((u) => u.ownerOrgId === claims.orgId).map((u) => u.key)
+        : claims.useCaseKey ? [claims.useCaseKey] : [];
+    const allowed = new Set<string>();
+    for (const key of useCaseKeys) {
+      const users = await deps.users.list(key);
+      for (const u of users) if (u.accountId) allowed.add(u.accountId);
+      const useCase = await deps.useCases.get(key).catch(() => null);
       if (useCase?.treasuryAccountId) allowed.add(useCase.treasuryAccountId);
     }
     return all.filter((a) => allowed.has(a.id));
@@ -106,7 +113,7 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
 
   app.get("/use-cases/:key", { schema: S.getUseCase, ...auth }, async (request, reply) => {
     const { key } = request.params as { key: string };
-    if (!scopedToCaller(request.user as TokenClaims, key)) return notFound(reply, `unknown use case '${key}'`);
+    if (!(await scopedToCaller(request.user as TokenClaims, key, deps.useCases))) return notFound(reply, `unknown use case '${key}'`);
     if (!(await deps.useCases.has(key))) return notFound(reply, `unknown use case '${key}'`);
     return deps.useCases.get(key);
   });
@@ -199,7 +206,7 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
   // simulated ones. Same visibility as GET /use-cases/:key (scoped read).
   app.get("/use-cases/:key/code", { schema: S.useCaseCode, ...auth }, async (request, reply) => {
     const { key } = request.params as { key: string };
-    if (!scopedToCaller(request.user as TokenClaims, key)) return notFound(reply, `unknown use case '${key}'`);
+    if (!(await scopedToCaller(request.user as TokenClaims, key, deps.useCases))) return notFound(reply, `unknown use case '${key}'`);
     if (!(await deps.useCases.has(key))) return notFound(reply, `unknown use case '${key}'`);
     const useCase = await deps.useCases.get(key);
     const { chainId } = request.query as { chainId: string };
@@ -316,7 +323,7 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
   }): Promise<{ ok: true; status: number; body: unknown } | { ok: false; status: number; error: string; message: string }> {
     const { useCaseKey: bUseCaseKey, name, chainId, metadata, initialSupply, sale } = input;
     const claims = input.claims;
-    if (claims.role !== "PlatformAdmin" && bUseCaseKey !== claims.useCaseKey) {
+    if (!(await scopedToCaller(claims, bUseCaseKey, deps.useCases))) {
       return { ok: false, status: 403, error: "WRONG_USE_CASE", message: "cannot issue into another use case" };
     }
     // Validate sale terms if provided
@@ -536,7 +543,7 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
     const claims = request.user as TokenClaims;
     const actor = actorOf(request);
     const { key } = request.params as { key: string };
-    if (claims.role !== "PlatformAdmin" && key !== claims.useCaseKey) {
+    if (!(await scopedToCaller(claims, key, deps.useCases))) {
       reply.code(403).send({ error: "WRONG_USE_CASE", message: "cannot manage a register in another use case" });
       return null;
     }
@@ -927,7 +934,7 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
   app.post("/assets/:id/buy", { schema: S.buy, ...authScoped("assets:transfer") }, async (request, reply) => {
     const asset = await deps.assets.get((request.params as { id: string }).id);
     if (!asset) return notFound(reply, "asset not found");
-    if (!scopedToCaller(request.user as TokenClaims, asset.useCaseKey)) return notFound(reply, "asset not found");
+    if (!(await scopedToCaller(request.user as TokenClaims, asset.useCaseKey, deps.useCases))) return notFound(reply, "asset not found");
     if (asset.status !== "active") {
       return reply.code(409).send({ error: "ASSET_NOT_ACTIVE", message: `asset is ${asset.status}` });
     }
@@ -1065,7 +1072,7 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
     const { id } = request.params as { id: string };
     const listing = await deps.listings.get(id);
     const asset = listing ? await deps.assets.get(listing.assetId) : null;
-    if (!listing || !asset || !scopedToCaller(request.user as TokenClaims, asset.useCaseKey)) {
+    if (!listing || !asset || !(await scopedToCaller(request.user as TokenClaims, asset.useCaseKey, deps.useCases))) {
       notFound(reply, "listing not found");
       return null;
     }
@@ -1347,13 +1354,23 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
   // --- cash (CBDC) --------------------------------------------------------
   app.post("/cash/credit", { schema: S.creditCash, ...authScoped("assets:transfer") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
-    if (!["Issuer", "UseCaseAdmin", "PlatformAdmin"].includes(claims.role)) {
+    if (!["Issuer", "Buyer", "UseCaseAdmin", "PlatformAdmin"].includes(claims.role)) {
       return reply.code(403).send({ error: "FORBIDDEN", message: "you may not fund accounts" });
     }
     const bdy = request.body as { account: string; currency: string; amount: string };
     if (!isSupportedCurrency(bdy.currency)) return reply.code(400).send({ error: "UNSUPPORTED_CURRENCY", message: `currency '${bdy.currency}' is not supported` });
     if (!/^\d+$/.test(bdy.amount) || BigInt(bdy.amount) <= 0n) return reply.code(400).send({ error: "INVALID_AMOUNT", message: "amount must be a positive integer" });
-    if (claims.role !== "PlatformAdmin") {
+    // Buyer self-funds ONLY: a retail investor may top up their own wallet,
+    // never anyone else's. Issuer/UseCaseAdmin keep the broader "any account in
+    // my use case" reach they already had (an issuer funding a demo buyer's
+    // wallet is existing, intentional behavior — this only ADDS a narrower door
+    // for Buyer, it does not narrow the wider ones).
+    if (claims.role === "Buyer") {
+      const own = await walletOf(claims);
+      if (!own || own !== bdy.account) {
+        return reply.code(403).send({ error: "OUT_OF_SCOPE", message: "you may only fund your own account" });
+      }
+    } else if (claims.role !== "PlatformAdmin") {
       const scoped = await scopedAccounts(claims);
       if (!scoped.some((a) => a.address === bdy.account)) {
         return reply.code(403).send({ error: "OUT_OF_SCOPE", message: "that account is not in your use case" });

@@ -865,12 +865,16 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     const claims = request.user as TokenClaims;
     if (claims.role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only the Platform Admin may create organizations" });
     if (!deps.didMasterConfigured && deps.isProduction) return reply.code(503).send({ error: "DID_KEYSTORE_UNCONFIGURED", message: "DID_MASTER_KEY must be set to create organizations" });
-    const b = request.body as { name: string; orgType: "bank" | "corporate" | "msme" | "government" | "verifier"; registrationId?: string; jurisdiction?: string };
+    const b = request.body as {
+      name: string; orgType: "bank" | "corporate" | "msme" | "government" | "verifier"; registrationId?: string; jurisdiction?: string;
+      admin?: { name: string; email: string; password: string };
+    };
     // POST /orgs keeps its explicit name-taken guard (a duplicate is a 409 here,
     // whereas ensureOrg deliberately RETURNS the existing org for the idempotent
     // provisioner). After this guard the name is free, so ensureOrg always creates.
     if (await deps.organizations.findByName(b.name)) return reply.code(409).send({ error: "NAME_TAKEN", message: "an organization with that name already exists" });
     if (b.registrationId && (await deps.organizations.findByRegistrationId(b.registrationId))) return reply.code(409).send({ error: "REGISTRATION_TAKEN", message: "an organization with that registration id already exists" });
+    if (b.admin && (await deps.users.findByEmail(b.admin.email))) return reply.code(409).send({ error: "EMAIL_TAKEN", message: "email already registered" });
     let org: OrganizationRecord;
     try {
       org = await ensureOrg(b.name, b.orgType, { registrationId: b.registrationId ?? null, jurisdiction: b.jurisdiction ?? null, actorId: claims.id });
@@ -878,7 +882,37 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
       if (err instanceof CodedError && err.code === "REGISTRY_UNAVAILABLE") return reply.code(502).send({ error: err.code, message: err.message });
       throw err;
     }
-    return reply.code(201).send({ id: org.id, name: org.name, did: org.did, orgType: org.orgType, registrationId: org.registrationId, jurisdiction: org.jurisdiction, verified: org.verified, status: org.status });
+    let issuerDid: string | null = null;
+    let orgCredentialId: string | null = null;
+    if (b.admin) {
+      // active:false until the ceremony below succeeds — the same shape
+      // self-service registration uses, just completed inline instead of at a
+      // later /orgs/:id/approve. kycStatus "approved": there is no KYB queue
+      // gating this admin's KYC the way self-service's is.
+      const adminUser = await deps.users.create({
+        email: b.admin.email, passwordHash: await bcrypt.hash(b.admin.password, BCRYPT_ROUNDS),
+        role: "OrgAdmin", useCaseKey: null, accountId: null, active: false,
+        kycStatus: "approved", kyc: { legalName: b.admin.name }, orgId: org.id, kind: "human",
+      });
+      try {
+        const ceremony = await activateOrgAdmin(org, adminUser);
+        issuerDid = ceremony.issuerDid;
+        orgCredentialId = ceremony.orgCredentialId;
+      } catch (err) {
+        // The org itself is already active and on-chain (ensureOrg has no
+        // "pending" to fall back to, unlike approve) — keep it, and remove
+        // only the admin login this call tried and failed to activate, so a
+        // retry via a fresh POST /orgs/:id/users doesn't collide on email.
+        await deps.users.remove(adminUser.id).catch(() => undefined);
+        request.log.error({ err }, "org admin activation failed during direct org creation");
+        return reply.code(502).send({ error: "ADMIN_ACTIVATION_FAILED", message: "the organization was created, but its admin login could not be activated — retry by adding the admin separately" });
+      }
+    }
+    return reply.code(201).send({
+      id: org.id, name: org.name, did: org.did, orgType: org.orgType, registrationId: org.registrationId,
+      jurisdiction: org.jurisdiction, verified: org.verified, status: org.status,
+      adminEmail: b.admin?.email ?? null, issuerDid, orgCredentialId,
+    });
   });
 
 
@@ -954,43 +988,17 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     let issuerDid: string | null = null;
     let orgCredentialId: string | null = null;
     if (admin) {
-      // Snapshot the pre-mint identity BEFORE mintMembership runs — the in-memory
-      // repo mutates the same object in place, so reading admin.did in the catch
-      // would otherwise see the freshly-minted DID instead of the original.
-      const priorDid = admin.did;
-      const priorSeed = admin.didSeedEncrypted;
       try {
-        await mintMembership(active, admin, "OrgAdmin");
-        await deps.users.update(admin.id, { active: true });
-        // The issuance ceremony: the PLATFORM org attests the corporate's KYB
-        // facts with a signed, anchored OrganizationCredential. Deliberately
-        // LAST: issueCredentialFor persists nothing on a throw, so a failure
-        // here needs only the rollback below — no credential compensation.
-        const platformOrg = await ensurePlatformIssuerOrg(deps);
-        const p = org.companyProfile;
-        // Named kybClaims (not `claims`) — the handler's `claims` is the caller's
-        // TokenClaims, and shadowing it here would be a trap for future edits.
-        const kybClaims: Record<string, unknown> = {
-          name: org.name, orgType: org.orgType,
-          ...(p ? {
-            cin: p.cin, pan: p.pan, state: p.state, pincode: p.pincode,
-            dateOfIncorporation: p.dateOfIncorporation, category: p.category,
-            ...(p.gstin ? { gstin: p.gstin } : {}),
-          } : {}),
-        };
         // The KYB approval ceremony is platform governance on a REAL
         // organization — it is refused to machine principals entirely
         // (`platformGovernanceRefused`), so its OrganizationCredential
         // anchors exactly as before.
-        const cred = await issueCredentialFor(deps, { issuerOrg: platformOrg, subjectDid: org.did, type: "OrganizationCredential", claims: kybClaims, validityDays: credentialTypeDef("OrganizationCredential").validityDays, proposalId: null });
-        issuerDid = platformOrg.did;
-        orgCredentialId = cred.id;
+        const ceremony = await activateOrgAdmin(active, admin);
+        issuerDid = ceremony.issuerDid;
+        orgCredentialId = ceremony.orgCredentialId;
       } catch (err) {
-        // Roll back to pending AND undo any sub-DID mintMembership stamped on the
-        // admin row before it threw — a dangling did on an inactive admin is
-        // otherwise reachable via POST /credentials/requests. Restore the row to
-        // its pre-approval state (no sub-DID, still inactive).
-        await deps.users.update(admin.id, { did: priorDid, didSeedEncrypted: priorSeed, active: false });
+        // activateOrgAdmin already restored the admin row to its pre-approval
+        // state (no sub-DID, still inactive) — roll the ORG back to pending too.
         await deps.organizations.setStatus(org.id, "pending");
         await deps.organizations.setVerified(org.id, false, null);
         request.log.error({ err }, "org admin activation failed");
@@ -1290,6 +1298,51 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
   // user's tenancy orgId). Shared logic lives in mintOrgMembership.
   async function mintMembership(org: OrganizationRecord, user: UserRecord, role: Role): Promise<string> {
     return mintOrgMembership(deps, org, user, role, { linkOrgId: true });
+  }
+
+
+  /**
+   * THE ISSUANCE CEREMONY for one org's admin: mint the admin's sub-DID +
+   * membership VC, activate the user, and have the platform sign an
+   * OrganizationCredential over the org's KYB facts (empty beyond
+   * name/orgType when the org has no companyProfile — a directly-created org
+   * never collected one). Extracted from `/orgs/:id/approve` so `POST /orgs`
+   * can run the identical ceremony for an admin it provisions inline, instead
+   * of going through the pending-approval queue.
+   *
+   * On failure, undoes exactly what this function did to `admin` (restores
+   * its prior DID fields and `active: false`) and rethrows — the CALLER
+   * decides what to do with the org itself (approve rolls it back to
+   * "pending"; a fresh direct-create instead removes the admin user it just
+   * made, since there is no "pending" state to fall back to).
+   */
+  async function activateOrgAdmin(org: OrganizationRecord, admin: UserRecord): Promise<{ issuerDid: string; orgCredentialId: string }> {
+    const priorDid = admin.did;
+    const priorSeed = admin.didSeedEncrypted;
+    try {
+      await mintMembership(org, admin, "OrgAdmin");
+      await deps.users.update(admin.id, { active: true });
+      const platformOrg = await ensurePlatformIssuerOrg(deps);
+      const p = org.companyProfile;
+      // Named kybClaims (not `claims`) — a handler's `claims` is the caller's
+      // TokenClaims, and shadowing it here would be a trap for future edits.
+      const kybClaims: Record<string, unknown> = {
+        name: org.name, orgType: org.orgType,
+        ...(p ? {
+          cin: p.cin, pan: p.pan, state: p.state, pincode: p.pincode,
+          dateOfIncorporation: p.dateOfIncorporation, category: p.category,
+          ...(p.gstin ? { gstin: p.gstin } : {}),
+        } : {}),
+      };
+      const cred = await issueCredentialFor(deps, {
+        issuerOrg: platformOrg, subjectDid: org.did, type: "OrganizationCredential",
+        claims: kybClaims, validityDays: credentialTypeDef("OrganizationCredential").validityDays, proposalId: null,
+      });
+      return { issuerDid: platformOrg.did, orgCredentialId: cred.id };
+    } catch (err) {
+      await deps.users.update(admin.id, { did: priorDid, didSeedEncrypted: priorSeed, active: false });
+      throw err;
+    }
   }
 
 
@@ -2298,7 +2351,17 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
   // PDF) and reference it from asset metadata by URL + sha256.
   // Only desk operators (issue-capable) and auditors may read stored documents —
   // these hold sensitive off-ledger invoice evidence, not public assets.
-  const canReadDoc = (role: Role): boolean => deps.rbac.can(role, "issue") || role === "Auditor";
+  //
+  // `role !== "OrgAdmin"` is deliberate, not incidental: OrgAdmin now carries
+  // "issue" too (it runs every use case its org owns), but that grant is
+  // scoped to tokenization actions — it says nothing about this UNSCOPED,
+  // platform-wide document store, which also serves KYB certificates and
+  // other orgs' invoice evidence. OrgAdmin reaches its OWN org's documents
+  // only through purpose-built, ownership-checked doors (branding logo, KYB
+  // certificate refs) — never this raw one. Carve it out explicitly so it
+  // stays excluded regardless of what future operator right "issue" grows to
+  // cover, rather than leaving that guarantee resting on today's role list.
+  const canReadDoc = (role: Role): boolean => (deps.rbac.can(role, "issue") && role !== "OrgAdmin") || role === "Auditor";
 
   // EN-B: DELIBERATELY UNSCOPED. An upload stores opaque bytes readable only by
   // issue-capable roles and an Auditor; it grants nothing on its own, and every
@@ -2306,7 +2369,8 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
   // Body size is already capped, so an unscoped key cannot use it to grow.
   app.post("/documents", { schema: S.uploadDocument, bodyLimit: DOC_UPLOAD_BODY_LIMIT, ...auth }, async (request, reply) => {
     const actor = actorOf(request);
-    if (!deps.rbac.can(actor.role, "issue")) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to upload documents" });
+    // Same OrgAdmin carve-out as canReadDoc above, and for the same reason.
+    if (!deps.rbac.can(actor.role, "issue") || actor.role === "OrgAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to upload documents" });
     // The uploader's own org, or null for a desk operator who belongs to none.
     // Null here is not a loophole: every ownership gate requires a non-null
     // match, so an unowned document is referenceable only by a PlatformAdmin.

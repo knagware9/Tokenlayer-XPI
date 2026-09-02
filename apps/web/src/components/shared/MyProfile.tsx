@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
-import { api, ApiError } from "../../api.js";
+import { api, ApiError, describeApiError } from "../../api.js";
 import { useAuth } from "../../auth.js";
 import { getOrCreateDeviceKey } from "../../lib/shared/device-wallet.js";
 import type { LoginKeyInfo } from "../../types.js";
 import { Card, SectionHeader } from "./ui.js";
+
+const DEMO_CURRENCIES = ["CBDC-INR", "USDC", "e-GBP"];
 
 /** Mirrors the backend's WALLET_ELIGIBLE_ROLES (apps/api/src/shared/wallets.ts)
  *  — the only roles PATCH /me/wallet will ever accept. Kept inline, not a
@@ -93,6 +95,30 @@ export function MyProfile({ onSelect }: { onSelect: (id: string) => void }): JSX
       refreshLoginKeys();
     } catch (e) {
       setKeyError(e instanceof ApiError ? e.message : "Could not revoke this device key.");
+    }
+  };
+
+  // Self-funding: Buyer and Issuer top up their OWN linked wallet only — the
+  // server enforces this (`/cash/credit` rejects any other account for a
+  // Buyer caller), this UI never offers a way to pick a different one.
+  const [fundAmount, setFundAmount] = useState("");
+  const [fundCurrency, setFundCurrency] = useState<string>(DEMO_CURRENCIES[0]!);
+  const [fundBusy, setFundBusy] = useState(false);
+  const [fundError, setFundError] = useState<string | null>(null);
+  const [fundNotice, setFundNotice] = useState<string | null>(null);
+  const fundAccount = async (): Promise<void> => {
+    if (!token || !user?.walletAddress || !fundAmount) return;
+    setFundBusy(true);
+    setFundError(null);
+    setFundNotice(null);
+    try {
+      const r = await api.creditCash(token, user.walletAddress, fundCurrency, fundAmount);
+      setFundNotice(`Balance now ${BigInt(r.balance).toLocaleString("en-IN")} ${fundCurrency}.`);
+      setFundAmount("");
+    } catch (e) {
+      setFundError(describeApiError(e, "Top-up failed"));
+    } finally {
+      setFundBusy(false);
     }
   };
 
@@ -233,6 +259,50 @@ export function MyProfile({ onSelect }: { onSelect: (id: string) => void }): JSX
                 className="shrink-0 inline-flex items-center rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {walletBusy ? "Linking…" : "Link"}
+              </button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {walletEligible && user?.walletAddress && (
+        <div className="mt-6">
+          <Card
+            title="Fund my account"
+            description="Top up your own wallet with demo settlement currency."
+          >
+            {fundError && (
+              <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">
+                {fundError}
+              </div>
+            )}
+            {fundNotice && (
+              <div className="mb-4 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-800">
+                {fundNotice}
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min="1"
+                value={fundAmount}
+                onChange={(e) => setFundAmount(e.target.value)}
+                placeholder="amount"
+                className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-brand-500 focus:outline-none"
+              />
+              <select
+                value={fundCurrency}
+                onChange={(e) => setFundCurrency(e.target.value)}
+                className="shrink-0 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-brand-500 focus:outline-none"
+              >
+                {DEMO_CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <button
+                onClick={() => void fundAccount()}
+                disabled={fundBusy || !fundAmount}
+                className="shrink-0 inline-flex items-center rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {fundBusy ? "Funding…" : "Fund"}
               </button>
             </div>
           </Card>

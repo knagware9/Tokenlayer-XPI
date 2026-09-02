@@ -292,6 +292,12 @@ export const PERSONAS: readonly PersonaDef[] = [
       // (an Auditor or UseCaseAdmin can never link one), so this sits here and
       // in tokenization-marketplace rather than STAFF_BASELINE or BASELINE.
       { prefix: "/me/wallet", methods: ["PATCH"], why: "link or replace the treasury's own wallet address" },
+      // ALL, not just credit: an issuer already funds any account within its
+      // use case (the existing "Fund CBDC" panel on the asset detail page),
+      // this just gives the container edge the route to actually reach that —
+      // it had none before, so the panel 404'd here even though the web app
+      // rendered it.
+      { prefix: "/cash", methods: "ALL", why: "fund settlement accounts within its use case (including its own)" },
       // EXACT, and only this one identity subpath — not the broader
       // `/users/:id/identity` grant identity-issuer carries (that one backs a
       // challenge/verify flow this console has no UI for). Kept out of
@@ -326,6 +332,10 @@ export const PERSONAS: readonly PersonaDef[] = [
       { prefix: "/assets/:id/listings", methods: "ALL", why: "list one's own units for sale" },
       { prefix: "/listings", methods: "ALL", why: "take another holder's listing off the secondary market" },
       { prefix: "/cash/balances", methods: ["GET"], why: "own settlement balance" },
+      // POST only, not the ALL an issuer/admin gets: the route itself enforces
+      // self-only for Buyer (see /cash/credit's handler), this just needs to
+      // reach it — never GET-any/PATCH/DELETE surface on cash.
+      { prefix: "/cash/credit", methods: ["POST"], why: "top up one's own settlement balance (self-funding, own account only)" },
       { prefix: "/currencies", methods: ["GET"], why: "render prices in the right currency" },
       // READ-ONLY: the asset detail page (shared with the staff consoles) needs
       // an asset's use case to know its compliance/lifecycle rules — without it,

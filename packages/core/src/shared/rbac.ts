@@ -12,7 +12,12 @@ const USE_CASE_ADMIN: readonly LifecycleAction[] = ["issue", "mint", "transfer",
 
 const MATRIX: Record<Role, ReadonlySet<LifecycleAction>> = {
   PlatformAdmin: new Set<LifecycleAction>(FULL),
-  OrgAdmin: new Set<LifecycleAction>(["read"]),
+  // Widened to the same operator set UseCaseAdmin has (not FULL — buy/list/
+  // cancel-listing stay investor-only): an OrgAdmin now runs every use case
+  // its org owns directly, not just proposes them. This is a superset, not a
+  // replacement — UseCaseAdmin is unchanged and every existing UseCaseAdmin
+  // login keeps working exactly as before.
+  OrgAdmin: new Set<LifecycleAction>(USE_CASE_ADMIN),
   UseCaseAdmin: new Set<LifecycleAction>(USE_CASE_ADMIN),
   Issuer: new Set<LifecycleAction>(["issue", "mint", "allow", "disallow", "freeze", "unfreeze", "read"]),
   Trader: new Set<LifecycleAction>(["transfer", "burn", "buy", "list", "cancel-listing", "read"]),

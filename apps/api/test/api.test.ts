@@ -857,7 +857,9 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
     expect(res.json().error).toBe("INSUFFICIENT_TREASURY");
   });
 
-  it("cash/credit 403 for a Buyer caller (role gate)", async () => {
+  it("cash/credit 403 OUT_OF_SCOPE when a Buyer funds an account that isn't their own", async () => {
+    // carbon.buyer's own wallet is EcoFund Capital (seed.ts), not BUYER_WALLET
+    // (Helios Energy Corp) — self-funding is real but self-ONLY.
     const res = await inj({
       method: "POST",
       url: "/cash/credit",
@@ -865,7 +867,21 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
       payload: { account: BUYER_WALLET, currency: "CBDC-INR", amount: "100" },
     });
     expect(res.statusCode).toBe(403);
-    expect(res.json().error).toBe("FORBIDDEN");
+    expect(res.json().error).toBe("OUT_OF_SCOPE");
+  });
+
+  it("cash/credit lets a Buyer fund their own account (self-funding)", async () => {
+    const carbonBuyer = await loginAs(app, "carbon.buyer@tokenlayer.dev", "carbon123");
+    // carbon.buyer's own linked wallet, per seed.ts.
+    const ownWallet = "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc"; // EcoFund Capital
+    const res = await inj({
+      method: "POST",
+      url: "/cash/credit",
+      headers: auth(carbonBuyer),
+      payload: { account: ownWallet, currency: "CBDC-INR", amount: "250" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().balance).toBe("250");
   });
 
   it("cash/credit 403 OUT_OF_SCOPE when a UseCaseAdmin funds an out-of-scope account", async () => {

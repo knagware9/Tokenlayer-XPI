@@ -278,6 +278,19 @@ export const sharedSchemas: Record<string, FastifySchema> = {
         orgType: { type: "string", enum: ["bank", "corporate", "msme", "government", "verifier"] },
         registrationId: { type: "string" },
         jurisdiction: { type: "string" },
+        // Optional: when supplied, provisions that org's FIRST login in the
+        // same call — active immediately (no pending-approval queue, unlike
+        // /orgs/register's public KYB signup), so the org can be handed
+        // straight to its owner. Omit to create a bare org with no admin (the
+        // existing behavior every other caller of this route still gets).
+        admin: {
+          type: "object", additionalProperties: false, required: ["name", "email", "password"],
+          properties: {
+            name: { type: "string", minLength: 1 },
+            email: { type: "string", format: "email" },
+            password: { type: "string", minLength: 8 },
+          },
+        },
       },
     },
     // Deliberately a NARROWER projection than `Organization`: no companyProfile,
@@ -295,6 +308,9 @@ export const sharedSchemas: Record<string, FastifySchema> = {
           jurisdiction: { type: "string", nullable: true },
           verified: { type: "boolean" },
           status: { type: "string", enum: ["pending", "active", "rejected"] },
+          adminEmail: { type: "string", nullable: true, description: "Set only when `admin` was supplied — that email can now log in." },
+          issuerDid: { type: "string", nullable: true, description: "The platform's DID, which signed the admin's OrganizationCredential (only when `admin` was supplied)." },
+          orgCredentialId: { type: "string", nullable: true },
         },
         required: ["id", "name", "did", "orgType", "verified", "status"],
       },

@@ -63,8 +63,8 @@ const CAPABILITY_FOR: Record<string, LifecycleAction> = {
   freeze: "freeze", unfreeze: "unfreeze", "cashflow-execute": "issue",
 };
 
-const tokenCanView = async (_deps: AppDeps, claims: TokenClaims, p: ProposalRecord): Promise<boolean> =>
-  p.useCaseKey !== null && scopedToCaller(claims, p.useCaseKey);
+const tokenCanView = async (deps: AppDeps, claims: TokenClaims, p: ProposalRecord): Promise<boolean> =>
+  p.useCaseKey !== null && (await scopedToCaller(claims, p.useCaseKey, deps.useCases));
 
 const tokenCanApprove = async (deps: AppDeps, claims: TokenClaims, p: ProposalRecord): Promise<boolean> => {
   const capability = CAPABILITY_FOR[p.kind];
