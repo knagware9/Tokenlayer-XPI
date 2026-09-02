@@ -41,6 +41,23 @@ up` on just `tokenization-api`, which recreates it standalone (drops
 `IDENTITY_SERVICE_URL` and widens `ENABLED_DOMAINS` back to
 `tokenization,identity`) instead of relinking it.
 
+**The "TokenLayer Platform" org's own custodial DID seed can go stale the same
+way**, and its failure mode is quieter: it is the fallback signer for onboarding
+KycCredentials with no owner org, *and* the issuer of the `OrganizationCredential`
+every `POST /orgs` admin-provisioning ceremony mints — so a mismatch surfaces
+generically as `ADMIN_ACTIVATION_FAILED` on org creation, or `REQUEST_FAILED` on
+the admin-issue-kyc shortcut, both hiding the same underlying
+`Unsupported state or unable to authenticate data` `decryptSeed` failure (visible
+only via `docker logs`, since this app runs with `logger: false`). Found and
+fixed live on 2026-09-02: the platform org's seed had been encrypted under an
+earlier, no-longer-current `DID_MASTER_KEY`. Fix is a direct one-row update —
+generate a fresh seed with the app's own `createKeystore(DID_MASTER_KEY)` module,
+confirm the *old* seed genuinely fails to decrypt first (don't touch a working
+one), then update that org's `did` + `didSeedEncrypted` — back up the database
+first. **Known, accepted consequence**: the platform org's DID string changes,
+so any credential it issued *before* the fix keeps an `issuerDid` pointing at
+the now-orphaned old DID and stops verifying against the org's current one.
+
 ## Endpoints
 
 ### Combined stack — both products in one app
