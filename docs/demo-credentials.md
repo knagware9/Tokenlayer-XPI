@@ -25,6 +25,22 @@ organizations survive and silently lose the ability to sign, surfacing much
 later as `Unsupported state or unable to authenticate data` on an unrelated
 onboarding. Back the file up; never regenerate it for a deployment that has data.
 
+`IDENTITY_SERVICE_KEY` (the peer credential a linked `tokenization-api` uses to
+ask `identity-api` "does this DID hold a valid credential?") belongs to the
+**identity-api database it was minted against**, not to `.env.personas` — if
+that database is ever reset (a fresh volume, a restore, a `DID_MASTER_KEY`
+recovery), the old key still sits in `.env.personas` looking valid but no
+longer exists on the identity side. The failure surfaces on the tokenization
+side, on the first identity-gated action, as `IDENTITY_SERVICE_UNAVAILABLE:
+the identity service refused the assertion (HTTP 401)` — a message that blames
+the transport, not the stale key. Re-mint with
+`IDENTITY_URL=http://localhost:4110/api/v1 node scripts/mint-identity-peer-key.mjs`,
+replace the value in `.env.personas`, then bring the linked stacks up through
+`bash scripts/stack-up.sh identity tokenization` — not a direct `docker compose
+up` on just `tokenization-api`, which recreates it standalone (drops
+`IDENTITY_SERVICE_URL` and widens `ENABLED_DOMAINS` back to
+`tokenization,identity`) instead of relinking it.
+
 ## Endpoints
 
 ### Combined stack — both products in one app
