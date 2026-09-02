@@ -3,7 +3,7 @@ import { ApiError, api } from "../../api.js";
 import { useAuth } from "../../auth.js";
 import { clampAccent } from "../../lib/shared/branding.js";
 import { DOMAIN_LABELS, ROLE_LABELS, fullCapabilities, isOrgOperatingRole, orgRoleEnabled, toggleCapability, validateEnvelope } from "../../lib/shared/capabilities.js";
-import { ORG_DOMAINS, ORG_OPERATING_ROLES, type CompanyCategory, type CredentialStatusInfo, type DidDocument, type KybDocumentRef, type OrgCapabilities, type OrgDomain, type OrgMember, type OrgOperatingRole, type OrgType, type Organization, type Role } from "../../types.js";
+import { ORG_DOMAINS, ORG_OPERATING_ROLES, type CompanyCategory, type CredentialStatusInfo, type CredentialUseCase, type DidDocument, type KybDocumentRef, type OrgCapabilities, type OrgDomain, type OrgMember, type OrgOperatingRole, type OrgType, type Organization, type Role, type UseCase } from "../../types.js";
 import { useOrgLogo } from "./AppShell.js";
 import { CredentialsPanel } from "../identity/CredentialsPanel.js";
 import { Card, EmptyState, Pill, SectionHeader } from "./ui.js";
@@ -437,6 +437,25 @@ export function Organizations(): JSX.Element {
   };
   useEffect(reloadPending, [token]);
 
+  // PlatformAdmin only, and only for the dashboard's use-case badges below —
+  // every other role never needs this fetch. Both domains: an org can own a
+  // tokenization use case, a credential use case, or (rarely) both.
+  const [useCases, setUseCases] = useState<UseCase[]>([]);
+  const [credentialUseCases, setCredentialUseCases] = useState<CredentialUseCase[]>([]);
+  useEffect(() => {
+    if (!token || !isPlatform) return;
+    void api.useCases(token).then(setUseCases).catch(() => setUseCases([]));
+    void api.credentialUseCases(token).then(setCredentialUseCases).catch(() => setCredentialUseCases([]));
+  }, [token, isPlatform]);
+
+  /** Every use case (either domain) a given org owns, as short display labels. */
+  const useCasesOwnedBy = (orgId: string): { key: string; name: string; domain: "tokenization" | "identity" }[] => [
+    ...useCases.filter((u) => u.ownerOrgId === orgId).map((u) => ({ key: u.key, name: u.name, domain: "tokenization" as const })),
+    ...credentialUseCases.filter((u) => u.ownerOrgId === orgId).map((u) => ({ key: u.key, name: u.name, domain: "identity" as const })),
+  ];
+
+  const onboardedOrgs = orgs.filter((o) => o.status === "active");
+
   const selectedOrg = orgs.find((o) => o.id === selected) ?? null;
 
   // Resolved once for the selected org only — a DID document per card would be
@@ -475,23 +494,26 @@ export function Organizations(): JSX.Element {
 
       {isPlatform && <CreateOrg onCreated={reload} />}
 
-      {orgs.length === 0 ? (
+      {isPlatform && <SectionHeader title="Onboarded organizations" description="Active organizations and the use case(s) each has subscribed to." />}
+
+      {(isPlatform ? onboardedOrgs : orgs).length === 0 ? (
         <Card>
           <EmptyState
             icon="globe"
-            title="No organizations yet"
-            hint={isPlatform ? "Create one above to start onboarding members." : "Your account is not linked to an organization."}
+            title={isPlatform ? "No onboarded organizations yet" : "No organizations yet"}
+            hint={isPlatform ? "Approve a pending registration above, or create one directly." : "Your account is not linked to an organization."}
           />
         </Card>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {orgs.map((o) => (
+          {(isPlatform ? onboardedOrgs : orgs).map((o) => (
             <OrgCard
               key={o.id}
               org={o}
               selected={o.id === selected}
               registration={o.id === selected ? registration : null}
               onSelect={() => setSelected(o.id)}
+              useCasesOwned={isPlatform ? useCasesOwnedBy(o.id) : undefined}
             />
           ))}
         </div>
@@ -506,12 +528,14 @@ export function Organizations(): JSX.Element {
   );
 }
 
-function OrgCard({ org, selected, registration, onSelect }: {
+function OrgCard({ org, selected, registration, onSelect, useCasesOwned }: {
   org: Organization;
   selected: boolean;
   /** Only ever set for the selected org — the DID document is resolved once, not per card. */
   registration: DidDocument["registration"];
   onSelect: () => void;
+  /** PlatformAdmin's dashboard only — the use case(s) (either domain) this org owns. */
+  useCasesOwned?: { key: string; name: string; domain: "tokenization" | "identity" }[];
 }): JSX.Element {
   return (
     <button
@@ -551,6 +575,19 @@ function OrgCard({ org, selected, registration, onSelect }: {
             ) : null;
           })()}
         </div>
+      )}
+      {useCasesOwned !== undefined && (
+        useCasesOwned.length === 0 ? (
+          <p className="text-[11px] text-slate-400">No use case subscribed yet</p>
+        ) : (
+          <div className="flex flex-wrap items-center gap-1.5 pt-1">
+            {useCasesOwned.map((u) => (
+              <Pill key={`${u.domain}-${u.key}`} tone={u.domain === "tokenization" ? "info" : "muted"}>
+                {u.name}
+              </Pill>
+            ))}
+          </div>
+        )
       )}
     </button>
   );
