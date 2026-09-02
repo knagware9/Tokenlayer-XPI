@@ -320,8 +320,19 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
 
   app.post("/credential-use-cases", { schema: S.createCredentialUseCase, ...authScoped("usecases:provision") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
-    if (claims.role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only a platform admin may author credential use cases" });
-    const def = request.body as CredentialUseCaseDefinition;
+    // A PlatformAdmin authors directly (201); an active OrgAdmin proposes an
+    // org-owned use case for a PlatformAdmin to approve (maker-checker, 202) —
+    // mirrors POST /use-cases on the tokenization side exactly.
+    if (claims.role !== "PlatformAdmin" && !(claims.role === "OrgAdmin" && claims.orgId)) {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "only a platform admin or an org admin may author credential use cases" });
+    }
+    let def = request.body as CredentialUseCaseDefinition;
+    if (claims.role === "OrgAdmin") {
+      // Stamp ownership AND the issuer binding from the caller's own claims,
+      // never the client body — an OrgAdmin may only create a use case IT
+      // issues for, never bind an arbitrary org (or the platform) as issuer.
+      def = { ...def, ownerOrgId: claims.orgId, issuer: { kind: "org", orgId: claims.orgId as string } };
+    }
     if (await namespaceHolding(deps, def.key)) {
       return reply.code(409).send({ error: "KEY_TAKEN", message: `use-case key '${def.key}' already exists` });
     }
@@ -336,6 +347,14 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
     if (badBackground) return reply.code(400).send(badBackground);
     const violation = await credentialUseCaseCapabilityViolation(def, known);
     if (violation) return orgCapabilityMissing(reply, violation.org, violation.missing);
+    if (claims.role === "OrgAdmin") {
+      const proposal = await deps.proposals.create({
+        useCaseKey: null, orgId: claims.orgId as string, assetId: null, kind: "create-credential-use-case",
+        payload: def as unknown as Record<string, unknown>,
+        proposerId: claims.id, proposerLabel: claims.email, required: 1,
+      });
+      return reply.code(202).send({ proposal: proposalView(proposal) });
+    }
     const created = await deps.credentialUseCases.create({ ...def, ownerOrgId: def.ownerOrgId ?? null });
     await deps.audit.append({ actorId: claims.id, action: "credential-usecase-created" as LifecycleAction, payload: { key: def.key } });
     return reply.code(201).send(created);

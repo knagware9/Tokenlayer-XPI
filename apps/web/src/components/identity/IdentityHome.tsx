@@ -127,7 +127,7 @@ export function IdentityHome(): JSX.Element {
                   Provision from template
                 </button>
               )}
-              {isPlatformAdmin && (
+              {canProvision && (
                 <button
                   onClick={() => setShowBuilder(true)}
                   className="rounded-lg bg-brand-600 text-white px-3.5 py-1.5 text-xs font-semibold hover:bg-brand-700"

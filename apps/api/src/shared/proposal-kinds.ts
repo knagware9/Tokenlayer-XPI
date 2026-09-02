@@ -13,7 +13,7 @@
 import type { Actor, ApiScope, LifecycleAction } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { issueCredentialKind, revokeCredentialKind } from "../identity/credential-kinds.js";
-import { issueUsecaseCredentialBatchKind, issueUsecaseCredentialKind } from "../identity/credential-usecase-kinds.js";
+import { createCredentialUseCaseKind, issueUsecaseCredentialBatchKind, issueUsecaseCredentialKind } from "../identity/credential-usecase-kinds.js";
 import { coded, executeCashflowCore, executeIssueActivation, runGatedAction } from "./executors.js";
 import type { TokenClaims } from "../http/support.js";
 import { scopedToCaller } from "../http/support.js";
@@ -169,6 +169,7 @@ export function allProposalKinds(): ProposalKindHandler[] {
 // through the same registry as the token kinds above.
 registerProposalKind(issueCredentialKind);
 registerProposalKind(revokeCredentialKind);
+registerProposalKind(createCredentialUseCaseKind);
 registerProposalKind(issueUsecaseCredentialKind);
 registerProposalKind(issueUsecaseCredentialBatchKind);
 

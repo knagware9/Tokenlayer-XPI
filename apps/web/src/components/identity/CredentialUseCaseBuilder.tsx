@@ -99,6 +99,7 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
 
   // Step 4 — create
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   // Step 4 — save as template (a lightweight, unparameterized snapshot of the
@@ -377,9 +378,16 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
     if (!token) return;
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
-      await api.createCredentialUseCase(token, buildDefinition());
-      onCreated();
+      const res = await api.createCredentialUseCase(token, buildDefinition());
+      if ("proposal" in res) {
+        // 202: an OrgAdmin's request is gated — nothing is created until a
+        // PlatformAdmin approves it (mirrors the tokenization use-case builder).
+        setNotice(`Use case submitted (${res.proposal.id.slice(0, 8)}…) — pending platform approval in Approvals.`);
+      } else {
+        onCreated();
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not create credential use case");
     } finally {
@@ -676,6 +684,7 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
                 </SummaryTile>
               </div>
               {error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2">{error}</div>}
+              {notice && <div className="rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm px-4 py-2">{notice}</div>}
 
               <div className="rounded-xl border border-slate-200 p-4">
                 <div className="flex items-center justify-between gap-2">

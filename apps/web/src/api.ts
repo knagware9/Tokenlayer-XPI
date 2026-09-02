@@ -460,7 +460,8 @@ export const api = {
   credentialTemplates: (token: string) => request<Record<string, CredentialTypeSpec>>("/credential-templates", token),
   credentialUseCases: (token: string) => request<CredentialUseCase[]>("/credential-use-cases", token),
   credentialUseCase: (token: string, key: string) => request<CredentialUseCase>(`/credential-use-cases/${encodeURIComponent(key)}`, token),
-  createCredentialUseCase: (token: string, def: CredentialUseCase) => request<CredentialUseCase>("/credential-use-cases", token, { method: "POST", body: JSON.stringify(def) }),
+  createCredentialUseCase: (token: string, def: CredentialUseCase) =>
+    request<CredentialUseCase | { proposal: Proposal }>("/credential-use-cases", token, { method: "POST", body: JSON.stringify(def) }),
   updateCredentialUseCase: (token: string, key: string, def: CredentialUseCase) => request<CredentialUseCase>(`/credential-use-cases/${encodeURIComponent(key)}`, token, { method: "PATCH", body: JSON.stringify(def) }),
   addCredentialType: (token: string, key: string, spec: CredentialTypeSpec) =>
     request<CredentialUseCase>(`/credential-use-cases/${encodeURIComponent(key)}/credential-types`, token, { method: "POST", body: JSON.stringify(spec) }),

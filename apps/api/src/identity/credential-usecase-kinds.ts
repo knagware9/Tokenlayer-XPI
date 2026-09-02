@@ -5,7 +5,7 @@
  * claim schema + validity come from the CredentialUseCase config, not the
  * closed catalog.
  */
-import { credentialUseCaseType, holderPolicyAllows, orgRoleEnabled } from "@tokenlayer/core";
+import { credentialUseCaseType, holderPolicyAllows, orgRoleEnabled, type CredentialUseCaseDefinition, type LifecycleAction } from "@tokenlayer/core";
 import type { AppDeps } from "../context.js";
 import { coded } from "../shared/executors.js";
 import { issueCredentialFor } from "./credential-issuance.js";
@@ -25,6 +25,36 @@ const orgScopedView = async (_deps: AppDeps, claims: TokenClaims, p: ProposalRec
  */
 const orgScopedOrOwnView = async (deps: AppDeps, claims: TokenClaims, p: ProposalRecord): Promise<boolean> =>
   claims.id === p.proposerId || orgScopedView(deps, claims, p);
+
+/**
+ * An OrgAdmin proposes a NEW credential use case for its own org (mirrors
+ * tokenization's `create-use-case` kind exactly). Shape/EN-A/document
+ * validation all already ran once, fully, at PROPOSE time — in the route
+ * handler, the same checks a PlatformAdmin's direct-create runs — so this
+ * re-checks only what could have gone STALE while the proposal sat pending: a
+ * key someone else took in the meantime, and the org's own Issuer capability
+ * (it may have been revoked after the proposal was drafted). Everything else
+ * in `def` is trusted as already-validated config, exactly like
+ * `issueUsecaseCredentialKind`'s own EN-A re-check does for the same reason.
+ */
+export const createCredentialUseCaseKind: ProposalKindHandler = {
+  kind: "create-credential-use-case",
+  apiScope: "usecases:provision",
+  canView: orgScopedView,
+  canApprove: orgScopedView,
+  async execute(ctx, _proposer, p) {
+    const def = p.payload as unknown as CredentialUseCaseDefinition;
+    if (await ctx.deps.credentialUseCases.has(def.key)) throw coded(409, "KEY_TAKEN", `use-case key '${def.key}' already exists`);
+    if (def.ownerOrgId) {
+      const owner = await ctx.deps.organizations.get(def.ownerOrgId).catch(() => null);
+      if (owner && !orgRoleEnabled(owner.capabilities, "Issuer")) {
+        throw coded(403, "ORG_CAPABILITY_MISSING", `organization '${owner.name}' (${owner.id}) does not have the 'Issuer' capability`);
+      }
+    }
+    await ctx.deps.credentialUseCases.create(def);
+    await ctx.deps.audit.append({ actorId: p.proposerId, action: "credential-usecase-created" as LifecycleAction, payload: { key: def.key } });
+  },
+};
 
 export interface IssueUsecaseCredentialPayload {
   credentialUseCaseKey: string;
