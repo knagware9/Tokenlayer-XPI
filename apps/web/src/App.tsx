@@ -145,10 +145,16 @@ export function App(): JSX.Element {
   // rather than living inside the console's view switch.
   if (routeKey === "verify") return <PublicVerify />;
 
+  // A password-reset link must work the same way: the person who clicked it may
+  // still hold a valid session in this browser (requested the reset from another
+  // device, or just never logged out here). Inside the auth gate below, that
+  // session would swallow the route and drop the ?token= silently — so this
+  // precedes the session check too, rather than living inside the gate.
+  if (routeKey === "reset-password") return <ResetPassword />;
+
   // Public (unauthenticated) surface: a marketing homepage plus the corporate
   // self-registration flow. The first path segment selects the screen.
   if (!token || !user) {
-    if (routeKey === "reset-password") return <ResetPassword />;
     if (routeKey === "signup") return <Signup />;
     if (routeKey === "login") return <Login />;
     // A persona build shows ITS OWN front door — which product, which app, and
