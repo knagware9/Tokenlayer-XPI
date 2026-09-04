@@ -42,6 +42,15 @@ export interface OnboardUserPayload {
    * at someone else's verified identity).
    */
   did: string | null;
+  /**
+   * The caller already has the plaintext password (e.g. `provisionDeskUser`,
+   * which auto-approves this proposal in-process) and will send its own
+   * `welcomeCredentialsEmail` right after `execute()` returns. Without this,
+   * that path sends BOTH the set-password-link email below AND the
+   * credentials email — contradictory. The real two-step `POST /users` flow
+   * never sets this, so it still gets the set-password email as intended.
+   */
+  skipWelcomeEmail?: boolean;
 }
 
 /** ownerOrg of the use case when present, else the platform issuer org. */
@@ -73,18 +82,18 @@ async function onboardSingle(deps: AppDeps, proposer: Actor, pl: OnboardUserPayl
     email: pl.email, passwordHash: pl.passwordHash, role: pl.role, useCaseKey: pl.useCaseKey,
     accountId, active: true, kycStatus: "pending", kyc: pl.kyc ?? null, kind: "human",
   });
-  {
-    const minted = await mintResetToken();
-    await deps.passwordResetTokens.create({
-      userId: created.id, tokenPrefix: minted.prefix, tokenHash: minted.hash,
-      expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
-    });
-    const setPasswordUrl = `${deps.publicWebUrl}/reset-password?token=${minted.token}`;
-    const welcome = welcomeSetPasswordEmail({ email: created.email, setPasswordUrl });
-    await deps.mail.send(created.email, welcome.subject, welcome.text, welcome.html).catch(() => undefined);
-  }
   let issuedCredentialId: string | null = null;
   try {
+    if (!pl.skipWelcomeEmail) {
+      const minted = await mintResetToken();
+      await deps.passwordResetTokens.create({
+        userId: created.id, tokenPrefix: minted.prefix, tokenHash: minted.hash,
+        expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+      });
+      const setPasswordUrl = `${deps.publicWebUrl}/reset-password?token=${minted.token}`;
+      const welcome = welcomeSetPasswordEmail({ email: created.email, setPasswordUrl });
+      await deps.mail.send(created.email, welcome.subject, welcome.text, welcome.html).catch(() => undefined);
+    }
     // LINK, or MINT. A supplied DID belongs to a separately-deployed Identity
     // service: this deployment records it and stores NO seed, because it does
     // not hold that key and must never be able to sign as the holder. It also

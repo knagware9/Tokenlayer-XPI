@@ -26,4 +26,36 @@ describe("welcome emails", () => {
     expect(sent!.text).not.toContain("never-sent-anywhere");
     expect(sent!.text).toMatch(/reset-password\?token=/);
   });
+
+  // Regression for the double-email bug: provisionDeskUser (identity.ts) creates
+  // an "onboard-user" proposal and auto-approves it in-process via
+  // onboardUserKind.execute (onboardSingle) in the SAME request, then sends its
+  // own welcomeCredentialsEmail. Before the fix, onboardSingle unconditionally
+  // sent its own welcomeSetPasswordEmail too — every desk user got BOTH a
+  // "here is your password" email and a contradictory "no password yet, click
+  // this link" email. skipWelcomeEmail on the proposal payload (set only by
+  // provisionDeskUser) suppresses onboardSingle's send for this path.
+  it("provisionDeskUser (POST /credential-use-cases/provision, createDeskUsers) sends exactly ONE email per desk user — the real-password variant, never a set-password link", async () => {
+    const h = await buildTestAppWithRepos();
+    const admin = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const domain = `desk-${Date.now()}.edu`;
+    const res = await h.app.inject({
+      method: "POST", url: `${V1}/credential-use-cases/provision`, headers: auth(admin),
+      payload: {
+        templateKey: "education-certificate",
+        params: { issuerOrgName: `Desk University ${Date.now()}`, jurisdiction: "IN" },
+        provisioning: { issuerOrgType: "government", createDeskUsers: true, deskEmailDomain: domain },
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const body = res.json() as { deskUsers: Array<{ email: string; password: string; role: string }> };
+    expect(body.deskUsers).toHaveLength(3);
+
+    for (const du of body.deskUsers) {
+      const toThisUser = h.mail.sent.filter((m) => m.to === du.email);
+      expect(toThisUser).toHaveLength(1); // not two — the double-send bug
+      expect(toThisUser[0]!.text).toContain(du.password); // welcomeCredentialsEmail, the real password
+      expect(toThisUser[0]!.text).not.toMatch(/reset-password\?token=/); // never welcomeSetPasswordEmail
+    }
+  });
 });

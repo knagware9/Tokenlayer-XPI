@@ -1003,6 +1003,11 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
       payload: {
         email, passwordHash: await bcrypt.hash(password, BCRYPT_ROUNDS),
         role, useCaseKey, walletAddress: null, kyc: null,
+        // The plaintext password is already in hand here (generated just above)
+        // and this function sends its own welcomeCredentialsEmail right after
+        // execute() returns — skip onboardSingle's set-password-link email so
+        // the desk user isn't sent two contradictory welcome emails.
+        skipWelcomeEmail: true,
       },
       proposerId: actor.id, proposerLabel: actor.email, required: 1,
     });
