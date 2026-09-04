@@ -7,6 +7,8 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
+import { mintResetToken, resetTokenMatches } from "../../mail/reset-tokens.js";
+import { passwordResetEmail } from "../../mail/templates.js";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ApiKeyRecord, AssetRecord, BrandingPatch, CashflowRecord, CompanyProfile, CredentialRecord, DocumentPurpose, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord, WebhookEndpointRecord } from "../../persistence/types/index.js";
 import { ListingConflictError } from "../../persistence/types/index.js";
@@ -84,6 +86,39 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
         brandAccent: org?.brandAccent ?? null,
       },
     };
+  });
+
+  app.post("/auth/forgot-password", { schema: S.forgotPassword }, async (request, reply) => {
+    if (loginThrottled(request.ip)) return reply.code(429).send({ error: "TOO_MANY_REQUESTS", message: "too many attempts; try again later" });
+    const { email } = request.body as { email: string };
+    const user = await deps.users.findByEmail(email);
+    // Same response whether or not the account exists — no enumeration.
+    if (user && user.kind === "human" && user.active) {
+      await deps.passwordResetTokens.invalidateAllForUser(user.id);
+      const minted = await mintResetToken();
+      await deps.passwordResetTokens.create({
+        userId: user.id, tokenPrefix: minted.prefix, tokenHash: minted.hash,
+        expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+      });
+      const resetUrl = `${deps.publicWebUrl}/reset-password?token=${minted.token}`;
+      const email_ = passwordResetEmail({ resetUrl });
+      await deps.mail.send(user.email, email_.subject, email_.text, email_.html).catch((err) => request.log.error({ err }, "[mail] forgot-password send failed"));
+    }
+    return reply.code(202).send({});
+  });
+
+  app.post("/auth/reset-password", { schema: S.resetPassword }, async (request, reply) => {
+    const { token, newPassword } = request.body as { token: string; newPassword: string };
+    const prefix = token.slice(0, 8);
+    const row = await deps.passwordResetTokens.findByPrefix(prefix);
+    const invalid = () => reply.code(400).send({ error: "INVALID_TOKEN", message: "this reset link is invalid or has expired" });
+    if (!row || row.usedAt || new Date(row.expiresAt) < new Date()) return invalid();
+    if (!(await resetTokenMatches(token, row.tokenHash))) return invalid();
+    await deps.users.update(row.userId, { passwordHash: await bcrypt.hash(newPassword, BCRYPT_ROUNDS) });
+    await deps.passwordResetTokens.markUsed(row.id);
+    await deps.passwordResetTokens.invalidateAllForUser(row.userId);
+    await deps.audit.append({ actorId: row.userId, action: "password-reset" as LifecycleAction, payload: { userId: row.userId } });
+    return reply.code(200).send({ status: "ok" });
   });
 
 

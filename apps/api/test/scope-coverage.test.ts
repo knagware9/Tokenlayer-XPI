@@ -48,6 +48,8 @@ import { declaredRoutes, routeKey as key } from "./route-decls.js";
 const DELIBERATELY_UNSCOPED: Record<string, string> = {
   // --- public: no principal at all, so there is no key to narrow ------------
   "POST /auth/login": "public; a key cannot authenticate here and a service user is refused outright",
+  "POST /auth/forgot-password": "public; no principal exists yet — the whole point is to reach an account that can't authenticate",
+  "POST /auth/reset-password": "public; authenticated by the single-use emailed token, not a session or key",
   "POST /auth/qr/start": "public; unauthenticated QR session bootstrap",
   "POST /auth/qr/:id/authenticate": "public; refuses service users at the JWT-minting step",
   "POST /orgs/register/documents": "public; self-registration KYB upload",

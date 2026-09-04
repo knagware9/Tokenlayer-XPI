@@ -438,6 +438,11 @@ const DOCUMENTATION_DEFERRED: Record<string, string> = {
   // would let fast-json-stringify take an interest in bytes it must pass
   // through untouched.
   "GET /credential-use-cases/:key/certificate/artwork": "returns opaque image bytes, not a JSON object",
+  // Deliberately empty: the whole point is that this route answers identically
+  // whether or not the account exists, so there is no field that could safely
+  // be named without leaking that fact. The schema's description explains what
+  // the empty 202 body means instead.
+  "POST /auth/forgot-password": "always returns an empty 202 body by design — naming a field would let a caller enumerate accounts",
 };
 
 type ResponseSchema = { response?: Record<string, unknown>; tags?: string[]; description?: string };

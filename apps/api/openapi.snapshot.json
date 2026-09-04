@@ -800,6 +800,20 @@
         }
       }
     },
+    "/api/v1/auth/forgot-password": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "security": null,
+        "scopes": null,
+        "parameters": [],
+        "requestBody": true,
+        "responses": {
+          "202": "{}"
+        }
+      }
+    },
     "/api/v1/auth/login": {
       "post": {
         "tags": [
@@ -866,6 +880,21 @@
           "404": "#Error",
           "410": "#Error",
           "429": "#Error"
+        }
+      }
+    },
+    "/api/v1/auth/reset-password": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "security": null,
+        "scopes": null,
+        "parameters": [],
+        "requestBody": true,
+        "responses": {
+          "200": "{status}",
+          "400": "#Error"
         }
       }
     },

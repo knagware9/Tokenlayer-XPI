@@ -41,6 +41,25 @@ export const sharedSchemas: Record<string, FastifySchema> = {
       ...errs(400, 401, 403),
     },
   },
+  forgotPassword: {
+    tags: ["Auth"],
+    summary: "Request a password-reset email",
+    description:
+      "Always answers 202, whether or not the account exists — a different reply would let a caller enumerate " +
+      "registered emails. This is NOT this platform's usual maker-checker 202 (a proposal for someone else to " +
+      "approve): the body is deliberately empty, and there is nothing further to check or poll.",
+    body: { type: "object", required: ["email"], properties: { email: { type: "string" } } },
+    response: { 202: { type: "object", properties: {}, additionalProperties: true } },
+  },
+  resetPassword: {
+    tags: ["Auth"],
+    summary: "Set a new password using a reset token",
+    body: { type: "object", required: ["token", "newPassword"], properties: { token: { type: "string" }, newPassword: { type: "string", minLength: 8 } } },
+    response: {
+      200: { type: "object", properties: { status: { type: "string" } }, additionalProperties: true },
+      400: { $ref: "Error#" },
+    },
+  },
   me: { tags: ["Auth"], summary: "Current session principal", security: humanOnly,
     description:
       "The caller's own principal, self-describing enough to drive a UI: role, use-case scope, which domain that " +
