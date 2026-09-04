@@ -40,6 +40,7 @@ import { resolveDid } from "../../identity/did-resolver.js";
 import { checkUrl } from "../../webhooks/url-guard.js";
 import { API_KEY_BCRYPT_ROUNDS, invalidateVerifiedPrefix, mintSecret } from "../../shared/api-keys.js";
 import { BRAND_LOGO_PRUNE_GRACE_MS, pruneSupersededBrandLogos } from "../../shared/brand-logo-prune.js";
+import { createProposalAndNotify } from "../../shared/proposal-notify.js";
 import { S } from "../schemas/index.js";
 import { holdsValidCredential, IDENTITY_CREDENTIAL_TYPE } from "../../identity/identity-assertions.js";
 import { actorOf, claimsOf, contextOf, isPositiveIntString, machinePrincipal, notFound, requirePrincipal, requireScope, scopedToCaller, type TokenClaims } from "../support.js";
@@ -105,7 +106,7 @@ export function buildRouteContext(app: FastifyInstance, deps: AppDeps, sharedPri
     if (!required || required < 1) return null;
     const claims = request.user as TokenClaims;
     // Token proposals are use-case scoped, never org scoped.
-    return deps.proposals.create({ useCaseKey: useCase.key, orgId: null, assetId, kind: op, payload, proposerId: claims.id, proposerLabel: claims.email, required });
+    return createProposalAndNotify(deps, { useCaseKey: useCase.key, orgId: null, assetId, kind: op, payload, proposerId: claims.id, proposerLabel: claims.email, required }, request.log);
   }
 
 

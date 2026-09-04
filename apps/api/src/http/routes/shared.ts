@@ -45,6 +45,7 @@ import { holdsValidCredential, IDENTITY_CREDENTIAL_TYPE } from "../../identity/i
 import { actorOf, claimsOf, contextOf, isPositiveIntString, machinePrincipal, notFound, requirePrincipal, requireScope, scopedToCaller, type TokenClaims } from "../support.js";
 import { NO_USE_CASE, canAdministerUser, BCRYPT_ROUNDS, LOGIN_WINDOW_MS, MAX_DOC_BYTES, DOC_UPLOAD_BODY_LIMIT, ALLOWED_DOC_TYPES, storeUploadedDocument, orgOwnsDocument, decodeVcJti, devKeyFromSeed, orgView, orgCapabilityMissing } from "./common.js";
 import type { BrandLogoErrorCode, RouteContext } from "./context.js";
+import { createProposalAndNotify } from "../../shared/proposal-notify.js";
 
 export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: RouteContext): void {
   const { principal, auth, authScoped, loginThrottled, proposeIfGated, orgScoped, resolveUseCaseDomain, useCaseKeysByDomain, linkedWallet, orgMemberCapabilityViolation, brandLogoRefusal, proposalView, ensureOrg, manageableTarget, mapHeld, issuerNameResolver, isRenderableArtwork, RENDERABLE_ARTWORK_TYPES, assetChain, verifyAsset, redactPayload } = ctx;
@@ -491,7 +492,7 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     // never enters the proposal store) and park everything in an onboard-user
     // proposal for a second user-manager to approve.
     const kyc = b.kyc && b.kyc.legalName && b.kyc.country ? b.kyc : null;
-    const proposal = await deps.proposals.create({
+    const proposal = await createProposalAndNotify(deps, {
       useCaseKey: targetUseCaseKey, orgId: null, assetId: null, kind: "onboard-user",
       payload: {
         email: b.email, passwordHash: await bcrypt.hash(b.password, BCRYPT_ROUNDS),
@@ -499,7 +500,7 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
         did: b.did ?? null,
       },
       proposerId: claims.id, proposerLabel: claims.email, required: 1,
-    });
+    }, request.log);
     return reply.code(202).send({ proposal: proposalView(proposal) });
   });
 
@@ -561,11 +562,11 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     // branch (`claims.orgId`) is NOT replicated here — a batch ALWAYS drafts a
     // proposal, even for an org-scoped caller, so every batch runs through the
     // same maker-checker executor path (one onboardSingle call per row).
-    const proposal = await deps.proposals.create({
+    const proposal = await createProposalAndNotify(deps, {
       useCaseKey: uniformUseCaseKey, orgId: null, assetId: null, kind: "onboard-user-batch",
       payload: { rows: prepared },
       proposerId: claims.id, proposerLabel: claims.email, required: 1,
-    });
+    }, request.log);
     await deps.audit.append({
       actorId: claims.id, action: "user-batch-proposed" as LifecycleAction,
       payload: { proposalId: proposal.id, total: prepared.length },
@@ -1340,11 +1341,11 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     if (!org) return notFound(reply, "organization not found");
     const b = request.body as { capabilities: unknown };
     const capabilities = validateOrgCapabilities(b.capabilities); // 400 INVALID_CAPABILITIES on bad input
-    const proposal = await deps.proposals.create({
+    const proposal = await createProposalAndNotify(deps, {
       useCaseKey: null, orgId: org.id, assetId: null, kind: "org-capability-change",
       payload: { orgId: org.id, capabilities },
       proposerId: claims.id, proposerLabel: claims.email, required: 1,
-    });
+    }, request.log);
     return reply.code(202).send({ proposal: proposalView(proposal) });
   });
 

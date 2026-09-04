@@ -43,6 +43,7 @@ import { redactClaims, resolveDisclosures, validateRequestedFields, type Disclos
 import { actorOf, claimsOf, contextOf, isPositiveIntString, machinePrincipal, notFound, requirePrincipal, requireScope, scopedToCaller, type TokenClaims } from "../support.js";
 import { NO_USE_CASE, canAdministerUser, BCRYPT_ROUNDS, LOGIN_WINDOW_MS, MAX_DOC_BYTES, DOC_UPLOAD_BODY_LIMIT, ALLOWED_DOC_TYPES, storeUploadedDocument, orgOwnsDocument, decodeVcJti, devKeyFromSeed, orgView, orgCapabilityMissing } from "./common.js";
 import type { BrandLogoErrorCode, RouteContext } from "./context.js";
+import { createProposalAndNotify } from "../../shared/proposal-notify.js";
 
 export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx: RouteContext): void {
   const { principal, auth, authScoped, loginThrottled, proposeIfGated, orgScoped, resolveUseCaseDomain, useCaseKeysByDomain, linkedWallet, orgMemberCapabilityViolation, brandLogoRefusal, proposalView, ensureOrg, manageableTarget, mapHeld, isRenderableArtwork, RENDERABLE_ARTWORK_TYPES, assetChain, verifyAsset, redactPayload } = ctx;
@@ -349,11 +350,11 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
     const violation = await credentialUseCaseCapabilityViolation(def, known);
     if (violation) return orgCapabilityMissing(reply, violation.org, violation.missing);
     if (claims.role === "OrgAdmin") {
-      const proposal = await deps.proposals.create({
+      const proposal = await createProposalAndNotify(deps, {
         useCaseKey: null, orgId: claims.orgId as string, assetId: null, kind: "create-credential-use-case",
         payload: def as unknown as Record<string, unknown>,
         proposerId: claims.id, proposerLabel: claims.email, required: 1,
-      });
+      }, request.log);
       return reply.code(202).send({ proposal: proposalView(proposal) });
     }
     const created = await deps.credentialUseCases.create({ ...def, ownerOrgId: def.ownerOrgId ?? null });
@@ -1317,11 +1318,11 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
     }
     validateMetadata(b.claims, spec.claimSchema); // throws INVALID_METADATA → 400
 
-    const proposal = await deps.proposals.create({
+    const proposal = await createProposalAndNotify(deps, {
       useCaseKey: null, orgId: issuerOrg.id, assetId: null, kind: "issue-usecase-credential",
       payload: { credentialUseCaseKey: key, credentialType: spec.name, subjectDid, ...subjectRef, claims: b.claims, issuerOrgId: issuerOrg.id },
       proposerId: claims.id, proposerLabel: claims.email, required: spec.requiredApprovals,
-    });
+    }, request.log);
     return reply.code(202).send({ proposal: proposalView(proposal) });
   });
 
@@ -1358,11 +1359,11 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
       return reply.code(400).send({ error: "BATCH_INVALID", message: `${problems.length} row(s) failed validation`, problems });
     }
 
-    const proposal = await deps.proposals.create({
+    const proposal = await createProposalAndNotify(deps, {
       useCaseKey: null, orgId: issuerOrg.id, assetId: null, kind: "issue-usecase-credential-batch",
       payload: { useCaseKey: key, credentialType: spec.name, issuerOrgId: issuerOrg.id, rows: b.rows },
       proposerId: claims.id, proposerLabel: claims.email, required: spec.requiredApprovals,
-    });
+    }, request.log);
     await deps.audit.append({
       actorId: claims.id, action: "credential-batch-proposed" as LifecycleAction,
       payload: { proposalId: proposal.id, useCaseKey: key, credentialType: spec.name, total: b.rows.length },
@@ -1420,11 +1421,11 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
     if (pending.some((p) => p.kind === "revoke-user-identity" && (p.payload as { userId: string }).userId === id)) {
       return reply.code(409).send({ error: "ALREADY_PENDING", message: "a revoke proposal for this user is already pending" });
     }
-    const proposal = await deps.proposals.create({
+    const proposal = await createProposalAndNotify(deps, {
       useCaseKey: target.useCaseKey, orgId: null, assetId: null, kind: "revoke-user-identity",
       payload: { userId: id, reason },
       proposerId: claims.id, proposerLabel: claims.email, required: 1,
-    });
+    }, request.log);
     return reply.code(202).send({ proposal: proposalView(proposal) });
   });
 
@@ -1486,11 +1487,11 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
     if (!subject.did) return reply.code(400).send({ error: "SUBJECT_HAS_NO_DID", message: "the subject has no decentralized identifier" });
     validateMetadata(b.claims, def.claimSchema); // throws INVALID_METADATA → 400
 
-    const proposal = await deps.proposals.create({
+    const proposal = await createProposalAndNotify(deps, {
       useCaseKey: null, orgId: org.id, assetId: null, kind: "issue-credential",
       payload: { type: def.type, subjectDid: subject.did, subjectUserId: subject.id, claims: b.claims, issuerOrgId: org.id },
       proposerId: claims.id, proposerLabel: claims.email, required: def.requiredApprovals,
-    });
+    }, request.log);
     return reply.code(202).send({ proposal: proposalView(proposal) });
   });
 
@@ -1525,11 +1526,11 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
     } else {
       required = credentialTypeDef(cred.type).requiredApprovals;
     }
-    const proposal = await deps.proposals.create({
+    const proposal = await createProposalAndNotify(deps, {
       useCaseKey: null, orgId: issuer.id, assetId: null, kind: "revoke-credential",
       payload: { credentialId: cred.id, reason },
       proposerId: claims.id, proposerLabel: claims.email, required,
-    });
+    }, request.log);
     return reply.code(202).send({ proposal: proposalView(proposal) });
   });
 

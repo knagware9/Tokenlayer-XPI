@@ -45,6 +45,7 @@ import { holdsValidCredential, IDENTITY_CREDENTIAL_TYPE } from "../../identity/i
 import { actorOf, claimsOf, contextOf, isPositiveIntString, machinePrincipal, notFound, requirePrincipal, requireScope, scopedToCaller, type TokenClaims } from "../support.js";
 import { NO_USE_CASE, canAdministerUser, BCRYPT_ROUNDS, LOGIN_WINDOW_MS, MAX_DOC_BYTES, DOC_UPLOAD_BODY_LIMIT, ALLOWED_DOC_TYPES, storeUploadedDocument, orgOwnsDocument, decodeVcJti, devKeyFromSeed, orgView, orgCapabilityMissing } from "./common.js";
 import type { BrandLogoErrorCode, RouteContext } from "./context.js";
+import { createProposalAndNotify } from "../../shared/proposal-notify.js";
 
 /**
  * ONE WORDING FOR ONE FACT. Issuance and `setPrice` refuse for the identical
@@ -153,11 +154,11 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
         return orgCapabilityMissing(reply, ownOrg, "tokenization");
       }
       const owned = { ...definition, ownerOrgId: claims.orgId as string };
-      const proposal = await deps.proposals.create({
+      const proposal = await createProposalAndNotify(deps, {
         useCaseKey: null, orgId: claims.orgId as string, assetId: null, kind: "create-use-case",
         payload: owned as unknown as Record<string, unknown>,
         proposerId: claims.id, proposerLabel: claims.email, required: 1,
-      });
+      }, request.log);
       return reply.code(202).send({ proposal: proposalView(proposal) });
     }
     // PlatformAdmin: deploy the use case's contract on each allowed chain that is
