@@ -27,6 +27,10 @@ export function Login(): JSX.Element {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [forgotMode, setForgotMode] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotBusy, setForgotBusy] = useState(false);
+  const [forgotNotice, setForgotNotice] = useState<string | null>(null);
 
   // Passwordless (QR / this-device) sign-in state.
   const [qrSvg, setQrSvg] = useState<string | null>(null);
@@ -55,6 +59,19 @@ export function Login(): JSX.Element {
       setError(err instanceof ApiError ? err.message : "Login failed");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function submitForgot(e?: React.FormEvent): Promise<void> {
+    e?.preventDefault();
+    setForgotBusy(true);
+    try {
+      await api.forgotPassword(forgotEmail);
+      setForgotNotice("If that address has an account, we've sent a password-reset link to it.");
+    } catch (err) {
+      setForgotNotice(err instanceof ApiError ? err.message : "Something went wrong — try again.");
+    } finally {
+      setForgotBusy(false);
     }
   }
 
@@ -251,16 +268,52 @@ export function Login(): JSX.Element {
                 )}
               </div>
 
-              <p className="mt-5 text-center text-sm text-slate-500">
-                New enterprise?{" "}
-                <button
-                  type="button"
-                  onClick={() => navigate("/signup")}
-                  className="font-medium text-brand-700 hover:text-brand-600"
-                >
-                  Register your company
-                </button>
-              </p>
+              {forgotMode ? (
+                <form onSubmit={submitForgot} className="mt-5 space-y-3 border-t border-slate-100 pt-5">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1.5">Email</label>
+                    <input
+                      className="w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                      value={forgotEmail}
+                      onChange={(e) => setForgotEmail(e.target.value)}
+                      autoComplete="username"
+                      placeholder="you@institution.com"
+                    />
+                  </div>
+                  {forgotNotice && <p className="text-sm text-slate-600">{forgotNotice}</p>}
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="submit"
+                      disabled={forgotBusy}
+                      className="flex-1 rounded-lg bg-brand-600 text-white py-2 text-sm font-medium hover:bg-brand-700 disabled:opacity-50"
+                    >
+                      {forgotBusy ? "Sending…" : "Send reset link"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setForgotMode(false); setForgotNotice(null); }}
+                      className="text-sm font-medium text-slate-500 hover:text-slate-700"
+                    >
+                      Back to sign in
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <p className="mt-5 text-center text-sm text-slate-500">
+                  <button type="button" onClick={() => setForgotMode(true)} className="font-medium text-brand-700 hover:text-brand-600">
+                    Forgot password?
+                  </button>
+                  {" · "}
+                  New enterprise?{" "}
+                  <button
+                    type="button"
+                    onClick={() => navigate("/signup")}
+                    className="font-medium text-brand-700 hover:text-brand-600"
+                  >
+                    Register your company
+                  </button>
+                </p>
+              )}
             </div>
           </div>
         </div>

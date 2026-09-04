@@ -18,6 +18,7 @@ import { InvoiceRegister } from "./components/tokenization/InvoiceRegister.js";
 import { IssueUsecaseCredential } from "./components/identity/IssueUsecaseCredential.js";
 import { CredentialSchemas } from "./components/identity/CredentialSchemas.js";
 import { Login } from "./components/shared/Login.js";
+import { ResetPassword } from "./components/shared/ResetPassword.js";
 import { MyIdentity } from "./components/identity/MyIdentity.js";
 import { MyProfile } from "./components/shared/MyProfile.js";
 import { Organizations } from "./components/shared/Organizations.js";
@@ -147,6 +148,7 @@ export function App(): JSX.Element {
   // Public (unauthenticated) surface: a marketing homepage plus the corporate
   // self-registration flow. The first path segment selects the screen.
   if (!token || !user) {
+    if (routeKey === "reset-password") return <ResetPassword />;
     if (routeKey === "signup") return <Signup />;
     if (routeKey === "login") return <Login />;
     // A persona build shows ITS OWN front door — which product, which app, and

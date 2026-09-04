@@ -83,6 +83,9 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ email, password }),
     }),
+  forgotPassword: (email: string) => request<Record<string, never>>("/auth/forgot-password", null, { method: "POST", body: JSON.stringify({ email }) }),
+  resetPassword: (token: string, newPassword: string) =>
+    request<{ status: string }>("/auth/reset-password", null, { method: "POST", body: JSON.stringify({ token, newPassword }) }),
   // Public: an unauthenticated visitor self-registers their company. 202 → the org
   // (and its admin) are pending until a PlatformAdmin approves.
   registerOrg: (body: {
