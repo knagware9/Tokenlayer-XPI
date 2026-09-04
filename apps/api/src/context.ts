@@ -24,6 +24,7 @@ import type {
   ListingRepository,
   LoginKeyRepository,
   OrganizationRepository,
+  PasswordResetTokenRepository,
   ProposalRepository,
   StagedInvoiceRepository,
   UseCaseRepository,
@@ -148,6 +149,7 @@ export interface AppDeps {
   registry?: IdentityRegistry;
   /** Outbound email — password reset, welcome, and notification sends. */
   mail: Mailer;
+  passwordResetTokens: PasswordResetTokenRepository;
   /**
    * Minimum age (ms) a `purpose = "brand-logo"` document must have before
    * `POST /orgs/{id}/branding/logo`'s prune will delete it — see

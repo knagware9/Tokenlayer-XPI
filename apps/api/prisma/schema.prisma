@@ -35,6 +35,17 @@ model User {
   createdAt    DateTime @default(now())
 }
 
+/// domain: shared
+model PasswordResetToken {
+  id         String    @id @default(cuid())
+  userId     String
+  tokenPrefix String   @unique
+  tokenHash  String
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime  @default(now())
+}
+
 // An org-scoped machine credential (EN-B). The secret exists exactly once — in
 // the create/rotate response — so only its bcrypt hash and a public prefix are
 // stored: a leaked database yields no working credential.

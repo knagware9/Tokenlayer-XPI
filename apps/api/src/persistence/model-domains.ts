@@ -56,6 +56,7 @@ export const MODEL_DOMAINS: Readonly<Record<string, DataDomain>> = {
 
   // ── Shared platform ─────────────────────────────────────────────────────
   User: "shared",
+  PasswordResetToken: "shared",
   ApiKey: "shared",
   Organization: "shared",
   Credential: "shared", // see the header — org membership is built on VCs
@@ -97,6 +98,7 @@ export const REPOSITORY_MODELS: Readonly<Record<string, string>> = {
   verificationRequests: "VerificationRequest",
 
   users: "User",
+  passwordResetTokens: "PasswordResetToken",
   apiKeys: "ApiKey",
   organizations: "Organization",
   credentials: "Credential",

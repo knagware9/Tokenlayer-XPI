@@ -20,6 +20,7 @@ import {
   MemoryCredentialRepository,
   MemoryLoginKeyRepository,
   MemoryOrganizationRepository,
+  MemoryPasswordResetTokenRepository,
   MemoryProposalRepository,
   MemoryCashRepository,
   MemoryDocumentRepository,
@@ -97,6 +98,7 @@ export async function buildTestAppWithRepos(opts: TestAppOptions = {}): Promise<
   const verificationRequests = new MemoryVerificationRequestRepository();
   const stagedInvoices = new MemoryStagedInvoiceRepository();
   const apiKeys = new MemoryApiKeyRepository();
+  const passwordResetTokens = new MemoryPasswordResetTokenRepository();
   const events = new MemoryEventRepository();
   const webhookEndpoints = new MemoryWebhookEndpointRepository();
   const webhookDeliveries = new MemoryWebhookDeliveryRepository();
@@ -118,7 +120,7 @@ export async function buildTestAppWithRepos(opts: TestAppOptions = {}): Promise<
   const mail = new NullMailer();
   const deps: AppDeps = {
     useCases, credentialUseCases, credentialTemplates, rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents, cashflows, proposals,
-    organizations, credentials, verificationRequests, stagedInvoices, apiKeys, events, webhookEndpoints, webhookDeliveries, ledgerTransactions,
+    organizations, credentials, verificationRequests, stagedInvoices, apiKeys, passwordResetTokens, events, webhookEndpoints, webhookDeliveries, ledgerTransactions,
     // The harness never delivers anything (no dispatcher runs in tests); this is
     // the registration-time posture, and the secure default is the right one to
     // exercise by default.

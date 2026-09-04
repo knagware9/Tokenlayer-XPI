@@ -19,6 +19,7 @@ import {
   PrismaCashflowRepository,
   PrismaCredentialRepository,
   PrismaOrganizationRepository,
+  PrismaPasswordResetTokenRepository,
   PrismaProposalRepository,
   PrismaCashRepository,
   PrismaDocumentRepository,
@@ -75,6 +76,7 @@ async function main(): Promise<void> {
   const stagedInvoices = new PrismaStagedInvoiceRepository();
   const loginKeys = new PrismaLoginKeyRepository();
   const apiKeys = new PrismaApiKeyRepository();
+  const passwordResetTokens = new PrismaPasswordResetTokenRepository();
   const events = new PrismaEventRepository();
   const webhookEndpoints = new PrismaWebhookEndpointRepository();
   const webhookDeliveries = new PrismaWebhookDeliveryRepository();
@@ -135,6 +137,7 @@ async function main(): Promise<void> {
     verificationRequests,
     stagedInvoices,
     apiKeys,
+    passwordResetTokens,
     events,
     webhookEndpoints,
     webhookDeliveries,

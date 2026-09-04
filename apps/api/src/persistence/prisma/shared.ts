@@ -11,7 +11,7 @@ import { auditEntryHash, auditGenesis } from "@tokenlayer/core";
 import type { LifecycleAction, OrgCapabilities, Role } from "@tokenlayer/core";
 import { LEDGER_UNKNOWN_RETRY_MS } from "../types/index.js";
 import type { OrgType } from "../types/index.js";
-import type { ApiKeyCreateInput, ApiKeyRecord, ApiKeyRepository, AuditAnchorRecord, AuditAnchorRepository, AuditEntryRecord, AuditRepository, BrandingPatch, CompanyProfile, CredentialRecord, CredentialRepository, DocumentPurpose, DocumentRecord, DocumentRepository, DocumentSummary, EventAppendInput, EventRecord, EventRepository, KycDetails, KycStatus, LedgerTransactionRecord, LedgerTransactionRepository, LedgerTransactionSettlement, LedgerTxKind, LedgerTxStatus, LoginKeyRecord, LoginKeyRepository, OrgStatus, OrganizationRecord, OrganizationRepository, Page, Paged, ProposalApproval, ProposalRecord, ProposalRepository, RegistryDeploymentRecord, RegistryDeploymentRepository, UserKind, UserRecord, UserRepository, WebhookDeliveryRecord, WebhookDeliveryRepository, WebhookEndpointCreateInput, WebhookEndpointRecord, WebhookEndpointRepository } from "../types/index.js";
+import type { ApiKeyCreateInput, ApiKeyRecord, ApiKeyRepository, AuditAnchorRecord, AuditAnchorRepository, AuditEntryRecord, AuditRepository, BrandingPatch, CompanyProfile, CredentialRecord, CredentialRepository, DocumentPurpose, DocumentRecord, DocumentRepository, DocumentSummary, EventAppendInput, EventRecord, EventRepository, KycDetails, KycStatus, LedgerTransactionRecord, LedgerTransactionRepository, LedgerTransactionSettlement, LedgerTxKind, LedgerTxStatus, LoginKeyRecord, LoginKeyRepository, OrgStatus, OrganizationRecord, OrganizationRepository, Page, Paged, PasswordResetTokenCreateInput, PasswordResetTokenRecord, PasswordResetTokenRepository, ProposalApproval, ProposalRecord, ProposalRepository, RegistryDeploymentRecord, RegistryDeploymentRepository, UserKind, UserRecord, UserRepository, WebhookDeliveryRecord, WebhookDeliveryRepository, WebhookEndpointCreateInput, WebhookEndpointRecord, WebhookEndpointRepository } from "../types/index.js";
 
 const toUser = (r: {
   id: string;
@@ -510,6 +510,31 @@ export class PrismaApiKeyRepository implements ApiKeyRepository {
       where: { id },
       data: { revokedAt: new Date(input.at), revokedBy: input.by },
     }));
+  }
+}
+
+const rowToPasswordResetToken = (r: {
+  id: string; userId: string; tokenPrefix: string; tokenHash: string; expiresAt: Date; usedAt: Date | null; createdAt: Date;
+}): PasswordResetTokenRecord => ({
+  id: r.id, userId: r.userId, tokenPrefix: r.tokenPrefix, tokenHash: r.tokenHash,
+  expiresAt: r.expiresAt.toISOString(), usedAt: r.usedAt ? r.usedAt.toISOString() : null, createdAt: r.createdAt.toISOString(),
+});
+
+export class PrismaPasswordResetTokenRepository implements PasswordResetTokenRepository {
+  async create(input: PasswordResetTokenCreateInput): Promise<PasswordResetTokenRecord> {
+    return rowToPasswordResetToken(await prisma.passwordResetToken.create({
+      data: { userId: input.userId, tokenPrefix: input.tokenPrefix, tokenHash: input.tokenHash, expiresAt: new Date(input.expiresAt) },
+    }));
+  }
+  async findByPrefix(prefix: string): Promise<PasswordResetTokenRecord | null> {
+    const r = await prisma.passwordResetToken.findUnique({ where: { tokenPrefix: prefix } });
+    return r ? rowToPasswordResetToken(r) : null;
+  }
+  async markUsed(id: string): Promise<PasswordResetTokenRecord> {
+    return rowToPasswordResetToken(await prisma.passwordResetToken.update({ where: { id }, data: { usedAt: new Date() } }));
+  }
+  async invalidateAllForUser(userId: string): Promise<void> {
+    await prisma.passwordResetToken.updateMany({ where: { userId, usedAt: null }, data: { usedAt: new Date() } });
   }
 }
 

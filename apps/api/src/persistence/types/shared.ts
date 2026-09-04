@@ -475,6 +475,32 @@ export interface ApiKeyRepository {
 }
 
 /**
+ * A single-use password-reset token. `tokenPrefix` is the indexed lookup key
+ * (same pattern as `ApiKeyRecord.prefix`); `tokenHash` is a bcrypt hash of the
+ * full raw token, which is never itself stored.
+ */
+export interface PasswordResetTokenRecord {
+  id: string;
+  userId: string;
+  tokenPrefix: string;
+  tokenHash: string;
+  expiresAt: string;
+  usedAt: string | null;
+  createdAt: string;
+}
+
+export type PasswordResetTokenCreateInput = Omit<PasswordResetTokenRecord, "id" | "createdAt" | "usedAt">;
+
+export interface PasswordResetTokenRepository {
+  create(input: PasswordResetTokenCreateInput): Promise<PasswordResetTokenRecord>;
+  /** The single indexed lookup before any bcrypt work. */
+  findByPrefix(prefix: string): Promise<PasswordResetTokenRecord | null>;
+  markUsed(id: string): Promise<PasswordResetTokenRecord>;
+  /** Every OTHER outstanding (unused) token for this user is invalidated on a successful reset. */
+  invalidateAllForUser(userId: string): Promise<void>;
+}
+
+/**
  * One durable, globally ordered fact (EN-C). Deliberately NOT an AuditEntry:
  * the audit log is per-asset hash-chained for tamper evidence and has no global
  * cursor, and delivery concerns must not get a say in that structure.

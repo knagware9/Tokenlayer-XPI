@@ -10,7 +10,7 @@ import { id, now, paginate } from "./common.js";
 import { auditEntryHash, auditGenesis } from "@tokenlayer/core";
 import type { OrgCapabilities } from "@tokenlayer/core";
 import { LEDGER_UNKNOWN_RETRY_MS } from "../types/index.js";
-import type { ApiKeyCreateInput, ApiKeyRecord, ApiKeyRepository, AuditAnchorRecord, AuditAnchorRepository, AuditEntryRecord, AuditRepository, BrandingPatch, CashflowRepository, CredentialRecord, CredentialRepository, DocumentPurpose, DocumentRecord, DocumentRepository, DocumentSummary, EventAppendInput, EventRecord, EventRepository, LedgerTransactionRecord, LedgerTransactionRepository, LedgerTransactionSettlement, LedgerTxKind, LedgerTxStatus, LoginKeyRecord, LoginKeyRepository, OrgStatus, OrganizationRecord, OrganizationRepository, Page, Paged, ProposalApproval, ProposalRecord, ProposalRepository, RegistryDeploymentRecord, RegistryDeploymentRepository, UserKind, UserRecord, UserRepository, WebhookDeliveryRecord, WebhookDeliveryRepository, WebhookEndpointCreateInput, WebhookEndpointRecord, WebhookEndpointRepository } from "../types/index.js";
+import type { ApiKeyCreateInput, ApiKeyRecord, ApiKeyRepository, AuditAnchorRecord, AuditAnchorRepository, AuditEntryRecord, AuditRepository, BrandingPatch, CashflowRepository, CredentialRecord, CredentialRepository, DocumentPurpose, DocumentRecord, DocumentRepository, DocumentSummary, EventAppendInput, EventRecord, EventRepository, LedgerTransactionRecord, LedgerTransactionRepository, LedgerTransactionSettlement, LedgerTxKind, LedgerTxStatus, LoginKeyRecord, LoginKeyRepository, OrgStatus, OrganizationRecord, OrganizationRepository, Page, Paged, PasswordResetTokenCreateInput, PasswordResetTokenRecord, PasswordResetTokenRepository, ProposalApproval, ProposalRecord, ProposalRepository, RegistryDeploymentRecord, RegistryDeploymentRepository, UserKind, UserRecord, UserRepository, WebhookDeliveryRecord, WebhookDeliveryRepository, WebhookEndpointCreateInput, WebhookEndpointRecord, WebhookEndpointRepository } from "../types/index.js";
 
 export class MemoryUserRepository implements UserRepository {
   private readonly byId = new Map<string, UserRecord>();
@@ -382,6 +382,30 @@ export class MemoryApiKeyRepository implements ApiKeyRepository {
     rec.revokedAt = input.at;
     rec.revokedBy = input.by;
     return rec;
+  }
+}
+
+export class MemoryPasswordResetTokenRepository implements PasswordResetTokenRepository {
+  private readonly byId = new Map<string, PasswordResetTokenRecord>();
+  async create(input: PasswordResetTokenCreateInput): Promise<PasswordResetTokenRecord> {
+    const rec: PasswordResetTokenRecord = { ...input, id: id("prt"), createdAt: now(), usedAt: null };
+    this.byId.set(rec.id, rec);
+    return rec;
+  }
+  async findByPrefix(prefix: string): Promise<PasswordResetTokenRecord | null> {
+    return [...this.byId.values()].find((t) => t.tokenPrefix === prefix) ?? null;
+  }
+  async markUsed(id: string): Promise<PasswordResetTokenRecord> {
+    const rec = this.byId.get(id);
+    if (!rec) throw new Error(`password reset token ${id} not found`);
+    const updated = { ...rec, usedAt: now() };
+    this.byId.set(id, updated);
+    return updated;
+  }
+  async invalidateAllForUser(userId: string): Promise<void> {
+    for (const [key, rec] of this.byId) {
+      if (rec.userId === userId && !rec.usedAt) this.byId.set(key, { ...rec, usedAt: now() });
+    }
   }
 }
 
