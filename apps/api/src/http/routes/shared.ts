@@ -8,7 +8,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { mintResetToken, resetTokenMatches } from "../../mail/reset-tokens.js";
-import { passwordResetEmail } from "../../mail/templates.js";
+import { passwordResetEmail, welcomeCredentialsEmail } from "../../mail/templates.js";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ApiKeyRecord, AssetRecord, BrandingPatch, CashflowRecord, CompanyProfile, CredentialRecord, DocumentPurpose, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord, WebhookEndpointRecord } from "../../persistence/types/index.js";
 import { ListingConflictError } from "../../persistence/types/index.js";
@@ -938,6 +938,8 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
         const ceremony = await activateOrgAdmin(org, adminUser);
         issuerDid = ceremony.issuerDid;
         orgCredentialId = ceremony.orgCredentialId;
+        const welcome = welcomeCredentialsEmail({ email: adminUser.email, password: b.admin.password, loginUrl: `${deps.publicWebUrl}/login` });
+        await deps.mail.send(adminUser.email, welcome.subject, welcome.text, welcome.html).catch((err) => request.log.error({ err }, "[mail] welcome send failed"));
       } catch (err) {
         // The org itself is already active and on-chain (ensureOrg has no
         // "pending" to fall back to, unlike approve) — keep it, and remove

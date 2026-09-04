@@ -12,6 +12,8 @@ import { PLATFORM_ORG_NAME } from "./platform-org.js";
 import type { ProposalKindHandler } from "./proposal-kinds.js";
 import type { ProposalRecord } from "../persistence/types/index.js";
 import { resolveAccountId } from "./wallets.js";
+import { mintResetToken } from "../mail/reset-tokens.js";
+import { welcomeSetPasswordEmail } from "../mail/templates.js";
 
 /** PlatformAdmin always; a UseCaseAdmin of the SAME use case. Never null-matches. */
 const userScopedView = async (_deps: AppDeps, claims: TokenClaims, p: ProposalRecord): Promise<boolean> =>
@@ -71,6 +73,16 @@ async function onboardSingle(deps: AppDeps, proposer: Actor, pl: OnboardUserPayl
     email: pl.email, passwordHash: pl.passwordHash, role: pl.role, useCaseKey: pl.useCaseKey,
     accountId, active: true, kycStatus: "pending", kyc: pl.kyc ?? null, kind: "human",
   });
+  {
+    const minted = await mintResetToken();
+    await deps.passwordResetTokens.create({
+      userId: created.id, tokenPrefix: minted.prefix, tokenHash: minted.hash,
+      expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+    });
+    const setPasswordUrl = `${deps.publicWebUrl}/reset-password?token=${minted.token}`;
+    const welcome = welcomeSetPasswordEmail({ email: created.email, setPasswordUrl });
+    await deps.mail.send(created.email, welcome.subject, welcome.text, welcome.html).catch(() => undefined);
+  }
   let issuedCredentialId: string | null = null;
   try {
     // LINK, or MINT. A supplied DID belongs to a separately-deployed Identity

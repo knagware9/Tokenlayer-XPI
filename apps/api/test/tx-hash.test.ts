@@ -37,6 +37,7 @@ import {
   MemoryListingRepository,
   MemoryLoginKeyRepository,
   MemoryOrganizationRepository,
+  MemoryPasswordResetTokenRepository,
   MemoryProposalRepository,
   MemoryStagedInvoiceRepository,
   MemoryUseCaseRepository,
@@ -45,6 +46,7 @@ import {
   MemoryWebhookDeliveryRepository,
   MemoryWebhookEndpointRepository,
 } from "../src/persistence/memory/index.js";
+import { NullMailer } from "../src/mail/mailer.js";
 import { ensurePlatformIssuerOrg } from "../src/shared/platform-org.js";
 import { provisionTreasury } from "../src/shared/wallets.js";
 import { createMemoryQrLoginStore } from "../src/identity/qr-login-sessions.js";
@@ -85,6 +87,7 @@ async function buildAppWithDeps(registry?: IdentityRegistry): Promise<TestApp> {
     cashflows: new MemoryCashflowRepository(), proposals: new MemoryProposalRepository(),
     organizations, credentials, verificationRequests: new MemoryVerificationRequestRepository(),
     stagedInvoices: new MemoryStagedInvoiceRepository(), apiKeys: new MemoryApiKeyRepository(),
+    passwordResetTokens: new MemoryPasswordResetTokenRepository(), mail: new NullMailer(),
     events: new MemoryEventRepository(), webhookEndpoints: new MemoryWebhookEndpointRepository(), webhookDeliveries: new MemoryWebhookDeliveryRepository(), ledgerTransactions: new MemoryLedgerTransactionRepository(),
     webhooksAllowInsecure: false, secretBox: createSecretBox("22".repeat(32)),
     keystore, didMasterConfigured: true,

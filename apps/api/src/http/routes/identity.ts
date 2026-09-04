@@ -32,6 +32,7 @@ import { readErpInvoices, stageInvoice } from "../../tokenization/invoice-regist
 import { assetBalancesOf, coded, CodedError, dropPayerShare, executeCashflowCore, executeIssueActivation, runGatedAction } from "../../shared/executors.js";
 import { proposalKind } from "../../shared/proposal-kinds.js";
 import type { OnboardUserPayload } from "../../shared/user-kinds.js";
+import { welcomeCredentialsEmail } from "../../mail/templates.js";
 import { resolveDid } from "../../identity/did-resolver.js";
 import { checkUrl } from "../../webhooks/url-guard.js";
 import { API_KEY_BCRYPT_ROUNDS, invalidateVerifiedPrefix, mintSecret } from "../../shared/api-keys.js";
@@ -1015,6 +1016,8 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
       throw err;
     }
     await deps.proposals.setStatus(proposal.id, "executed");
+    const welcome = welcomeCredentialsEmail({ email, password, loginUrl: `${deps.publicWebUrl}/login` });
+    await deps.mail.send(email, welcome.subject, welcome.text, welcome.html).catch((err) => log.error({ err }, "[mail] welcome send failed"));
     return { email, password, role };
   }
 
