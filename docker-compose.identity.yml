@@ -87,6 +87,11 @@ services:
       # apps/api/src/shared/observability.ts.
       SENTRY_DSN: ${SENTRY_DSN:-}
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-}
+      SMTP_HOST: ${IDENTITY_SMTP_HOST:-identity-mailpit}
+      SMTP_PORT: ${IDENTITY_SMTP_PORT:-1025}
+      SMTP_USER: ${IDENTITY_SMTP_USER:-}
+      SMTP_PASS: ${IDENTITY_SMTP_PASS:-}
+      MAIL_FROM: ${MAIL_FROM:-no-reply@tokenlayer.dev}
     volumes: [identity-data:/data]
     networks: [xi-net]
     restart: unless-stopped
@@ -99,6 +104,12 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+
+  identity-mailpit:
+    image: axllent/mailpit:latest
+    ports: ["8026:8025"]
+    networks: [xi-net]
+    restart: unless-stopped
 
   identity-issuer-edge:
     build: { <<: *edge-build, args: { PERSONA: identity-issuer } }

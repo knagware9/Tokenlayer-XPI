@@ -93,6 +93,11 @@ services:
       # apps/api/src/shared/observability.ts.
       SENTRY_DSN: ${SENTRY_DSN:-}
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-}
+      SMTP_HOST: ${TOKENIZATION_SMTP_HOST:-tokenization-mailpit}
+      SMTP_PORT: ${TOKENIZATION_SMTP_PORT:-1025}
+      SMTP_USER: ${TOKENIZATION_SMTP_USER:-}
+      SMTP_PASS: ${TOKENIZATION_SMTP_PASS:-}
+      MAIL_FROM: ${MAIL_FROM:-no-reply@tokenlayer.dev}
     volumes: [tokenization-data:/data]
     # A raw HTTP GET, not a dedicated route: the API has none, every real route
     # needs auth, and ANY response (even a 401) proves Fastify is up and
@@ -113,6 +118,12 @@ services:
     # this alias is ever present alongside a REAL identity-api (its own
     # container, its own database, wired in above via IDENTITY_SERVICE_URL).
     # See that overlay file for what the alias is for and when it is safe.
+    networks: [xi-net]
+    restart: unless-stopped
+
+  tokenization-mailpit:
+    image: axllent/mailpit:latest
+    ports: ["8025:8025"]
     networks: [xi-net]
     restart: unless-stopped
 
