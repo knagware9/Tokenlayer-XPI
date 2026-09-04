@@ -8,7 +8,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { mintResetToken, resetTokenMatches } from "../../mail/reset-tokens.js";
-import { kycDecisionEmail, passwordResetEmail, welcomeCredentialsEmail } from "../../mail/templates.js";
+import { kycDecisionEmail, orgApprovedEmail, passwordResetEmail, welcomeCredentialsEmail } from "../../mail/templates.js";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ApiKeyRecord, AssetRecord, BrandingPatch, CashflowRecord, CompanyProfile, CredentialRecord, DocumentPurpose, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord, WebhookEndpointRecord } from "../../persistence/types/index.js";
 import { ListingConflictError } from "../../persistence/types/index.js";
@@ -1052,6 +1052,10 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
       }
     }
     await deps.audit.append({ actorId: claims.id, action: "org-approved" as LifecycleAction, payload: { orgId: org.id, did: org.did, orgCredentialId, issuerDid } });
+    if (admin) {
+      const notice = orgApprovedEmail({ orgName: active.name, loginUrl: `${deps.publicWebUrl}/login` });
+      await deps.mail.send(admin.email, notice.subject, notice.text, notice.html).catch((err) => request.log.error({ err }, "[mail] org-approved send failed"));
+    }
     return reply.code(200).send({ id: active.id, name: active.name, did: active.did, orgType: active.orgType, status: "active", verified: true, issuerDid, orgCredentialId });
   });
 
