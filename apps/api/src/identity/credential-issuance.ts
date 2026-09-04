@@ -14,6 +14,23 @@ import type { AppDeps } from "../context.js";
 import { emitEvent } from "../shared/events.js";
 import { coded } from "../shared/executors.js";
 import type { CredentialRecord, OrganizationRecord } from "../persistence/types/index.js";
+import { credentialIssuedEmail, credentialRevokedEmail } from "../mail/templates.js";
+
+/**
+ * The email to notify for a credential concerning `subjectDid` — the holder's
+ * own address if it belongs to a user, else that org's OrgAdmin if it belongs
+ * to an organization, else null (nothing to notify, e.g. a DID this deployment
+ * has never onboarded). No `findByDid` on `UserRepository` today, so this
+ * scans — acceptable at pilot scale; revisit if the roster grows large.
+ */
+async function resolveCredentialRecipientEmail(deps: AppDeps, subjectDid: string): Promise<string | null> {
+  const user = (await deps.users.list()).find((u) => u.did === subjectDid);
+  if (user) return user.email;
+  const org = await deps.organizations.findByDid(subjectDid).catch(() => null);
+  if (!org) return null;
+  const admin = (await deps.users.listByOrg(org.id)).find((u) => u.role === "OrgAdmin");
+  return admin?.email ?? null;
+}
 
 export interface IssueCredentialArgs {
   issuerOrg: OrganizationRecord;
@@ -93,6 +110,15 @@ export async function issueCredentialFor(deps: AppDeps, a: IssueCredentialArgs):
       chainId: credential.anchorChainId,
     },
   });
+  try {
+    const to = await resolveCredentialRecipientEmail(deps, credential.holderDid);
+    if (to) {
+      const notice = credentialIssuedEmail({ credentialType: credential.type, issuerName: a.issuerOrg.name });
+      await deps.mail.send(to, notice.subject, notice.text, notice.html);
+    }
+  } catch (err) {
+    console.error({ err, credentialId: credential.id }, "[mail] credential-issued send failed");
+  }
   return credential;
 }
 
@@ -136,4 +162,13 @@ export async function revokeCredentialById(
       txHash: revokeReceipt?.txHash ?? null,
     },
   });
+  try {
+    const to = await resolveCredentialRecipientEmail(deps, cred.holderDid);
+    if (to) {
+      const notice = credentialRevokedEmail({ credentialType: cred.type, reason: meta.reason });
+      await deps.mail.send(to, notice.subject, notice.text, notice.html);
+    }
+  } catch (err) {
+    console.error({ err, credentialId: cred.id }, "[mail] credential-revoked send failed");
+  }
 }

@@ -32,7 +32,12 @@ describe("org-approved notification", () => {
     const before = h.mail.sent.length;
     const approve = await h.app.inject({ method: "POST", url: `${V1}/orgs/${orgId}/approve`, headers: auth(platform), payload: {} });
     expect(approve.statusCode).toBe(200);
-    const sent = h.mail.sent.slice(before).find((m) => m.to === adminEmail);
+    // `.slice(before)` can also catch the OrganizationCredential-issued
+    // notification (Task 10 hooks credential issuance itself, and approval
+    // issues the org's OrganizationCredential to this same admin) — match on
+    // subject to get the org-approved email specifically, not just any email
+    // to this address.
+    const sent = h.mail.sent.slice(before).find((m) => m.to === adminEmail && /approved/i.test(m.subject));
     expect(sent).toBeDefined();
     expect(sent!.text).toContain(orgName);
   });
