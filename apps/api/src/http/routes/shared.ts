@@ -608,10 +608,15 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     }
     if (typeof b.password === "string") patch.passwordHash = bcrypt.hashSync(b.password, BCRYPT_ROUNDS);
     if (typeof b.active === "boolean") patch.active = b.active;
-    if (b.kycStatus === "approved" || b.kycStatus === "rejected") patch.kycStatus = b.kycStatus;
+    // Narrowed once, into its own variable: `patch.kycStatus` is declared as
+    // the full KycStatus union (it also accepts "pending" elsewhere), so
+    // TypeScript can't carry this block's narrowing across the assignment —
+    // reading `patch.kycStatus` back out below would widen right back.
+    const kycDecision = b.kycStatus === "approved" || b.kycStatus === "rejected" ? b.kycStatus : undefined;
+    if (kycDecision) patch.kycStatus = kycDecision;
     const updated = await deps.users.update(id, patch);
-    if (patch.kycStatus) {
-      const notice = kycDecisionEmail({ decision: patch.kycStatus });
+    if (kycDecision) {
+      const notice = kycDecisionEmail({ decision: kycDecision });
       await deps.mail.send(updated.email, notice.subject, notice.text, notice.html).catch((err) => request.log.error({ err }, "[mail] kyc-decision send failed"));
     }
     return { id: updated.id, email: updated.email, role: updated.role, useCaseKey: updated.useCaseKey, accountId: updated.accountId, active: updated.active, kycStatus: updated.kycStatus };
