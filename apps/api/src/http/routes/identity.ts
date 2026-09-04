@@ -32,7 +32,7 @@ import { readErpInvoices, stageInvoice } from "../../tokenization/invoice-regist
 import { assetBalancesOf, coded, CodedError, dropPayerShare, executeCashflowCore, executeIssueActivation, runGatedAction } from "../../shared/executors.js";
 import { proposalKind } from "../../shared/proposal-kinds.js";
 import type { OnboardUserPayload } from "../../shared/user-kinds.js";
-import { welcomeCredentialsEmail } from "../../mail/templates.js";
+import { kycDecisionEmail, welcomeCredentialsEmail } from "../../mail/templates.js";
 import { resolveDid } from "../../identity/did-resolver.js";
 import { checkUrl } from "../../webhooks/url-guard.js";
 import { API_KEY_BCRYPT_ROUNDS, invalidateVerifiedPrefix, mintSecret } from "../../shared/api-keys.js";
@@ -2125,6 +2125,10 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: AppDeps, ctx:
       did: result.holderDid,
       kyc: { ...(target.kyc ?? {}), country: vcClaims.country, legalName: vcClaims.legalName ?? target.kyc?.legalName, issuerDid: result.credential!.issuer, credentialId: String(decodeVcJti(presentation) ?? ""), verifiedAt: new Date().toISOString() },
     });
+    {
+      const notice = kycDecisionEmail({ decision: "approved" });
+      await deps.mail.send(target.email, notice.subject, notice.text, notice.html).catch((err) => request.log.error({ err }, "[mail] kyc-decision send failed"));
+    }
     // Asset-less audit entry: "kyc-verified" is not a LifecycleAction, so cast at
     // the append boundary (analytics/holders folds only match specific actions and
     // never see this row anyway — it carries no assetId).

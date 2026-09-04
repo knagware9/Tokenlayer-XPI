@@ -8,7 +8,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { mintResetToken, resetTokenMatches } from "../../mail/reset-tokens.js";
-import { passwordResetEmail, welcomeCredentialsEmail } from "../../mail/templates.js";
+import { kycDecisionEmail, passwordResetEmail, welcomeCredentialsEmail } from "../../mail/templates.js";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ApiKeyRecord, AssetRecord, BrandingPatch, CashflowRecord, CompanyProfile, CredentialRecord, DocumentPurpose, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord, WebhookEndpointRecord } from "../../persistence/types/index.js";
 import { ListingConflictError } from "../../persistence/types/index.js";
@@ -610,6 +610,10 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     if (typeof b.active === "boolean") patch.active = b.active;
     if (b.kycStatus === "approved" || b.kycStatus === "rejected") patch.kycStatus = b.kycStatus;
     const updated = await deps.users.update(id, patch);
+    if (patch.kycStatus) {
+      const notice = kycDecisionEmail({ decision: patch.kycStatus });
+      await deps.mail.send(updated.email, notice.subject, notice.text, notice.html).catch((err) => request.log.error({ err }, "[mail] kyc-decision send failed"));
+    }
     return { id: updated.id, email: updated.email, role: updated.role, useCaseKey: updated.useCaseKey, accountId: updated.accountId, active: updated.active, kycStatus: updated.kycStatus };
   });
 
