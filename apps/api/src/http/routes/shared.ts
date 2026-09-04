@@ -102,7 +102,12 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
       });
       const resetUrl = `${deps.publicWebUrl}/reset-password?token=${minted.token}`;
       const email_ = passwordResetEmail({ resetUrl });
-      await deps.mail.send(user.email, email_.subject, email_.text, email_.html).catch((err) => request.log.error({ err }, "[mail] forgot-password send failed"));
+      // Fire-and-forget: do NOT await the send. Awaiting here would make this
+      // branch's response time depend on a real SMTP round-trip while the
+      // "no such user" branch returns instantly, letting an attacker
+      // distinguish real accounts from non-existent ones by response timing —
+      // defeating the uniform-202 anti-enumeration design of this endpoint.
+      void deps.mail.send(user.email, email_.subject, email_.text, email_.html).catch((err) => request.log.error({ err }, "[mail] forgot-password send failed"));
     }
     return reply.code(202).send({});
   });

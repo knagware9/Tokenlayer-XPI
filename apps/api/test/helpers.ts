@@ -8,7 +8,7 @@ import { loadCurrencies } from "../src/tokenization/currencies.js";
 import { createMemoryChallengeStore } from "../src/identity/identity-challenges.js";
 import { createKeystore } from "../src/shared/keystore.js";
 import { createSecretBox } from "../src/webhooks/secret-box.js";
-import { NullMailer } from "../src/mail/mailer.js";
+import { NullMailer, type Mailer } from "../src/mail/mailer.js";
 import { createMemoryQrLoginStore } from "../src/identity/qr-login-sessions.js";
 import {
   MemoryAccountRepository,
@@ -48,7 +48,7 @@ export const TEST_MARKET_ESCROW = "0xcd3B766CCDd6AE721141F452C550Ca635964ce71";
 /** A second seeded PlatformAdmin (test-only) — the SoD checker for null-scope / brand-new-use-case onboarding proposals the sole admin proposes. */
 export const PLATFORM_ADMIN_2 = { email: "admin2@tokenlayer.dev", password: "admin123" } as const;
 
-export interface TestAppOptions { loginRateLimitMax?: number; apiKeyRateLimitMax?: number; apiKeyFailedAttemptMax?: number; apiKeyReserveIntervalMs?: number; platformFeeAccount?: string; marketEscrowAccount?: string; trustedKycIssuers?: string[]; devIssuerSeed?: string; isProduction?: boolean; didMasterConfigured?: boolean; registry?: IdentityRegistry; enabledDomains?: string[]; subjectIdentifiers?: "did" | "plain"; brandLogoPruneGraceMs?: number }
+export interface TestAppOptions { loginRateLimitMax?: number; apiKeyRateLimitMax?: number; apiKeyFailedAttemptMax?: number; apiKeyReserveIntervalMs?: number; platformFeeAccount?: string; marketEscrowAccount?: string; trustedKycIssuers?: string[]; devIssuerSeed?: string; isProduction?: boolean; didMasterConfigured?: boolean; registry?: IdentityRegistry; enabledDomains?: string[]; subjectIdentifiers?: "did" | "plain"; brandLogoPruneGraceMs?: number; /** Overrides the default NullMailer — e.g. a stub whose send() never resolves, to prove a route doesn't await it. `buildApp` shallow-copies deps at build time, so this must be set here rather than mutated on the returned handle afterward. */ mail?: Mailer }
 
 /**
  * The app plus the repositories tests need to reach directly — used where a
@@ -117,7 +117,8 @@ export async function buildTestAppWithRepos(opts: TestAppOptions = {}): Promise<
     deploy: (def, chainId) => engine.deployUseCaseContract(def, chainId),
   });
   // The suite makes many logins from one IP; raise the throttle unless a test opts into it.
-  const mail = new NullMailer();
+  const nullMailer = new NullMailer();
+  const mail: Mailer = opts.mail ?? nullMailer;
   const deps: AppDeps = {
     useCases, credentialUseCases, credentialTemplates, rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents, cashflows, proposals,
     organizations, credentials, verificationRequests, stagedInvoices, apiKeys, passwordResetTokens, events, webhookEndpoints, webhookDeliveries, ledgerTransactions,
@@ -154,7 +155,11 @@ export async function buildTestAppWithRepos(opts: TestAppOptions = {}): Promise<
     // `BRAND_LOGO_PRUNE_GRACE_MS` explicitly.
     brandLogoPruneGraceMs: opts.brandLogoPruneGraceMs ?? 0,
   };
-  return { app: await buildApp(deps), users, apiKeys, loginKeys, organizations, audit, deps, mail };
+  // `mail` on the handle stays the NullMailer (the `.sent` assertions every
+  // other test relies on) even when `opts.mail` overrode what the app itself
+  // uses — a test that passes `opts.mail` reads the app's real mailer off
+  // `deps.mail`, not off this field.
+  return { app: await buildApp(deps), users, apiKeys, loginKeys, organizations, audit, deps, mail: nullMailer };
 }
 
 /** All v1 API routes live under this prefix. */
