@@ -1218,11 +1218,7 @@ Expected: FAIL on the first test (no email sent).
 
 - [ ] **Step 3: Notify from `PATCH /users/:id`**
 
-In `apps/api/src/http/routes/shared.ts`, add the import:
-
-```typescript
-import { kycDecisionEmail } from "../../mail/templates.js";
-```
+In `apps/api/src/http/routes/shared.ts`, Task 7 already added an `import { welcomeCredentialsEmail } from "../../mail/templates.js";` line — add `kycDecisionEmail` to that SAME import statement rather than a new one (`import { kycDecisionEmail, welcomeCredentialsEmail } from "../../mail/templates.js";`). If for any reason Task 7's import isn't there, add a fresh one with just `kycDecisionEmail`.
 
 Right after `const updated = await deps.users.update(id, patch);` in the `PATCH /users/:id` handler, add:
 
