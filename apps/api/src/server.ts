@@ -44,6 +44,7 @@ import { rehydrateSimulatedLedgers } from "./tokenization/ledger-replay.js";
 import { provisionTreasury } from "./shared/wallets.js";
 import { createHttpSender, startDispatcher } from "./webhooks/dispatcher.js";
 import { createSecretBox } from "./webhooks/secret-box.js";
+import { SmtpMailer } from "./mail/mailer.js";
 import { startConfirmer } from "./shared/ledger-confirmer.js";
 import { captureFatalAndFlush, initObservability } from "./shared/observability.js";
 
@@ -167,6 +168,7 @@ async function main(): Promise<void> {
     apiKeyReserveIntervalMs: env.apiKeyReserveIntervalMs,
     brandLogoPruneGraceMs: env.brandLogoPruneGraceMs,
     registry,
+    mail: new SmtpMailer(env.mailFrom, { host: env.smtpHost, port: env.smtpPort, user: env.smtpUser, pass: env.smtpPass }),
   };
   // Resolved BEFORE seedUseCases now: every seeded use case needs an owner.
   const platformOrg = await ensurePlatformIssuerOrg(deps);

@@ -186,6 +186,13 @@ export interface Env {
   webhooksAllowInsecure: boolean;
   /** Per-attempt HTTP timeout. Bounds how long one bad endpoint holds a worker. */
   webhooksTimeoutMs: number;
+  /** SMTP transport for outbound email. Defaults to Mailpit's usual dev port. */
+  smtpHost: string;
+  smtpPort: number;
+  smtpUser?: string;
+  smtpPass?: string;
+  /** The `From:` address on every outbound email. */
+  mailFrom: string;
 }
 
 const platformFeeAccount =
@@ -279,6 +286,11 @@ export const env: Env = {
   webhooksPollMs: process.env.WEBHOOKS_POLL_MS ? Number(process.env.WEBHOOKS_POLL_MS) : 2000,
   webhooksAllowInsecure: process.env.WEBHOOKS_ALLOW_INSECURE === "1",
   webhooksTimeoutMs: process.env.WEBHOOKS_TIMEOUT_MS ? Number(process.env.WEBHOOKS_TIMEOUT_MS) : 10_000,
+  smtpHost: process.env.SMTP_HOST ?? "localhost",
+  smtpPort: Number(process.env.SMTP_PORT ?? 1025),
+  smtpUser: process.env.SMTP_USER || undefined,
+  smtpPass: process.env.SMTP_PASS || undefined,
+  mailFrom: process.env.MAIL_FROM ?? "no-reply@tokenlayer.dev",
 };
 
 /**

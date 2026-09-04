@@ -8,6 +8,7 @@ import { loadCurrencies } from "../src/tokenization/currencies.js";
 import { createMemoryChallengeStore } from "../src/identity/identity-challenges.js";
 import { createKeystore } from "../src/shared/keystore.js";
 import { createSecretBox } from "../src/webhooks/secret-box.js";
+import { NullMailer } from "../src/mail/mailer.js";
 import { createMemoryQrLoginStore } from "../src/identity/qr-login-sessions.js";
 import {
   MemoryAccountRepository,
@@ -67,6 +68,8 @@ export interface TestAppHandle {
    * webhook tests have to prove which endpoints a real fan-out reaches.
    */
   deps: AppDeps;
+  /** Every email the app under test sent — assert against `.sent`. */
+  mail: NullMailer;
 }
 
 export async function buildTestApp(opts: TestAppOptions = {}): Promise<FastifyInstance> {
@@ -112,6 +115,7 @@ export async function buildTestAppWithRepos(opts: TestAppOptions = {}): Promise<
     deploy: (def, chainId) => engine.deployUseCaseContract(def, chainId),
   });
   // The suite makes many logins from one IP; raise the throttle unless a test opts into it.
+  const mail = new NullMailer();
   const deps: AppDeps = {
     useCases, credentialUseCases, credentialTemplates, rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents, cashflows, proposals,
     organizations, credentials, verificationRequests, stagedInvoices, apiKeys, events, webhookEndpoints, webhookDeliveries, ledgerTransactions,
@@ -139,6 +143,7 @@ export async function buildTestAppWithRepos(opts: TestAppOptions = {}): Promise<
     // `marketEscrowAccount: undefined` disables the market (503s).
     marketEscrowAccount: "marketEscrowAccount" in opts ? opts.marketEscrowAccount : TEST_MARKET_ESCROW,
     registry: opts.registry,
+    mail,
     // 0 by default: almost every test's uploads happen milliseconds apart on
     // purpose (that's the whole point of testing "the second prunes the
     // first"), and the production default (60s) would make every one of them
@@ -147,7 +152,7 @@ export async function buildTestAppWithRepos(opts: TestAppOptions = {}): Promise<
     // `BRAND_LOGO_PRUNE_GRACE_MS` explicitly.
     brandLogoPruneGraceMs: opts.brandLogoPruneGraceMs ?? 0,
   };
-  return { app: await buildApp(deps), users, apiKeys, loginKeys, organizations, audit, deps };
+  return { app: await buildApp(deps), users, apiKeys, loginKeys, organizations, audit, deps, mail };
 }
 
 /** All v1 API routes live under this prefix. */

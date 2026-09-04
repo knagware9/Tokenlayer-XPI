@@ -34,6 +34,7 @@ import type {
 } from "./persistence/types/index.js";
 import type { IdentityRegistry } from "./identity/registry.js";
 import type { SecretBox } from "./webhooks/secret-box.js";
+import type { Mailer } from "./mail/mailer.js";
 
 export interface AppDeps {
   useCases: UseCaseRepository;
@@ -145,6 +146,8 @@ export interface AppDeps {
   marketEscrowAccount?: string;
   /** The on-chain identity registry. ABSENT when no chain hosts one — consumers must handle that explicitly. */
   registry?: IdentityRegistry;
+  /** Outbound email — password reset, welcome, and notification sends. */
+  mail: Mailer;
   /**
    * Minimum age (ms) a `purpose = "brand-logo"` document must have before
    * `POST /orgs/{id}/branding/logo`'s prune will delete it — see
