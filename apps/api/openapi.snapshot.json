@@ -3463,6 +3463,27 @@
         }
       }
     },
+    "/api/v1/users/me/kyc/submit": {
+      "post": {
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [],
+        "requestBody": true,
+        "responses": {
+          "200": "{id,kycStatus}",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error"
+        }
+      }
+    },
     "/api/v1/users/{id}": {
       "delete": {
         "tags": [

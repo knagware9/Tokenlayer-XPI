@@ -1090,6 +1090,26 @@ export const sharedSchemas: Record<string, FastifySchema> = {
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: { ...errs(401, 403, 404) },
   },
+  submitKyc: {
+    tags: ["Users"],
+    summary: "Submit (or re-submit) the caller's own KYC application",
+    security: humanOnly,
+    body: {
+      type: "object",
+      required: ["legalName", "country", "idType", "idNumber", "idDocumentId", "addressDocumentId"],
+      properties: {
+        legalName: { type: "string" }, country: { type: "string" }, idType: { type: "string" }, idNumber: { type: "string" },
+        dateOfBirth: { type: "string" },
+        address: { type: "object", properties: { street: { type: "string" }, city: { type: "string" }, postalCode: { type: "string" } } },
+        occupation: { type: "string" }, sourceOfFunds: { type: "string" }, pepDeclaration: { type: "boolean" },
+        idDocumentId: { type: "string" }, addressDocumentId: { type: "string" },
+      },
+    },
+    response: {
+      200: { type: "object", additionalProperties: true, properties: { id: { type: "string" }, kycStatus: { type: "string" } } },
+      ...errs(400, 401, 403),
+    },
+  },
   deleteUser: { tags: ["Users"], summary: "Remove a user (scoped)", security: eitherCredential,
     description:
       "Requires the `users:onboard` scope: removing a principal is the same authority as creating one, so it is not " +

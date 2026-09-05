@@ -67,6 +67,7 @@ const DELIBERATELY_UNSCOPED: Record<string, string> = {
   "POST /orgs/:id/branding/logo": "403 MACHINE_PRINCIPAL: gated identically to PATCH /orgs/:id/branding — uploading the org's mark is the same console act as setting its colour, checked the same way (role AND org-ownership in the handler, machine principals refused outright).",
   "POST /users/me/kyc/documents": "403 MACHINE_PRINCIPAL: uploads the caller's OWN KYC document; a key has no self to submit for",
   "GET /users/me/kyc/documents/:id": "403 MACHINE_PRINCIPAL: reads the caller's OWN KYC document; a key has no self to read for",
+  "POST /users/me/kyc/submit": "403 MACHINE_PRINCIPAL: submits the caller's OWN KYC application; a key has no self to submit for",
 
   // --- gated dynamically, by something a static scope cannot express --------
   "POST /proposals/:id/approve": "scope derived from the proposal's KIND inside decide() — see ProposalKindHandler.apiScope",

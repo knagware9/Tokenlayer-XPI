@@ -140,10 +140,12 @@ const BASELINE: readonly PersonaRule[] = [
   // Public and unauthenticated by design — every app's login screen may link to it.
   { prefix: "/orgs/register", methods: "ALL", why: "public self-service signup, including its KYB document upload" },
   // Every persona's My Profile can complete KYC, staff and self-service alike —
-  // uploading and reading back are both scoped to the caller's own document
-  // (or a PlatformAdmin's review), so this belongs beside /me/login-keys above
-  // rather than in STAFF_BASELINE or any one persona's own list.
-  { prefix: "/users/me/kyc/documents", methods: "ALL", why: "upload one's own KYC documents and read them back while under review" },
+  // uploading, reading back, and submitting the application are all scoped to
+  // the caller's own record (or a PlatformAdmin's review for documents), so
+  // this belongs beside /me/login-keys above rather than in STAFF_BASELINE or
+  // any one persona's own list. Widened from `/kyc/documents` to `/kyc` so the
+  // Task 3 submission endpoint (`/users/me/kyc/submit`) is covered too.
+  { prefix: "/users/me/kyc", methods: "ALL", why: "upload one's own KYC documents, read them back while under review, and submit (or re-submit) the KYC application itself" },
 ];
 
 /**

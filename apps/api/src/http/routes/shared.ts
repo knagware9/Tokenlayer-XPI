@@ -2481,4 +2481,31 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
       .header("content-disposition", `attachment; filename="kyc-document-${id}"`)
       .send(doc.bytes);
   });
+
+  app.post("/users/me/kyc/submit", { schema: S.submitKyc, ...auth }, async (request, reply) => {
+    if (machinePrincipal(request)) return reply.code(403).send({ error: "MACHINE_PRINCIPAL", message: "an API key has no self to submit KYC for" });
+    const claims = request.user as TokenClaims;
+    const b = request.body as {
+      legalName: string; country: string; idType: string; idNumber: string;
+      dateOfBirth?: string; address?: { street: string; city: string; postalCode: string };
+      occupation?: string; sourceOfFunds?: string; pepDeclaration?: boolean;
+      idDocumentId: string; addressDocumentId: string;
+    };
+    const idDoc = await deps.documents.get(b.idDocumentId);
+    const addressDoc = await deps.documents.get(b.addressDocumentId);
+    if (!idDoc || !addressDoc) return reply.code(400).send({ error: "DOCUMENT_NOT_FOUND", message: "one or both documents were not found" });
+    if (idDoc.uploadedBy !== claims.id || addressDoc.uploadedBy !== claims.id) {
+      return reply.code(400).send({ error: "DOCUMENT_NOT_YOURS", message: "both documents must have been uploaded by you" });
+    }
+    const kyc: KycDetails = {
+      legalName: b.legalName, country: b.country, idType: b.idType, idNumber: b.idNumber,
+      dateOfBirth: b.dateOfBirth, address: b.address, occupation: b.occupation, sourceOfFunds: b.sourceOfFunds,
+      pepDeclaration: b.pepDeclaration ?? false,
+      idDocument: { id: idDoc.id, sha256: idDoc.sha256 }, addressDocument: { id: addressDoc.id, sha256: addressDoc.sha256 },
+      // A fresh submission clears any stale decision from a prior round.
+      riskTier: null, expiresAt: null, rejectionReason: null,
+    };
+    const updated = await deps.users.update(claims.id, { kycStatus: "pending", kyc });
+    return reply.code(200).send({ id: updated.id, kycStatus: updated.kycStatus });
+  });
 }
