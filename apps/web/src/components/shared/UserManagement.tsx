@@ -489,10 +489,24 @@ function KycReviewPanel({ user, onClose, onDecided }: { user: Summary; onClose: 
   // file goes through — never hardcode `/api/v1` separately.
   async function openDocument(docId: string): Promise<void> {
     if (!token) return;
-    const res = await fetch(`${API_BASE}/users/me/kyc/documents/${docId}`, { headers: { authorization: `Bearer ${token}` } });
-    if (!res.ok) { setError("Could not load that document"); return; }
-    const blob = await res.blob();
-    window.open(URL.createObjectURL(blob), "_blank");
+    // Opened SYNCHRONOUSLY, in the same tick as the click — a browser's popup
+    // blocker allows window.open only while it can still see this as a direct
+    // response to a user gesture, and that permission is gone by the time an
+    // `await` resumes. Opening blank now and pointing it at the blob once the
+    // fetch resolves keeps the tab inside the gesture instead of after it —
+    // same pattern as CredentialSchemas.tsx's previewStored.
+    const win = window.open("", "_blank");
+    try {
+      const res = await fetch(`${API_BASE}/users/me/kyc/documents/${docId}`, { headers: { authorization: `Bearer ${token}` } });
+      if (!res.ok) { win?.close(); setError("Could not load that document"); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      if (win) win.location.href = url; else window.open(url, "_blank");
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch {
+      win?.close();
+      setError("Could not load that document");
+    }
   }
 
   return (
