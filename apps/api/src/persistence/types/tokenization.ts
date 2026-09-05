@@ -7,6 +7,22 @@
 import type { TokenStandard, TokenType, LifecycleAction, UseCaseDefinition, UseCaseSource } from "@tokenlayer/core";
 import type { Paged, Page } from "./shared.js";
 
+export interface AssetDueDiligence {
+  prospectus?: { id: string; sha256: string } | null;
+  legalOpinion?: { id: string; sha256: string } | null;
+  additionalDocuments?: { id: string; sha256: string; label: string }[];
+  riskTier?: "low" | "medium" | "high" | null;
+  reviewedBy?: string | null;
+  reviewedAt?: string | null;
+  rejectionReason?: string | null;
+  // The issuer's own requested activation parameters, captured at POST
+  // /assets time (see Task 8's issueAssetCore change). `executeIssueActivation`
+  // needs them at approval time; with no proposal system involved, this is
+  // the only durable place they can wait.
+  pendingInitialSupply?: string | null;
+  pendingSale?: { unitPrice: string; currency: string } | null;
+}
+
 export interface AssetRecord {
   id: string;
   useCaseKey: string;
@@ -25,6 +41,7 @@ export interface AssetRecord {
   treasuryAccount: string | null;
   /** Value of the use case's `uniqueBy` field, enforced unique per use case. */
   uniqueKey?: string | null;
+  dueDiligence?: AssetDueDiligence | null;
 }
 
 export interface SaleTerms {
@@ -52,6 +69,7 @@ export interface AssetRepository {
   list(filter?: AssetFilter, page?: Page): Promise<Paged<AssetRecord>>;
   setStatus(id: string, status: string): Promise<void>;
   setSaleTerms(id: string, terms: SaleTerms): Promise<void>;
+  setDueDiligence(id: string, dueDiligence: AssetDueDiligence): Promise<void>;
   /** First asset in the use case whose metadata[field] === value, else null. */
   findByMetadata(useCaseKey: string, field: string, value: unknown): Promise<AssetRecord | null>;
 }

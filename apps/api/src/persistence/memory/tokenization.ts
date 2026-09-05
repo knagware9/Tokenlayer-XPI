@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { id, now, paginate } from "./common.js";
 import { PolicyError, normalizeUseCaseDefinition } from "@tokenlayer/core";
 import type { UseCaseDefinition } from "@tokenlayer/core";
-import type { AccountRecord, AccountRepository, AssetFilter, AssetRecord, AssetRepository, CashBalanceRecord, CashRepository, CashflowRecord, CashflowRepository, ListingRecord, ListingRepository, Page, Paged, SaleTerms, StagedInvoiceRecord, StagedInvoiceRepository, StagedInvoiceStatus, UseCaseRepository } from "../types/index.js";
+import type { AccountRecord, AccountRepository, AssetDueDiligence, AssetFilter, AssetRecord, AssetRepository, CashBalanceRecord, CashRepository, CashflowRecord, CashflowRepository, ListingRecord, ListingRepository, Page, Paged, SaleTerms, StagedInvoiceRecord, StagedInvoiceRepository, StagedInvoiceStatus, UseCaseRepository } from "../types/index.js";
 import { ListingConflictError } from "../types/index.js";
 
 export class MemoryAssetRepository implements AssetRepository {
@@ -31,6 +31,7 @@ export class MemoryAssetRepository implements AssetRepository {
       currency: input.currency ?? null,
       treasuryAccount: input.treasuryAccount ?? null,
       uniqueKey: input.uniqueKey ?? null,
+      dueDiligence: input.dueDiligence ?? null,
       createdAt: now(),
     };
     this.byId.set(rec.id, rec);
@@ -54,6 +55,10 @@ export class MemoryAssetRepository implements AssetRepository {
   async setSaleTerms(id: string, terms: SaleTerms): Promise<void> {
     const a = this.byId.get(id);
     if (a) { a.unitPrice = terms.unitPrice; a.currency = terms.currency; a.treasuryAccount = terms.treasuryAccount; }
+  }
+  async setDueDiligence(id: string, dueDiligence: AssetDueDiligence): Promise<void> {
+    const a = this.byId.get(id);
+    if (a) a.dueDiligence = dueDiligence;
   }
   async findByMetadata(useCaseKey: string, field: string, value: unknown): Promise<AssetRecord | null> {
     if (value === undefined) return null; // never match on a missing field (undefined === undefined footgun)

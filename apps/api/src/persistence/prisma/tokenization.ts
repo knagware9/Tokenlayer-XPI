@@ -10,7 +10,7 @@ import { prisma } from "./client.js";
 import { parseJsonObject } from "./common.js";
 import { PolicyError, normalizeUseCaseDefinition } from "@tokenlayer/core";
 import type { TokenStandard, TokenType, UseCaseDefinition } from "@tokenlayer/core";
-import type { AccountRecord, AccountRepository, AssetFilter, AssetRecord, AssetRepository, CashBalanceRecord, CashRepository, CashflowRecord, CashflowRepository, ListingRecord, ListingRepository, Page, Paged, SaleTerms, StagedInvoiceRecord, StagedInvoiceRepository, StagedInvoiceStatus, UseCaseRepository } from "../types/index.js";
+import type { AccountRecord, AccountRepository, AssetDueDiligence, AssetFilter, AssetRecord, AssetRepository, CashBalanceRecord, CashRepository, CashflowRecord, CashflowRepository, ListingRecord, ListingRepository, Page, Paged, SaleTerms, StagedInvoiceRecord, StagedInvoiceRepository, StagedInvoiceStatus, UseCaseRepository } from "../types/index.js";
 import { ListingConflictError } from "../types/index.js";
 
 function toAsset(r: Asset, parsedMetadata?: Record<string, unknown>): AssetRecord {
@@ -31,6 +31,7 @@ function toAsset(r: Asset, parsedMetadata?: Record<string, unknown>): AssetRecor
     currency: r.currency,
     treasuryAccount: r.treasuryAccount,
     uniqueKey: r.uniqueKey,
+    dueDiligence: r.dueDiligence ? JSON.parse(r.dueDiligence) as AssetDueDiligence : null,
   };
 }
 
@@ -41,6 +42,7 @@ export class PrismaAssetRepository implements AssetRepository {
         ...input,
         uniqueKey: input.uniqueKey ?? null,
         metadata: JSON.stringify(input.metadata),
+        dueDiligence: input.dueDiligence ? JSON.stringify(input.dueDiligence) : null,
       },
     });
     return toAsset(r, input.metadata);
@@ -70,6 +72,9 @@ export class PrismaAssetRepository implements AssetRepository {
   }
   async setSaleTerms(id: string, terms: SaleTerms): Promise<void> {
     await prisma.asset.update({ where: { id }, data: { unitPrice: terms.unitPrice, currency: terms.currency, treasuryAccount: terms.treasuryAccount } });
+  }
+  async setDueDiligence(id: string, dueDiligence: AssetDueDiligence): Promise<void> {
+    await prisma.asset.update({ where: { id }, data: { dueDiligence: JSON.stringify(dueDiligence) } });
   }
   // Metadata is stored as a JSON string column, so filter in-process over the
   // (small) per-use-case set rather than with a JSON query.

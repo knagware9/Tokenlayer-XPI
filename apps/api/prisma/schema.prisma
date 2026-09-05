@@ -90,6 +90,16 @@ model Asset {
   // makes "tokenize an invoice at most once" hold even under concurrent issue.
   // NULL for use cases without a uniqueBy rule (SQLite treats NULLs as distinct).
   uniqueKey       String?
+  // Due-diligence documents, risk classification, and the reviewer's decision
+  // for this asset — JSON-encoded, same convention as `metadata` above. Kept
+  // as its own column rather than folded into `metadata` because `metadata`
+  // is the use case's own metadataSchema-validated, investor-facing free-form
+  // data; mixing review state into it would pollute that display and
+  // complicate its validation. Also carries the issuer's originally-requested
+  // initialSupply/sale terms from POST /assets, deferred until
+  // POST /assets/:id/review-decision approves and needs them to activate —
+  // see AssetDueDiligence's own doc comment for why they live here.
+  dueDiligence    String?
 
   @@unique([useCaseKey, uniqueKey])
 }
