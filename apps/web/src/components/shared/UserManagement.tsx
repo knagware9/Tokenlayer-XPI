@@ -3,6 +3,7 @@ import { API_BASE, ApiError, api } from "../../api.js";
 import { useAuth } from "../../auth.js";
 import { assignableRoles, can } from "../../rbac.js";
 import { activePersona } from "../../lib/shared/persona.js";
+import { isExpiringOrExpired } from "../../lib/shared/kyc-expiry.js";
 import type { CredentialUseCase, IdentityResult, Role, UseCase } from "../../types.js";
 import type { DomainKey } from "../../domains.js";
 import { Pill } from "./ui.js";
@@ -214,6 +215,13 @@ function ManageUsers({ rows, me, useCases, onChanged }: { rows: Summary[]; me?: 
   const [allowing, setAllowing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [kycFilter, setKycFilter] = useState<"all" | "pending" | "expiring">("all");
+
+  const filteredRows = rows.filter((u) => {
+    if (kycFilter === "pending") return u.kycStatus === "pending";
+    if (kycFilter === "expiring") return u.kycStatus === "approved" && isExpiringOrExpired(u.kyc?.expiresAt);
+    return true;
+  });
 
   const act = async (fn: () => Promise<unknown>): Promise<void> => {
     setError(null);
@@ -280,11 +288,22 @@ function ManageUsers({ rows, me, useCases, onChanged }: { rows: Summary[]; me?: 
     <div className="space-y-3">
       {error && <p className="text-sm text-red-600">{error}</p>}
       {notice && <p className="text-sm text-emerald-600">{notice}</p>}
+      <div className="flex gap-1">
+        {(["all", "pending", "expiring"] as const).map((f) => (
+          <button
+            key={f}
+            onClick={() => setKycFilter(f)}
+            className={`px-3 py-1 rounded-lg text-xs font-medium ${kycFilter === f ? "bg-white text-brand-700 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-800"}`}
+          >
+            {f === "all" ? "All users" : f === "pending" ? "Pending KYC" : "KYC expiring/expired"}
+          </button>
+        ))}
+      </div>
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
         <table className="w-full text-sm">
           <thead className="text-xs text-slate-500 bg-slate-50 uppercase tracking-wide"><tr><th className="text-left font-medium px-4 py-2.5">Email</th><th className="text-left font-medium px-4 py-2.5">Role</th><th className="text-left font-medium px-4 py-2.5">Use case</th><th className="text-left font-medium px-4 py-2.5">Status</th><th className="text-left font-medium px-4 py-2.5">KYC</th><th className="px-4 py-2.5 text-right font-medium">Actions</th></tr></thead>
           <tbody>
-            {rows.map((u) => (
+            {filteredRows.map((u) => (
               <Fragment key={u.id}>
                 <tr className="border-t border-slate-100">
                   <td className="px-4 py-2">{u.email}</td>
