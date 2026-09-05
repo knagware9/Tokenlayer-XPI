@@ -68,6 +68,7 @@ const DELIBERATELY_UNSCOPED: Record<string, string> = {
   "POST /users/me/kyc/documents": "403 MACHINE_PRINCIPAL: uploads the caller's OWN KYC document; a key has no self to submit for",
   "GET /users/me/kyc/documents/:id": "403 MACHINE_PRINCIPAL: reads the caller's OWN KYC document; a key has no self to read for",
   "POST /users/me/kyc/submit": "403 MACHINE_PRINCIPAL: submits the caller's OWN KYC application; a key has no self to submit for",
+  "POST /users/:id/kyc/decision": "403 MACHINE_PRINCIPAL: platform governance (deciding someone's identity verification) — mirrors POST /orgs/:id/approve",
 
   // --- gated dynamically, by something a static scope cannot express --------
   "POST /proposals/:id/approve": "scope derived from the proposal's KIND inside decide() — see ProposalKindHandler.apiScope",

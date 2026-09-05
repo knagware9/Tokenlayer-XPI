@@ -19,6 +19,7 @@ import type { TokenClaims } from "../http/support.js";
 import { scopedToCaller } from "../http/support.js";
 import type { ProposalRecord } from "../persistence/types/index.js";
 import { orgCapabilityChangeKind } from "./org-kinds.js";
+import { kycDecisionKind } from "./kyc-kinds.js";
 import { onboardUserBatchKind, onboardUserKind, revokeUserIdentityKind } from "./user-kinds.js";
 import { createUseCaseKind } from "../tokenization/usecase-kinds.js";
 
@@ -187,3 +188,8 @@ registerProposalKind(createUseCaseKind);
 // Org-scoped capability-change kind (EN-A): an OrgAdmin requests a new envelope;
 // only a PlatformAdmin may approve. Same registry, same TYPE-only import pattern.
 registerProposalKind(orgCapabilityChangeKind);
+
+// Platform-governance KYC decision kind: a PlatformAdmin proposes approving or
+// rejecting a pending KYC submission; a second PlatformAdmin approval executes
+// it. Same registry, same no-runtime-cycle TYPE-only import pattern.
+registerProposalKind(kycDecisionKind);

@@ -46,6 +46,7 @@ import { actorOf, claimsOf, contextOf, isPositiveIntString, machinePrincipal, no
 import { NO_USE_CASE, canAdministerUser, BCRYPT_ROUNDS, LOGIN_WINDOW_MS, MAX_DOC_BYTES, DOC_UPLOAD_BODY_LIMIT, ALLOWED_DOC_TYPES, storeUploadedDocument, orgOwnsDocument, decodeVcJti, devKeyFromSeed, orgView, orgCapabilityMissing } from "./common.js";
 import type { BrandLogoErrorCode, RouteContext } from "./context.js";
 import { createProposalAndNotify } from "../../shared/proposal-notify.js";
+import type { KycDecisionPayload } from "../../shared/kyc-kinds.js";
 
 export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: RouteContext): void {
   const { principal, auth, authScoped, loginThrottled, resetThrottled, proposeIfGated, orgScoped, resolveUseCaseDomain, useCaseKeysByDomain, linkedWallet, orgMemberCapabilityViolation, brandLogoRefusal, proposalView, ensureOrg, manageableTarget, mapHeld, issuerNameResolver, isRenderableArtwork, RENDERABLE_ARTWORK_TYPES, assetChain, verifyAsset, redactPayload } = ctx;
@@ -2507,5 +2508,24 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     };
     const updated = await deps.users.update(claims.id, { kycStatus: "pending", kyc });
     return reply.code(200).send({ id: updated.id, kycStatus: updated.kycStatus });
+  });
+
+  app.post("/users/:id/kyc/decision", { schema: S.proposeKycDecision, ...auth }, async (request, reply) => {
+    if (machinePrincipal(request)) return reply.code(403).send({ error: "MACHINE_PRINCIPAL", message: "an API key may not decide KYC" });
+    const claims = request.user as TokenClaims;
+    if (claims.role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only the Platform Admin may decide KYC" });
+    const { id } = request.params as { id: string };
+    const b = request.body as { decision: "approved" | "rejected"; riskTier?: "low" | "medium" | "high"; rejectionReason?: string };
+    const target = await deps.users.findById(id);
+    if (!target) return notFound(reply, "user not found");
+    if (target.kycStatus !== "pending") return reply.code(409).send({ error: "NOT_PENDING", message: `user's KYC is ${target.kycStatus}, not pending` });
+    if (b.decision === "rejected" && !b.rejectionReason) return reply.code(400).send({ error: "REASON_REQUIRED", message: "a rejection requires a reason" });
+    const payload: KycDecisionPayload = { userId: id, decision: b.decision, riskTier: b.riskTier, rejectionReason: b.rejectionReason };
+    const proposal = await createProposalAndNotify(deps, {
+      useCaseKey: null, orgId: target.orgId ?? null, assetId: null, kind: "kyc-decision",
+      payload: payload as unknown as Record<string, unknown>,
+      proposerId: claims.id, proposerLabel: claims.email, required: 1,
+    }, request.log);
+    return reply.code(202).send({ proposal: proposalView(proposal) });
   });
 }

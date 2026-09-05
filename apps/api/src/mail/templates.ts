@@ -61,10 +61,13 @@ export function passwordResetEmail(a: { resetUrl: string }): EmailContent {
   };
 }
 
-export function kycDecisionEmail(a: { decision: "approved" | "rejected" }): EmailContent {
+export function kycDecisionEmail(a: { decision: "approved" | "rejected"; rejectionReason?: string }): EmailContent {
   const verb = a.decision === "approved" ? "approved" : "rejected";
-  const text = `Your KYC verification was ${verb}.`;
-  return { subject: `Your KYC verification was ${verb}`, text, html: wrap([esc(text)]) };
+  const reasonLine = a.decision === "rejected" && a.rejectionReason ? `\n\nReason: ${a.rejectionReason}` : "";
+  const text = `Your KYC verification was ${verb}.${reasonLine}`;
+  const htmlParts = [esc(`Your KYC verification was ${verb}.`)];
+  if (a.decision === "rejected" && a.rejectionReason) htmlParts.push(`Reason: ${esc(a.rejectionReason)}`);
+  return { subject: `Your KYC verification was ${verb}`, text, html: wrap(htmlParts) };
 }
 
 export function orgApprovedEmail(a: { orgName: string; loginUrl: string }): EmailContent {

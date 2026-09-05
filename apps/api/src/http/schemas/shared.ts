@@ -1110,6 +1110,23 @@ export const sharedSchemas: Record<string, FastifySchema> = {
       ...errs(400, 401, 403),
     },
   },
+  proposeKycDecision: {
+    tags: ["Users"],
+    summary: "Propose a KYC decision (maker-checker) — PlatformAdmin only",
+    security: humanOnly,
+    description:
+      "Drafts a KYC approve/reject decision only. It applies through a second PlatformAdmin's approval (SELF_APPROVAL " +
+      "forbids the proposer from also being the checker), and no API key may ever decide it.\n\n" +
+      "**202 means nothing has changed yet.** The response carries a maker-checker `proposal`; the user's KYC status " +
+      "is still `pending` until a second Platform Admin approves that proposal.",
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    body: {
+      type: "object",
+      required: ["decision"],
+      properties: { decision: { type: "string", enum: ["approved", "rejected"] }, riskTier: { type: "string", enum: ["low", "medium", "high"] }, rejectionReason: { type: "string" } },
+    },
+    response: { 202: { $ref: "ProposalEnvelope#" }, ...errs(400, 401, 403, 404, 409) },
+  },
   deleteUser: { tags: ["Users"], summary: "Remove a user (scoped)", security: eitherCredential,
     description:
       "Requires the `users:onboard` scope: removing a principal is the same authority as creating one, so it is not " +

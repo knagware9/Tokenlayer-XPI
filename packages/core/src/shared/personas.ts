@@ -183,6 +183,10 @@ const STAFF_BASELINE: readonly PersonaRule[] = [
   { prefix: "/users/:id", methods: ["PATCH", "DELETE"], exact: true, why: "edit or deactivate a member of the roster" },
   { prefix: "/users/batch", methods: ["POST"], why: "CSV batch onboarding" },
   { prefix: "/proposals", methods: "ALL", why: "the maker-checker queue every gated action lands in" },
+  // PlatformAdmin-only in the handler (like /orgs/:id/approve above), but the
+  // EDGE grant is staff-wide — the route itself, not the container, decides
+  // who may actually call it.
+  { prefix: "/users/:id/kyc/decision", methods: ["POST"], why: "the platform's KYC approve/reject decision queue (maker-checker)" },
   { prefix: "/audit", methods: "ALL", why: "the hash-chained log and its anchoring" },
   { prefix: "/events", methods: ["GET"], why: "the activity feed behind the audit console" },
   { prefix: "/documents", methods: "ALL", why: "upload and fetch supporting documents" },
