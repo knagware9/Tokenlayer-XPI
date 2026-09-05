@@ -2457,7 +2457,7 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
       .send(doc.bytes);
   });
 
-  app.post("/users/me/kyc/documents", { schema: S.uploadKycDocument, ...auth }, async (request, reply) => {
+  app.post("/users/me/kyc/documents", { schema: S.uploadKycDocument, bodyLimit: DOC_UPLOAD_BODY_LIMIT, ...auth }, async (request, reply) => {
     if (machinePrincipal(request)) return reply.code(403).send({ error: "MACHINE_PRINCIPAL", message: "an API key has no self to submit KYC for" });
     const claims = request.user as TokenClaims;
     const doc = await storeUploadedDocument(deps.documents, request.body as { contentType: string; dataBase64: string }, null, null, claims.id);

@@ -42,6 +42,21 @@ describe("KYC document upload and read gate", () => {
     expect(read.statusCode).toBe(200);
   });
 
+  it("accepts an upload whose base64 body exceeds the app's default 256KB bodyLimit but stays under DOC_UPLOAD_BODY_LIMIT", async () => {
+    // A real ID scan or address-proof photo decodes to well over 190KB; base64
+    // inflates that ~1.33x. This payload's raw bytes alone are ~300KB, so the
+    // base64-encoded JSON body is well past Fastify's global 256KB bodyLimit but
+    // safely under the route's DOC_UPLOAD_BODY_LIMIT (8MB) and MAX_DOC_BYTES (5MB)
+    // ceiling — proving the route-level bodyLimit override is actually applied.
+    const h = await buildTestAppWithRepos();
+    const buyer = await loginAs(h.app, "carbon.buyer@tokenlayer.dev", "carbon123");
+    const upload = await h.app.inject({
+      method: "POST", url: `${V1}/users/me/kyc/documents`, headers: auth(buyer),
+      payload: { contentType: "application/pdf", dataBase64: Buffer.alloc(300 * 1024, "a").toString("base64") },
+    });
+    expect(upload.statusCode).toBe(201);
+  });
+
   it("a machine principal cannot upload a KYC document (no self to submit for)", async () => {
     const h = await buildTestAppWithRepos();
     // Real API-key minting path: an org, then POST /orgs/:id/api-keys — mirrors

@@ -65,6 +65,8 @@ const DELIBERATELY_UNSCOPED: Record<string, string> = {
   "PATCH /orgs/:id/capabilities": "403 MACHINE_PRINCIPAL: a key may never raise the envelope that bounds it",
   "PATCH /orgs/:id/branding": "403 MACHINE_PRINCIPAL: session-only by design — branding is a console act by an OrgAdmin or PlatformAdmin, and an unattended key must not be able to rewrite an organization's identity. Role AND org-ownership are both checked in the handler; withholding a scope alone would NOT have withheld the route, so the refusal is explicit.",
   "POST /orgs/:id/branding/logo": "403 MACHINE_PRINCIPAL: gated identically to PATCH /orgs/:id/branding — uploading the org's mark is the same console act as setting its colour, checked the same way (role AND org-ownership in the handler, machine principals refused outright).",
+  "POST /users/me/kyc/documents": "403 MACHINE_PRINCIPAL: uploads the caller's OWN KYC document; a key has no self to submit for",
+  "GET /users/me/kyc/documents/:id": "403 MACHINE_PRINCIPAL: reads the caller's OWN KYC document; a key has no self to read for",
 
   // --- gated dynamically, by something a static scope cannot express --------
   "POST /proposals/:id/approve": "scope derived from the proposal's KIND inside decide() — see ProposalKindHandler.apiScope",
@@ -78,8 +80,6 @@ const DELIBERATELY_UNSCOPED: Record<string, string> = {
   "POST /me/credentials/:id/reject": "the caller's OWN held credential; confers no authority over anyone",
   "POST /me/credentials/:id/request-changes": "the caller's OWN held credential; confers no authority over anyone",
   "POST /verification-requests/:id/reject": "holder DECLINING disclosure; denies rather than grants",
-  "POST /users/me/kyc/documents": "uploads the caller's OWN KYC document; confers no authority over anyone",
-  "GET /users/me/kyc/documents/:id": "reads the caller's OWN KYC document (or, for a PlatformAdmin reviewing it, someone else's); confers no authority over anyone",
 
   // --- no persistence, or no authority conferred ---------------------------
   "POST /use-cases/preview-code": "pure render of contract source; writes nothing",
