@@ -98,6 +98,11 @@ services:
       SMTP_USER: ${TOKENIZATION_SMTP_USER:-}
       SMTP_PASS: ${TOKENIZATION_SMTP_PASS:-}
       MAIL_FROM: ${MAIL_FROM:-no-reply@tokenlayer.dev}
+      # Base URL embedded in every emailed link. Deliberately NOT the first
+      # CORS_ORIGINS entry (:8100, tokenization-issuer-web) — :8102 is
+      # tokenization-admin-web, the console PlatformAdmins actually act from
+      # for org-approval and proposal-approval links, which only they follow.
+      PUBLIC_WEB_URL: ${TOKENIZATION_PUBLIC_WEB_URL:-http://localhost:8102}
     volumes: [tokenization-data:/data]
     # A raw HTTP GET, not a dedicated route: the API has none, every real route
     # needs auth, and ANY response (even a 401) proves Fastify is up and
@@ -121,11 +126,19 @@ services:
     networks: [xi-net]
     restart: unless-stopped
 
+  # DEV ONLY. Mailpit's inbox holds live password-reset links and plaintext
+  # welcome-email passwords — publishing it on all interfaces with no auth in
+  # the same compose file a real deployment uses would hand that inbox to
+  # anyone on the host's network. `profiles: [dev]` keeps it off a bare
+  # `docker compose up`; scripts/stack-up.sh sets COMPOSE_PROFILES=dev so
+  # local development still gets it automatically. Loopback-only binding is a
+  # second, independent barrier even when the profile IS active.
   tokenization-mailpit:
-    image: axllent/mailpit:latest
-    ports: ["8025:8025"]
+    image: axllent/mailpit:v1.20.0
+    ports: ["127.0.0.1:8025:8025"]
     networks: [xi-net]
     restart: unless-stopped
+    profiles: [dev]
 
   tokenization-issuer-edge:
     build: { <<: *edge-build, args: { PERSONA: tokenization-issuer } }

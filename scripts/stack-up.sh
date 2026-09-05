@@ -92,6 +92,12 @@ docker network inspect "$NETWORK" >/dev/null 2>&1 || {
   docker network create "$NETWORK" >/dev/null
 }
 
+# Mailpit is gated behind the 'dev' compose profile (it is a plaintext-password
+# inbox with no auth — see its service comment in the compose files) and does
+# NOT start on a bare `docker compose up`. This script IS local development, so
+# opt every `up` below into that profile automatically.
+export COMPOSE_PROFILES=dev
+
 wait_for() {   # wait_for <port> <label>
   local port="$1" label="$2" code
   for i in $(seq 1 150); do

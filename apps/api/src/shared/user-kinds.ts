@@ -83,8 +83,24 @@ async function onboardSingle(deps: AppDeps, proposer: Actor, pl: OnboardUserPayl
     accountId, active: true, kycStatus: "pending", kyc: pl.kyc ?? null, kind: "human",
   });
   let issuedCredentialId: string | null = null;
-  try {
-    if (!pl.skipWelcomeEmail) {
+  // Sends the set-password link, but ONLY after every failure-capable step in
+  // this function has already succeeded (called at the tail of every success
+  // path in the try below, right before that path returns/falls through) —
+  // never as the try's first statement. Emailing first orphaned a working
+  // "set your password" link for an account the catch below was about to
+  // delete on a later failure (DID mint / credential issuance / the
+  // post-issuance update / audit append), and — once a KycCredential had
+  // already issued — a SECOND, contradictory "your credential was revoked"
+  // email to the very same stranded user when the rollback ran.
+  const sendWelcomeEmail = async (): Promise<void> => {
+    if (pl.skipWelcomeEmail) return;
+    // Called only once onboarding has fully succeeded — the whole point of
+    // moving this to the tail (see the comment above). It must therefore
+    // never itself trigger the catch below and roll back an already-successful
+    // onboarding (deleting the user / revoking a just-issued credential) over
+    // a mail-infrastructure hiccup, so the entire step — token mint included,
+    // not just the send — is best-effort and logs rather than throws.
+    try {
       const minted = await mintResetToken();
       await deps.passwordResetTokens.create({
         userId: created.id, tokenPrefix: minted.prefix, tokenHash: minted.hash,
@@ -92,8 +108,17 @@ async function onboardSingle(deps: AppDeps, proposer: Actor, pl: OnboardUserPayl
       });
       const setPasswordUrl = `${deps.publicWebUrl}/reset-password?token=${minted.token}`;
       const welcome = welcomeSetPasswordEmail({ email: created.email, setPasswordUrl });
-      await deps.mail.send(created.email, welcome.subject, welcome.text, welcome.html).catch(() => undefined);
+      // The set-password email is the user's ONLY way into their account (the
+      // plaintext password is never stored) — this is the one mail call site
+      // in the codebase that used to fail silently. Mirrors the
+      // credential-issuance.ts console.error shape for the same class of
+      // best-effort mail failure.
+      await deps.mail.send(created.email, welcome.subject, welcome.text, welcome.html);
+    } catch (err) {
+      console.error({ err, userId: created.id }, "[mail] onboarding set-password send failed");
     }
+  };
+  try {
     // LINK, or MINT. A supplied DID belongs to a separately-deployed Identity
     // service: this deployment records it and stores NO seed, because it does
     // not hold that key and must never be able to sign as the holder. It also
@@ -108,6 +133,7 @@ async function onboardSingle(deps: AppDeps, proposer: Actor, pl: OnboardUserPayl
         actorId: proposer.id, action: "user-onboarded" as LifecycleAction,
         payload: { userId: created.id, email: pl.email, role: pl.role, did: null, kyc: null },
       });
+      await sendWelcomeEmail();
       return;
     }
     let did: string;
@@ -156,6 +182,7 @@ async function onboardSingle(deps: AppDeps, proposer: Actor, pl: OnboardUserPayl
       actorId: proposer.id, action: "user-onboarded" as LifecycleAction,
       payload: { userId: created.id, email: pl.email, role: pl.role, did, kyc: pl.kyc ? { country: pl.kyc.country } : null },
     });
+    await sendWelcomeEmail();
   } catch (err) {
     // DID mint / credential issuance / the post-issuance update / audit append
     // failed ⇒ no user row AND no live credential survives (mirrors the

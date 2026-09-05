@@ -48,7 +48,7 @@ import type { BrandLogoErrorCode, RouteContext } from "./context.js";
 import { createProposalAndNotify } from "../../shared/proposal-notify.js";
 
 export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: RouteContext): void {
-  const { principal, auth, authScoped, loginThrottled, proposeIfGated, orgScoped, resolveUseCaseDomain, useCaseKeysByDomain, linkedWallet, orgMemberCapabilityViolation, brandLogoRefusal, proposalView, ensureOrg, manageableTarget, mapHeld, issuerNameResolver, isRenderableArtwork, RENDERABLE_ARTWORK_TYPES, assetChain, verifyAsset, redactPayload } = ctx;
+  const { principal, auth, authScoped, loginThrottled, resetThrottled, proposeIfGated, orgScoped, resolveUseCaseDomain, useCaseKeysByDomain, linkedWallet, orgMemberCapabilityViolation, brandLogoRefusal, proposalView, ensureOrg, manageableTarget, mapHeld, issuerNameResolver, isRenderableArtwork, RENDERABLE_ARTWORK_TYPES, assetChain, verifyAsset, redactPayload } = ctx;
   // --- auth ---------------------------------------------------------------
   app.post("/auth/login", { schema: S.login }, async (request, reply) => {
     if (loginThrottled(request.ip)) {
@@ -90,7 +90,7 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
   });
 
   app.post("/auth/forgot-password", { schema: S.forgotPassword }, async (request, reply) => {
-    if (loginThrottled(request.ip)) return reply.code(429).send({ error: "TOO_MANY_REQUESTS", message: "too many attempts; try again later" });
+    if (resetThrottled(request.ip)) return reply.code(429).send({ error: "TOO_MANY_REQUESTS", message: "too many attempts; try again later" });
     const { email } = request.body as { email: string };
     const user = await deps.users.findByEmail(email);
     // Same response whether or not the account exists — no enumeration.
@@ -120,6 +120,14 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     const invalid = () => reply.code(400).send({ error: "INVALID_TOKEN", message: "this reset link is invalid or has expired" });
     if (!row || row.usedAt || new Date(row.expiresAt) < new Date()) return invalid();
     if (!(await resetTokenMatches(token, row.tokenHash))) return invalid();
+    // Defensive: the target user may no longer exist (e.g. an onboarding
+    // rollback deleted the row after this token was already minted and
+    // emailed) or may no longer be an active human account — treat that the
+    // SAME as an invalid token (400) rather than letting `deps.users.update`
+    // throw on an unknown id (which the shared error handler would surface as
+    // a 500 to someone who only clicked a link in an email).
+    const targetUser = await deps.users.findById(row.userId);
+    if (!targetUser || !targetUser.active || targetUser.kind !== "human") return invalid();
     await deps.users.update(row.userId, { passwordHash: await bcrypt.hash(newPassword, BCRYPT_ROUNDS) });
     await deps.passwordResetTokens.markUsed(row.id);
     await deps.passwordResetTokens.invalidateAllForUser(row.userId);

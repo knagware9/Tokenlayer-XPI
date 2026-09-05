@@ -7,6 +7,19 @@ export interface EmailContent {
 
 const wrap = (paragraphs: string[]): string => paragraphs.map((p) => `<p>${p}</p>`).join("\n");
 
+/**
+ * HTML-escape a value before it lands in an `html` template. Several of these
+ * values are attacker-reachable (org names via the public `POST /orgs/register`,
+ * user emails via `POST /users` — neither field is pattern-restricted) and end
+ * up in mail sent to third parties and to every PlatformAdmin, so every `${...}`
+ * interpolated into an `html` string (never `text`, which is safe as-is) must go
+ * through this first — URLs included, for attribute-context consistency even
+ * though every URL here is internally constructed, never caller-supplied.
+ */
+const esc = (s: string): string =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
 export function welcomeCredentialsEmail(a: { email: string; password: string; loginUrl: string }): EmailContent {
   const text = `Welcome to TokenLayer.\n\nYour login: ${a.email}\nYour password: ${a.password}\n\nSign in at ${a.loginUrl}\n\nWe recommend changing your password after your first sign-in.`;
   return {
@@ -14,8 +27,8 @@ export function welcomeCredentialsEmail(a: { email: string; password: string; lo
     text,
     html: wrap([
       "Welcome to TokenLayer.",
-      `Your login: <strong>${a.email}</strong><br>Your password: <strong>${a.password}</strong>`,
-      `Sign in at <a href="${a.loginUrl}">${a.loginUrl}</a>`,
+      `Your login: <strong>${esc(a.email)}</strong><br>Your password: <strong>${esc(a.password)}</strong>`,
+      `Sign in at <a href="${esc(a.loginUrl)}">${esc(a.loginUrl)}</a>`,
       "We recommend changing your password after your first sign-in.",
     ]),
   };
@@ -28,8 +41,8 @@ export function welcomeSetPasswordEmail(a: { email: string; setPasswordUrl: stri
     text,
     html: wrap([
       "Welcome to TokenLayer.",
-      `An account was created for <strong>${a.email}</strong>. Set your password to finish signing in:`,
-      `<a href="${a.setPasswordUrl}">${a.setPasswordUrl}</a>`,
+      `An account was created for <strong>${esc(a.email)}</strong>. Set your password to finish signing in:`,
+      `<a href="${esc(a.setPasswordUrl)}">${esc(a.setPasswordUrl)}</a>`,
       "This link expires in 30 minutes.",
     ]),
   };
@@ -42,7 +55,7 @@ export function passwordResetEmail(a: { resetUrl: string }): EmailContent {
     text,
     html: wrap([
       "Reset your TokenLayer password:",
-      `<a href="${a.resetUrl}">${a.resetUrl}</a>`,
+      `<a href="${esc(a.resetUrl)}">${esc(a.resetUrl)}</a>`,
       "This link expires in 30 minutes. If you didn't request this, ignore this email.",
     ]),
   };
@@ -51,7 +64,7 @@ export function passwordResetEmail(a: { resetUrl: string }): EmailContent {
 export function kycDecisionEmail(a: { decision: "approved" | "rejected" }): EmailContent {
   const verb = a.decision === "approved" ? "approved" : "rejected";
   const text = `Your KYC verification was ${verb}.`;
-  return { subject: `Your KYC verification was ${verb}`, text, html: wrap([text]) };
+  return { subject: `Your KYC verification was ${verb}`, text, html: wrap([esc(text)]) };
 }
 
 export function orgApprovedEmail(a: { orgName: string; loginUrl: string }): EmailContent {
@@ -59,18 +72,18 @@ export function orgApprovedEmail(a: { orgName: string; loginUrl: string }): Emai
   return {
     subject: `${a.orgName} is now approved`,
     text,
-    html: wrap([`<strong>${a.orgName}</strong> has been approved on TokenLayer.`, `Sign in at <a href="${a.loginUrl}">${a.loginUrl}</a>`]),
+    html: wrap([`<strong>${esc(a.orgName)}</strong> has been approved on TokenLayer.`, `Sign in at <a href="${esc(a.loginUrl)}">${esc(a.loginUrl)}</a>`]),
   };
 }
 
 export function credentialIssuedEmail(a: { credentialType: string; issuerName: string }): EmailContent {
   const text = `A ${a.credentialType} credential was issued to you by ${a.issuerName}.`;
-  return { subject: `You received a ${a.credentialType} credential`, text, html: wrap([text]) };
+  return { subject: `You received a ${a.credentialType} credential`, text, html: wrap([`A ${esc(a.credentialType)} credential was issued to you by ${esc(a.issuerName)}.`]) };
 }
 
 export function credentialRevokedEmail(a: { credentialType: string; reason: string }): EmailContent {
   const text = `Your ${a.credentialType} credential was revoked.\n\nReason: ${a.reason}`;
-  return { subject: `Your ${a.credentialType} credential was revoked`, text, html: wrap([`Your ${a.credentialType} credential was revoked.`, `Reason: ${a.reason}`]) };
+  return { subject: `Your ${a.credentialType} credential was revoked`, text, html: wrap([`Your ${esc(a.credentialType)} credential was revoked.`, `Reason: ${esc(a.reason)}`]) };
 }
 
 export function proposalAwaitingApprovalEmail(a: { kind: string; proposerLabel: string; approvalsUrl: string }): EmailContent {
@@ -78,6 +91,6 @@ export function proposalAwaitingApprovalEmail(a: { kind: string; proposerLabel: 
   return {
     subject: `Approval needed: ${a.kind}`,
     text,
-    html: wrap([`A '${a.kind}' proposal from <strong>${a.proposerLabel}</strong> is awaiting your approval.`, `Review it at <a href="${a.approvalsUrl}">${a.approvalsUrl}</a>`]),
+    html: wrap([`A '${esc(a.kind)}' proposal from <strong>${esc(a.proposerLabel)}</strong> is awaiting your approval.`, `Review it at <a href="${esc(a.approvalsUrl)}">${esc(a.approvalsUrl)}</a>`]),
   };
 }

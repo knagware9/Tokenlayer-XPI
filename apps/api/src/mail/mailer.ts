@@ -29,6 +29,8 @@ export interface SmtpOptions {
   port: number;
   user?: string;
   pass?: string;
+  secure?: boolean;
+  requireTLS?: boolean;
 }
 
 export class SmtpMailer implements Mailer {
@@ -41,6 +43,16 @@ export class SmtpMailer implements Mailer {
       // (not an empty-string user/pass) is what nodemailer requires to skip
       // the AUTH handshake a real provider would otherwise fail on.
       auth: opts.user && opts.pass ? { user: opts.user, pass: opts.pass } : undefined,
+      secure: opts.secure ?? false,
+      requireTLS: opts.requireTLS ?? (opts.user !== undefined && opts.pass !== undefined),
+      // nodemailer's default timeouts are minutes long, and every one of the
+      // ~10 mail call sites in this codebase awaits send() on the request
+      // path — a dead/slow SMTP server would otherwise hang a Fastify
+      // handler for minutes. Mirrors webhooksTimeoutMs's role for the same
+      // class of problem (see env.ts).
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 10_000,
     });
   }
   async send(to: string, subject: string, text: string, html: string): Promise<void> {

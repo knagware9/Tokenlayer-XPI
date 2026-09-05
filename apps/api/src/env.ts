@@ -191,6 +191,15 @@ export interface Env {
   smtpPort: number;
   smtpUser?: string;
   smtpPass?: string;
+  /** Implicit TLS (SMTPS, typically port 465). Default false — most providers use STARTTLS on 587. */
+  smtpSecure: boolean;
+  /**
+   * Force STARTTLS after connecting. Unset ⇒ SmtpMailer infers it from
+   * whether credentials are configured (a real provider needs TLS; Mailpit's
+   * unauthenticated dev connection does not). Explicit true/false overrides
+   * that inference either way.
+   */
+  smtpRequireTls?: boolean;
   /** The `From:` address on every outbound email. */
   mailFrom: string;
 }
@@ -290,6 +299,8 @@ export const env: Env = {
   smtpPort: Number(process.env.SMTP_PORT ?? 1025),
   smtpUser: process.env.SMTP_USER || undefined,
   smtpPass: process.env.SMTP_PASS || undefined,
+  smtpSecure: process.env.SMTP_SECURE === "true",
+  smtpRequireTls: process.env.SMTP_REQUIRE_TLS === "true" ? true : process.env.SMTP_REQUIRE_TLS === "false" ? false : undefined,
   mailFrom: process.env.MAIL_FROM ?? "no-reply@tokenlayer.dev",
 };
 

@@ -92,6 +92,11 @@ services:
       SMTP_USER: ${IDENTITY_SMTP_USER:-}
       SMTP_PASS: ${IDENTITY_SMTP_PASS:-}
       MAIL_FROM: ${MAIL_FROM:-no-reply@tokenlayer.dev}
+      # Base URL embedded in every emailed link (org-approval, credential,
+      # password-reset). Unset falls back to the first CORS_ORIGINS entry,
+      # which is identity-issuer-web here too — but set it explicitly so the
+      # link never silently drifts if CORS_ORIGINS' first entry ever changes.
+      PUBLIC_WEB_URL: ${IDENTITY_PUBLIC_WEB_URL:-http://localhost:8090}
     volumes: [identity-data:/data]
     networks: [xi-net]
     restart: unless-stopped
@@ -105,11 +110,19 @@ services:
       retries: 5
       start_period: 20s
 
+  # DEV ONLY. Mailpit's inbox holds live password-reset links and plaintext
+  # welcome-email passwords — publishing it on all interfaces with no auth in
+  # the same compose file a real deployment uses would hand that inbox to
+  # anyone on the host's network. `profiles: [dev]` keeps it off a bare
+  # `docker compose up`; scripts/stack-up.sh sets COMPOSE_PROFILES=dev so
+  # local development still gets it automatically. Loopback-only binding is a
+  # second, independent barrier even when the profile IS active.
   identity-mailpit:
-    image: axllent/mailpit:latest
-    ports: ["8026:8025"]
+    image: axllent/mailpit:v1.20.0
+    ports: ["127.0.0.1:8026:8025"]
     networks: [xi-net]
     restart: unless-stopped
+    profiles: [dev]
 
   identity-issuer-edge:
     build: { <<: *edge-build, args: { PERSONA: identity-issuer } }

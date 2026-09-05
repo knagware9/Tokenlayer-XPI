@@ -91,6 +91,22 @@ export function buildRouteContext(app: FastifyInstance, deps: AppDeps, sharedPri
     return e.count > loginMax;
   }
 
+  // A SEPARATE bucket from loginThrottled — sharing one would let a user who
+  // mistypes their password a few times and then requests a reset lock
+  // themselves out of login too. Same shape, same limit source, independent counters.
+  const resetHits = new Map<string, { count: number; resetAt: number }>();
+
+  function resetThrottled(ip: string): boolean {
+    const now = Date.now();
+    const e = resetHits.get(ip);
+    if (!e || now > e.resetAt) {
+      resetHits.set(ip, { count: 1, resetAt: now + LOGIN_WINDOW_MS });
+      return false;
+    }
+    e.count += 1;
+    return e.count > loginMax;
+  }
+
 
   // When the use case gates `op`, capture the operation as a pending Proposal
   // instead of executing it. Returns the proposal (→ 202) or null when ungated.
@@ -470,7 +486,7 @@ export function buildRouteContext(app: FastifyInstance, deps: AppDeps, sharedPri
   }
 
 
-  return { principal, auth, authScoped, loginThrottled, proposeIfGated, orgScoped, resolveUseCaseDomain, useCaseKeysByDomain, linkedWallet, orgMemberCapabilityViolation, brandLogoRefusal, proposalView, ensureOrg, manageableTarget, mapHeld, issuerNameResolver, isRenderableArtwork, RENDERABLE_ARTWORK_TYPES, assetChain, verifyAsset, redactPayload };
+  return { principal, auth, authScoped, loginThrottled, resetThrottled, proposeIfGated, orgScoped, resolveUseCaseDomain, useCaseKeysByDomain, linkedWallet, orgMemberCapabilityViolation, brandLogoRefusal, proposalView, ensureOrg, manageableTarget, mapHeld, issuerNameResolver, isRenderableArtwork, RENDERABLE_ARTWORK_TYPES, assetChain, verifyAsset, redactPayload };
 }
 
 /** What every `register*Routes` receives. */

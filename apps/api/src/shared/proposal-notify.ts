@@ -26,8 +26,18 @@ export async function createProposalAndNotify(
       proposerLabel: proposal.proposerLabel,
       approvalsUrl: `${deps.publicWebUrl}/approvals`,
     });
-    for (const admin of admins) {
-      await deps.mail.send(admin.email, notice.subject, notice.text, notice.html);
+    // Concurrent, not sequential: N admins sequentially awaited could add real
+    // latency to any of the 11 routes that create a proposal (worse now that
+    // SmtpMailer carries real timeouts — up to ~10s per admin), and a single
+    // admin's send throwing used to abort the loop, silently skipping every
+    // admin still left in it. allSettled fires all sends at once and reports
+    // each failure independently, so one bad address never costs the others
+    // their notification.
+    const results = await Promise.allSettled(admins.map((admin) => deps.mail.send(admin.email, notice.subject, notice.text, notice.html)));
+    for (const [i, result] of results.entries()) {
+      if (result.status === "rejected") {
+        log.error({ err: result.reason, proposalId: proposal.id, kind: proposal.kind, adminEmail: admins[i]!.email }, "[mail] proposal-awaiting-approval send failed");
+      }
     }
   } catch (err) {
     log.error({ err, proposalId: proposal.id, kind: proposal.kind }, "[mail] proposal-awaiting-approval send failed");

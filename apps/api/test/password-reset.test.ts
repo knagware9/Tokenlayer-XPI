@@ -63,6 +63,20 @@ describe("password reset", () => {
     expect(second.json().error).toBe("INVALID_TOKEN");
   });
 
+  it("reset-password rejects an expired token", async () => {
+    const h = await buildTestAppWithRepos();
+    const user = await h.users.findByEmail("admin@tokenlayer.dev");
+    const { mintResetToken } = await import("../src/mail/reset-tokens.js");
+    const minted = await mintResetToken();
+    await h.deps.passwordResetTokens.create({
+      userId: user!.id, tokenPrefix: minted.prefix, tokenHash: minted.hash,
+      expiresAt: new Date(Date.now() - 1000).toISOString(), // already expired
+    });
+    const res = await h.app.inject({ method: "POST", url: `${V1}/auth/reset-password`, payload: { token: minted.token, newPassword: "whatever-12345" } });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("INVALID_TOKEN");
+  });
+
   it("a fresh forgot-password request invalidates the previous token", async () => {
     const h = await buildTestAppWithRepos();
     await h.app.inject({ method: "POST", url: `${V1}/auth/forgot-password`, payload: { email: "admin@tokenlayer.dev" } });

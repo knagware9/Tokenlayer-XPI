@@ -171,7 +171,7 @@ async function main(): Promise<void> {
     apiKeyReserveIntervalMs: env.apiKeyReserveIntervalMs,
     brandLogoPruneGraceMs: env.brandLogoPruneGraceMs,
     registry,
-    mail: new SmtpMailer(env.mailFrom, { host: env.smtpHost, port: env.smtpPort, user: env.smtpUser, pass: env.smtpPass }),
+    mail: new SmtpMailer(env.mailFrom, { host: env.smtpHost, port: env.smtpPort, user: env.smtpUser, pass: env.smtpPass, secure: env.smtpSecure, requireTLS: env.smtpRequireTls }),
   };
   // Resolved BEFORE seedUseCases now: every seeded use case needs an owner.
   const platformOrg = await ensurePlatformIssuerOrg(deps);

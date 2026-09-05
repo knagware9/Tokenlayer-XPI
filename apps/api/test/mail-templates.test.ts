@@ -62,4 +62,28 @@ describe("mail templates", () => {
     expect(t.text).toContain("admin@acme.com");
     expect(t.text).toContain("https://app/approvals");
   });
+
+  // HTML-escaping: org names, proposer labels, and revoke reasons are
+  // attacker-reachable (public POST /orgs/register and POST /users have no
+  // pattern restriction on these fields) and land in mail sent to third
+  // parties and every PlatformAdmin — the `html` output must never carry raw
+  // markup from them. `text` is untouched (plain text is safe as-is).
+  it("orgApprovedEmail escapes HTML in the org name", () => {
+    const t = orgApprovedEmail({ orgName: `<script>alert(1)</script>`, loginUrl: "https://app/login" });
+    expect(t.html).not.toContain("<script>");
+    expect(t.html).toContain("&lt;script&gt;");
+    expect(t.text).toContain("<script>alert(1)</script>"); // text is unescaped by design
+  });
+
+  it("credentialRevokedEmail escapes HTML in the reason", () => {
+    const t = credentialRevokedEmail({ credentialType: "KycCredential", reason: `bad" onmouseover="alert(1)` });
+    expect(t.html).not.toContain(`bad" onmouseover="alert(1)`);
+    expect(t.html).toContain("&quot;");
+  });
+
+  it("proposalAwaitingApprovalEmail escapes HTML in the proposer label", () => {
+    const t = proposalAwaitingApprovalEmail({ kind: "onboard-user", proposerLabel: `<img src=x onerror=alert(1)>`, approvalsUrl: "https://app/approvals" });
+    expect(t.html).not.toContain("<img");
+    expect(t.html).toContain("&lt;img");
+  });
 });
