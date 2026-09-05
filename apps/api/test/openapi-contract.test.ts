@@ -443,6 +443,11 @@ const DOCUMENTATION_DEFERRED: Record<string, string> = {
   // be named without leaking that fact. The schema's description explains what
   // the empty 202 body means instead.
   "POST /auth/forgot-password": "always returns an empty 202 body by design — naming a field would let a caller enumerate accounts",
+  // Same answer as `GET /documents/:id`/`GET /orgs/:id/branding/logo` above:
+  // the 200 is the stored document's raw bytes, and this one is tagged "Users"
+  // (correctly — it's where a reader looks for it, unlike `getDocument`) so it
+  // doesn't escape the check on tag alone.
+  "GET /users/me/kyc/documents/:id": "returns opaque bytes (the stored KYC document), not a JSON object",
 };
 
 type ResponseSchema = { response?: Record<string, unknown>; tags?: string[]; description?: string };

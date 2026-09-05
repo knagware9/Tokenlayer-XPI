@@ -78,6 +78,8 @@ const DELIBERATELY_UNSCOPED: Record<string, string> = {
   "POST /me/credentials/:id/reject": "the caller's OWN held credential; confers no authority over anyone",
   "POST /me/credentials/:id/request-changes": "the caller's OWN held credential; confers no authority over anyone",
   "POST /verification-requests/:id/reject": "holder DECLINING disclosure; denies rather than grants",
+  "POST /users/me/kyc/documents": "uploads the caller's OWN KYC document; confers no authority over anyone",
+  "GET /users/me/kyc/documents/:id": "reads the caller's OWN KYC document (or, for a PlatformAdmin reviewing it, someone else's); confers no authority over anyone",
 
   // --- no persistence, or no authority conferred ---------------------------
   "POST /use-cases/preview-code": "pure render of contract source; writes nothing",

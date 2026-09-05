@@ -2456,4 +2456,29 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
       .header("content-disposition", `attachment; filename="document-${id}"`)
       .send(doc.bytes);
   });
+
+  app.post("/users/me/kyc/documents", { schema: S.uploadKycDocument, ...auth }, async (request, reply) => {
+    if (machinePrincipal(request)) return reply.code(403).send({ error: "MACHINE_PRINCIPAL", message: "an API key has no self to submit KYC for" });
+    const claims = request.user as TokenClaims;
+    const doc = await storeUploadedDocument(deps.documents, request.body as { contentType: string; dataBase64: string }, null, null, claims.id);
+    return reply.code(201).send({ id: doc.id, sha256: doc.sha256, size: doc.size });
+  });
+
+  app.get("/users/me/kyc/documents/:id", { schema: S.getKycDocument, ...auth }, async (request, reply) => {
+    if (machinePrincipal(request)) return reply.code(403).send({ error: "MACHINE_PRINCIPAL", message: "an API key has no KYC documents of its own" });
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    const doc = await deps.documents.get(id);
+    if (!doc) return notFound(reply, "document not found");
+    // A dedicated gate — deliberately NOT canReadDoc/the "issue" RBAC flag,
+    // which this codebase has already been burned by overloading once.
+    if (doc.uploadedBy !== claims.id && claims.role !== "PlatformAdmin") {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to read that document" });
+    }
+    return reply
+      .header("content-type", doc.contentType)
+      .header("x-content-type-options", "nosniff")
+      .header("content-disposition", `attachment; filename="kyc-document-${id}"`)
+      .send(doc.bytes);
+  });
 }
