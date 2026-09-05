@@ -33,6 +33,11 @@ function summarize(p: Proposal): string {
   if (p.kind === "onboard-user-batch") return `onboard ${(pl.rows as unknown[] | undefined)?.length ?? "?"} users${p.useCaseKey ? ` — ${p.useCaseKey}` : ""}`;
   if (p.kind === "issue-usecase-credential-batch") return `issue ${(pl.rows as unknown[] | undefined)?.length ?? "?"} × ${String(pl.credentialType ?? "credential")} — ${String(pl.useCaseKey ?? "")}`;
   if (p.kind === "revoke-user-identity") return `revoke a user's identity — ${String(pl.reason ?? "no reason given")}`;
+  if (p.kind === "kyc-decision") {
+    const decision = String(pl.decision ?? "");
+    const detail = decision === "approved" ? `approve (${String(pl.riskTier ?? "no tier")} risk)` : `reject — ${String(pl.rejectionReason ?? "no reason given")}`;
+    return `KYC decision: ${detail}`;
+  }
   if (p.kind === "org-capability-change") {
     const caps = pl.capabilities as { domains?: string[]; roles?: string[] } | undefined;
     const domains = caps?.domains?.length ? caps.domains.join(" · ") : "no domains";
