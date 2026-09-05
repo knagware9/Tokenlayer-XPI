@@ -33,6 +33,7 @@ export interface SessionUser {
    * `AppShell` reads exactly that distinction to decide whether to refresh. */
   brandLogoDocumentId?: string | null;
   brandAccent?: string | null;
+  kycStatus?: "pending" | "approved" | "rejected" | null;
 }
 
 /**

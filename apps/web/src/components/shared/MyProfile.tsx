@@ -3,6 +3,7 @@ import { api, ApiError, describeApiError } from "../../api.js";
 import { useAuth } from "../../auth.js";
 import { getOrCreateDeviceKey } from "../../lib/shared/device-wallet.js";
 import type { LoginKeyInfo } from "../../types.js";
+import { KycSubmissionPanel } from "./KycSubmissionPanel.js";
 import { Card, SectionHeader } from "./ui.js";
 
 const DEMO_CURRENCIES = ["CBDC-INR", "USDC", "e-GBP"];
@@ -178,6 +179,12 @@ export function MyProfile({ onSelect }: { onSelect: (id: string) => void }): JSX
           </button>
         </div>
       </Card>
+
+      {(user?.kycStatus === "pending" || user?.kycStatus === "rejected") && (
+        <div className="mt-6">
+          <KycSubmissionPanel onSubmitted={() => window.location.reload()} />
+        </div>
+      )}
 
       <div className="mt-6">
         <Card

@@ -86,6 +86,7 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
         orgCapabilities: org?.capabilities ?? null,
         brandLogoDocumentId: org?.brandLogoDocumentId ?? null,
         brandAccent: org?.brandAccent ?? null,
+        kycStatus: user.kycStatus,
       },
     };
   });
@@ -147,10 +148,12 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     // EN-E rides the SAME org record already loaded above: the shell needs the
     // brand on first paint, and a second fetch would be a second round-trip
     // before it could avoid a flash of the platform palette.
+    const self = await deps.users.findById(claims.id);
     return {
       ...base, useCaseKey: claims.useCaseKey ?? null, useCaseDomain, orgCapabilities: org?.capabilities ?? null,
       brandLogoDocumentId: org?.brandLogoDocumentId ?? null,
       brandAccent: org?.brandAccent ?? null,
+      kycStatus: self?.kycStatus ?? null,
     };
   });
 

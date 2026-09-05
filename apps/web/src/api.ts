@@ -288,6 +288,14 @@ export const api = {
     request<{ accountId: string; walletAddress: string }>("/me/wallet", token, { method: "PATCH", body: JSON.stringify({ walletAddress }) }),
   mePortfolio: (token: string) => request<Portfolio>("/me/portfolio", token),
   meActivity: (token: string) => request<ActivityEvent[]>("/me/activity", token),
+  uploadKycDocument: (token: string, contentType: string, dataBase64: string) =>
+    request<{ id: string; sha256: string; size: number }>("/users/me/kyc/documents", token, { method: "POST", body: JSON.stringify({ contentType, dataBase64 }) }),
+  submitKyc: (token: string, body: {
+    legalName: string; country: string; idType: string; idNumber: string;
+    dateOfBirth?: string; address?: { street: string; city: string; postalCode: string };
+    occupation?: string; sourceOfFunds?: string; pepDeclaration?: boolean;
+    idDocumentId: string; addressDocumentId: string;
+  }) => request<{ id: string; kycStatus: string }>("/users/me/kyc/submit", token, { method: "POST", body: JSON.stringify(body) }),
   orgs: (token: string) => request<Organization[]>("/orgs", token),
   // PlatformAdmin: the self-service registration queue and its decisions.
   pendingOrgs: (token: string) => request<Organization[]>("/orgs?status=pending", token),

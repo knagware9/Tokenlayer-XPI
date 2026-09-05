@@ -33,6 +33,7 @@ export const sharedSchemas: Record<string, FastifySchema> = {
             properties: {
               brandLogoDocumentId: { type: "string", nullable: true, description: "EN-E: the caller's org's logo Document id — fetch the bytes from `GET /orgs/{id}/branding/logo`. null for an org-less principal or an unbranded org." },
               brandAccent: { type: "string", nullable: true, description: "EN-E: the caller's org's lowercase `#rrggbb` accent. null for an org-less principal or an unbranded org." },
+              kycStatus: { type: "string", enum: ["pending", "approved", "rejected"], nullable: true, description: "The caller's own current KYC status, freshly re-read (not cached from the JWT)." },
             },
           },
         },
@@ -78,6 +79,7 @@ export const sharedSchemas: Record<string, FastifySchema> = {
           orgCapabilities: { type: "object", additionalProperties: true, nullable: true, description: "The org's EN-A envelope. null both for an org-less principal AND for a legacy, unrestricted org — the two are indistinguishable here." },
           brandLogoDocumentId: { type: "string", nullable: true, description: "EN-E: the caller's org's logo Document id. null for an org-less principal or an unbranded org." },
           brandAccent: { type: "string", nullable: true, description: "EN-E: the caller's org's lowercase `#rrggbb` accent. null for an org-less principal or an unbranded org." },
+          kycStatus: { type: "string", enum: ["pending", "approved", "rejected"], nullable: true, description: "The caller's own current KYC status, freshly re-read (not cached from the JWT)." },
         },
         required: ["id", "role"],
       },

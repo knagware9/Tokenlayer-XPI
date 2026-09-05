@@ -1904,7 +1904,7 @@
         "parameters": [],
         "requestBody": false,
         "responses": {
-          "200": "{brandAccent,brandLogoDocumentId,id,orgCapabilities,role,useCaseDomain,useCaseKey}",
+          "200": "{brandAccent,brandLogoDocumentId,id,kycStatus,orgCapabilities,role,useCaseDomain,useCaseKey}",
           "401": "#Error"
         }
       }
