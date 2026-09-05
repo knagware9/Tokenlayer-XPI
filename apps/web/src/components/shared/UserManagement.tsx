@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { ApiError, api } from "../../api.js";
+import { API_BASE, ApiError, api } from "../../api.js";
 import { useAuth } from "../../auth.js";
 import { assignableRoles, can } from "../../rbac.js";
 import { activePersona } from "../../lib/shared/persona.js";
@@ -209,6 +209,7 @@ function ManageUsers({ rows, me, useCases, onChanged }: { rows: Summary[]; me?: 
   const { token, user } = useAuth();
   const [editing, setEditing] = useState<Summary | null>(null);
   const [verifying, setVerifying] = useState<string | null>(null);
+  const [reviewingKyc, setReviewingKyc] = useState<string | null>(null);
   const [issuingKyc, setIssuingKyc] = useState<string | null>(null);
   const [allowing, setAllowing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -236,6 +237,7 @@ function ManageUsers({ rows, me, useCases, onChanged }: { rows: Summary[]; me?: 
   // is reachable and this restriction does not apply.
   const persona = activePersona();
   const identityIssuerEdge = !persona || persona.key === "identity-issuer";
+  const isPlatformAdmin = user?.role === "PlatformAdmin";
 
   // Allowlists a user's own wallet on every currently active asset in their
   // use case, in one click — the common case (a buyer should generally be
@@ -298,6 +300,7 @@ function ManageUsers({ rows, me, useCases, onChanged }: { rows: Summary[]; me?: 
                   </td>
                   <td className="px-4 py-2 text-right space-x-3">
                     {identityIssuerEdge && manageable(u) && u.kycStatus === "pending" && <button onClick={() => setVerifying((v) => (v === u.id ? null : u.id))} className="text-xs text-brand-600 hover:text-brand-700 font-medium">Verify identity (DID/VC)</button>}
+                    {isPlatformAdmin && manageable(u) && u.kycStatus === "pending" && <button onClick={() => setReviewingKyc((v) => (v === u.id ? null : u.id))} className="text-xs text-brand-600 hover:text-brand-700 font-medium">Review KYC</button>}
                     {canIssueKycRow(u) && <button onClick={() => setIssuingKyc((v) => (v === u.id ? null : u.id))} className="text-xs text-brand-600 hover:text-brand-700 font-medium">Issue KYC</button>}
                     {manageable(u) ? (
                       <>
@@ -323,6 +326,13 @@ function ManageUsers({ rows, me, useCases, onChanged }: { rows: Summary[]; me?: 
                   <tr className="border-t border-slate-100 bg-slate-50/60">
                     <td colSpan={6} className="px-4 py-3">
                       <VerifyIdentityPanel user={u} onClose={() => setVerifying(null)} onVerified={() => { setVerifying(null); onChanged(); }} />
+                    </td>
+                  </tr>
+                )}
+                {reviewingKyc === u.id && (
+                  <tr className="border-t border-slate-100 bg-slate-50/60">
+                    <td colSpan={6} className="px-4 py-3">
+                      <KycReviewPanel user={u} onClose={() => setReviewingKyc(null)} onDecided={() => { setReviewingKyc(null); onChanged(); }} />
                     </td>
                   </tr>
                 )}
@@ -437,6 +447,86 @@ function VerifyIdentityPanel({ user, onClose, onVerified }: { user: Summary; onC
         </p>
       )}
       {error && <p className="text-xs text-red-600">{error}</p>}
+    </div>
+  );
+}
+
+/** Platform Admin review of a self-submitted KYC (Task 3/6's My Profile flow):
+ * shows the full field set plus both uploaded documents, and proposes an
+ * approve/reject decision through Task 4's maker-checker endpoint — mirrors
+ * VerifyIdentityPanel's inline-expand pattern above. */
+function KycReviewPanel({ user, onClose, onDecided }: { user: Summary; onClose: () => void; onDecided: () => void }): JSX.Element {
+  const { token } = useAuth();
+  const [riskTier, setRiskTier] = useState<"low" | "medium" | "high">("low");
+  const [rejectionReason, setRejectionReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function decide(decision: "approved" | "rejected"): Promise<void> {
+    if (!token) return;
+    if (decision === "rejected" && !rejectionReason.trim()) {
+      setError("A rejection reason is required.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await api.proposeKycDecision(token, user.id, decision === "approved" ? { decision, riskTier } : { decision, rejectionReason: rejectionReason.trim() });
+      onDecided();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not propose that decision");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const kyc = user.kyc;
+
+  // A plain `<a href>` would not carry the Bearer token this codebase uses for
+  // auth (there is no auth cookie), so the document read would 401. Fetch with
+  // the token attached and open the result as a blob URL instead. `API_BASE`
+  // (exported from api.ts) is the same versioned root every other call in this
+  // file goes through — never hardcode `/api/v1` separately.
+  async function openDocument(docId: string): Promise<void> {
+    if (!token) return;
+    const res = await fetch(`${API_BASE}/users/me/kyc/documents/${docId}`, { headers: { authorization: `Bearer ${token}` } });
+    if (!res.ok) { setError("Could not load that document"); return; }
+    const blob = await res.blob();
+    window.open(URL.createObjectURL(blob), "_blank");
+  }
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-slate-900">Review KYC · {user.email}</h3>
+        <button onClick={onClose} className="text-xs text-slate-400 hover:text-slate-600">Close</button>
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
+        <div>Legal name: {kyc?.legalName ?? "—"}</div>
+        <div>Country: {kyc?.country ?? "—"}</div>
+        <div>ID: {kyc?.idType ?? "—"} {kyc?.idNumber ?? ""}</div>
+        <div>Date of birth: {kyc?.dateOfBirth ?? "—"}</div>
+        <div>Address: {kyc?.address ? `${kyc.address.street}, ${kyc.address.city} ${kyc.address.postalCode}` : "—"}</div>
+        <div>Occupation: {kyc?.occupation ?? "—"}</div>
+        <div>Source of funds: {kyc?.sourceOfFunds ?? "—"}</div>
+        <div>PEP: {kyc?.pepDeclaration ? "Yes" : "No"}</div>
+      </div>
+      <div className="flex gap-3">
+        {kyc?.idDocument && <button onClick={() => void openDocument(kyc.idDocument!.id)} className="text-xs text-brand-600 hover:text-brand-700 font-medium">View ID document ↗</button>}
+        {kyc?.addressDocument && <button onClick={() => void openDocument(kyc.addressDocument!.id)} className="text-xs text-brand-600 hover:text-brand-700 font-medium">View address document ↗</button>}
+      </div>
+      {error && <p className="text-xs text-red-600">{error}</p>}
+      <div className="flex items-center gap-3 pt-2 border-t border-slate-100">
+        <select className="rounded border border-slate-300 px-2 py-1 text-xs" value={riskTier} onChange={(e) => setRiskTier(e.target.value as "low" | "medium" | "high")}>
+          <option value="low">Low risk</option>
+          <option value="medium">Medium risk</option>
+          <option value="high">High risk</option>
+        </select>
+        <button disabled={busy} onClick={() => void decide("approved")} className="text-xs rounded bg-emerald-600 text-white px-3 py-1.5 font-medium hover:bg-emerald-700 disabled:opacity-40">Propose approve</button>
+        <input className="rounded border border-slate-300 px-2 py-1 text-xs flex-1" placeholder="Rejection reason" value={rejectionReason} onChange={(e) => setRejectionReason(e.target.value)} />
+        <button disabled={busy} onClick={() => void decide("rejected")} className="text-xs rounded border border-red-300 text-red-600 px-3 py-1.5 font-medium hover:bg-red-50 disabled:opacity-40">Propose reject</button>
+      </div>
+      <p className="text-[11px] text-slate-400">Proposing a decision requires a second Platform Admin to approve it in Approvals before it takes effect.</p>
     </div>
   );
 }

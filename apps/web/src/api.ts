@@ -504,4 +504,7 @@ export const api = {
     request<{ definition: unknown }>(`/credential-use-case-templates/${encodeURIComponent(key)}/preview`, token, { method: "POST", body: JSON.stringify({ params }) }),
   provisionUseCase: (token: string, body: { templateKey: string; params: Record<string, unknown>; provisioning: { issuerOrgName: string; issuerOrgType?: string; createDeskUsers: boolean; deskEmailDomain?: string; failIfExists?: boolean } }) =>
     request<ProvisionResult>("/credential-use-cases/provision", token, { method: "POST", body: JSON.stringify(body) }),
+  // 202 → { proposal }: KYC approve/reject is maker-checker gated, same as onboarding.
+  proposeKycDecision: (token: string, userId: string, body: { decision: "approved" | "rejected"; riskTier?: "low" | "medium" | "high"; rejectionReason?: string }) =>
+    request<{ proposal: { id: string; status: string } }>(`/users/${userId}/kyc/decision`, token, { method: "POST", body: JSON.stringify(body) }),
 };
