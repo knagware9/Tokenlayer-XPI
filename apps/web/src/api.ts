@@ -254,7 +254,12 @@ export const api = {
     request<{ proposal: Proposal }>(`/proposals/${id}/reject`, token, { method: "POST", body: JSON.stringify({}) }),
   creditCash: (token: string, account: string, currency: string, amount: string) =>
     request<{ ok: boolean; balance: string }>("/cash/credit", token, { method: "POST", body: JSON.stringify({ account, currency, amount }) }),
-  users: (token: string) => request<{ id: string; email: string; role: Role; useCaseKey: string | null; accountId: string | null; active: boolean; kycStatus: "pending" | "approved" | "rejected"; kyc: { legalName?: string; country?: string; idType?: string; idNumber?: string; documentRef?: string } | null; did: string | null }[]>("/users", token),
+  users: (token: string) => request<{ id: string; email: string; role: Role; useCaseKey: string | null; accountId: string | null; active: boolean; kycStatus: "pending" | "approved" | "rejected"; kyc: {
+    legalName?: string; country?: string; idType?: string; idNumber?: string; documentRef?: string;
+    dateOfBirth?: string; address?: { street: string; city: string; postalCode: string }; occupation?: string; sourceOfFunds?: string; pepDeclaration?: boolean;
+    idDocument?: { id: string; sha256: string } | null; addressDocument?: { id: string; sha256: string } | null;
+    riskTier?: "low" | "medium" | "high" | null; expiresAt?: string | null; rejectionReason?: string | null;
+  } | null; did: string | null }[]>("/users", token),
   // 202 → { proposal }: non-org onboarding is gated; the user does not exist until it is approved.
   createUser: (token: string, input: { email: string; password: string; role: Role; useCaseKey?: string; walletAddress?: string; kyc?: { legalName?: string; country?: string; idType?: string; idNumber?: string; documentRef?: string } }) =>
     request<{ proposal: Proposal }>("/users", token, { method: "POST", body: JSON.stringify(input) }),

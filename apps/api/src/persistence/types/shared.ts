@@ -22,6 +22,21 @@ export interface KycDetails {
   verifiedAt?: string;
   revokedAt?: string;
   revokeReason?: string;
+  /** ISO date. */
+  dateOfBirth?: string;
+  address?: { street: string; city: string; postalCode: string };
+  occupation?: string;
+  sourceOfFunds?: string;
+  /** Self-declared, not automated screening. */
+  pepDeclaration?: boolean;
+  idDocument?: { id: string; sha256: string } | null;
+  addressDocument?: { id: string; sha256: string } | null;
+  /** Set by the reviewer on approval. */
+  riskTier?: "low" | "medium" | "high" | null;
+  /** ISO date; null = grandfathered under the old rules, never expires. */
+  expiresAt?: string | null;
+  /** Set by the reviewer on rejection. */
+  rejectionReason?: string | null;
 }
 
 /**

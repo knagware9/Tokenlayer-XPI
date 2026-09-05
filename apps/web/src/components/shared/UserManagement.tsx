@@ -13,7 +13,12 @@ import { BatchCsv } from "./BatchCsv.js";
  *  these can meaningfully be allowlisted. */
 const WALLET_ELIGIBLE_ROLES = new Set<Role>(["Buyer", "Trader", "Issuer"]);
 
-type Summary = { id: string; email: string; role: Role; useCaseKey: string | null; accountId: string | null; active: boolean; kycStatus: "pending" | "approved" | "rejected"; kyc: { legalName?: string; country?: string; idType?: string; idNumber?: string; documentRef?: string } | null; did: string | null };
+type Summary = { id: string; email: string; role: Role; useCaseKey: string | null; accountId: string | null; active: boolean; kycStatus: "pending" | "approved" | "rejected"; kyc: {
+    legalName?: string; country?: string; idType?: string; idNumber?: string; documentRef?: string;
+    dateOfBirth?: string; address?: { street: string; city: string; postalCode: string }; occupation?: string; sourceOfFunds?: string; pepDeclaration?: boolean;
+    idDocument?: { id: string; sha256: string } | null; addressDocument?: { id: string; sha256: string } | null;
+    riskTier?: "low" | "medium" | "high" | null; expiresAt?: string | null; rejectionReason?: string | null;
+  } | null; did: string | null };
 type Sub = "add" | "manage";
 
 export function UserManagement({ useCaseKey, useCases }: { useCaseKey: string; useCases: UseCase[] }): JSX.Element {
