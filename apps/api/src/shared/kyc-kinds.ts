@@ -25,11 +25,20 @@ export interface KycDecisionPayload {
 
 const KYC_VALIDITY_DAYS = 365;
 
+// Narrower than `platformOnlyView`: SELF_APPROVAL (enforced generically at
+// /proposals/:id/approve) only blocks proposer === approver. Nothing there
+// stops the KYC SUBJECT from approving a decision about themselves as long as
+// someone else proposed it — reachable whenever the subject is a
+// PlatformAdmin, since only a PlatformAdmin can approve at all, and any
+// PlatformAdmin can self-submit KYC via POST /users/me/kyc/submit.
+const canApproveKycDecision = async (_deps: AppDeps, claims: TokenClaims, p: ProposalRecord): Promise<boolean> =>
+  claims.role === "PlatformAdmin" && (p.payload as unknown as KycDecisionPayload).userId !== claims.id;
+
 export const kycDecisionKind: ProposalKindHandler = {
   kind: "kyc-decision",
   apiScope: null,
   canView: platformOnlyView,
-  canApprove: platformOnlyView,
+  canApprove: canApproveKycDecision,
   async execute(ctx, _proposer, p) {
     const pl = p.payload as unknown as KycDecisionPayload;
     const target = await ctx.deps.users.findById(pl.userId);

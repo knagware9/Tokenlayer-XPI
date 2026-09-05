@@ -87,6 +87,7 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
         brandLogoDocumentId: org?.brandLogoDocumentId ?? null,
         brandAccent: org?.brandAccent ?? null,
         kycStatus: user.kycStatus,
+        kycExpiresAt: user.kyc?.expiresAt ?? null,
       },
     };
   });
@@ -154,6 +155,7 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
       brandLogoDocumentId: org?.brandLogoDocumentId ?? null,
       brandAccent: org?.brandAccent ?? null,
       kycStatus: self?.kycStatus ?? null,
+      kycExpiresAt: self?.kyc?.expiresAt ?? null,
     };
   });
 
@@ -389,7 +391,21 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     const claims = request.user as TokenClaims;
     if (!canManageUsers(claims.role)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to manage users" });
     const rows = await deps.users.list(claims.role === "PlatformAdmin" ? undefined : claims.useCaseKey ?? NO_USE_CASE);
-    return rows.map((u) => ({ id: u.id, email: u.email, role: u.role, useCaseKey: u.useCaseKey, accountId: u.accountId, active: u.active, kycStatus: u.kycStatus, kyc: u.kyc, did: u.did ?? null }));
+    // A non-PlatformAdmin caller (UseCaseAdmin, OrgAdmin) sees the rest of `kyc`
+    // (legalName, country, etc.) but NOT the two document-reference fields —
+    // those are exactly the ids that unlock the raw bytes, and this route must
+    // not become a side door around the dedicated KYC document read gate
+    // (GET /users/me/kyc/documents/:id, uploader-or-PlatformAdmin only). Only a
+    // PlatformAdmin — who that gate already admits directly — gets them here.
+    const stripDocs = claims.role !== "PlatformAdmin";
+    return rows.map((u) => {
+      let kyc = u.kyc;
+      if (stripDocs && kyc) {
+        const { idDocument: _idDocument, addressDocument: _addressDocument, ...rest } = kyc;
+        kyc = rest;
+      }
+      return { id: u.id, email: u.email, role: u.role, useCaseKey: u.useCaseKey, accountId: u.accountId, active: u.active, kycStatus: u.kycStatus, kyc, did: u.did ?? null };
+    });
   });
 
 
@@ -2445,6 +2461,16 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     const { id } = request.params as { id: string };
     const doc = await deps.documents.get(id);
     if (!doc) return notFound(reply, "document not found");
+    // A KYC document has its OWN dedicated gate (GET /users/me/kyc/documents/:id
+    // — uploader or PlatformAdmin only). This route's role-only `canReadDoc`
+    // check admits every issue-capable role (UseCaseAdmin, Issuer...) with no
+    // ownership check at all, which would otherwise let a UseCaseAdmin read
+    // any of their users' KYC ID scans / address proofs simply by knowing the
+    // document id (exposed via `GET /users`'s `kyc` blob) — completely
+    // bypassing the dedicated gate. Refuse here regardless of role.
+    if (doc.purpose === "kyc") {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "KYC documents are read through GET /users/me/kyc/documents/:id" });
+    }
     // Never let the browser sniff/execute stored bytes as the API origin: pin the
     // stored (allowlisted) type, forbid sniffing, and force download.
     return reply
@@ -2457,7 +2483,7 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
   app.post("/users/me/kyc/documents", { schema: S.uploadKycDocument, bodyLimit: DOC_UPLOAD_BODY_LIMIT, ...auth }, async (request, reply) => {
     if (machinePrincipal(request)) return reply.code(403).send({ error: "MACHINE_PRINCIPAL", message: "an API key has no self to submit KYC for" });
     const claims = request.user as TokenClaims;
-    const doc = await storeUploadedDocument(deps.documents, request.body as { contentType: string; dataBase64: string }, null, null, claims.id);
+    const doc = await storeUploadedDocument(deps.documents, request.body as { contentType: string; dataBase64: string }, null, "kyc", claims.id);
     return reply.code(201).send({ id: doc.id, sha256: doc.sha256, size: doc.size });
   });
 
@@ -2494,7 +2520,14 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     if (idDoc.uploadedBy !== claims.id || addressDoc.uploadedBy !== claims.id) {
       return reply.code(400).send({ error: "DOCUMENT_NOT_YOURS", message: "both documents must have been uploaded by you" });
     }
+    // MERGE over the caller's existing kyc blob, never replace it wholesale —
+    // every other KYC-writing path in this codebase does the same. A wholesale
+    // rebuild here would silently erase fields the submission form doesn't
+    // carry at all: issuerDid/credentialId/verifiedAt (VC-based verification),
+    // revokedAt/revokeReason (a prior revocation), the legacy documentRef.
+    const caller = await deps.users.findById(claims.id);
     const kyc: KycDetails = {
+      ...(caller?.kyc ?? {}),
       legalName: b.legalName, country: b.country, idType: b.idType, idNumber: b.idNumber,
       dateOfBirth: b.dateOfBirth, address: b.address, occupation: b.occupation, sourceOfFunds: b.sourceOfFunds,
       pepDeclaration: b.pepDeclaration ?? false,
@@ -2511,11 +2544,18 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     const claims = request.user as TokenClaims;
     if (claims.role !== "PlatformAdmin") return reply.code(403).send({ error: "FORBIDDEN", message: "only the Platform Admin may decide KYC" });
     const { id } = request.params as { id: string };
+    // Blocks a PlatformAdmin proposing a decision about their OWN KYC subject —
+    // SELF_APPROVAL (at /proposals/:id/approve) only stops the same person from
+    // also being the approver, not from being the subject on one side. Without
+    // this, a PlatformAdmin subject could propose their own decision and have
+    // any other PlatformAdmin rubber-stamp it as the second reviewer.
+    if (id === claims.id) return reply.code(403).send({ error: "FORBIDDEN", message: "you cannot propose a KYC decision about yourself" });
     const b = request.body as { decision: "approved" | "rejected"; riskTier?: "low" | "medium" | "high"; rejectionReason?: string };
     const target = await deps.users.findById(id);
     if (!target) return notFound(reply, "user not found");
     if (target.kycStatus !== "pending") return reply.code(409).send({ error: "NOT_PENDING", message: `user's KYC is ${target.kycStatus}, not pending` });
     if (b.decision === "rejected" && !b.rejectionReason) return reply.code(400).send({ error: "REASON_REQUIRED", message: "a rejection requires a reason" });
+    if (b.decision === "approved" && !b.riskTier) return reply.code(400).send({ error: "RISK_TIER_REQUIRED", message: "an approval requires a risk tier" });
     const payload: KycDecisionPayload = { userId: id, decision: b.decision, riskTier: b.riskTier, rejectionReason: b.rejectionReason };
     const proposal = await createProposalAndNotify(deps, {
       useCaseKey: null, orgId: target.orgId ?? null, assetId: null, kind: "kyc-decision",

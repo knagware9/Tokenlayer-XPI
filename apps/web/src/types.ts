@@ -34,6 +34,7 @@ export interface SessionUser {
   brandLogoDocumentId?: string | null;
   brandAccent?: string | null;
   kycStatus?: "pending" | "approved" | "rejected" | null;
+  kycExpiresAt?: string | null;
 }
 
 /**
@@ -50,6 +51,7 @@ export interface SessionPrincipal {
   brandLogoDocumentId?: string | null;
   brandAccent?: string | null;
   kycStatus?: "pending" | "approved" | "rejected" | null;
+  kycExpiresAt?: string | null;
 }
 
 export type TokenStandard = "ERC-20" | "ERC-721" | "ERC-3643";

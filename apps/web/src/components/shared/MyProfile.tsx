@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, ApiError, describeApiError } from "../../api.js";
 import { useAuth } from "../../auth.js";
 import { getOrCreateDeviceKey } from "../../lib/shared/device-wallet.js";
+import { isExpiringOrExpired } from "../../lib/shared/kyc-expiry.js";
 import type { LoginKeyInfo } from "../../types.js";
 import { KycSubmissionPanel } from "./KycSubmissionPanel.js";
 import { Card, SectionHeader } from "./ui.js";
@@ -180,7 +181,8 @@ export function MyProfile({ onSelect }: { onSelect: (id: string) => void }): JSX
         </div>
       </Card>
 
-      {(user?.kycStatus === "pending" || user?.kycStatus === "rejected") && (
+      {(user?.kycStatus === "pending" || user?.kycStatus === "rejected" ||
+        (user?.kycStatus === "approved" && isExpiringOrExpired(user?.kycExpiresAt))) && (
         <div className="mt-6">
           {/* The panel shows its own post-submit confirmation and keeps that
            *  local state, so we only need to refresh the session's kycStatus

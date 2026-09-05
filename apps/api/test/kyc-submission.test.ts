@@ -59,6 +59,26 @@ describe("self-service KYC submission", () => {
     expect(res.statusCode).toBe(400);
   });
 
+  it("a re-submission MERGES over the caller's existing kyc blob, keeping fields the submission form does not carry (revokedAt/revokeReason)", async () => {
+    const h = await buildTestAppWithRepos();
+    const buyer = await loginAs(h.app, "carbon.buyer@tokenlayer.dev", "carbon123");
+    const user = await h.users.findByEmail("carbon.buyer@tokenlayer.dev");
+    // Simulate a prior revocation — a field the submission body never sends.
+    await h.users.update(user!.id, { kyc: { ...(user!.kyc ?? {}), revokedAt: "2026-01-01T00:00:00.000Z", revokeReason: "credential compromised" } });
+    const idDocId = await uploadDoc(h.app, buyer, "id-merge");
+    const addressDocId = await uploadDoc(h.app, buyer, "address-merge");
+    const res = await h.app.inject({
+      method: "POST", url: `${V1}/users/me/kyc/submit`, headers: auth(buyer),
+      payload: { ...SUBMISSION, idDocumentId: idDocId, addressDocumentId: addressDocId },
+    });
+    expect(res.statusCode).toBe(200);
+    const updated = await h.users.findById(user!.id);
+    expect(updated!.kyc!.revokedAt).toBe("2026-01-01T00:00:00.000Z");
+    expect(updated!.kyc!.revokeReason).toBe("credential compromised");
+    // The submission's own fields still land.
+    expect(updated!.kyc!.legalName).toBe("Test Holder");
+  });
+
   it("a re-submission after rejection works the same way", async () => {
     const h = await buildTestAppWithRepos();
     const buyer = await loginAs(h.app, "carbon.buyer@tokenlayer.dev", "carbon123");

@@ -174,7 +174,7 @@ export class PrismaDocumentRepository implements DocumentRepository {
   async get(id: string): Promise<DocumentRecord | null> {
     const r = await prisma.document.findUnique({ where: { id } });
     return r
-      ? { id: r.id, contentType: r.contentType, sha256: r.sha256, size: r.size, bytes: Buffer.from(r.bytes), createdAt: r.createdAt.toISOString(), ownerOrgId: r.ownerOrgId ?? null, purpose: r.purpose === "brand-logo" ? "brand-logo" : null, uploadedBy: r.uploadedBy ?? null }
+      ? { id: r.id, contentType: r.contentType, sha256: r.sha256, size: r.size, bytes: Buffer.from(r.bytes), createdAt: r.createdAt.toISOString(), ownerOrgId: r.ownerOrgId ?? null, purpose: r.purpose === "brand-logo" || r.purpose === "kyc" ? r.purpose : null, uploadedBy: r.uploadedBy ?? null }
       : null;
   }
   async listByOwnerPurpose(ownerOrgId: string, purpose: DocumentPurpose): Promise<DocumentSummary[]> {

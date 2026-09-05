@@ -55,6 +55,51 @@ describe("kyc-decision proposal kind", () => {
     expect(updated!.kyc!.expiresAt).toBeFalsy();
   });
 
+  it("proposing an approval without a riskTier is refused with RISK_TIER_REQUIRED", async () => {
+    const h = await buildTestAppWithRepos();
+    const buyer = await loginAs(h.app, "carbon.buyer@tokenlayer.dev", "carbon123");
+    const platform = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    await submitPendingKyc(h.app, buyer);
+    const user = await h.users.findByEmail("carbon.buyer@tokenlayer.dev");
+    const res = await h.app.inject({
+      method: "POST", url: `${V1}/users/${user!.id}/kyc/decision`, headers: auth(platform),
+      payload: { decision: "approved" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("RISK_TIER_REQUIRED");
+  });
+
+  it("a PlatformAdmin cannot propose a KYC decision about themselves", async () => {
+    const h = await buildTestAppWithRepos();
+    const platform = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    await submitPendingKyc(h.app, platform);
+    const self = await h.users.findByEmail("admin@tokenlayer.dev");
+    const res = await h.app.inject({
+      method: "POST", url: `${V1}/users/${self!.id}/kyc/decision`, headers: auth(platform),
+      payload: { decision: "approved", riskTier: "low" },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("a PlatformAdmin who is the KYC subject cannot approve a decision proposed by someone else about them", async () => {
+    const h = await buildTestAppWithRepos();
+    const platform = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const checker = await loginAs(h.app, PLATFORM_ADMIN_2.email, PLATFORM_ADMIN_2.password);
+    await submitPendingKyc(h.app, checker);
+    const subject = await h.users.findByEmail(PLATFORM_ADMIN_2.email);
+    // `platform` (admin@tokenlayer.dev) proposes a decision about `subject`
+    // (admin2@tokenlayer.dev, the checker) — someone else's subject, fine so far.
+    const draft = await h.app.inject({
+      method: "POST", url: `${V1}/users/${subject!.id}/kyc/decision`, headers: auth(platform),
+      payload: { decision: "approved", riskTier: "low" },
+    });
+    expect(draft.statusCode).toBe(202);
+    // Now the SUBJECT tries to approve the decision about themselves.
+    const selfSubjectApprove = await h.app.inject({ method: "POST", url: `${V1}/proposals/${draft.json().proposal.id}/approve`, headers: auth(checker), payload: {} });
+    expect(selfSubjectApprove.statusCode).toBe(403);
+    expect(selfSubjectApprove.json().error).toBe("NOT_ELIGIBLE");
+  });
+
   it("a non-PlatformAdmin cannot propose a KYC decision", async () => {
     const h = await buildTestAppWithRepos();
     const buyer = await loginAs(h.app, "carbon.buyer@tokenlayer.dev", "carbon123");
