@@ -308,6 +308,13 @@ describe("Asset due-diligence document upload and read gate", () => {
     const h = await buildTestAppWithRepos();
     const platform = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
     const assetId = await issueAsset(h.app, platform, "carbon-credit");
+    // issueAsset() issues via today's synchronous path (no use case has
+    // workflow.approvals.issue set) and returns an already-active asset —
+    // this task's own routes don't yet run before Task 8 makes
+    // pending_approval the universal default, so force the state this test
+    // actually needs directly through the repository, the same way this
+    // plan's Task 3 test 3 already does.
+    await h.assets.setStatus(assetId, "pending_approval");
     const upload = await h.app.inject({
       method: "POST", url: `${V1}/assets/${assetId}/diligence/documents`, headers: auth(platform),
       payload: { slot: "prospectus", contentType: "application/pdf", dataBase64: Buffer.from("%PDF-1.4 x").toString("base64") },
@@ -317,7 +324,6 @@ describe("Asset due-diligence document upload and read gate", () => {
     const pendingRead = await h.app.inject({ method: "GET", url: `${V1}/assets/${assetId}/diligence/documents/${docId}`, headers: auth(buyer) });
     expect(pendingRead.statusCode).toBe(403);
 
-    await h.users.update((await h.app.inject({ method: "GET", url: `${V1}/me`, headers: auth(buyer) })).json().id, {});
     await h.assets.setStatus(assetId, "active");
     const activeRead = await h.app.inject({ method: "GET", url: `${V1}/assets/${assetId}/diligence/documents/${docId}`, headers: auth(buyer) });
     expect(activeRead.statusCode).toBe(200);
@@ -612,6 +618,12 @@ import { auth, buildTestAppWithRepos, issueAsset, loginAs, V1 } from "./helpers.
 
 async function submittedAsset(h: Awaited<ReturnType<typeof buildTestAppWithRepos>>, platform: string): Promise<string> {
   const assetId = await issueAsset(h.app, platform, "carbon-credit");
+  // issueAsset() issues via today's synchronous path (no use case has
+  // workflow.approvals.issue set) and returns an already-active asset — the
+  // review-decision route this task adds requires pending_approval, and
+  // Task 8 is what makes that the universal default, not this task. Force
+  // the state this task's own tests need directly, same as Task 2's fix.
+  await h.assets.setStatus(assetId, "pending_approval");
   await h.app.inject({
     method: "POST", url: `${V1}/assets/${assetId}/diligence/documents`, headers: auth(platform),
     payload: { slot: "prospectus", contentType: "application/pdf", dataBase64: Buffer.from("%PDF-1.4 x").toString("base64") },
