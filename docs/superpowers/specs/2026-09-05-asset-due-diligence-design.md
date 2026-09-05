@@ -13,7 +13,7 @@ Today, issuing an asset is a one-click act: `POST /assets` creates the asset and
 - Risk tier driving any automatic behavior (buy limits, auto-freeze, tier-gated visibility) — it is a signal for investors and admins to act on manually, the same posture KYC took with its own risk tier. Automated enforcement is a reasonable future follow-up, explicitly deferred.
 - Changing the secondary market (`ListingRecord`/take flow) in any way — the review gate applies to *primary issuance* only. An already-approved asset's secondary-market resale works exactly as today.
 - Forced retroactive review of already-issued assets — explicitly grandfathered; the new requirement only applies to assets created after this ships.
-- Removing or repurposing the existing per-use-case `workflow.approvals.issue` flag — it becomes redundant for issuance (the new gate is always-on and strictly stronger) but is left alone as out-of-scope cleanup, since other code may still reference it.
+- Removing the existing per-use-case `workflow.approvals.issue` flag, its `"issue"` proposal kind, or `proposeIfGated` — none are deleted, and a use case that still has the flag set keeps whatever other effects it has. But for any asset issued after this ships, `issueAssetCore` stops calling `proposeIfGated` for issuance and unconditionally takes the path this feature defines instead (section C) — so `workflow.approvals.issue` becomes **inert for new assets specifically**: due-diligence review is the only gate a new asset goes through, never the old issuance-proposal one, regardless of the flag's value. Running both gates on the same asset would mean two different, uncoordinated approval mechanisms both had to clear it, which is not a design this spec builds. This is a real behavior change for any use case that has the flag set, not a no-op — flagged here precisely so it is not mistaken for a leave-alone.
 - A fixed, closed taxonomy of due-diligence document types beyond the two named slots below — anything past a prospectus and a legal opinion is free-form, issuer-labeled.
 
 ## A. Data model
@@ -29,10 +29,20 @@ export interface AssetDueDiligence {
   reviewedBy?: string | null;                    // the approving UseCaseAdmin's user id
   reviewedAt?: string | null;
   rejectionReason?: string | null;               // set by the reviewer on rejection
+  // The issuer's own requested activation parameters, captured at POST /assets
+  // time. `issueAssetCore` already defers minting/sale-terms whenever an asset
+  // is created pending — today that deferred data rides inside the old
+  // gatedIssue proposal's payload; with no proposal in this design, it has to
+  // be stashed somewhere durable until POST /assets/:id/review-decision
+  // approves and needs it to call executeIssueActivation. This is the only
+  // place that durable storage can live, since `metadata` is investor-facing
+  // and must not carry it.
+  pendingInitialSupply?: string | null;
+  pendingSale?: { unitPrice: string; currency: string } | null;
 }
 ```
 
-All fields optional. `AssetRecord` (`apps/api/src/persistence/types/tokenization.ts`) gains `dueDiligence?: AssetDueDiligence | null`, round-tripped via `JSON.stringify`/`JSON.parse` the same way `metadata` already is in the Prisma repository layer.
+All fields optional. `AssetRecord` (`apps/api/src/persistence/types/tokenization.ts`) gains `dueDiligence?: AssetDueDiligence | null`, round-tripped via `JSON.stringify`/`JSON.parse` the same way `metadata` already is in the Prisma repository layer. `AssetRepository` needs a new method to persist changes to it — `setDueDiligence(id: string, dueDiligence: AssetDueDiligence): Promise<void>` — mirroring the existing narrow `setStatus`/`setSaleTerms` methods rather than a general-purpose update.
 
 ## B. Document storage
 
@@ -48,7 +58,7 @@ Both new routes below carry the same `authScoped("assets:issue")` gate `POST /as
 
 Issuance becomes a two-phase act. This reuses only the existing **status-freeze** behavior a `pending_approval` asset already gets today (refused by buy/list/secondary-market routes) — not the proposal-based mechanism `workflow.approvals.issue` currently drives, which section D deliberately replaces rather than reuses:
 
-- `POST /assets` creates the `AssetRecord` at `status: "pending_approval"` for **every** new asset — no supply is minted yet. (Today this only happens for use cases that opted into the old gate; that opt-in becomes moot going forward since the new gate always applies.)
+- `POST /assets` creates the `AssetRecord` at `status: "pending_approval"` for **every** new asset — no supply is minted yet. (Today this only happens for use cases that opted into the old gate; that opt-in becomes moot going forward since the new gate always applies.) Any `initialSupply`/`sale` the caller requested is captured into `dueDiligence.pendingInitialSupply`/`pendingSale` (section A) rather than the old gated path's proposal payload, since section D reads it back from there instead of from a proposal.
 - `POST /assets/:id/diligence/documents` (section B) attaches documents to the pending asset, any number of times, in any order.
 - `POST /assets/:id/submit-for-review` — the Issuer's explicit "ready for review" action. Requires at least the `prospectus` slot to be filled (the legal opinion and additional documents are optional, per the chosen document-type scope); a 400 `PROSPECTUS_REQUIRED` otherwise. Available whether this is a first-time submission or a resubmission after rejection — same endpoint, same validation, every time (matching KYC's own resubmission posture). This is a **plain, unilateral, no-proposal state transition** — it does not draft anything in the proposal system, exactly like KYC's own self-service `POST /users/me/kyc/submit`. The asset was already at `status: "pending_approval"` from creation (section C above); this call just marks the diligence package "ready to be looked at" (see `dueDiligence` shape in section A — no new field is actually needed for this, since the asset's own presence of a `prospectus` plus its `status` already fully describe "submitted, awaiting review").
 
@@ -62,7 +72,7 @@ Instead: `POST /assets/:id/review-decision`, body `{ decision: "approved" | "rej
 - Requires `claims.role === "UseCaseAdmin" && claims.useCaseKey === asset.useCaseKey` — a UseCaseAdmin scoped to this asset's own use case, not PlatformAdmin-wide (the explicit choice to keep this at the use-case level, unlike KYC).
 - Refuses the asset's own creator (`asset.createdBy === claims.id` → 403) — the direct analog of the proposal system's `SELF_APPROVAL`, needed explicitly here since there is no generic proposer/approver machinery to provide it for free. This is the same class of gap KYC's own final review caught and fixed (a subject able to be on both sides of their own decision) — built in from the start here rather than found afterward.
 - Requires `asset.status === "pending_approval"` (409 `NOT_PENDING` otherwise) and, on approval, `b.riskTier` present (400 `RISK_TIER_REQUIRED`, symmetric to rejection's `rejectionReason` requirement) and `b.decision === "rejected"` requires `b.rejectionReason` (400 `REASON_REQUIRED`) — both required-field guards KYC's own final review had to add after the fact are specified here from the start.
-- On approval: sets `dueDiligence.riskTier`, `reviewedBy: claims.id`, `reviewedAt` (clearing any stale `rejectionReason`), mints the initial supply and applies sale terms by calling the same activation logic `executeIssueActivation` already encapsulates, and flips `status: "active"` — executed synchronously in this one request, since there is no second approval step to wait for.
+- On approval: sets `dueDiligence.riskTier`, `reviewedBy: claims.id`, `reviewedAt` (clearing any stale `rejectionReason`), then calls the existing `executeIssueActivation(deps, actor, asset, { initialSupply: asset.dueDiligence?.pendingInitialSupply, treasury, sale: asset.dueDiligence?.pendingSale })` — reading back exactly what `POST /assets` stashed in section C (`treasury` itself is never stashed; it is re-derived fresh from the use case's own registered treasury, the same way `issueAssetCore` already does today) — which mints supply, applies sale terms, and flips `status: "active"` as a side effect. Executed synchronously in this one request, since there is no second approval step to wait for.
 - On rejection: sets `dueDiligence.rejectionReason` (clearing any stale `riskTier`/`reviewedBy`/`reviewedAt`), flips `status: "rejected"`, mints nothing.
 - **Notification:** a best-effort email to the Issuer on either outcome, mirroring `kycDecisionEmail`'s shape (a new template, since this reuses no proposal-system notification helper).
 
