@@ -8,7 +8,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { mintResetToken, resetTokenMatches } from "../../mail/reset-tokens.js";
-import { kycDecisionEmail, orgApprovedEmail, passwordResetEmail, welcomeCredentialsEmail } from "../../mail/templates.js";
+import { orgApprovedEmail, passwordResetEmail, welcomeCredentialsEmail } from "../../mail/templates.js";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ApiKeyRecord, AssetRecord, BrandingPatch, CashflowRecord, CompanyProfile, CredentialRecord, DocumentPurpose, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord, WebhookEndpointRecord } from "../../persistence/types/index.js";
 import { ListingConflictError } from "../../persistence/types/index.js";
@@ -598,11 +598,14 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
   app.patch("/users/:id", { schema: S.updateUser, ...authScoped("users:onboard") }, async (request, reply) => {
     const claims = request.user as TokenClaims;
     const { id } = request.params as { id: string };
-    const b = request.body as { password?: string; active?: boolean; kycStatus?: "approved" | "rejected" };
+    const b = request.body as { password?: string; active?: boolean; kycStatus?: unknown };
     const target = await deps.users.findById(id);
     if (!target) return notFound(reply, "user not found");
     if (!canAdministerUser(claims, target)) return reply.code(403).send({ error: "FORBIDDEN", message: "not allowed to edit that user" });
-    const patch: { passwordHash?: string; active?: boolean; kycStatus?: KycStatus } = {};
+    if (b.kycStatus !== undefined) {
+      return reply.code(400).send({ error: "KYC_STATUS_NOT_PATCHABLE", message: "KYC decisions are made through POST /users/:id/kyc/decision (maker-checker), not this endpoint" });
+    }
+    const patch: { passwordHash?: string; active?: boolean } = {};
     // A machine principal may not set a password on an EXISTING account: that is
     // takeover of a human who already exists and whose credential the key had no
     // part in choosing. Creating a NEW user with a caller-supplied password
@@ -618,17 +621,7 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     }
     if (typeof b.password === "string") patch.passwordHash = bcrypt.hashSync(b.password, BCRYPT_ROUNDS);
     if (typeof b.active === "boolean") patch.active = b.active;
-    // Narrowed once, into its own variable: `patch.kycStatus` is declared as
-    // the full KycStatus union (it also accepts "pending" elsewhere), so
-    // TypeScript can't carry this block's narrowing across the assignment —
-    // reading `patch.kycStatus` back out below would widen right back.
-    const kycDecision = b.kycStatus === "approved" || b.kycStatus === "rejected" ? b.kycStatus : undefined;
-    if (kycDecision) patch.kycStatus = kycDecision;
     const updated = await deps.users.update(id, patch);
-    if (kycDecision) {
-      const notice = kycDecisionEmail({ decision: kycDecision });
-      await deps.mail.send(updated.email, notice.subject, notice.text, notice.html).catch((err) => request.log.error({ err }, "[mail] kyc-decision send failed"));
-    }
     return { id: updated.id, email: updated.email, role: updated.role, useCaseKey: updated.useCaseKey, accountId: updated.accountId, active: updated.active, kycStatus: updated.kycStatus };
   });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { auth, buildTestApp, loginAs, onboardUser, V1 } from "./helpers.js";
+import { auth, buildTestApp, buildTestAppWithRepos, loginAs, onboardUser, V1 } from "./helpers.js";
 import { FakeAnchor, fakeRegistry } from "./fake-anchor.js";
 
 // Seed a credential use case, an issuer-eligible subject, then exercise the runtime.
@@ -317,7 +317,7 @@ describe("ID-H identity gate on acceptance-enabled KYC (L3)", () => {
   }
 
   it("buy refused (IDENTITY_NOT_VERIFIED) while the KYC use-case credential is pending; succeeds after accept", async () => {
-    const app = await buildTestApp();
+    const { app, users } = await buildTestAppWithRepos();
     const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     const admin2 = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
     const carbonAdmin = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
@@ -329,8 +329,7 @@ describe("ID-H identity gate on acceptance-enabled KYC (L3)", () => {
     const buyer = await onboardUser(app, carbonAdmin, platform, {
       email: "l3-acc-buyer@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER_WALLET,
     });
-    const patchRes = await app.inject({ method: "PATCH", url: `${V1}/users/${buyer.id}`, headers: auth(platform), payload: { kycStatus: "approved" } });
-    expect(patchRes.statusCode).toBe(200);
+    await users.update(buyer.id, { kycStatus: "approved" });
     await issueUsecaseCredential(app, platform, admin2, buyer.id);
     await fundAndAllow(app, platform, assetId);
 

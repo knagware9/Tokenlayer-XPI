@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildTestApp, V1, loginAs, auth, onboardUser } from "./helpers.js";
+import { buildTestApp, buildTestAppWithRepos, V1, loginAs, auth, onboardUser } from "./helpers.js";
 
 const BUYER_WALLET = "0x14dC79964da2C08b23698B3D3cc7Ca32193d9955";
 
@@ -38,7 +38,7 @@ async function fundAndAllow(app: Awaited<ReturnType<typeof buildTestApp>>, platf
 
 describe("POST /users/:id/identity/issue-kyc — admin-issued KYC for a user with no external credential to present", () => {
   it("mints a DID and a local KycCredential for a DID-less user, unblocking a requireVerifiedIdentity buy", async () => {
-    const app = await buildTestApp();
+    const { app, users } = await buildTestAppWithRepos();
     const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     const carbonAdmin = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
 
@@ -53,8 +53,7 @@ describe("POST /users/:id/identity/issue-kyc — admin-issued KYC for a user wit
     });
     // Approve KYC status out-of-band so the `allow` action's own KYC_NOT_APPROVED
     // check doesn't mask the identity gate this test actually exercises.
-    const patchRes = await app.inject({ method: "PATCH", url: `${V1}/users/${buyer.id}`, headers: auth(platform), payload: { kycStatus: "approved" } });
-    expect(patchRes.statusCode).toBe(200);
+    await users.update(buyer.id, { kycStatus: "approved" });
     await fundAndAllow(app, platform, assetId);
 
     // Blocked before issuance.

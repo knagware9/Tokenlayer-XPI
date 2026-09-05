@@ -549,7 +549,7 @@ describe("per-use-case tenancy", () => {
   });
 
   it("KYC: onboard pending, gate allowlist until approved, ungated for unlinked wallets", async () => {
-    const app = await buildTestApp();
+    const { app, users } = await buildTestAppWithRepos();
     const admin = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
     const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     const wallet = "0x14dC79964da2C08b23698B3D3cc7Ca32193d9955"; // not linked by the seed
@@ -563,8 +563,8 @@ describe("per-use-case tenancy", () => {
     expect(blocked.json().error).toBe("KYC_NOT_APPROVED");
     const free = await app.inject({ method: "POST", url: `${V1}/assets/${id}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: "0x90F79bf6EB2c4f870365E785982E1f101E93b906" } });
     expect(free.statusCode).toBe(200); // unlinked wallet ungated
-    const appr = await app.inject({ method: "PATCH", url: `${V1}/users/${created.id}`, headers: { authorization: `Bearer ${admin}` }, payload: { kycStatus: "approved" } });
-    expect(appr.json().kycStatus).toBe("approved");
+    await users.update(created.id, { kycStatus: "approved" });
+    expect((await users.findById(created.id))?.kycStatus).toBe("approved");
     const allowed = await app.inject({ method: "POST", url: `${V1}/assets/${id}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: wallet } });
     expect(allowed.statusCode).toBe(200);
   });
@@ -616,7 +616,7 @@ async function buy(appInst: typeof app, token: string, assetId: string, quantity
 
 describe("marketplace: buy (DvP) + cash/credit", () => {
   it("happy path: issue with sale terms, fund buyer, buy → token delivered + cash moved", async () => {
-    const app = await buildTestApp();
+    const { app, users } = await buildTestAppWithRepos();
     const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     const carbonAdmin = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
 
@@ -651,12 +651,7 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
     expect(createdBuyer.kycStatus).toBe("pending");
 
     // KYC-approve the buyer
-    await app.inject({
-      method: "PATCH",
-      url: `${V1}/users/${createdBuyer.id}`,
-      headers: { authorization: `Bearer ${carbonAdmin}` },
-      payload: { kycStatus: "approved" },
-    });
+    await users.update(createdBuyer.id, { kycStatus: "approved" });
 
     // Allow treasury and buyer wallet
     await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: treasury } });
@@ -699,7 +694,7 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
   });
 
   it("buy blocked when buyer NOT allowlisted → cash refunded (compensation ran)", async () => {
-    const app = await buildTestApp();
+    const { app, users } = await buildTestAppWithRepos();
     const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     const carbonAdmin = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
 
@@ -721,7 +716,7 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
 
     // Onboard buyer with a fresh email (gated + checked by the platform admin)
     const createdBuyer = await onboardUser(app, carbonAdmin, platform, { email: "helios2@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER_WALLET });
-    await app.inject({ method: "PATCH", url: `${V1}/users/${createdBuyer.id}`, headers: { authorization: `Bearer ${carbonAdmin}` }, payload: { kycStatus: "approved" } });
+    await users.update(createdBuyer.id, { kycStatus: "approved" });
 
     // Allow ONLY treasury (NOT the buyer wallet)
     await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: treasury } });
@@ -742,7 +737,7 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
   });
 
   it("buy 400 NO_SALE_TERMS when asset has no sale terms", async () => {
-    const app = await buildTestApp();
+    const { app, users } = await buildTestAppWithRepos();
     const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     const carbonAdmin = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
 
@@ -751,7 +746,7 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
 
     // Onboard buyer (gated + checked by the platform admin)
     const createdBuyer = await onboardUser(app, carbonAdmin, platform, { email: "helios3@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER_WALLET });
-    await app.inject({ method: "PATCH", url: `${V1}/users/${createdBuyer.id}`, headers: { authorization: `Bearer ${carbonAdmin}` }, payload: { kycStatus: "approved" } });
+    await users.update(createdBuyer.id, { kycStatus: "approved" });
     await creditCash(app, platform, BUYER_WALLET, "500");
     const buyerToken = await loginAs(app, "helios3@x.dev", "secret1");
 
@@ -788,7 +783,7 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
   });
 
   it("buy 400 INSUFFICIENT_FUNDS when buyer funded less than cost", async () => {
-    const app = await buildTestApp();
+    const { app, users } = await buildTestAppWithRepos();
     const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     const carbonAdmin = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
 
@@ -808,7 +803,7 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
     const treasury = await treasuryAddressOf(app, platform, "carbon-credit");
 
     const createdBuyer = await onboardUser(app, carbonAdmin, platform, { email: "helios4@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER_WALLET });
-    await app.inject({ method: "PATCH", url: `${V1}/users/${createdBuyer.id}`, headers: { authorization: `Bearer ${carbonAdmin}` }, payload: { kycStatus: "approved" } });
+    await users.update(createdBuyer.id, { kycStatus: "approved" });
     await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: treasury } });
     await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: BUYER_WALLET } });
     await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/mint`, headers: { authorization: `Bearer ${platform}` }, payload: { to: treasury, amount: "100" } });
@@ -823,7 +818,7 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
   });
 
   it("buy 400 INSUFFICIENT_TREASURY when treasury holds fewer tokens than requested", async () => {
-    const app = await buildTestApp();
+    const { app, users } = await buildTestAppWithRepos();
     const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     const carbonAdmin = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
 
@@ -843,7 +838,7 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
     const treasury = await treasuryAddressOf(app, platform, "carbon-credit");
 
     const createdBuyer = await onboardUser(app, carbonAdmin, platform, { email: "helios5@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER_WALLET });
-    await app.inject({ method: "PATCH", url: `${V1}/users/${createdBuyer.id}`, headers: { authorization: `Bearer ${carbonAdmin}` }, payload: { kycStatus: "approved" } });
+    await users.update(createdBuyer.id, { kycStatus: "approved" });
     await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: treasury } });
     await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: BUYER_WALLET } });
 
@@ -967,12 +962,7 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
     expect((await users.findById(createdBuyer.id))?.accountId).toBeNull();
 
     // KYC-approve the buyer
-    await app.inject({
-      method: "PATCH",
-      url: `${V1}/users/${createdBuyer.id}`,
-      headers: { authorization: `Bearer ${carbonAdmin}` },
-      payload: { kycStatus: "approved" },
-    });
+    await users.update(createdBuyer.id, { kycStatus: "approved" });
 
     const buyerToken = await loginAs(app, "nowallet@x.dev", "secret1");
     const res = await buy(app, buyerToken, assetId, "1");

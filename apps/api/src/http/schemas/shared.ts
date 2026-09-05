@@ -1138,7 +1138,7 @@ export const sharedSchemas: Record<string, FastifySchema> = {
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: {
       type: "object",
-      properties: { password: { type: "string", minLength: 6 }, active: { type: "boolean" }, kycStatus: { type: "string", enum: ["approved", "rejected"] } },
+      properties: { password: { type: "string", minLength: 6 }, active: { type: "boolean" } },
     },
     // The updated user — the same projection as GET /users MINUS `kyc`.
     response: {

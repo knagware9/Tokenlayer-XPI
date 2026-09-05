@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildTestApp, V1, loginAs, auth, onboardUser } from "./helpers.js";
+import { buildTestApp, buildTestAppWithRepos, V1, loginAs, auth, onboardUser } from "./helpers.js";
 
 const BUYER_WALLET = "0x14dC79964da2C08b23698B3D3cc7Ca32193d9955";
 
@@ -61,7 +61,7 @@ describe("identity gate: requireVerifiedIdentity blocks buy without a held, unre
   });
 
   it("buyer holds NO KycCredential -> buy fails with IDENTITY_NOT_VERIFIED", async () => {
-    const app = await buildTestApp();
+    const { app, users } = await buildTestAppWithRepos();
     const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     const carbonAdmin = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
 
@@ -74,8 +74,7 @@ describe("identity gate: requireVerifiedIdentity blocks buy without a held, unre
     const buyer = await onboardUser(app, carbonAdmin, platform, {
       email: "unverified-buyer@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER_WALLET,
     });
-    const patchRes = await app.inject({ method: "PATCH", url: `${V1}/users/${buyer.id}`, headers: auth(platform), payload: { kycStatus: "approved" } });
-    expect(patchRes.statusCode).toBe(200);
+    await users.update(buyer.id, { kycStatus: "approved" });
     await fundAndAllow(app, platform, assetId);
 
     const buyerToken = await loginAs(app, "unverified-buyer@x.dev", "secret1");
@@ -119,7 +118,7 @@ describe("identity gate: requireVerifiedIdentity blocks buy without a held, unre
   });
 
   it("requireVerifiedIdentity off (default) -> buy succeeds even without a KycCredential (back-compat)", async () => {
-    const app = await buildTestApp();
+    const { app, users } = await buildTestAppWithRepos();
     const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     const carbonAdmin = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
 
@@ -129,8 +128,7 @@ describe("identity gate: requireVerifiedIdentity blocks buy without a held, unre
     const buyer = await onboardUser(app, carbonAdmin, platform, {
       email: "nogate-buyer@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER_WALLET,
     });
-    const patchRes = await app.inject({ method: "PATCH", url: `${V1}/users/${buyer.id}`, headers: auth(platform), payload: { kycStatus: "approved" } });
-    expect(patchRes.statusCode).toBe(200);
+    await users.update(buyer.id, { kycStatus: "approved" });
     await fundAndAllow(app, platform, assetId);
 
     const buyerToken = await loginAs(app, "nogate-buyer@x.dev", "secret1");
