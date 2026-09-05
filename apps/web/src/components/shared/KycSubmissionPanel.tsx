@@ -32,6 +32,7 @@ export function KycSubmissionPanel({ onSubmitted }: { onSubmitted: () => void })
   const [addressFile, setAddressFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [submitted, setSubmitted] = useState(false);
 
   const canSubmit = legalName && country && idType && idNumber && idFile && addressFile;
 
@@ -51,12 +52,28 @@ export function KycSubmissionPanel({ onSubmitted }: { onSubmitted: () => void })
         occupation: occupation || undefined, sourceOfFunds: sourceOfFunds || undefined, pepDeclaration,
         idDocumentId: idUpload.id, addressDocumentId: addressUpload.id,
       });
+      // Show our own confirmation instead of reloading — a reload would wipe
+      // this component's state and re-mount the (now-empty) form, which reads
+      // to the user as if nothing happened. The caller still gets notified so
+      // it can refresh the session's kycStatus in the background.
+      setSubmitted(true);
       onSubmitted();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not submit your KYC application.");
     } finally {
       setBusy(false);
     }
+  }
+
+  if (submitted) {
+    return (
+      <Card>
+        <SectionHeader title="Complete your KYC" description="Submit your identity details and documents for review." />
+        <div className="mt-3 rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-800">
+          Your KYC application has been submitted and is pending review. We'll update your status here once it's been reviewed.
+        </div>
+      </Card>
+    );
   }
 
   return (

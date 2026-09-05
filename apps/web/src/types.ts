@@ -49,6 +49,7 @@ export interface SessionPrincipal {
   orgCapabilities?: OrgCapabilities | null;
   brandLogoDocumentId?: string | null;
   brandAccent?: string | null;
+  kycStatus?: "pending" | "approved" | "rejected" | null;
 }
 
 export type TokenStandard = "ERC-20" | "ERC-721" | "ERC-3643";

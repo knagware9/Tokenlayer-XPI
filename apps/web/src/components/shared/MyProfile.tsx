@@ -16,7 +16,7 @@ const WALLET_ELIGIBLE_ROLES = new Set(["Buyer", "Trader", "Issuer"]);
 
 /** A read-only snapshot of the signed-in user's account and identity. */
 export function MyProfile({ onSelect }: { onSelect: (id: string) => void }): JSX.Element {
-  const { token, user, setSession } = useAuth();
+  const { token, user, setSession, refreshSession } = useAuth();
   const [copied, setCopied] = useState(false);
 
   const walletEligible = !!user?.role && WALLET_ELIGIBLE_ROLES.has(user.role);
@@ -182,7 +182,11 @@ export function MyProfile({ onSelect }: { onSelect: (id: string) => void }): JSX
 
       {(user?.kycStatus === "pending" || user?.kycStatus === "rejected") && (
         <div className="mt-6">
-          <KycSubmissionPanel onSubmitted={() => window.location.reload()} />
+          {/* The panel shows its own post-submit confirmation and keeps that
+           *  local state, so we only need to refresh the session's kycStatus
+           *  in the background here — no reload, which would wipe the panel's
+           *  state and re-mount a blank form right after a successful submit. */}
+          <KycSubmissionPanel onSubmitted={() => void refreshSession()} />
         </div>
       )}
 
