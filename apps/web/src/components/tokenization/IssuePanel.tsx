@@ -20,7 +20,6 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
   const [meta, setMeta] = useState<Record<string, string>>({});
   const [derived, setDerived] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [initialSupply, setInitialSupply] = useState("");
   const [listForSale, setListForSale] = useState(false);
@@ -113,10 +112,12 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
       setListForSale(false);
       setSalePrice("");
       setSaleCurrency("");
-      // Maker-checker: a gated issuance returns a pending proposal (202) — the
-      // asset is pending_approval, so surface it rather than navigating as success.
-      if (res.proposal) setNotice("Issuance submitted for approval — pending in the Approvals tab.");
-      else onIssued(res.asset.id);
+      // Every new asset now starts pending_approval — POST /assets always
+      // returns 202 with the created asset, never a maker-checker proposal
+      // (see the due-diligence review flow). Navigate straight to it so the
+      // issuer lands on AssetDetail's due-diligence panel and can attach a
+      // prospectus next.
+      onIssued(res.asset.id);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Issuance failed");
     } finally {
@@ -290,7 +291,6 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
       )}
 
       {error && <p className="text-sm text-red-600">{error}</p>}
-      {notice && <p className="rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-2">{notice}</p>}
       <button
         type="submit"
         disabled={busy || !name || !chainId}
