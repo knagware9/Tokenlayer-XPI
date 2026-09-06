@@ -1533,6 +1533,20 @@ git add apps/api/test/<each file you touched in Steps 6-7>
 git commit -m "test(assets): migrate existing fixtures to the mandatory due-diligence review flow"
 ```
 
+- [ ] **Task 8 addendum — two regressions found after the flip, fixed in a third commit**
+
+Moving asset activation from the old maker-checker `"issue"` proposal kind to `POST /assets/:id/review-decision` silently dropped two things that kind's `compensate`/`execute` hooks used to do (`apps/api/src/shared/proposal-kinds.ts`), discovered via the implementer's own self-review after Steps 1-7 above, then investigated and confirmed real by reading that old code directly:
+
+1. **Issuance fee never refunded on rejection.** The old `issueKind.compensate` called `refundIssuanceFee(ctx, p)` on rejection, reading the fee from the proposal's own payload. The new route has no proposal payload to read from. Fixed by adding `pendingIssuanceFee?: { amount: string; currency: string; payer: string } | null` to `AssetDueDiligence` (alongside `pendingInitialSupply`/`pendingSale`), capturing it in `issueAssetCore` from the already-in-scope `issuanceFeeCharged`/`feePayer` locals, and refunding it in `review-decision`'s rejection branch by reading `dd.pendingIssuanceFee` — same `deps.cash.transfer` semantics as the old `refundIssuanceFee`, same best-effort catch-and-log.
+2. **`asset.issued` webhook event never fires.** The old ungated path in `issueAssetCore` emitted `asset.issued` after activation; the gated path's approval surfaced as `proposal.executed` instead. Task 8's flip made `gatedIssue` always `true`, so the ungated branch (and its emit) became dead code, and `executeIssueActivation` (the new activation path's only caller) emitted nothing at all — a real regression to a documented enterprise webhook contract. Fixed by moving the emit into `executeIssueActivation` itself (`apps/api/src/shared/executors.ts`), mirroring the exact precedent `runGatedAction` already sets in the same file for `asset.transferred`/`asset.redeemed` ("emit at the actual chokepoint, not in each calling route"), and removing the now-dead standalone emit from `issueAssetCore`.
+
+Both fixes add their own tests (a balance-based proof of the refund, and an event-log assertion for the emission) and were committed separately: `git commit -m "fix(assets): refund issuance fee on rejection + restore asset.issued emit"`.
+
+**Left deliberately unfixed, flagged for follow-up rather than silently absorbed:**
+- `POST /assets/:id/review-decision`'s check-then-act sequence has no explicit concurrency guard against two simultaneous decisions on the same asset — the same class of read-modify-write race already flagged (and deferred) on `setDueDiligence` during Task 2's review.
+- An org-owned use case with no onboarded `UseCaseAdmin` member has no eligible decider for `review-decision`, since Task 4's design deliberately restricts decisions to `UseCaseAdmin` (not `OrgAdmin`'s merged operator rights) — this is a pre-existing platform provisioning gap (every use case is expected to have a `UseCaseAdmin`), not a defect this feature introduced.
+- `issueKind` in `proposal-kinds.ts` is now genuinely dead code (no route creates `"issue"`-kind proposals post-flip) — confirmed harmless (would not double-emit if somehow reached, since nothing reaches it), left in place rather than removed since deleting a proposal kind is outside this plan's scope.
+
 ---
 
 ### Task 9: Deploy and live-verify
