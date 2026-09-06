@@ -425,6 +425,19 @@ Then add the two routes right after the existing `GET /assets/:id` route (search
     const asset = await scopedAsset(request, reply, "read");
     if (!asset) return reply;
     const claims = request.user as TokenClaims;
+    const { docId } = request.params as { docId: string };
+    // THE ID IN THE URL MUST BE ONE OF *THIS ASSET'S OWN* DILIGENCE DOCUMENTS.
+    // Without this, the checks below only prove the caller may see asset `:id`
+    // — they say nothing about whose bytes `docId` names. A buyer scoped to a
+    // use case with even one ACTIVE asset would otherwise be able to swap in
+    // any other document id in the whole system (another still-pending asset's
+    // prospectus in the same use case, a KYC scan, ...) and read it back,
+    // because `deps.documents.get` alone knows nothing about asset ownership.
+    // Tying `docId` to the asset record already loaded and scope-checked above
+    // is what makes this a dedicated gate rather than a second `GET /documents/:id`.
+    const dd = asset.dueDiligence ?? {};
+    const belongsToAsset = dd.prospectus?.id === docId || dd.legalOpinion?.id === docId || (dd.additionalDocuments ?? []).some((d) => d.id === docId);
+    if (!belongsToAsset) return notFound(reply, "document not found");
     // A still-pending or rejected asset's diligence package is not yet public —
     // only this asset's own use-case staff (anyone who can `act` on it, i.e.
     // Issuer/UseCaseAdmin scoped here) may see it before it goes active. Once
@@ -436,7 +449,6 @@ Then add the two routes right after the existing `GET /assets/:id` route (search
       const isStaffRole = claims.role === "Issuer" || claims.role === "UseCaseAdmin" || claims.role === "PlatformAdmin";
       if (!canAct || !isStaffRole) return reply.code(403).send({ error: "FORBIDDEN", message: "this asset's diligence package is not yet public" });
     }
-    const { docId } = request.params as { docId: string };
     const doc = await deps.documents.get(docId);
     if (!doc) return notFound(reply, "document not found");
     return reply
