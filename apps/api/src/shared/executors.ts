@@ -92,20 +92,50 @@ export async function executeIssueActivation(
   asset: AssetRecord,
   p: { initialSupply?: string; treasury?: string | null; sale?: { unitPrice: string; currency: string } },
 ): Promise<void> {
+  const useCase = await deps.useCases.get(asset.useCaseKey);
+  let txHash: string | undefined;
   // The treasury is never client-supplied (see issueAssetCore) — sale terms
   // always reference the same use-case-derived treasury as the mint below.
   if (p.sale && p.treasury) await deps.assets.setSaleTerms(asset.id, { ...p.sale, treasuryAccount: p.treasury });
   if (p.initialSupply && p.treasury) {
     const ctx = contextOf(asset);
-    const useCase = await deps.useCases.get(asset.useCaseKey);
     if (useCase.compliance.allowlist) {
       const allowReceipt = await deps.engine.setAllowed(actor, ctx, p.treasury, true);
       await recordSubmission(deps, "allow", allowReceipt, { assetId: asset.id });
     }
     const mintReceipt = await deps.engine.mint(actor, ctx, p.treasury, p.initialSupply);
     await recordSubmission(deps, "mint", mintReceipt, { assetId: asset.id, amount: p.initialSupply });
+    txHash = mintReceipt.txHash;
   }
   await deps.assets.setStatus(asset.id, "active");
+  // EN-C. Emitted AT THIS CHOKEPOINT, mirroring runGatedAction's own rationale
+  // just below in this file: every caller that can activate an asset — the
+  // POST /assets/:id/review-decision approval, and the now-unreachable-but-
+  // still-present ungated branch of issueAssetCore — comes through this one
+  // function. A route-level emit would silently skip whichever caller forgot
+  // it, which is exactly how Task 8's due-diligence rework dropped this event
+  // for every asset: the old sync path's `asset.issued` emit and the old
+  // gated path's `proposal.executed` emit both vanished when review-decision
+  // replaced the proposal system, and neither was replaced with anything.
+  // NOTE `metadata` is deliberately absent, matching the old emit site: for an
+  // invoice use case it is commercial detail (debtor, amount, terms), not the
+  // event's business. `txHash` is the MINT's receipt (the economically
+  // meaningful action) when one happened; a sale-terms-only activation with no
+  // initial supply has no receipt to report, so the field is omitted rather
+  // than sent as a misleading null-shaped placeholder.
+  await emitEvent(deps, {
+    type: "asset.issued",
+    orgId: await ownerOrgOfUseCase(deps, asset.useCaseKey),
+    useCaseKey: asset.useCaseKey,
+    subjectId: asset.id,
+    data: {
+      assetId: asset.id, name: asset.name, useCaseKey: asset.useCaseKey, chainId: asset.chainId,
+      tokenType: asset.tokenType, tokenStandard: useCase.tokenStandard,
+      symbol: asset.symbol, contractRef: asset.contractRef,
+      status: "active", initialSupply: p.initialSupply ?? null,
+      ...(txHash ? { txHash } : {}),
+    },
+  });
 }
 
 /** The five gatable lifecycle actions (mint/transfer/burn/freeze/unfreeze), engine-dispatched as `actor`. */

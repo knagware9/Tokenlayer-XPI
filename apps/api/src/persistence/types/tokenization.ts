@@ -21,6 +21,11 @@ export interface AssetDueDiligence {
   // the only durable place they can wait.
   pendingInitialSupply?: string | null;
   pendingSale?: { unitPrice: string; currency: string } | null;
+  // The fee charged at POST /assets time (see issueAssetCore), captured so a
+  // rejection at review-decision time can refund it — mirrors the OLD "issue"
+  // proposal kind's `payload.issuanceFee`, which no longer exists now that
+  // review-decision replaces the proposal system for this activation path.
+  pendingIssuanceFee?: { amount: string; currency: string; payer: string } | null;
 }
 
 export interface AssetRecord {

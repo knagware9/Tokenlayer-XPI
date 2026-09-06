@@ -25,7 +25,6 @@ import { reconcile } from "../../tokenization/reconciliation.js";
 import { computeIdentityDashboard } from "../../identity/identity-analytics.js";
 import { issueCredentialFor, revokeCredentialById } from "../../identity/credential-issuance.js";
 import { namespaceHolding } from "../../shared/usecase-namespace.js";
-import { emitEvent, ownerOrgOfUseCase } from "../../shared/events.js";
 import { mintOrgMembership } from "../../shared/membership.js";
 import { ensurePlatformIssuerOrg, PLATFORM_ORG_NAME } from "../../shared/platform-org.js";
 import { provisionTreasury } from "../../shared/wallets.js";
@@ -478,6 +477,7 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
         await deps.assets.setDueDiligence(id, {
           ...(wantsSupply ? { pendingInitialSupply: initialSupply } : {}),
           ...(sale ? { pendingSale: sale } : {}),
+          ...(issuanceFeeCharged && feePayer ? { pendingIssuanceFee: { ...issuanceFeeCharged, payer: feePayer } } : {}),
         });
         return { ok: true, status: 202, body: { asset: await deps.assets.get(id) } };
       }
@@ -503,25 +503,12 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
       throw err;
     }
     const finalAsset = await deps.assets.get(id);
-    // EN-C. Only on the UNGATED path — the gated branch above returned 202 with
-    // the asset `pending_approval` and its mint DEFERRED, so nothing has been
-    // issued yet and claiming otherwise would be a lie an integrator acts on.
-    // The gated issuance surfaces as `proposal.executed` on approval.
-    // NOTE `metadata` is deliberately absent: for an invoice use case it is the
-    // commercial detail (debtor, amount, terms) and is not the event's business.
-    await emitEvent(deps, {
-      type: "asset.issued",
-      orgId: useCase.ownerOrgId ?? null,
-      useCaseKey: bUseCaseKey,
-      subjectId: id,
-      data: {
-        assetId: id, name, useCaseKey: bUseCaseKey, chainId,
-        tokenType: result.tokenType, tokenStandard: useCase.tokenStandard,
-        symbol: useCase.symbol, contractRef: result.ref.contractRef,
-        status: finalAsset?.status ?? null, txHash: result.txHash,
-        initialSupply: wantsSupply ? initialSupply : null,
-      },
-    }, input.request.log);
+    // NOTE this whole branch (gatedIssue hardcoded true above) is unreachable
+    // today — kept only because it is out of this fix's scope to remove. The
+    // `asset.issued` emit that used to live here now happens uniformly inside
+    // `executeIssueActivation` itself (see that function's own comment), so it
+    // is deliberately NOT re-added here: doing so would double-fire the event
+    // if this branch were ever reactivated.
     return { ok: true, status: 201, body: { asset: finalAsset, txHash: result.txHash, ...(issuanceFeeCharged ? { issuanceFee: issuanceFeeCharged } : {}) } };
   }
 
@@ -842,6 +829,17 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
       dd.reviewedAt = null;
       await deps.assets.setDueDiligence(asset.id, dd);
       await deps.assets.setStatus(asset.id, "rejected");
+      // Refund the issuance fee captured at POST /assets time (see
+      // issueAssetCore) — mirrors the OLD "issue" proposal kind's
+      // `compensate` hook (refundIssuanceFee in proposal-kinds.ts), which no
+      // proposal exists any more to run now that review-decision is the sole
+      // activation path. Best-effort, same as that hook: logged, not thrown,
+      // so a webhook/ledger hiccup here never blocks the rejection itself.
+      const fee = dd.pendingIssuanceFee;
+      if (fee?.payer && deps.platformFeeAccount) {
+        await deps.cash.transfer(fee.currency, deps.platformFeeAccount, fee.payer, fee.amount).catch((refundErr) =>
+          request.log.error({ refundErr, assetId: asset.id }, "issuance fee refund failed — manual reconciliation required"));
+      }
     }
     const issuer = await deps.users.findById(asset.createdBy);
     if (issuer) {

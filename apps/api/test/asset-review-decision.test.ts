@@ -102,6 +102,32 @@ describe("POST /assets/:id/review-decision", () => {
     expect(res.json().error).toBe("MACHINE_PRINCIPAL");
   });
 
+  // Task-8 fixup regression test: the OLD sync issuance path emitted
+  // `asset.issued` on activation, and the old gated (proposal) path surfaced
+  // `proposal.executed` instead — an integrator always got SOME signal that an
+  // asset went live. Task 8 made review-decision the sole activation path and
+  // dropped both: `executeIssueActivation` (shared/executors.ts) emitted
+  // nothing at all. This proves the fix — `asset.issued` now fires uniformly
+  // from `executeIssueActivation` itself, exercised here through the real
+  // HTTP approval path (not a direct emitEvent() call, which would prove
+  // nothing about whether the route actually triggers it).
+  it("approving via review-decision emits an asset.issued event", async () => {
+    const h = await buildTestAppWithRepos();
+    const platform = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const assetId = await submittedAsset(h, platform);
+    const carbonAdmin = await loginAs(h.app, "carbon.admin@tokenlayer.dev", "carbon123");
+    const res = await h.app.inject({
+      method: "POST", url: `${V1}/assets/${assetId}/review-decision`, headers: auth(carbonAdmin),
+      payload: { decision: "approved", riskTier: "low" },
+    });
+    expect(res.statusCode).toBe(200);
+
+    const events = await h.deps.events.listAfter(0, { orgId: undefined, type: "asset.issued", limit: 10 });
+    const forThisAsset = events.filter((e) => e.subjectId === assetId);
+    expect(forThisAsset).toHaveLength(1);
+    expect(forThisAsset[0].data).toMatchObject({ assetId, useCaseKey: "carbon-credit", status: "active" });
+  });
+
   it("deciding on an asset that is not pending_approval is refused", async () => {
     const h = await buildTestAppWithRepos();
     const platform = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");

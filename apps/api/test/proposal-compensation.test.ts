@@ -7,21 +7,28 @@ import { buildTestApp, V1, loginAs, auth, onboardUser, PLATFORM_ADMIN_2 } from "
 // approval failed to execute), issueKind.compensate() undid BOTH halves of the
 // propose-time side effects — the captured issuance fee was refunded, and (on
 // reject only) the asset flipped to rejected. richer-config.test.ts covers
-// CHARGING the fee; this file covered giving it back.
+// CHARGING the fee; this file covers giving it back.
 //
-// Task 8 retires the whole proposal path for issuance: issueAssetCore no
+// Task 8 retired the whole proposal path for issuance: issueAssetCore no
 // longer calls proposeIfGated for "issue" at all, so POST /assets never
-// returns a `proposal` for a gated-fee use case any more, and there is no
-// compensate() to run when review-decision rejects an asset — its reject
-// branch simply flips the status, nothing more. The PROPOSER_INACTIVE failure
-// mode (an approval that can't execute because the original proposer went
-// inactive first) is gone too: review-decision performs the mint/sale
+// returns a `proposal` for a gated-fee use case any more. The PROPOSER_INACTIVE
+// failure mode (an approval that can't execute because the original proposer
+// went inactive first) is gone too: review-decision performs the mint/sale
 // directly, attributed to the DECIDER (`claims.id`), not to whoever created
 // the asset — there is no "proposer identity" execution runs as any more, so
 // nothing can fail on account of one going inactive.
+//
+// Task 8 shipped WITHOUT a replacement for issueKind.compensate()'s refund,
+// though — an issuer whose asset was rejected simply kept being charged the
+// fee, silently, forever. This task-8-fixup restores it: issueAssetCore now
+// stashes the charged fee (amount/currency/payer) on the asset's own
+// `dueDiligence.pendingIssuanceFee` at issuance time (there is no proposal
+// payload left to keep it on), and review-decision's reject branch reads it
+// back and refunds it directly — the same transfer issueKind.compensate() used
+// to make, just performed at the new chokepoint instead of the old one.
 // (issuanceFeeCharged itself — charged unconditionally at issuance, before the
-// gated/ungated branch — is UNCHANGED by Task 8; only what happens to it AFTER
-// a decision is what this file's rewrite is actually about.)
+// gated/ungated branch — is unchanged; only what happens to it AFTER a
+// decision is what this file covers.)
 
 // A platform fee account distinct from any seeded buyer/treasury address.
 const FEE_ACCOUNT = "0xdF3e18d64BC6A983f673Ab319CCaE4f1a57C7097";
@@ -115,8 +122,8 @@ async function issueAndSubmit(app: FastifyInstance, tokens: { platform: string; 
   return { asset };
 }
 
-describe("issuance fee: charged unconditionally at issuance now — review-decision never refunds it either way", () => {
-  it("reject via review-decision flips the asset to rejected but does NOT refund the fee", async () => {
+describe("issuance fee: charged unconditionally at issuance, refunded only on review-decision rejection", () => {
+  it("reject via review-decision refunds the issuance fee back to the issuer", async () => {
     const app = await buildTestApp({ platformFeeAccount: FEE_ACCOUNT });
     const t = await setup(app);
     const { asset } = await issueAndSubmit(app, t, "GFN-REJECT");
@@ -128,11 +135,12 @@ describe("issuance fee: charged unconditionally at issuance now — review-decis
     expect(rej.statusCode).toBe(200);
     expect((await app.inject({ method: "GET", url: `${V1}/assets/${asset.id}`, headers: auth(t.platform) })).json().status).toBe("rejected");
 
-    // The fee stays exactly where it landed at issuance — review-decision's
-    // reject branch performs no compensation at all (see this file's header
-    // comment for why: there is no proposal left to run compensate() on).
-    expect(await cashBalance(app, t.platform, ISSUER_WALLET)).toBe("400");
-    expect(await cashBalance(app, t.platform, FEE_ACCOUNT)).toBe("100");
+    // The fee moves straight back from the platform fee account to the
+    // issuer's wallet — review-decision's reject branch reads
+    // `dueDiligence.pendingIssuanceFee` (stashed at issuance time) and refunds
+    // it, mirroring the old issueKind.compensate() hook's refundIssuanceFee.
+    expect(await cashBalance(app, t.platform, ISSUER_WALLET)).toBe("500");
+    expect(await cashBalance(app, t.platform, FEE_ACCOUNT)).toBe("0");
   });
 
   it("approve via review-decision keeps the fee charged too — it's a one-way charge regardless of the decision", async () => {
