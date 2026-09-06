@@ -251,7 +251,7 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
           ✕ Review rejected{asset.dueDiligence?.rejectionReason ? ` — ${asset.dueDiligence.rejectionReason}` : ""}. Attach the missing documents and resubmit below.
         </div>
       )}
-      {(asset.status === "pending_approval" || asset.status === "rejected") && (
+      {can(role, "issue") && (asset.status === "pending_approval" || asset.status === "rejected") && (
         <DueDiligencePanel asset={asset} onChanged={() => void reload()} />
       )}
 
