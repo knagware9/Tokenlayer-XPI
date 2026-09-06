@@ -84,7 +84,31 @@ export interface AssetRepository {
    */
   casStatus(id: string, from: string, to: string): Promise<boolean>;
   setSaleTerms(id: string, terms: SaleTerms): Promise<void>;
-  setDueDiligence(id: string, dueDiligence: AssetDueDiligence): Promise<void>;
+  /**
+   * Shallow-merge `patch` onto the asset's current `dueDiligence`, reading the
+   * current value FRESH inside the implementation rather than trusting a
+   * value the caller read earlier. A caller must never do
+   * `{ ...asset.dueDiligence, someField: x }` itself and pass the whole
+   * object here — that read-then-write is exactly the lost-update race this
+   * signature exists to close: two callers who each read a stale snapshot
+   * and then write their own merged copy back can silently clobber each
+   * other's change (e.g. one upload's document reference lost under a
+   * concurrent second upload, or a reviewer's decision fields lost under a
+   * concurrent document upload). Pass only the fields actually changing;
+   * `null` clears a field, an absent key leaves it untouched. Both
+   * implementations perform the read+merge+write atomically with respect to
+   * each other (a DB transaction for Prisma, no `await` between read and
+   * write for the in-memory repo).
+   */
+  setDueDiligence(id: string, patch: Partial<AssetDueDiligence>): Promise<void>;
+  /**
+   * Append one entry to `dueDiligence.additionalDocuments`, reading the
+   * current array fresh rather than requiring the caller to read-modify-push
+   * it themselves — the same lost-update hazard `setDueDiligence` above
+   * guards against, specific to appending (a shallow-merge patch can't
+   * express "add to this array" without clobbering concurrent appends).
+   */
+  appendAdditionalDocument(id: string, doc: { id: string; sha256: string; label: string }): Promise<void>;
   /** First asset in the use case whose metadata[field] === value, else null. */
   findByMetadata(useCaseKey: string, field: string, value: unknown): Promise<AssetRecord | null>;
 }

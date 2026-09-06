@@ -82,8 +82,24 @@ export class PrismaAssetRepository implements AssetRepository {
   async setSaleTerms(id: string, terms: SaleTerms): Promise<void> {
     await prisma.asset.update({ where: { id }, data: { unitPrice: terms.unitPrice, currency: terms.currency, treasuryAccount: terms.treasuryAccount } });
   }
-  async setDueDiligence(id: string, dueDiligence: AssetDueDiligence): Promise<void> {
-    await prisma.asset.update({ where: { id }, data: { dueDiligence: JSON.stringify(dueDiligence) } });
+  async setDueDiligence(id: string, patch: Partial<AssetDueDiligence>): Promise<void> {
+    // Read-merge-write inside one transaction: two concurrent calls each take
+    // SQLite's write lock in turn (Prisma retries on SQLITE_BUSY), so the
+    // second call's read always sees the first call's already-merged write —
+    // neither can silently clobber a field the other just set.
+    await prisma.$transaction(async (tx) => {
+      const row = await tx.asset.findUniqueOrThrow({ where: { id }, select: { dueDiligence: true } });
+      const current = row.dueDiligence ? JSON.parse(row.dueDiligence) as AssetDueDiligence : {};
+      await tx.asset.update({ where: { id }, data: { dueDiligence: JSON.stringify({ ...current, ...patch }) } });
+    });
+  }
+  async appendAdditionalDocument(id: string, doc: { id: string; sha256: string; label: string }): Promise<void> {
+    await prisma.$transaction(async (tx) => {
+      const row = await tx.asset.findUniqueOrThrow({ where: { id }, select: { dueDiligence: true } });
+      const current = row.dueDiligence ? JSON.parse(row.dueDiligence) as AssetDueDiligence : {};
+      const merged = { ...current, additionalDocuments: [...(current.additionalDocuments ?? []), doc] };
+      await tx.asset.update({ where: { id }, data: { dueDiligence: JSON.stringify(merged) } });
+    });
   }
   // Metadata is stored as a JSON string column, so filter in-process over the
   // (small) per-use-case set rather than with a JSON query.

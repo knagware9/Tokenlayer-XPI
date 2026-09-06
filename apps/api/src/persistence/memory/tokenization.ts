@@ -66,9 +66,19 @@ export class MemoryAssetRepository implements AssetRepository {
     const a = this.byId.get(id);
     if (a) { a.unitPrice = terms.unitPrice; a.currency = terms.currency; a.treasuryAccount = terms.treasuryAccount; }
   }
-  async setDueDiligence(id: string, dueDiligence: AssetDueDiligence): Promise<void> {
+  async setDueDiligence(id: string, patch: Partial<AssetDueDiligence>): Promise<void> {
     const a = this.byId.get(id);
-    if (a) a.dueDiligence = dueDiligence;
+    // No `await` between the read and the write: this whole method runs as
+    // one synchronous turn, so two "concurrent" callers can never interleave
+    // here — each call sees whatever the previous call already merged in.
+    if (a) a.dueDiligence = { ...(a.dueDiligence ?? {}), ...patch };
+  }
+  async appendAdditionalDocument(id: string, doc: { id: string; sha256: string; label: string }): Promise<void> {
+    const a = this.byId.get(id);
+    if (a) {
+      const dd = a.dueDiligence ?? {};
+      a.dueDiligence = { ...dd, additionalDocuments: [...(dd.additionalDocuments ?? []), doc] };
+    }
   }
   async findByMetadata(useCaseKey: string, field: string, value: unknown): Promise<AssetRecord | null> {
     if (value === undefined) return null; // never match on a missing field (undefined === undefined footgun)

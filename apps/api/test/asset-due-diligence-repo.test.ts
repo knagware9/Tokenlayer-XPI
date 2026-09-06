@@ -33,4 +33,35 @@ describe("AssetRepository.setDueDiligence", () => {
     const created = await assets.create(baseInput({ dueDiligence: dd }));
     expect(created.dueDiligence).toEqual(dd);
   });
+
+  it("MemoryAssetRepository: setDueDiligence merges a patch rather than replacing the whole object", async () => {
+    const assets = new MemoryAssetRepository();
+    await assets.create(baseInput());
+    await assets.setDueDiligence("a1", { prospectus: { id: "doc1", sha256: "0x1" } });
+    await assets.setDueDiligence("a1", { riskTier: "low" });
+    const after = await assets.get("a1");
+    // The second call's patch must not have clobbered the first call's field —
+    // this is exactly the lost-update shape the plan's final review flagged.
+    expect(after?.dueDiligence).toEqual({ prospectus: { id: "doc1", sha256: "0x1" }, riskTier: "low" });
+  });
+
+  it("MemoryAssetRepository: appendAdditionalDocument appends without requiring the caller to read first", async () => {
+    const assets = new MemoryAssetRepository();
+    await assets.create(baseInput());
+    await assets.appendAdditionalDocument("a1", { id: "doc1", sha256: "0x1", label: "Audit report" });
+    await assets.appendAdditionalDocument("a1", { id: "doc2", sha256: "0x2", label: "Insurance cert" });
+    const after = await assets.get("a1");
+    expect(after?.dueDiligence?.additionalDocuments).toEqual([
+      { id: "doc1", sha256: "0x1", label: "Audit report" },
+      { id: "doc2", sha256: "0x2", label: "Insurance cert" },
+    ]);
+  });
+
+  it("MemoryAssetRepository: a null in a patch clears that field without touching others", async () => {
+    const assets = new MemoryAssetRepository();
+    await assets.create(baseInput({ dueDiligence: { riskTier: "high", rejectionReason: "bad prospectus" } }));
+    await assets.setDueDiligence("a1", { rejectionReason: null });
+    const after = await assets.get("a1");
+    expect(after?.dueDiligence).toEqual({ riskTier: "high", rejectionReason: null });
+  });
 });

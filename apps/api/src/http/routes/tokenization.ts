@@ -782,12 +782,15 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
     }
     const useCase = await deps.useCases.get(asset.useCaseKey);
     const doc = await storeUploadedDocument(deps.documents, { contentType: b.contentType, dataBase64: b.dataBase64 }, useCase.ownerOrgId ?? null, "asset-diligence", claims.id);
-    const dd = { ...(asset.dueDiligence ?? {}) };
     const ref = { id: doc.id, sha256: doc.sha256 };
-    if (b.slot === "prospectus") dd.prospectus = ref;
-    else if (b.slot === "legalOpinion") dd.legalOpinion = ref;
-    else dd.additionalDocuments = [...(dd.additionalDocuments ?? []), { ...ref, label: b.label! }];
-    await deps.assets.setDueDiligence(asset.id, dd);
+    // Patch-and-merge, never read-then-write: a legal opinion attached right
+    // after a prospectus (or two additional documents attached back to back)
+    // must not race and clobber each other's reference. setDueDiligence and
+    // appendAdditionalDocument each read the asset's current dueDiligence
+    // fresh at write time, not the possibly-stale `asset` fetched above.
+    if (b.slot === "prospectus") await deps.assets.setDueDiligence(asset.id, { prospectus: ref });
+    else if (b.slot === "legalOpinion") await deps.assets.setDueDiligence(asset.id, { legalOpinion: ref });
+    else await deps.assets.appendAdditionalDocument(asset.id, { ...ref, label: b.label! });
     return reply.code(201).send({ id: doc.id, sha256: doc.sha256, size: doc.size });
   });
 
@@ -844,7 +847,7 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
     if (asset.status === "rejected") {
       const won = await deps.assets.casStatus(asset.id, "rejected", "pending_approval");
       if (won) {
-        await deps.assets.setDueDiligence(asset.id, { ...asset.dueDiligence, rejectionReason: null });
+        await deps.assets.setDueDiligence(asset.id, { rejectionReason: null });
       }
       const after = await deps.assets.get(asset.id);
       return reply.code(200).send({ id: after!.id, status: after!.status });
@@ -903,13 +906,19 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
     if (!won) {
       return reply.code(409).send({ error: "NOT_PENDING", message: `asset is not pending_approval` });
     }
-    const dd = { ...(asset.dueDiligence ?? {}) };
+    // Patches only, never a read-then-write of the whole `dueDiligence`
+    // object: `pendingInitialSupply`/`pendingSale`/`pendingIssuanceFee` are
+    // read straight off the `asset` snapshot fetched above rather than a
+    // merged copy, since nothing else ever writes those three fields after
+    // issuance — only this route reads and clears them, so the snapshot is
+    // safe here even though other fields (documents) may change concurrently.
     if (b.decision === "approved") {
-      dd.riskTier = b.riskTier;
-      dd.reviewedBy = claims.id;
-      dd.reviewedAt = new Date().toISOString();
-      dd.rejectionReason = null;
-      await deps.assets.setDueDiligence(asset.id, dd);
+      await deps.assets.setDueDiligence(asset.id, {
+        riskTier: b.riskTier,
+        reviewedBy: claims.id,
+        reviewedAt: new Date().toISOString(),
+        rejectionReason: null,
+      });
       const useCase = await deps.useCases.get(asset.useCaseKey);
       const treasury = useCase.treasuryAccountId ? (await deps.accounts.findById(useCase.treasuryAccountId))?.address ?? null : null;
       // executeIssueActivation also flips status to "active" itself — a
@@ -917,15 +926,11 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
       // kept only so the ungated issueAssetCore branch (unreachable today,
       // see its own comment) still works unmodified if ever reactivated.
       await executeIssueActivation(deps, { id: claims.id, role: claims.role }, asset, {
-        initialSupply: dd.pendingInitialSupply ?? undefined,
+        initialSupply: asset.dueDiligence?.pendingInitialSupply ?? undefined,
         treasury,
-        sale: dd.pendingSale ?? undefined,
+        sale: asset.dueDiligence?.pendingSale ?? undefined,
       }, request.log);
     } else {
-      dd.rejectionReason = b.rejectionReason;
-      dd.riskTier = null;
-      dd.reviewedBy = null;
-      dd.reviewedAt = null;
       // Refund the issuance fee captured at POST /assets time (see
       // issueAssetCore) — mirrors the OLD "issue" proposal kind's
       // `compensate` hook (refundIssuanceFee in proposal-kinds.ts), which no
@@ -938,9 +943,14 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
       // cycle without this would refund the same fee a second time, and a
       // resubmit-then-approve cycle would activate an asset that was never
       // actually charged.
-      const fee = dd.pendingIssuanceFee;
-      dd.pendingIssuanceFee = null;
-      await deps.assets.setDueDiligence(asset.id, dd);
+      const fee = asset.dueDiligence?.pendingIssuanceFee;
+      await deps.assets.setDueDiligence(asset.id, {
+        rejectionReason: b.rejectionReason,
+        riskTier: null,
+        reviewedBy: null,
+        reviewedAt: null,
+        pendingIssuanceFee: null,
+      });
       if (fee?.payer && deps.platformFeeAccount) {
         await deps.cash.transfer(fee.currency, deps.platformFeeAccount, fee.payer, fee.amount).catch((refundErr) =>
           request.log.error({ refundErr, assetId: asset.id }, "issuance fee refund failed — manual reconciliation required"));
