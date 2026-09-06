@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, ApiError } from "../../api.js";
+import { api, ApiError, API_BASE } from "../../api.js";
 import { useAuth } from "../../auth.js";
 import type { Asset } from "../../types.js";
 import { Card, EmptyState, Skeleton } from "../shared/ui.js";
@@ -8,18 +8,26 @@ export function ReviewAssets(): JSX.Element {
   const { token, user } = useAuth();
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState<string | null>(null);
 
   async function reload(): Promise<void> {
     if (!token) return;
     setLoading(true);
-    const all = await api.assets(token, user?.useCaseKey ?? undefined);
-    setAssets(all.filter((a) => a.status === "pending_approval"));
-    setLoading(false);
+    setError(null);
+    try {
+      const all = await api.assets(token, user?.useCaseKey ?? undefined);
+      setAssets(all.filter((a) => a.status === "pending_approval"));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not load assets pending review");
+    } finally {
+      setLoading(false);
+    }
   }
   useEffect(() => { void reload(); }, [token]);
 
   if (loading) return <Card><Skeleton lines={4} /></Card>;
+  if (error) return <Card><EmptyState icon="warn" title="Could not load review queue" hint={error} /></Card>;
   if (assets.length === 0) return <Card><EmptyState icon="shield" title="Nothing pending review" hint="Assets awaiting due-diligence review in your use case will appear here." /></Card>;
 
   return (
@@ -47,6 +55,26 @@ function AssetReviewPanel({ asset, onDecided }: { asset: Asset; onDecided: () =>
   const [error, setError] = useState<string | null>(null);
   const dd = asset.dueDiligence;
 
+  // Same popup-blocker-safe pattern as AssetDetail.tsx's DueDiligenceDisplay:
+  // open a blank tab synchronously (before the async fetch), then redirect it
+  // once the bytes arrive — a plain <a href> can't carry the Bearer token
+  // this codebase uses for auth, and window.open() after an await is
+  // silently blocked by real browsers' popup blockers.
+  async function openDocument(docId: string): Promise<void> {
+    if (!token) return;
+    const win = window.open("", "_blank");
+    try {
+      const res = await fetch(`${API_BASE}/assets/${asset.id}/diligence/documents/${docId}`, { headers: { authorization: `Bearer ${token}` } });
+      if (!res.ok) { win?.close(); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      if (win) win.location.href = url; else window.open(url, "_blank");
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch {
+      win?.close();
+    }
+  }
+
   async function decide(decision: "approved" | "rejected"): Promise<void> {
     if (!token) return;
     if (decision === "rejected" && !rejectionReason.trim()) { setError("A rejection reason is required."); return; }
@@ -65,10 +93,30 @@ function AssetReviewPanel({ asset, onDecided }: { asset: Asset; onDecided: () =>
   return (
     <div className="border-t border-slate-100 p-4 space-y-3 bg-slate-50/60">
       <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
-        <div>Prospectus: {dd?.prospectus ? "attached" : "missing"}</div>
-        <div>Legal opinion: {dd?.legalOpinion ? "attached" : "—"}</div>
+        <div>
+          Prospectus:{" "}
+          {dd?.prospectus
+            ? <button onClick={() => void openDocument(dd.prospectus!.id)} className="text-brand-600 hover:text-brand-700 font-medium">open ↗</button>
+            : "missing"}
+        </div>
+        <div>
+          Legal opinion:{" "}
+          {dd?.legalOpinion
+            ? <button onClick={() => void openDocument(dd.legalOpinion!.id)} className="text-brand-600 hover:text-brand-700 font-medium">open ↗</button>
+            : "—"}
+        </div>
       </div>
-      {dd?.additionalDocuments?.length ? <div className="text-xs text-slate-600">Additional: {dd.additionalDocuments.map((d) => d.label).join(", ")}</div> : null}
+      {dd?.additionalDocuments?.length ? (
+        <div className="text-xs text-slate-600 flex flex-wrap gap-x-1">
+          Additional:{" "}
+          {dd.additionalDocuments.map((d, i) => (
+            <span key={d.id}>
+              <button onClick={() => void openDocument(d.id)} className="text-brand-600 hover:text-brand-700 font-medium">{d.label} ↗</button>
+              {i < dd.additionalDocuments!.length - 1 ? "," : ""}
+            </span>
+          ))}
+        </div>
+      ) : null}
       {error && <p className="text-xs text-red-600">{error}</p>}
       <div className="flex items-center gap-3">
         <select className="rounded border border-slate-300 px-2 py-1 text-xs" value={riskTier} onChange={(e) => setRiskTier(e.target.value as "low" | "medium" | "high")}>
