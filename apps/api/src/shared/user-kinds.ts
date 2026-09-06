@@ -53,13 +53,35 @@ export interface OnboardUserPayload {
   skipWelcomeEmail?: boolean;
 }
 
-/** ownerOrg of the use case when present, else the platform issuer org. */
+/**
+ * The bound issuer org of `useCaseKey`, else the platform issuer org.
+ *
+ * `useCaseKey` names EITHER a tokenization use case (owner org via
+ * `ownerOrgId`) OR an identity-domain credential use case (issuer org via its
+ * `issuer` binding) — the two catalogues are consulted in the same
+ * enabledDomains-gated way `resolveUseCaseDomain`/`useCaseKeysByDomain` do in
+ * routes/context.ts, so this never queries a table this deployment doesn't
+ * own. Consulting only the tokenization table used to silently fall back to
+ * the platform org for every identity-domain onboarding, mis-signing the
+ * KycCredential.
+ */
 export async function resolveIssuerOrg(deps: AppDeps, useCaseKey: string | null) {
   if (useCaseKey) {
-    const uc = await deps.useCases.get(useCaseKey).catch(() => null);
-    if (uc?.ownerOrgId) {
-      const org = await deps.organizations.get(uc.ownerOrgId);
-      if (org) return org;
+    if (deps.enabledDomains.includes("identity")) {
+      const cuc = await deps.credentialUseCases.get(useCaseKey);
+      if (cuc) {
+        const issuerOrg = cuc.issuer.kind === "platform"
+          ? await deps.organizations.findByName(PLATFORM_ORG_NAME)
+          : await deps.organizations.get(cuc.issuer.orgId);
+        if (issuerOrg) return issuerOrg;
+      }
+    }
+    if (deps.enabledDomains.includes("tokenization")) {
+      const uc = await deps.useCases.get(useCaseKey).catch(() => null);
+      if (uc?.ownerOrgId) {
+        const org = await deps.organizations.get(uc.ownerOrgId);
+        if (org) return org;
+      }
     }
   }
   const platform = await deps.organizations.findByName(PLATFORM_ORG_NAME);

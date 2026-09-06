@@ -9,6 +9,7 @@ import { selectIdentityAssertions } from "./identity/identity-assertions.js";
 import { createMemoryChallengeStore } from "./identity/identity-challenges.js";
 import { createMemoryQrLoginStore } from "./identity/qr-login-sessions.js";
 import { createKeystore } from "./shared/keystore.js";
+import { checkDidSeedIntegrity } from "./shared/did-seed-check.js";
 import { ensureNamedOrg, ensurePlatformIssuerOrg, ensureUserWallet, provisionOrgMemberIdentities, provisionPlatformOperatorIdentities } from "./shared/platform-org.js";
 import {
   PrismaAccountRepository,
@@ -82,6 +83,11 @@ async function main(): Promise<void> {
   const webhookDeliveries = new PrismaWebhookDeliveryRepository();
   const ledgerTransactions = new PrismaLedgerTransactionRepository();
   const keystore = createKeystore(env.didMasterKey);
+  // Every existing org's stored DID must still decrypt under this key — a
+  // mismatch (e.g. a Docker volume reused with a different DID_MASTER_KEY)
+  // otherwise stays silent until the org's key is first used to sign, deep
+  // inside proposal execution. Loud, never fatal (see the function's doc).
+  await checkDidSeedIntegrity(organizations, keystore);
   // Demo users/accounts (with predictable passwords) are seeded only outside
   // production. The ROSTER is seeded on every deployment — it is how anyone logs
   // in — but the demo WALLETS behind it only where tokenization is sold.
