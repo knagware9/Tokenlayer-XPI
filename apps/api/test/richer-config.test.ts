@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { buildTestApp, V1, loginAs, auth, onboardUser, treasuryAddressOf } from "./helpers.js";
+import { approveAssetForTest, buildTestApp, V1, loginAs, auth, onboardUser, treasuryAddressOf } from "./helpers.js";
 
 // A platform fee account distinct from any seeded buyer/treasury address.
 const FEE_ACCOUNT = "0xdF3e18d64BC6A983f673Ab319CCaE4f1a57C7097";
@@ -86,6 +86,7 @@ describe("richer low-code config: compliance rules + fees", () => {
         initialSupply: "100",
       },
     })).json().asset;
+    await approveAssetForTest(app, asset.id, "carbon-credit");
     const treasury = await treasuryAddressOf(app, platform, "carbon-credit");
 
     // Onboard + KYC-approve a Buyer (via the scoped UseCaseAdmin, checked by the
@@ -120,6 +121,7 @@ describe("richer low-code config: compliance rules + fees", () => {
         initialSupply: "100",
       },
     })).json().asset;
+    await approveAssetForTest(app, asset.id, "carbon-credit");
     const treasury = await treasuryAddressOf(app, platform, "carbon-credit");
 
     // Now restrict to IN/US only.
@@ -166,8 +168,13 @@ describe("richer low-code config: compliance rules + fees", () => {
       method: "POST", url: `${V1}/assets`, headers: auth(issuer),
       payload: { useCaseKey: "carbon-credit", name: "Iss Asset", chainId: "fabric", metadata: { projectName: "P", registry: "Verra", vintage: 2024 }, sale: { unitPrice: "5", currency: "CBDC-INR" } },
     });
-    expect(res.statusCode).toBe(201);
-    expect(res.json().issuanceFee).toMatchObject({ amount: "100", currency: "CBDC-INR" });
+    expect(res.statusCode).toBe(202);
+    // The gated-issuance response body no longer echoes `issuanceFee` (Task 8's
+    // gated branch returns only `{ asset }` — there is no proposal payload to
+    // carry it in any more, and this is the only branch issueAssetCore ever
+    // reaches now). The charge itself is unaffected — prove it via balances,
+    // the same way this test already does two lines below.
+    expect(res.json().issuanceFee).toBeUndefined();
     // Issuer paid 100 → 400 left; fee account received 100.
     expect(await cashBalance(app, platform, ISSUER_WALLET)).toBe("400");
     expect(await cashBalance(app, platform, FEE_ACCOUNT)).toBe("100");

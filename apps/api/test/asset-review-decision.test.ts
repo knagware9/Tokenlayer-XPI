@@ -1,19 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { auth, buildTestAppWithRepos, issueAsset, loginAs, V1 } from "./helpers.js";
+import { auth, buildTestAppWithRepos, loginAs, V1 } from "./helpers.js";
 
-async function submittedAsset(h: Awaited<ReturnType<typeof buildTestAppWithRepos>>, platform: string): Promise<string> {
-  const assetId = await issueAsset(h.app, platform, "carbon-credit");
-  // issueAsset() issues via today's synchronous path (no use case has
-  // workflow.approvals.issue set) and returns an already-active asset — the
-  // review-decision route this task adds requires pending_approval, and
-  // Task 8 is what makes that the universal default, not this task. Force
-  // the state this task's own tests need directly, same as Task 2's fix.
-  await h.assets.setStatus(assetId, "pending_approval");
+// Deliberately NOT the shared issueAsset() helper: that helper now completes
+// the ENTIRE due-diligence flow (upload + submit + approve) internally, using
+// the use case's own seeded UseCaseAdmin to decide — which is exactly the
+// actor these tests need to still be free to act as themselves (to attempt
+// (and, in one case, be refused) the decision below). Issue raw, upload, and
+// submit — leaving the asset `pending_approval` for the test body to decide.
+async function submittedAsset(h: Awaited<ReturnType<typeof buildTestAppWithRepos>>, actor: string): Promise<string> {
+  const issue = await h.app.inject({
+    method: "POST", url: `${V1}/assets`, headers: auth(actor),
+    payload: { useCaseKey: "carbon-credit", name: "T", symbol: "T", chainId: "fabric", metadata: { projectName: "P", registry: "Verra", vintage: 2024 } },
+  });
+  const assetId = issue.json().asset.id as string;
   await h.app.inject({
-    method: "POST", url: `${V1}/assets/${assetId}/diligence/documents`, headers: auth(platform),
+    method: "POST", url: `${V1}/assets/${assetId}/diligence/documents`, headers: auth(actor),
     payload: { slot: "prospectus", contentType: "application/pdf", dataBase64: Buffer.from("%PDF-1.4 x").toString("base64") },
   });
-  await h.app.inject({ method: "POST", url: `${V1}/assets/${assetId}/submit-for-review`, headers: auth(platform) });
+  await h.app.inject({ method: "POST", url: `${V1}/assets/${assetId}/submit-for-review`, headers: auth(actor) });
   return assetId;
 }
 

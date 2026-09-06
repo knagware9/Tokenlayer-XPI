@@ -1637,7 +1637,7 @@ describe("a member — and so a KEY — binds only to a use case its org owns (f
         metadata: { invoiceNumber: "CONFIDENTIAL-INV-1", invoiceDate: "2026-07-01", buyerName: "JSW Steel Limited", currency: "INR", amount: 1000000, dueDate: "2099-12-31" },
       },
     });
-    expect(confidential.statusCode).toBe(201);
+    expect(confidential.statusCode).toBe(202);
 
     const minted = await mintKey(h, orgAdmin, orgId, { name: "own erp", role: "Trader", useCaseKey: ownKey, scopes: ["assets:read"] });
     expect(minted.key).toMatchObject({ role: "Trader", useCaseKey: ownKey, status: "active" });

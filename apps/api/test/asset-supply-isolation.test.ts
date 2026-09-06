@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildTestApp, V1, loginAs, auth, onboardUser, treasuryAddressOf } from "./helpers.js";
+import { approveAssetForTest, buildTestApp, V1, loginAs, auth, onboardUser, treasuryAddressOf } from "./helpers.js";
 
 const UC = "invoice-tokenization";
 const HOLDER = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"; // Carol — seeded account, linkable
@@ -9,16 +9,25 @@ const inv = (n: string, amount: number) => ({
   currency: "INR", amount, dueDate: "2026-10-01",
 });
 
+/** Issued by the platform (not `admin` — m1.admin, invoice-tokenization's own
+ *  seeded UseCaseAdmin) so `admin` stays free to DECIDE this asset's
+ *  due-diligence review below — review-decision refuses a creator deciding
+ *  their own asset. Every asset now starts `pending_approval`; complete the
+ *  flow via the shared helper so callers get back an active asset with the
+ *  requested supply minted, same as before this task's flip. */
 async function issue(
   app: Awaited<ReturnType<typeof buildTestApp>>, admin: string, n: string, amount: number, supply: string,
   sale?: { unitPrice: string; currency: string },
 ): Promise<string> {
+  const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
   const res = await app.inject({
-    method: "POST", url: `${V1}/assets`, headers: auth(admin),
+    method: "POST", url: `${V1}/assets`, headers: auth(platform),
     payload: { useCaseKey: UC, name: n, chainId: "fabric", initialSupply: supply, metadata: inv(n, amount), ...(sale ? { sale } : {}) },
   });
-  expect(res.statusCode).toBe(201);
-  return res.json().asset.id as string;
+  expect(res.statusCode).toBe(202);
+  const assetId = res.json().asset.id as string;
+  await approveAssetForTest(app, assetId, UC);
+  return assetId;
 }
 
 /**

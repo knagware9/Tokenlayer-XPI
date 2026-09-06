@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { auth, buildTestAppWithRepos, loginAs, V1, type TestAppHandle } from "./helpers.js";
+import { auth, buildTestAppWithRepos, completeDueDiligence, loginAs, V1, type TestAppHandle } from "./helpers.js";
 
 /**
  * OrgAdmin gained full operator rights (mint/transfer/burn/freeze/unfreeze/
@@ -45,13 +45,30 @@ async function ownedUseCase(h: TestAppHandle, admin: string, orgAdmin: string, k
   return key;
 }
 
-async function issueAndMint(h: TestAppHandle, actorToken: string, useCaseKey: string, treasury: string): Promise<string> {
+/** OrgAdmin's merged operator rights (mint/transfer/etc.) don't extend to
+ *  deciding a due-diligence review — review-decision requires role ===
+ *  "UseCaseAdmin" specifically (Task 4's own RBAC, unchanged by this task).
+ *  An org-owned use case's OrgAdmin can, however, directly create a
+ *  UseCaseAdmin member for it (canCreateOrgMember allows OrgAdmin →
+ *  UseCaseAdmin, no gating) — do that here so there is someone eligible to
+ *  decide reviews, distinct from `orgAdmin` (the asset's creator below). */
+async function makeUseCaseAdminMember(h: TestAppHandle, orgId: string, orgAdmin: string, useCaseKey: string, email: string): Promise<string> {
+  const res = await h.app.inject({
+    method: "POST", url: `${V1}/orgs/${orgId}/users`, headers: auth(orgAdmin),
+    payload: { email, password: "secret1", role: "UseCaseAdmin", useCaseKey },
+  });
+  if (res.statusCode !== 201) throw new Error(`makeUseCaseAdminMember failed: ${res.statusCode} ${res.payload}`);
+  return loginAs(h.app, email, "secret1");
+}
+
+async function issueAndMint(h: TestAppHandle, actorToken: string, useCaseKey: string, treasury: string, deciderToken: string): Promise<string> {
   const issued = await h.app.inject({
     method: "POST", url: `${V1}/assets`, headers: auth(actorToken),
     payload: { useCaseKey, name: "Op Note", symbol: "NTS", chainId: "fabric", metadata: {} },
   });
-  if (issued.statusCode !== 201) throw new Error(`issue failed: ${issued.statusCode} ${issued.payload}`);
+  if (issued.statusCode !== 202) throw new Error(`issue failed: ${issued.statusCode} ${issued.payload}`);
   const assetId = issued.json().asset.id as string;
+  await completeDueDiligence(h.app, assetId, actorToken, deciderToken);
   const allowTreasury = await h.app.inject({
     method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: auth(actorToken), payload: { account: treasury },
   });
@@ -70,6 +87,7 @@ describe("OrgAdmin operational rights (merged with UseCaseAdmin)", () => {
     const orgId = await makeOrg(h, admin, "Op Rights Org");
     const orgAdmin = await makeOrgAdmin(h, admin, orgId, "opadmin@oprights.example");
     const key = await ownedUseCase(h, admin, orgAdmin, "op-rights-note");
+    const decider = await makeUseCaseAdminMember(h, orgId, orgAdmin, key, "opadmin.uca@oprights.example");
 
     const uc = await h.app.inject({ method: "GET", url: `${V1}/use-cases/${key}`, headers: auth(orgAdmin) });
     expect(uc.statusCode).toBe(200);
@@ -77,7 +95,7 @@ describe("OrgAdmin operational rights (merged with UseCaseAdmin)", () => {
     const treasury = (await h.app.inject({ method: "GET", url: `${V1}/accounts`, headers: auth(admin) })).json()
       .find((a: { id: string }) => a.id === treasuryAccountId).address as string;
 
-    const assetId = await issueAndMint(h, orgAdmin, key, treasury);
+    const assetId = await issueAndMint(h, orgAdmin, key, treasury, decider);
 
     // Freeze/unfreeze and transfer, the rest of the operator surface.
     const freeze = await h.app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/freeze`, headers: auth(orgAdmin), payload: { account: treasury } });
@@ -102,7 +120,7 @@ describe("OrgAdmin operational rights (merged with UseCaseAdmin)", () => {
         method: "POST", url: `${V1}/assets`, headers: auth(token),
         payload: { useCaseKey: key, name, symbol: "NTS", chainId: "fabric", metadata: {} },
       });
-      if (res.statusCode !== 201) throw new Error(`issue ${name} failed: ${res.statusCode} ${res.payload}`);
+      if (res.statusCode !== 202) throw new Error(`issue ${name} failed: ${res.statusCode} ${res.payload}`);
     }
 
     const list = await h.app.inject({ method: "GET", url: `${V1}/assets?limit=100&offset=0`, headers: auth(orgAdmin) });

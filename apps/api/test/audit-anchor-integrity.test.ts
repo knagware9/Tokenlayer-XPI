@@ -12,7 +12,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { buildTestAppWithRepos, V1, loginAs, auth } from "./helpers.js";
+import { approveAssetForTest, buildTestAppWithRepos, V1, loginAs, auth } from "./helpers.js";
 import type { AppDeps } from "../src/context.js";
 
 async function seeded(): Promise<{ app: FastifyInstance; deps: AppDeps; admin: string; assetId: string }> {
@@ -23,8 +23,13 @@ async function seeded(): Promise<{ app: FastifyInstance; deps: AppDeps; admin: s
     method: "POST", url: `${V1}/assets`, headers: auth(issuer),
     payload: { useCaseKey: "carbon-credit", name: "ANCHOR-1", chainId: "fabric", initialSupply: "100", metadata: { projectName: "P", registry: "Verra", vintage: 2024 } },
   });
-  expect(res.statusCode).toBe(201);
-  return { app: h.app, deps: h.deps, admin, assetId: res.json().asset.id };
+  expect(res.statusCode).toBe(202);
+  const assetId = res.json().asset.id as string;
+  // Issued by carbon.issuer, not `admin` (carbon.admin), so `admin` stays
+  // free to DECIDE this asset's due-diligence review — review-decision
+  // refuses a creator deciding their own asset.
+  await approveAssetForTest(h.app, assetId, "carbon-credit");
+  return { app: h.app, deps: h.deps, admin, assetId };
 }
 
 const verify = async (app: FastifyInstance, admin: string, assetId: string) =>

@@ -219,8 +219,12 @@ describe("gated identity revocation — chain-backed", () => {
     // The VC was anchored on-chain at issuance and is not revoked.
     expect((await anchor.credentialStatusOf("0xvc", credentialId)).revoked).toBe(false);
 
-    // An asset to allowlist against — succeeds while KYC is approved.
-    const assetId = await issueAsset(app, carbon, "carbon-credit");
+    // An asset to allowlist against — succeeds while KYC is approved. Issued
+    // by the platform, not `carbon` (carbon-credit's own seeded UseCaseAdmin),
+    // so `carbon` stays free to DECIDE this asset's due-diligence review
+    // inside issueAsset() — review-decision refuses a creator deciding their
+    // own asset.
+    const assetId = await issueAsset(app, admin, "carbon-credit");
     const allowOk = await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: auth(carbon), payload: { account: wallet } });
     expect(allowOk.statusCode).toBe(200);
 

@@ -8,7 +8,7 @@
  * a free address to every "is this taken?" check in the codebase.
  */
 import { describe, it, expect } from "vitest";
-import { buildTestApp, buildTestAppWithRepos, V1, loginAs, auth, onboardUser, treasuryAddressOf } from "./helpers.js";
+import { approveAssetForTest, buildTestApp, buildTestAppWithRepos, completeDueDiligence, V1, loginAs, auth, onboardUser, onboardUseCaseAdmin, treasuryAddressOf } from "./helpers.js";
 import { createComplianceProvider } from "../src/tokenization/compliance-provider.js";
 import { MemoryAccountRepository, MemoryAuditRepository, MemoryUserRepository } from "../src/persistence/memory/index.js";
 import { ownerOrgOfUseCase } from "../src/shared/events.js";
@@ -116,10 +116,17 @@ describe("finding 1: the compliance-exempt treasury address is not claimable", (
     expect(created.statusCode).toBe(201);
     const treasury = await treasuryAddressOf(app, platform, "uc-exempt");
 
-    const assetId = (await app.inject({
+    const issued = await app.inject({
       method: "POST", url: `${V1}/assets`, headers: auth(platform),
       payload: { useCaseKey: "uc-exempt", name: "Exemption Trace", chainId: "fabric", metadata: {} },
-    })).json().asset.id as string;
+    });
+    expect(issued.statusCode).toBe(202);
+    const assetId = issued.json().asset.id as string;
+    // uc-exempt ships with no seeded UseCaseAdmin — onboard one (distinct from
+    // `platform`, the creator) so there's someone eligible to decide the
+    // mandatory due-diligence review below.
+    const ucaToken = await onboardUseCaseAdmin(app, "uc-exempt", "uc-exempt.admin@x.dev");
+    await completeDueDiligence(app, assetId, platform, ucaToken);
 
     const mint = () => app.inject({
       method: "POST", url: `${V1}/assets/${assetId}/actions/mint`, headers: auth(platform),
@@ -250,13 +257,19 @@ describe("finding 7: PlatformAdmin create-use-case edge cases", () => {
     const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
     // Issue while the treasury still exists, then strip it — so setPrice hits
     // the same condition issuance does.
-    const assetId = (await app.inject({
+    const firstIssued = await app.inject({
       method: "POST", url: `${V1}/assets`, headers: auth(platform),
       payload: {
         useCaseKey: "carbon-credit", name: "Wording Check", chainId: "fabric",
         metadata: { projectName: "P", registry: "Verra", vintage: 2024 },
       },
-    })).json().asset.id as string;
+    });
+    const assetId = firstIssued.json().asset.id as string;
+    // setPrice below requires an ACTIVE asset (it 409s ASSET_NOT_ACTIVE
+    // otherwise, masking the MISSING_TREASURY case this test is actually
+    // about) — complete due diligence while the treasury still exists, before
+    // stripping it.
+    await approveAssetForTest(app, assetId, "carbon-credit");
     const carbon = await deps.useCases.get("carbon-credit");
     await deps.useCases.update("carbon-credit", { ...carbon, treasuryAccountId: undefined });
 

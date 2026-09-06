@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FastifyInstance, InjectOptions } from "fastify";
-import { ACCOUNTS, auth, buildTestApp, buildTestAppWithRepos, issueAsset, loginAs, onboardUser, treasuryAddressOf, V1 } from "./helpers.js";
+import { ACCOUNTS, approveAssetForTest, auth, buildTestApp, buildTestAppWithRepos, completeDueDiligence, issueAsset, loginAs, onboardUseCaseAdmin, onboardUser, treasuryAddressOf, V1 } from "./helpers.js";
 
 let app: FastifyInstance;
 beforeAll(async () => {
@@ -15,9 +15,25 @@ function inj(opts: InjectOptions & { url: string }) {
   return app.inject({ ...opts, url: opts.url.startsWith("/api") || opts.url.startsWith("/openapi") ? opts.url : `${V1}${opts.url}` });
 }
 
+// `generic-asset`/`generic-certificate` ship with no seeded demo UseCaseAdmin
+// (unlike carbon-credit/gold-loan/etc., which `approveAssetForTest` already
+// covers) — onboard one apiece, lazily, and cache the token across this
+// file's tests (all share the one `app` built in beforeAll above).
+let genericAssetAdminToken: Promise<string> | undefined;
+function genericAssetAdmin(): Promise<string> {
+  return (genericAssetAdminToken ??= onboardUseCaseAdmin(app, "generic-asset", "generic-asset.admin@x.dev"));
+}
+let genericCertAdminToken: Promise<string> | undefined;
+function genericCertAdmin(): Promise<string> {
+  return (genericCertAdminToken ??= onboardUseCaseAdmin(app, "generic-certificate", "generic-cert.admin@x.dev"));
+}
+
 /**
- * Issue a generic-asset (ERC-20) as PlatformAdmin and return its id.
- * All tests that need a live asset in the shared `app` instance use this.
+ * Issue a generic-asset (ERC-20) as PlatformAdmin, complete due diligence, and
+ * return its id — already `active`. All tests that need a live asset in the
+ * shared `app` instance use this. Every asset now starts `pending_approval`;
+ * this mirrors the shared `issueAsset()` helper for a use case that helper
+ * doesn't cover.
  */
 async function issueGenericAsset(token: string): Promise<string> {
   const res = await inj({
@@ -26,8 +42,10 @@ async function issueGenericAsset(token: string): Promise<string> {
     headers: auth(token),
     payload: { useCaseKey: "generic-asset", name: "Demo Asset", symbol: "DEMO", chainId: "fabric", metadata: { issuer: "ACME", assetClass: "commodity" } },
   });
-  expect(res.statusCode).toBe(201);
-  return res.json().asset.id as string;
+  expect(res.statusCode).toBe(202);
+  const assetId = res.json().asset.id as string;
+  await completeDueDiligence(app, assetId, token, await genericAssetAdmin());
+  return assetId;
 }
 
 describe("auth", () => {
@@ -97,7 +115,7 @@ describe("issuance + RBAC + validation", () => {
       headers: auth(token),
       payload: { useCaseKey: "carbon-credit", name: "VCU Batch", symbol: "VCU", chainId: "fabric", metadata: { projectName: "Rainforest", registry: "Verra", vintage: 2023 } },
     });
-    expect(res.statusCode).toBe(201);
+    expect(res.statusCode).toBe(202);
   });
 
   it("forbids a Buyer (read-only role) from issuing", async () => {
@@ -202,9 +220,10 @@ describe("lifecycle + compliance + audit", () => {
       headers: auth(admin),
       payload: { useCaseKey: "generic-certificate", name: "Cert", symbol: "CERT", chainId: "fabric", metadata: { category: "registration", authority: "Gov" } },
     });
-    expect(issue.statusCode).toBe(201);
+    expect(issue.statusCode).toBe(202);
     expect(issue.json().asset.tokenStandard).toBe("ERC-721");
     const id = issue.json().asset.id as string;
+    await completeDueDiligence(app, id, admin, await genericCertAdmin());
 
     expect((await inj({ method: "POST", url: `/assets/${id}/actions/mint`, headers: auth(admin), payload: { to: ACCOUNTS.ALICE, tokenId: "1", uri: "ipfs://x" } })).statusCode).toBe(200);
 
@@ -225,6 +244,7 @@ describe("lifecycle + compliance + audit", () => {
       payload: { useCaseKey: "generic-certificate", name: "Cert2", symbol: "CERT", chainId: "fabric", metadata: { category: "registration", authority: "Gov" } },
     });
     const id = issue.json().asset.id as string;
+    await completeDueDiligence(app, id, admin, await genericCertAdmin());
 
     const missing = await inj({ method: "POST", url: `/assets/${id}/actions/mint`, headers: auth(admin), payload: { to: ACCOUNTS.ALICE, uri: "ipfs://x" } });
     expect(missing.statusCode).toBe(400);
@@ -415,7 +435,7 @@ describe("use-case-owned contracts", () => {
     expect(dep.statusCode).toBe(200);
     expect(dep.json().contracts.canton.contractRef).toBe("canton:uc-grow");
     const ok = await app.inject({ method: "POST", url: "/api/v1/assets", headers: auth(admin), payload: { useCaseKey: "uc-grow", name: "Y", chainId: "canton", metadata: {} } });
-    expect(ok.statusCode).toBe(201);
+    expect(ok.statusCode).toBe(202);
   });
 
   it("rejects changing symbol on a deployed use case (IMMUTABLE_FIELD)", async () => {
@@ -636,14 +656,18 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
         sale: { unitPrice: "5", currency: "CBDC-INR" },
       },
     });
-    expect(issueRes.statusCode).toBe(201);
+    expect(issueRes.statusCode).toBe(202);
     const assetId = issueRes.json().asset.id as string;
-    // Sale terms should be reflected in the returned asset
-    expect(issueRes.json().asset.unitPrice).toBe("5");
-    expect(issueRes.json().asset.currency).toBe("CBDC-INR");
+    // Sale terms are now deferred: they land on the asset only once due
+    // diligence completes and a UseCaseAdmin approves (Task 8) — not on the
+    // issuance response itself.
+    await approveAssetForTest(app, assetId, "carbon-credit");
+    const activated = (await app.inject({ method: "GET", url: `${V1}/assets/${assetId}`, headers: { authorization: `Bearer ${platform}` } })).json();
+    expect(activated.unitPrice).toBe("5");
+    expect(activated.currency).toBe("CBDC-INR");
     const treasury = await treasuryAddressOf(app, platform, "carbon-credit");
     // The sale-terms treasury IS the use case's own registered treasury.
-    expect(issueRes.json().asset.treasuryAccount).toBe(treasury);
+    expect(activated.treasuryAccount).toBe(treasury);
 
     // Onboard a new Buyer with a wallet (BUYER_WALLET = Helios Energy Corp),
     // gated + checked by the platform admin.
@@ -712,6 +736,7 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
         sale: { unitPrice: "5", currency: "CBDC-INR" },
       },
     })).json().asset.id as string;
+    await approveAssetForTest(app, assetId, "carbon-credit");
     const treasury = await treasuryAddressOf(app, platform, "carbon-credit");
 
     // Onboard buyer with a fresh email (gated + checked by the platform admin)
@@ -800,6 +825,7 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
         sale: { unitPrice: "5", currency: "CBDC-INR" },
       },
     })).json().asset.id as string;
+    await approveAssetForTest(app, assetId, "carbon-credit");
     const treasury = await treasuryAddressOf(app, platform, "carbon-credit");
 
     const createdBuyer = await onboardUser(app, carbonAdmin, platform, { email: "helios4@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER_WALLET });
@@ -835,6 +861,7 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
         sale: { unitPrice: "5", currency: "CBDC-INR" },
       },
     })).json().asset.id as string;
+    await approveAssetForTest(app, assetId, "carbon-credit");
     const treasury = await treasuryAddressOf(app, platform, "carbon-credit");
 
     const createdBuyer = await onboardUser(app, carbonAdmin, platform, { email: "helios5@x.dev", password: "secret1", role: "Buyer", walletAddress: BUYER_WALLET });
@@ -956,6 +983,7 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
         sale: { unitPrice: "5", currency: "CBDC-INR" },
       },
     })).json().asset.id as string;
+    await approveAssetForTest(app, assetId, "carbon-credit");
 
     const createdBuyer = await onboardUser(app, carbonAdmin, platform, { email: "nowallet@x.dev", password: "secret1", role: "Buyer" });
     await users.update(createdBuyer.id, { accountId: null });

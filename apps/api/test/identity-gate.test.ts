@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildTestApp, buildTestAppWithRepos, V1, loginAs, auth, onboardUser } from "./helpers.js";
+import { buildTestApp, buildTestAppWithRepos, V1, loginAs, auth, onboardUser, approveAssetForTest } from "./helpers.js";
 
 const BUYER_WALLET = "0x14dC79964da2C08b23698B3D3cc7Ca32193d9955";
 
@@ -7,7 +7,9 @@ interface AssetSummary { id: string }
 
 /** Issues a priced carbon-credit asset with an initial treasury supply, BEFORE
  * any requireVerifiedIdentity rule is added — so the treasury mint itself is
- * never gated, isolating the buy leg the tests actually exercise. */
+ * never gated, isolating the buy leg the tests actually exercise. Every asset
+ * now starts `pending_approval` with its mint + sale terms deferred; complete
+ * due diligence via the shared helper so callers get back an active, priced asset. */
 async function issuePricedCarbonAsset(app: Awaited<ReturnType<typeof buildTestApp>>, platformToken: string): Promise<string> {
   const res = await app.inject({
     method: "POST", url: `${V1}/assets`, headers: auth(platformToken),
@@ -18,8 +20,10 @@ async function issuePricedCarbonAsset(app: Awaited<ReturnType<typeof buildTestAp
       initialSupply: "100",
     },
   });
-  expect(res.statusCode).toBe(201);
-  return (res.json().asset as AssetSummary).id;
+  expect(res.statusCode).toBe(202);
+  const assetId = (res.json().asset as AssetSummary).id;
+  await approveAssetForTest(app, assetId, "carbon-credit");
+  return assetId;
 }
 
 /** Flips requireVerifiedIdentity on the carbon-credit use case, preserving its

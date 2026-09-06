@@ -199,6 +199,19 @@ export async function onboardUser(
   return user;
 }
 
+/** Onboards a fresh UseCaseAdmin for `useCaseKey` and returns its login token
+ *  — for an ad hoc use case a test creates on the fly (or a no-UseCaseAdmin-
+ *  seeded built-in like `generic-asset`/`generic-certificate`), which
+ *  `approveAssetForTest`'s fixed demo-admin map does not cover. Logs in both
+ *  seeded PlatformAdmins itself since SoD needs two distinct managers
+ *  (proposer !== approver) for the onboarding proposal. */
+export async function onboardUseCaseAdmin(app: FastifyInstance, useCaseKey: string, email: string): Promise<string> {
+  const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+  const platform2 = await loginAs(app, PLATFORM_ADMIN_2.email, PLATFORM_ADMIN_2.password);
+  await onboardUser(app, platform, platform2, { email, password: "secret1", role: "UseCaseAdmin", useCaseKey });
+  return loginAs(app, email, "secret1");
+}
+
 /** Issue an asset for the given use case key, complete due diligence, and
  *  have the use case's own seeded UseCaseAdmin approve it — returns the new
  *  asset's id, already `active`. Every asset now starts `pending_approval`;
@@ -239,16 +252,28 @@ export async function approveAssetForTest(app: FastifyInstance, assetId: string,
   if (!admin) throw new Error(`approveAssetForTest: no seeded UseCaseAdmin known for use case '${useCaseKey}'`);
   const adminToken = await loginAs(app, admin.email, admin.password);
   const platformToken = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+  await completeDueDiligence(app, assetId, platformToken, adminToken);
+}
+
+/** Generalizes `approveAssetForTest` for a use case with no fixed demo
+ *  UseCaseAdmin (an ad hoc use case a test creates on the fly, or one of the
+ *  no-UseCaseAdmin-seeded built-ins like `generic-asset`/`generic-certificate`):
+ *  attach a throwaway prospectus and submit as `actorToken` (needs
+ *  `assets:issue` scope on the asset's own use case), then decide as
+ *  `deciderToken` — a UseCaseAdmin of that SAME use case, distinct from
+ *  whoever created the asset (review-decision refuses a creator deciding
+ *  their own asset). */
+export async function completeDueDiligence(app: FastifyInstance, assetId: string, actorToken: string, deciderToken: string): Promise<void> {
   await app.inject({
-    method: "POST", url: `${V1}/assets/${assetId}/diligence/documents`, headers: { authorization: `Bearer ${platformToken}` },
+    method: "POST", url: `${V1}/assets/${assetId}/diligence/documents`, headers: { authorization: `Bearer ${actorToken}` },
     payload: { slot: "prospectus", contentType: "application/pdf", dataBase64: Buffer.from("%PDF-1.4 test fixture").toString("base64") },
   });
-  await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/submit-for-review`, headers: { authorization: `Bearer ${platformToken}` } });
+  await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/submit-for-review`, headers: { authorization: `Bearer ${actorToken}` } });
   const decision = await app.inject({
-    method: "POST", url: `${V1}/assets/${assetId}/review-decision`, headers: { authorization: `Bearer ${adminToken}` },
+    method: "POST", url: `${V1}/assets/${assetId}/review-decision`, headers: { authorization: `Bearer ${deciderToken}` },
     payload: { decision: "approved", riskTier: "low" },
   });
-  if (decision.statusCode !== 200) throw new Error(`approveAssetForTest(${assetId}) failed: ${decision.statusCode} ${decision.body}`);
+  if (decision.statusCode !== 200) throw new Error(`completeDueDiligence(${assetId}) failed: ${decision.statusCode} ${decision.body}`);
 }
 
 export function auth(token: string): { authorization: string } {

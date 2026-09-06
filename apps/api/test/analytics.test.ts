@@ -2,7 +2,7 @@ import { describe, expect, it, afterEach } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { computeAnalytics, type AnalyticsInput } from "../src/tokenization/analytics.js";
 import type { AssetRecord, AuditEntryRecord } from "../src/persistence/types/index.js";
-import { buildTestApp, loginAs, auth, ACCOUNTS, V1 } from "./helpers.js";
+import { approveAssetForTest, buildTestApp, loginAs, auth, ACCOUNTS, V1 } from "./helpers.js";
 
 // ---------------------------------------------------------------------------
 // Fixture helpers
@@ -284,8 +284,12 @@ describe("GET /analytics (route)", () => {
       headers: { authorization: `Bearer ${token}` },
       payload: { useCaseKey, name: "T", chainId, metadata: meta[useCaseKey] ?? {} },
     });
-    if (res.statusCode !== 201) throw new Error(`issue failed: ${res.statusCode} ${res.body}`);
-    return res.json().asset.id as string;
+    if (res.statusCode !== 202) throw new Error(`issue failed: ${res.statusCode} ${res.body}`);
+    const assetId = res.json().asset.id as string;
+    // Issued by the platform (not the use case's own seeded UseCaseAdmin), so
+    // approveAssetForTest's own decider is never the creator.
+    await approveAssetForTest(app, assetId, useCaseKey);
+    return assetId;
   }
 
   async function mint(token: string, id: string, to: string, amount: string): Promise<void> {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { V1, loginAs, auth, buildTestAppWithRepos, onboardUser } from "./helpers.js";
+import { V1, loginAs, auth, buildTestAppWithRepos, onboardUser, approveAssetForTest } from "./helpers.js";
 import { rehydrateSimulatedLedgers } from "../src/tokenization/ledger-replay.js";
 
 const INVESTOR_WALLET = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"; // Carol — seeded account, unlinked
@@ -11,13 +11,18 @@ describe("rehydrateSimulatedLedgers — surviving a simulated-chain restart", ()
     const admin = await loginAs(app, "m1.admin@tokenlayer.dev", "m1admin123");
     const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
 
+    // Issued by the platform (not m1.admin, the invoice desk's own
+    // UseCaseAdmin) so m1.admin remains free to DECIDE this asset's
+    // due-diligence review below — review-decision refuses a creator
+    // deciding their own asset.
     const issued = await app.inject({
-      method: "POST", url: `${V1}/assets`, headers: auth(admin),
+      method: "POST", url: `${V1}/assets`, headers: auth(platform),
       payload: { useCaseKey: "invoice-tokenization", name: "REPLAY-1", chainId: "fabric", initialSupply: "1000", metadata: inv("REPLAY-1"), sale: { unitPrice: "100", currency: "CBDC-INR" } },
     });
-    expect(issued.statusCode).toBe(201);
-    const asset = issued.json().asset;
-    const assetId = asset.id;
+    expect(issued.statusCode).toBe(202);
+    const assetId = issued.json().asset.id as string;
+    await approveAssetForTest(app, assetId, "invoice-tokenization");
+    const asset = (await app.inject({ method: "GET", url: `${V1}/assets/${assetId}`, headers: auth(admin) })).json();
 
     await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: auth(admin), payload: { account: INVESTOR_WALLET } });
     await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/freeze`, headers: auth(admin), payload: { account: INVESTOR_WALLET } });

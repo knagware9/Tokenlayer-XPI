@@ -47,12 +47,9 @@ describe("Asset due-diligence document upload and read gate", () => {
     const h = await buildTestAppWithRepos();
     const platform = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
     const assetId = await issueAsset(h.app, platform, "carbon-credit");
-    // issueAsset() issues via today's synchronous path (no use case has
-    // workflow.approvals.issue set) and returns an already-active asset —
-    // this task's own routes don't yet run before Task 8 makes
-    // pending_approval the universal default, so force the state this test
-    // actually needs directly through the repository, the same way this
-    // plan's Task 3 test 3 already does.
+    // issueAsset() now completes the whole due-diligence flow and returns an
+    // already-active asset — force it back to pending_approval directly
+    // through the repository so this test can exercise the pending-state gate.
     await h.assets.setStatus(assetId, "pending_approval");
     const upload = await h.app.inject({
       method: "POST", url: `${V1}/assets/${assetId}/diligence/documents`, headers: auth(platform),

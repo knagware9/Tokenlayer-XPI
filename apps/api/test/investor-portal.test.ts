@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { buildTestApp, V1, loginAs, auth, onboardUser, treasuryAddressOf } from "./helpers.js";
+import { buildTestApp, V1, loginAs, auth, onboardUser, treasuryAddressOf, approveAssetForTest } from "./helpers.js";
 
 const INVESTOR_WALLET = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"; // Carol — seeded account, unlinked
 const inv = (n: string) => ({ invoiceNumber: n, invoiceDate: "2026-07-01", buyerName: "JSW Steel Limited", currency: "INR", amount: 1000000, dueDate: "2026-12-31" });
@@ -27,11 +27,16 @@ describe("investor portal endpoints", () => {
   it("portfolio: holdings + value from a subscription; activity records it", async () => {
     const app = await buildTestApp();
     const { admin, investor } = await investorSetup(app);
-    const issued = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(admin), payload: { useCaseKey: "invoice-tokenization", name: "INV-PORT-1", chainId: "fabric", initialSupply: "1000", metadata: inv("INV-PORT-1"), sale: { unitPrice: "920", currency: "CBDC-INR" } } });
-    expect(issued.statusCode).toBe(201);
-    const assetId = issued.json().asset.id;
-    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: auth(admin), payload: { account: INVESTOR_WALLET } });
     const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    // Issued by the platform, not m1.admin (the invoice desk's own
+    // UseCaseAdmin), so m1.admin remains free to DECIDE this asset's
+    // due-diligence review — review-decision refuses a creator deciding
+    // their own asset.
+    const issued = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(platform), payload: { useCaseKey: "invoice-tokenization", name: "INV-PORT-1", chainId: "fabric", initialSupply: "1000", metadata: inv("INV-PORT-1"), sale: { unitPrice: "920", currency: "CBDC-INR" } } });
+    expect(issued.statusCode).toBe(202);
+    const assetId = issued.json().asset.id;
+    await approveAssetForTest(app, assetId, "invoice-tokenization");
+    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: auth(admin), payload: { account: INVESTOR_WALLET } });
     await app.inject({ method: "POST", url: `${V1}/cash/credit`, headers: auth(platform), payload: { account: INVESTOR_WALLET, currency: "CBDC-INR", amount: "500000" } });
     const buy = await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/buy`, headers: auth(investor), payload: { quantity: "200" } });
     expect(buy.statusCode).toBe(200);
@@ -52,11 +57,14 @@ describe("investor portal endpoints", () => {
   it("activity: redemption share matches what settlement actually paid", async () => {
     const app = await buildTestApp();
     const { admin, investor } = await investorSetup(app);
-    const issued = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(admin), payload: { useCaseKey: "invoice-tokenization", name: "INV-PORT-2", chainId: "fabric", initialSupply: "1000", metadata: inv("INV-PORT-2"), sale: { unitPrice: "900", currency: "CBDC-INR" } } });
-    expect(issued.statusCode).toBe(201);
-    const assetId = issued.json().asset.id;
-    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: auth(admin), payload: { account: INVESTOR_WALLET } });
     const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+    // Issued by the platform so m1.admin stays free to decide the review (see
+    // the previous test's comment).
+    const issued = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(platform), payload: { useCaseKey: "invoice-tokenization", name: "INV-PORT-2", chainId: "fabric", initialSupply: "1000", metadata: inv("INV-PORT-2"), sale: { unitPrice: "900", currency: "CBDC-INR" } } });
+    expect(issued.statusCode).toBe(202);
+    const assetId = issued.json().asset.id;
+    await approveAssetForTest(app, assetId, "invoice-tokenization");
+    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: auth(admin), payload: { account: INVESTOR_WALLET } });
     await app.inject({ method: "POST", url: `${V1}/cash/credit`, headers: auth(platform), payload: { account: INVESTOR_WALLET, currency: "CBDC-INR", amount: "900000" } });
     await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/buy`, headers: auth(investor), payload: { quantity: "400" } }); // investor 400, payer keeps 600
     // The redemption's payer defaults to the asset's own (server-derived)
@@ -91,7 +99,7 @@ describe("investor portal endpoints", () => {
     const carbon = await loginAs(app, "carbon.admin@tokenlayer.dev", "carbon123");
     // Assert the cross-tenant issuance actually lands, or every() below goes vacuous.
     const issued = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(carbon), payload: { useCaseKey: "carbon-credit", name: "VCU-X", chainId: "fabric", initialSupply: "10", metadata: { projectName: "P", registry: "Verra", vintage: 2024 } } });
-    expect(issued.statusCode).toBe(201);
+    expect(issued.statusCode).toBe(202);
     const pf = (await app.inject({ method: "GET", url: `${V1}/me/portfolio`, headers: auth(investor) })).json();
     expect(pf.holdings.every((h: { useCaseKey: string }) => h.useCaseKey === "invoice-tokenization")).toBe(true);
   });
@@ -120,8 +128,11 @@ describe("investor portal endpoints", () => {
     const app = await buildTestApp();
     const { admin, investor: seller } = await investorSetup(app); // Carol, linked to INVESTOR_WALLET
     const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
-    const issued = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(admin), payload: { useCaseKey: "invoice-tokenization", name: "INV-SOLD-1", chainId: "fabric", initialSupply: "1000", metadata: inv("INV-SOLD-1"), sale: { unitPrice: "900", currency: "CBDC-INR" } } });
+    // Issued by the platform so m1.admin stays free to decide the review (see
+    // the earlier tests' comment).
+    const issued = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(platform), payload: { useCaseKey: "invoice-tokenization", name: "INV-SOLD-1", chainId: "fabric", initialSupply: "1000", metadata: inv("INV-SOLD-1"), sale: { unitPrice: "900", currency: "CBDC-INR" } } });
     const assetId = issued.json().asset.id;
+    await approveAssetForTest(app, assetId, "invoice-tokenization");
     await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: auth(admin), payload: { account: INVESTOR_WALLET } });
     await app.inject({ method: "POST", url: `${V1}/cash/credit`, headers: auth(platform), payload: { account: INVESTOR_WALLET, currency: "CBDC-INR", amount: "500000" } });
     await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/buy`, headers: auth(seller), payload: { quantity: "200" } });

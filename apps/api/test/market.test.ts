@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { buildTestApp, buildTestAppWithRepos, V1, loginAs, auth, onboardUser, treasuryAddressOf, TEST_MARKET_ESCROW } from "./helpers.js";
+import { approveAssetForTest, buildTestApp, buildTestAppWithRepos, V1, loginAs, auth, onboardUser, treasuryAddressOf, TEST_MARKET_ESCROW } from "./helpers.js";
 import { MemoryUserRepository } from "../src/persistence/memory/index.js";
 
 // A platform fee account distinct from any seeded buyer/treasury address.
@@ -55,8 +55,9 @@ async function setupMarket() {
       initialSupply: "1000",
     },
   });
-  expect(issued.statusCode).toBe(201);
+  expect(issued.statusCode).toBe(202);
   const assetId = issued.json().asset.id as string;
+  await approveAssetForTest(app, assetId, "carbon-credit");
   const treasury = await treasuryAddressOf(app, platform, "carbon-credit");
 
   // Seller = the seeded carbon Buyer (already KYC-approved, wallet EcoFund).

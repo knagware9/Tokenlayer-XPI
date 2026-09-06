@@ -23,7 +23,7 @@ describe("invoice ERC-20 issue", () => {
       useCaseKey: UC, name: inv.invoiceNumber, chainId: "fabric", initialSupply: "10000",
       metadata: { ...inv, invoiceHash: "0x" + "00".repeat(32) }, // bogus — must be ignored
     }});
-    expect(res.statusCode).toBe(201);
+    expect(res.statusCode).toBe(202);
     expect(res.json().asset.metadata.invoiceHash).toBe(invoiceFingerprint(inv));
   });
 
@@ -31,7 +31,7 @@ describe("invoice ERC-20 issue", () => {
     const app = await buildTestApp();
     const admin = await invoiceAdmin(app);
     const body = { useCaseKey: UC, name: inv.invoiceNumber, chainId: "fabric", initialSupply: "10000", metadata: { ...inv } };
-    expect((await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(admin), payload: body })).statusCode).toBe(201);
+    expect((await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(admin), payload: body })).statusCode).toBe(202);
     const dup = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(admin), payload: { ...body, name: "dup" } });
     expect(dup.statusCode).toBe(409);
     expect(dup.json().error).toBe("DUPLICATE_ASSET");

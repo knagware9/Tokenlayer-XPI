@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { auth, buildTestApp, buildTestAppWithRepos, loginAs, onboardUser, V1 } from "./helpers.js";
+import { approveAssetForTest, auth, buildTestApp, buildTestAppWithRepos, loginAs, onboardUser, V1 } from "./helpers.js";
 import { FakeAnchor, fakeRegistry } from "./fake-anchor.js";
 
 // Seed a credential use case, an issuer-eligible subject, then exercise the runtime.
@@ -298,8 +298,10 @@ describe("ID-H identity gate on acceptance-enabled KYC (L3)", () => {
         initialSupply: "100",
       },
     });
-    expect(res.statusCode).toBe(201);
-    return (res.json().asset as { id: string }).id;
+    expect(res.statusCode).toBe(202);
+    const assetId = (res.json().asset as { id: string }).id;
+    await approveAssetForTest(app, assetId, "carbon-credit");
+    return assetId;
   }
 
   async function enableIdentityGate(app: Awaited<ReturnType<typeof buildTestApp>>, platformToken: string): Promise<void> {

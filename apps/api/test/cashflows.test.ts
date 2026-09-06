@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { buildTestApp, V1, loginAs, auth, onboardUser, treasuryAddressOf } from "./helpers.js";
+import { approveAssetForTest, buildTestApp, V1, loginAs, auth, onboardUser, treasuryAddressOf } from "./helpers.js";
 
 const UC = "invoice-tokenization";
 const HOLDER = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"; // Carol — seeded account, linkable
@@ -33,10 +33,15 @@ async function linkPayer(app: FastifyInstance, admin: string): Promise<void> {
  * payload could still name HOLDER as the treasury directly.
  */
 async function issueInvoice(app: FastifyInstance, admin: string, n: string, due: string): Promise<string> {
-  const res = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(admin), payload: { useCaseKey: UC, name: n, chainId: "fabric", initialSupply: "10000", metadata: inv(n, due) } });
-  expect(res.statusCode).toBe(201);
-  const assetId = res.json().asset.id as string;
   const platform = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+  // Issued by the platform, not `admin` (m1.admin, invoice-tokenization's own
+  // seeded UseCaseAdmin), so `admin` stays free to DECIDE this asset's
+  // due-diligence review — review-decision refuses a creator deciding their
+  // own asset.
+  const res = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(platform), payload: { useCaseKey: UC, name: n, chainId: "fabric", initialSupply: "10000", metadata: inv(n, due) } });
+  expect(res.statusCode).toBe(202);
+  const assetId = res.json().asset.id as string;
+  await approveAssetForTest(app, assetId, UC);
   const treasury = await treasuryAddressOf(app, platform, UC);
   await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: auth(admin), payload: { account: HOLDER } });
   const xfer = await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/transfer`, headers: auth(admin), payload: { from: treasury, to: HOLDER, amount: "10000" } });
@@ -216,7 +221,11 @@ describe("cashflows: execution", () => {
     };
     expect((await app.inject({ method: "POST", url: `${V1}/use-cases`, headers: auth(platform), payload: def })).statusCode).toBe(201);
     const issued = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(platform), payload: { useCaseKey: "cf-note", name: "NOTE-1", chainId: "fabric", initialSupply: "1000", metadata: { faceValue: 1000000, couponRate: 10, maturityDate: "2099-12-31" } } });
-    expect(issued.statusCode).toBe(201);
+    // Every issuance is now pending_approval from birth (Task 8) — but
+    // cashflow materialization runs before the gated/ungated branch either
+    // way, and this route's own status checks never require `active`, so the
+    // schedule below is fully inspectable regardless.
+    expect(issued.statusCode).toBe(202);
     const assetId = issued.json().asset.id;
     const { cashflows } = (await app.inject({ method: "GET", url: `${V1}/assets/${assetId}/cashflows`, headers: auth(platform) })).json();
     const coupon = cashflows.find((c: { kind: string }) => c.kind === "coupon");
@@ -242,7 +251,7 @@ describe("cashflows: execution", () => {
     };
     expect((await app.inject({ method: "POST", url: `${V1}/use-cases`, headers: auth(platform), payload: def })).statusCode).toBe(201);
     const issued = await app.inject({ method: "POST", url: `${V1}/assets`, headers: auth(platform), payload: { useCaseKey: "cf-note-2", name: "NOTE-2", chainId: "fabric", initialSupply: "1000", metadata: { faceValue: 1000000, couponRate: 12, maturityDate: maturity } } });
-    expect(issued.statusCode).toBe(201);
+    expect(issued.statusCode).toBe(202); // pending_approval from birth now; cashflow materialization is unaffected
     const assetId = issued.json().asset.id;
     const { cashflows } = (await app.inject({ method: "GET", url: `${V1}/assets/${assetId}/cashflows`, headers: auth(platform) })).json();
     expect(cashflows.some((c: { kind: string }) => c.kind === "coupon")).toBe(true);

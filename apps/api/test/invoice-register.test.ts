@@ -40,7 +40,11 @@ describe("invoice register", () => {
     const tok = await app.inject({ method: "POST", url: `${V1}/use-cases/${KEY}/invoices/tokenize`, headers: { authorization: `Bearer ${issuer}` },
       payload: { ids: [ids[0], ids[1]], chainId: "fabric" } });
     expect(tok.statusCode).toBe(200);
-    expect((tok.json().results as { status: string }[]).filter((r) => r.status === "tokenized")).toHaveLength(2);
+    // Every issuance is now `pending_approval` from birth (Task 8) — the route
+    // reports that distinctly from "tokenized" so a caller doesn't read
+    // "tokenized" as "active with the supply it asked for" (see its own
+    // comment above); "tokenized" as a status literally never comes back now.
+    expect((tok.json().results as { status: string }[]).filter((r) => r.status === "pending_approval")).toHaveLength(2);
     const staged2 = (await app.inject({ method: "GET", url: `${V1}/use-cases/${KEY}/invoices?status=staged`, headers: { authorization: `Bearer ${issuer}` } })).json();
     expect(staged2).toHaveLength(1);
     const retry = await app.inject({ method: "POST", url: `${V1}/use-cases/${KEY}/invoices/tokenize`, headers: { authorization: `Bearer ${issuer}` }, payload: { ids: [ids[0]], chainId: "fabric" } });
