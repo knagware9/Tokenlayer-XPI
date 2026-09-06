@@ -298,7 +298,6 @@ const ADDITIVE_FLOOR = 153;
  */
 const PRE_EXISTING_NARROWING: Record<string, string> = {
   "S.login.response.200": "predates EN-D1 — token+user only, and `user` itself is open",
-  "S.issueAsset.response.201": "predates EN-D1",
   "S.action.response.200.oneOf[1]": "predates EN-D1 — explicit additionalProperties:false on the 202 arm",
   "S.listCashflows.response.200": "predates EN-D1",
   "S.listCashflows.response.200.preview.split.items": "predates EN-D1",

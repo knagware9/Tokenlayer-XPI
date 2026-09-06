@@ -93,9 +93,15 @@ export const tokenizationSchemas: Record<string, FastifySchema> = {
   issueAsset: {
     tags: ["Assets"], summary: "Issue (tokenize) a new asset", security: eitherCredential,
     description:
-      "Requires the `assets:issue` scope. Mints the asset on the configured chain and returns it with the " +
-      "transaction hash. This is one of two doors onto issuance; `POST /use-cases/{key}/invoices/tokenize` is the " +
-      "other, and carries the same scope on purpose.",
+      "Requires the `assets:issue` scope. Every new asset is created `pending_approval` and answers **202** — " +
+      "due-diligence review (attach a prospectus via `POST /assets/{id}/diligence/documents`, then " +
+      "`POST /assets/{id}/submit-for-review`) is now mandatory before it mints supply or takes sale terms, " +
+      "regardless of the use case's `workflow.approvals.issue` setting. " +
+      "**This 202 is NOT a maker-checker proposal** — unlike almost every other 202 in this API, no `proposal` is " +
+      "created and there is nothing to poll under `/proposals`; the asset row exists immediately with the mint and " +
+      "any requested sale terms captured on it, deferred until a UseCaseAdmin decides the review via " +
+      "`POST /assets/{id}/review-decision`. This is one of two doors onto issuance; " +
+      "`POST /use-cases/{key}/invoices/tokenize` is the other, and carries the same scope on purpose.",
     body: {
       type: "object",
       required: ["useCaseKey", "name", "chainId"],
@@ -119,11 +125,10 @@ export const tokenizationSchemas: Record<string, FastifySchema> = {
       },
     },
     response: {
-      201: {
-        type: "object",
+      202: {
+        type: "object", additionalProperties: true,
         properties: {
           asset: { $ref: "Asset#" },
-          txHash: { type: "string" },
           issuanceFee: { type: "object", additionalProperties: true, nullable: true },
         },
         required: ["asset"],

@@ -305,6 +305,7 @@ export const components: Record<string, unknown>[] = [
       unitPrice: { type: "string", nullable: true },
       currency: { type: "string", nullable: true },
       treasuryAccount: { type: "string", nullable: true },
+      dueDiligence: { type: "object", additionalProperties: true, nullable: true },
     },
     required: ["id", "useCaseKey", "name", "symbol", "chainId", "contractRef", "tokenType", "tokenStandard", "status"],
   },

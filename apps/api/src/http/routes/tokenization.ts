@@ -362,7 +362,14 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
     }
     // Gated issuance: the asset is created `pending_approval` (frozen to actions/
     // buy/listings) and its supply mint + sale terms are deferred to approval.
-    const gatedIssue = !!useCase.workflow?.approvals?.issue;
+    // Due-diligence review is now mandatory for every asset, superseding the
+    // old opt-in workflow.approvals.issue gate for issuance specifically (see
+    // this plan's Global Constraints and the spec's Non-goals for why running
+    // both gates on the same asset was rejected as a design). `gatedIssue`
+    // stays named the same below so the rest of this function's existing
+    // branches (mint deferral, sale-terms deferral) need no further change —
+    // only what feeds into them changes.
+    const gatedIssue = true;
 
     // Resolve issuance metadata: compute any server-derived fields (e.g. the
     // invoice fingerprint) from their source fields, overwriting any client value,
@@ -465,22 +472,14 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
       if (schedule.length) await deps.cashflows.createMany(id, useCase.terms!.currency, schedule);
 
       if (gatedIssue) {
-        // Defer supply mint + sale terms to approval; capture them in the proposal.
-        // `treasury` must be captured whenever EITHER a mint OR sale terms are
-        // deferred — executeIssueActivation (run on approval) needs it to write
-        // sale terms even when no initial supply was requested; omitting it here
-        // used to mean gated issue-with-sale-only silently dropped the terms on
-        // approval, with no error anywhere.
-        const wantsTreasury = wantsSupply || !!sale;
-        const proposal = await proposeIfGated(input.request, useCase, "issue", id, {
-          ...(wantsSupply ? { initialSupply } : {}),
-          ...(wantsTreasury ? { treasury } : {}),
-          ...(sale ? { sale } : {}),
-          ...(issuanceFeeCharged ? { issuanceFee: { ...issuanceFeeCharged, payer: feePayer } } : {}),
+        // No proposal — see this plan's Task 4 and the spec's section D for
+        // why. Stash the deferred activation params on the asset itself
+        // instead, for POST /assets/:id/review-decision to read back later.
+        await deps.assets.setDueDiligence(id, {
+          ...(wantsSupply ? { pendingInitialSupply: initialSupply } : {}),
+          ...(sale ? { pendingSale: sale } : {}),
         });
-        // `gatedIssue` already established this use case gates "issue", so
-        // proposeIfGated cannot have returned null here.
-        return { ok: true, status: 202, body: { proposal: proposal ? proposalView(proposal) : null, asset: await deps.assets.get(id) } };
+        return { ok: true, status: 202, body: { asset: await deps.assets.get(id) } };
       }
       // Ungated: activate immediately — sale terms + allowlist treasury + mint supply.
       const created = await deps.assets.get(id);

@@ -199,7 +199,13 @@ export async function onboardUser(
   return user;
 }
 
-/** Issue an asset for the given use case key, returning the new asset's id. */
+/** Issue an asset for the given use case key, complete due diligence, and
+ *  have the use case's own seeded UseCaseAdmin approve it — returns the new
+ *  asset's id, already `active`. Every asset now starts `pending_approval`;
+ *  this helper exists so the majority of this test suite, which only cares
+ *  about having an active asset to test something ELSE, doesn't need to know
+ *  that. A test that specifically wants to exercise the pending/review flow
+ *  itself should call the underlying routes directly instead of this helper. */
 export async function issueAsset(app: FastifyInstance, token: string, useCaseKey: string): Promise<string> {
   const meta: Record<string, Record<string, unknown>> = {
     "carbon-credit": { projectName: "P", registry: "Verra", vintage: 2024 },
@@ -212,8 +218,37 @@ export async function issueAsset(app: FastifyInstance, token: string, useCaseKey
     headers: { authorization: `Bearer ${token}` },
     payload: { useCaseKey, name: "T", symbol: "T", chainId: "fabric", metadata: meta[useCaseKey] ?? {} },
   });
-  if (res.statusCode !== 201) throw new Error(`issueAsset(${useCaseKey}) failed: ${res.statusCode} ${res.body}`);
-  return res.json().asset.id as string;
+  if (res.statusCode !== 202) throw new Error(`issueAsset(${useCaseKey}) failed: ${res.statusCode} ${res.body}`);
+  const assetId = res.json().asset.id as string;
+  await approveAssetForTest(app, assetId, useCaseKey);
+  return assetId;
+}
+
+/** Attach a throwaway prospectus, submit for review, and approve as the use
+ *  case's own seeded UseCaseAdmin — the mechanical fix every other test file
+ *  in this suite that assumed synchronous active issuance also needs,
+ *  applied here once so `issueAsset`'s own callers get it for free. */
+export async function approveAssetForTest(app: FastifyInstance, assetId: string, useCaseKey: string): Promise<void> {
+  const admins: Record<string, { email: string; password: string }> = {
+    "carbon-credit": { email: "carbon.admin@tokenlayer.dev", password: "carbon123" },
+    "gold-loan": { email: "gold.admin@tokenlayer.dev", password: "gold123" },
+    "corporate-bond": { email: "bond.admin@tokenlayer.dev", password: "bond123" },
+    "invoice-tokenization": { email: "m1.admin@tokenlayer.dev", password: "m1admin123" },
+  };
+  const admin = admins[useCaseKey];
+  if (!admin) throw new Error(`approveAssetForTest: no seeded UseCaseAdmin known for use case '${useCaseKey}'`);
+  const adminToken = await loginAs(app, admin.email, admin.password);
+  const platformToken = await loginAs(app, "admin@tokenlayer.dev", "admin123");
+  await app.inject({
+    method: "POST", url: `${V1}/assets/${assetId}/diligence/documents`, headers: { authorization: `Bearer ${platformToken}` },
+    payload: { slot: "prospectus", contentType: "application/pdf", dataBase64: Buffer.from("%PDF-1.4 test fixture").toString("base64") },
+  });
+  await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/submit-for-review`, headers: { authorization: `Bearer ${platformToken}` } });
+  const decision = await app.inject({
+    method: "POST", url: `${V1}/assets/${assetId}/review-decision`, headers: { authorization: `Bearer ${adminToken}` },
+    payload: { decision: "approved", riskTier: "low" },
+  });
+  if (decision.statusCode !== 200) throw new Error(`approveAssetForTest(${assetId}) failed: ${decision.statusCode} ${decision.body}`);
 }
 
 export function auth(token: string): { authorization: string } {
