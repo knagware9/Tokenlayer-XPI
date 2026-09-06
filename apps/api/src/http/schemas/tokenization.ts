@@ -190,6 +190,23 @@ export const tokenizationSchemas: Record<string, FastifySchema> = {
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: { 200: { type: "object", additionalProperties: true, properties: { id: { type: "string" }, status: { type: "string" } } }, ...errs(400, 401, 403, 404) },
   },
+  decideAssetReview: {
+    tags: ["Assets"],
+    summary: "Decide a pending asset's due-diligence review — UseCaseAdmin of its own use case only",
+    security: humanOnly,
+    description: "A direct decision, not a maker-checker proposal: the reviewing UseCaseAdmin alone decides. No API key may ever call this. Approving requires a riskTier; rejecting requires a rejectionReason. The asset's own creator may never decide it.",
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    body: {
+      type: "object",
+      required: ["decision"],
+      properties: {
+        decision: { type: "string", enum: ["approved", "rejected"] },
+        riskTier: { type: "string", enum: ["low", "medium", "high"] },
+        rejectionReason: { type: "string" },
+      },
+    },
+    response: { 200: { type: "object", additionalProperties: true, properties: { id: { type: "string" }, status: { type: "string" } } }, ...errs(400, 401, 403, 404, 409) },
+  },
   assetAccounts: {
     tags: ["Assets"], summary: "Holders: per-account balance + compliance state", security: eitherCredential,
     description:

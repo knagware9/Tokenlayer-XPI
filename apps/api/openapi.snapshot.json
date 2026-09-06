@@ -760,6 +760,31 @@
         }
       }
     },
+    "/api/v1/assets/{id}/review-decision": {
+      "post": {
+        "tags": [
+          "Assets"
+        ],
+        "security": [
+          [
+            "bearerAuth"
+          ]
+        ],
+        "scopes": null,
+        "parameters": [
+          "path:id!"
+        ],
+        "requestBody": true,
+        "responses": {
+          "200": "{id,status}",
+          "400": "#Error",
+          "401": "#Error",
+          "403": "#Error",
+          "404": "#Error",
+          "409": "#Error"
+        }
+      }
+    },
     "/api/v1/assets/{id}/submit-for-review": {
       "post": {
         "tags": [

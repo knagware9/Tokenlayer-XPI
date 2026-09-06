@@ -46,6 +46,7 @@ import { actorOf, claimsOf, contextOf, isPositiveIntString, machinePrincipal, no
 import { NO_USE_CASE, canAdministerUser, BCRYPT_ROUNDS, LOGIN_WINDOW_MS, MAX_DOC_BYTES, DOC_UPLOAD_BODY_LIMIT, ALLOWED_DOC_TYPES, storeUploadedDocument, orgOwnsDocument, decodeVcJti, devKeyFromSeed, orgView, orgCapabilityMissing } from "./common.js";
 import type { BrandLogoErrorCode, RouteContext } from "./context.js";
 import { createProposalAndNotify } from "../../shared/proposal-notify.js";
+import { assetReviewDecisionEmail } from "../../mail/templates.js";
 
 /**
  * ONE WORDING FOR ONE FACT. Issuance and `setPrice` refuse for the identical
@@ -797,6 +798,59 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
       return reply.code(400).send({ error: "PROSPECTUS_REQUIRED", message: "attach a prospectus before submitting for review" });
     }
     return reply.code(200).send({ id: asset.id, status: asset.status });
+  });
+
+  app.post("/assets/:id/review-decision", { schema: S.decideAssetReview, ...auth }, async (request, reply) => {
+    if (machinePrincipal(request)) return reply.code(403).send({ error: "MACHINE_PRINCIPAL", message: "an API key may not decide an asset review" });
+    const claims = request.user as TokenClaims;
+    const { id } = request.params as { id: string };
+    const asset = await deps.assets.get(id);
+    if (!asset) return notFound(reply, "asset not found");
+    if (claims.role !== "UseCaseAdmin" || claims.useCaseKey !== asset.useCaseKey) {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "only a UseCaseAdmin of this asset's own use case may decide it" });
+    }
+    if (asset.createdBy === claims.id) {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "you cannot decide a review of an asset you created" });
+    }
+    if (asset.status !== "pending_approval") {
+      return reply.code(409).send({ error: "NOT_PENDING", message: `asset is ${asset.status}, not pending_approval` });
+    }
+    const b = request.body as { decision: "approved" | "rejected"; riskTier?: "low" | "medium" | "high"; rejectionReason?: string };
+    if (b.decision === "rejected" && !b.rejectionReason) {
+      return reply.code(400).send({ error: "REASON_REQUIRED", message: "a rejection requires a reason" });
+    }
+    if (b.decision === "approved" && !b.riskTier) {
+      return reply.code(400).send({ error: "RISK_TIER_REQUIRED", message: "an approval requires a risk tier" });
+    }
+    const dd = { ...(asset.dueDiligence ?? {}) };
+    if (b.decision === "approved") {
+      dd.riskTier = b.riskTier;
+      dd.reviewedBy = claims.id;
+      dd.reviewedAt = new Date().toISOString();
+      dd.rejectionReason = null;
+      await deps.assets.setDueDiligence(asset.id, dd);
+      const useCase = await deps.useCases.get(asset.useCaseKey);
+      const treasury = useCase.treasuryAccountId ? (await deps.accounts.findById(useCase.treasuryAccountId))?.address ?? null : null;
+      await executeIssueActivation(deps, { id: claims.id, role: claims.role }, asset, {
+        initialSupply: dd.pendingInitialSupply ?? undefined,
+        treasury,
+        sale: dd.pendingSale ?? undefined,
+      });
+    } else {
+      dd.rejectionReason = b.rejectionReason;
+      dd.riskTier = null;
+      dd.reviewedBy = null;
+      dd.reviewedAt = null;
+      await deps.assets.setDueDiligence(asset.id, dd);
+      await deps.assets.setStatus(asset.id, "rejected");
+    }
+    const issuer = await deps.users.findById(asset.createdBy);
+    if (issuer) {
+      const notice = assetReviewDecisionEmail({ assetName: asset.name, decision: b.decision, rejectionReason: b.rejectionReason });
+      await deps.mail.send(issuer.email, notice.subject, notice.text, notice.html).catch((err) => request.log.error({ err, assetId: asset.id }, "[mail] asset-review-decision send failed"));
+    }
+    const final = await deps.assets.get(asset.id);
+    return reply.code(200).send({ id: final!.id, status: final!.status });
   });
 
   app.get("/assets/:id/accounts", { schema: S.assetAccounts, ...authScoped("assets:read") }, async (request, reply) => {

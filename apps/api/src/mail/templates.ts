@@ -70,6 +70,15 @@ export function kycDecisionEmail(a: { decision: "approved" | "rejected"; rejecti
   return { subject: `Your KYC verification was ${verb}`, text, html: wrap(htmlParts) };
 }
 
+export function assetReviewDecisionEmail(a: { assetName: string; decision: "approved" | "rejected"; rejectionReason?: string }): EmailContent {
+  const verb = a.decision === "approved" ? "approved" : "rejected";
+  const reasonLine = a.decision === "rejected" && a.rejectionReason ? `\n\nReason: ${a.rejectionReason}` : "";
+  const text = `Your asset "${a.assetName}" was ${verb} for listing.${reasonLine}`;
+  const htmlParts = [esc(`Your asset "${a.assetName}" was ${verb} for listing.`)];
+  if (a.decision === "rejected" && a.rejectionReason) htmlParts.push(`Reason: ${esc(a.rejectionReason)}`);
+  return { subject: `Your asset "${a.assetName}" was ${verb}`, text, html: wrap(htmlParts) };
+}
+
 export function orgApprovedEmail(a: { orgName: string; loginUrl: string }): EmailContent {
   const text = `${a.orgName} has been approved on TokenLayer.\n\nSign in at ${a.loginUrl}`;
   return {
