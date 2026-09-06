@@ -177,7 +177,7 @@ export const tokenizationSchemas: Record<string, FastifySchema> = {
         dataBase64: { type: "string" },
       },
     },
-    response: { 201: { type: "object", additionalProperties: true, properties: { id: { type: "string" }, sha256: { type: "string" }, size: { type: "number" } } }, ...errs(400, 401, 403, 404, 413, 415) },
+    response: { 201: { type: "object", additionalProperties: true, properties: { id: { type: "string" }, sha256: { type: "string" }, size: { type: "number" } } }, ...errs(400, 401, 403, 404, 409, 413, 415) },
   },
   getAssetDiligenceDocument: {
     tags: ["Assets"],
@@ -197,9 +197,9 @@ export const tokenizationSchemas: Record<string, FastifySchema> = {
   },
   decideAssetReview: {
     tags: ["Assets"],
-    summary: "Decide a pending asset's due-diligence review — UseCaseAdmin of its own use case only",
+    summary: "Decide a pending asset's due-diligence review — UseCaseAdmin of its own use case, or any PlatformAdmin",
     security: humanOnly,
-    description: "A direct decision, not a maker-checker proposal: the reviewing UseCaseAdmin alone decides. No API key may ever call this. Approving requires a riskTier; rejecting requires a rejectionReason. The asset's own creator may never decide it.",
+    description: "A direct decision, not a maker-checker proposal: the reviewing UseCaseAdmin (of the asset's own use case) or any PlatformAdmin decides. No API key may ever call this. Approving requires a riskTier; rejecting requires a rejectionReason. The asset's own creator may never decide it, even a creator who holds the PlatformAdmin role.",
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     body: {
       type: "object",

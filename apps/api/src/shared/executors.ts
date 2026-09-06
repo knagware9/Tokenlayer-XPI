@@ -91,6 +91,7 @@ export async function executeIssueActivation(
   actor: Actor,
   asset: AssetRecord,
   p: { initialSupply?: string; treasury?: string | null; sale?: { unitPrice: string; currency: string } },
+  log?: Logger,
 ): Promise<void> {
   const useCase = await deps.useCases.get(asset.useCaseKey);
   let txHash: string | undefined;
@@ -135,7 +136,7 @@ export async function executeIssueActivation(
       status: "active", initialSupply: p.initialSupply ?? null,
       ...(txHash ? { txHash } : {}),
     },
-  });
+  }, log ?? console);
 }
 
 /** The five gatable lifecycle actions (mint/transfer/burn/freeze/unfreeze), engine-dispatched as `actor`. */

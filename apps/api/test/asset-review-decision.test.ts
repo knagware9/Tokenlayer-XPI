@@ -128,6 +128,45 @@ describe("POST /assets/:id/review-decision", () => {
     expect(forThisAsset[0].data).toMatchObject({ assetId, useCaseKey: "carbon-credit", status: "active" });
   });
 
+  // Whole-branch-review fixup ("overturned ruling"): a use case with no
+  // onboarded UseCaseAdmin (the built-in generic-asset/generic-certificate,
+  // or simply one nobody has staffed yet) used to have no eligible decider at
+  // all once every asset became pending_approval — a permanent dead end.
+  // PlatformAdmin may now decide ANY use case's asset, not just its own.
+  // Proven here on carbon-credit (which DOES have its own UseCaseAdmin) to
+  // isolate exactly the thing that changed: PlatformAdmin's eligibility no
+  // longer depends on matching claims.useCaseKey to the asset's use case.
+  it("a PlatformAdmin can decide a review for a use case it has no UseCaseAdmin membership in", async () => {
+    const h = await buildTestAppWithRepos();
+    const carbonIssuer = await loginAs(h.app, "carbon.issuer@tokenlayer.dev", "carbon123");
+    const assetId = await submittedAsset(h, carbonIssuer);
+    const platform = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const res = await h.app.inject({
+      method: "POST", url: `${V1}/assets/${assetId}/review-decision`, headers: auth(platform),
+      payload: { decision: "approved", riskTier: "low" },
+    });
+    expect(res.statusCode).toBe(200);
+    const asset = (await h.app.inject({ method: "GET", url: `${V1}/assets/${assetId}`, headers: auth(platform) })).json();
+    expect(asset.status).toBe("active");
+    expect(asset.dueDiligence.reviewedBy).toBeTruthy();
+  });
+
+  // Widening WHO may decide (any PlatformAdmin, not just a same-use-case
+  // UseCaseAdmin) must never widen self-approval — the creator-cannot-decide
+  // rule has to apply to a deciding PlatformAdmin exactly as it does to a
+  // UseCaseAdmin.
+  it("the creator-cannot-decide-own-asset rule still applies to a PlatformAdmin creator", async () => {
+    const h = await buildTestAppWithRepos();
+    const platform = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const assetId = await submittedAsset(h, platform);
+    const res = await h.app.inject({
+      method: "POST", url: `${V1}/assets/${assetId}/review-decision`, headers: auth(platform),
+      payload: { decision: "approved", riskTier: "low" },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("FORBIDDEN");
+  });
+
   it("deciding on an asset that is not pending_approval is refused", async () => {
     const h = await buildTestAppWithRepos();
     const platform = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");

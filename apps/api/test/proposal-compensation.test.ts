@@ -160,4 +160,48 @@ describe("issuance fee: charged unconditionally at issuance, refunded only on re
     expect(await cashBalance(app, t.platform, ISSUER_WALLET)).toBe("400");
     expect(await cashBalance(app, t.platform, FEE_ACCOUNT)).toBe("100");
   });
+
+  // Whole-branch-review fixup: rejection used to be a permanent dead end (see
+  // asset-submit-for-review.test.ts), and separately, the reject branch here
+  // refunded `dueDiligence.pendingIssuanceFee` without ever clearing it. Once
+  // rejection stopped being terminal, those two bugs compound: reject (refund
+  // #1) -> resubmit -> reject again (refund #2 of a fee that was never
+  // recharged) would hand the issuer double their money back. This proves the
+  // fee field is cleared after the first refund, so a second rejection on the
+  // SAME resubmitted asset is a no-op for cash movement.
+  it("rejecting a resubmitted asset a second time does NOT refund the issuance fee again", async () => {
+    const app = await buildTestApp({ platformFeeAccount: FEE_ACCOUNT });
+    const t = await setup(app);
+    const { asset } = await issueAndSubmit(app, t, "GFN-DOUBLE-REJECT");
+
+    const firstReject = await app.inject({
+      method: "POST", url: `${V1}/assets/${asset.id}/review-decision`, headers: auth(t.admin),
+      payload: { decision: "rejected", rejectionReason: "faceValue too small for this desk" },
+    });
+    expect(firstReject.statusCode).toBe(200);
+    expect(await cashBalance(app, t.platform, ISSUER_WALLET)).toBe("500");
+    expect(await cashBalance(app, t.platform, FEE_ACCOUNT)).toBe("0");
+
+    // Resubmit without re-issuing (no new fee is charged — that only happens
+    // at POST /assets time) and reject again.
+    await app.inject({
+      method: "POST", url: `${V1}/assets/${asset.id}/diligence/documents`, headers: auth(t.issuer),
+      payload: { slot: "prospectus", contentType: "application/pdf", dataBase64: Buffer.from("%PDF-1.4 revised").toString("base64") },
+    });
+    const resubmit = await app.inject({ method: "POST", url: `${V1}/assets/${asset.id}/submit-for-review`, headers: auth(t.issuer) });
+    expect(resubmit.statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: `${V1}/assets/${asset.id}`, headers: auth(t.platform) })).json().status).toBe("pending_approval");
+
+    const secondReject = await app.inject({
+      method: "POST", url: `${V1}/assets/${asset.id}/review-decision`, headers: auth(t.admin),
+      payload: { decision: "rejected", rejectionReason: "still not good enough" },
+    });
+    expect(secondReject.statusCode).toBe(200);
+
+    // No second refund: the issuer never paid a second time, so the fee
+    // account must stay at 0 and the issuer's wallet must stay at 500 — not
+    // "grow" a phantom 100 out of a fee field that was never cleared.
+    expect(await cashBalance(app, t.platform, ISSUER_WALLET)).toBe("500");
+    expect(await cashBalance(app, t.platform, FEE_ACCOUNT)).toBe("0");
+  });
 });

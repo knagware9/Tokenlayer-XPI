@@ -528,7 +528,7 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
         initialSupply: wantsSupply ? initialSupply : undefined,
         treasury,
         sale,
-      });
+      }, input.request.log);
     } catch (err) {
       // Issuance failed after the fee moved — refund it so the issuer isn't charged
       // for an asset that was never created (mirrors the buy path's compensation).
@@ -752,19 +752,29 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
   app.get("/assets/:id", { schema: S.getAsset, ...authScoped("assets:read") }, async (request, reply) => {
     const asset = await scopedAsset(request, reply, "read");
     if (!asset) return reply;
+    const claims = request.user as TokenClaims;
     // THIS asset's own supply, folded from its own audit stream — see
     // assetStateOf for why a live chain read pools across every asset sharing
     // the use case's contract.
     const state = await assetStateOf(deps, asset.id).catch(() => null);
     const totalSupply = state ? state.supply.toString() : null;
     const settlement = await settlementStatus(deps, asset);
-    return { ...asset, totalSupply, settlement };
+    return { ...withProjectedDueDiligence(asset, claims), totalSupply, settlement };
   });
 
 
   app.post("/assets/:id/diligence/documents", { schema: S.uploadAssetDiligenceDocument, bodyLimit: DOC_UPLOAD_BODY_LIMIT, ...authScoped("assets:issue") }, async (request, reply) => {
     const asset = await scopedAsset(request, reply, "act");
     if (!asset) return reply;
+    // A diligence package is only editable while the asset is actually under
+    // review (pending_approval) or being fixed up after a rejection — never
+    // once it has been reviewed and gone active. Without this an issuer could
+    // swap in a replacement prospectus on an already-`active` asset, silently
+    // changing what the risk tier and reviewer attribution were actually
+    // based on while investors keep seeing the old badge as if nothing changed.
+    if (asset.status !== "pending_approval" && asset.status !== "rejected") {
+      return reply.code(409).send({ error: "NOT_EDITABLE", message: "due-diligence documents can only be attached while an asset is pending review (or being resubmitted after a rejection)" });
+    }
     const claims = request.user as TokenClaims;
     const b = request.body as { slot: "prospectus" | "legalOpinion" | "additional"; label?: string; contentType: string; dataBase64: string };
     if (b.slot === "additional" && !b.label) {
@@ -824,6 +834,21 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
     if (!asset.dueDiligence?.prospectus) {
       return reply.code(400).send({ error: "PROSPECTUS_REQUIRED", message: "attach a prospectus before submitting for review" });
     }
+    // A rejection is not a dead end: the whole point of surfacing a
+    // rejectionReason to the issuer is so they can fix the package and come
+    // back through this SAME endpoint. Without this transition the asset
+    // never returns to pending_approval, never reappears in the Review
+    // Assets screen (which filters on exactly that status), and every
+    // further review-decision call 409s forever — a real dead end the
+    // resubmission UI otherwise promises but cannot deliver.
+    if (asset.status === "rejected") {
+      const won = await deps.assets.casStatus(asset.id, "rejected", "pending_approval");
+      if (won) {
+        await deps.assets.setDueDiligence(asset.id, { ...asset.dueDiligence, rejectionReason: null });
+      }
+      const after = await deps.assets.get(asset.id);
+      return reply.code(200).send({ id: after!.id, status: after!.status });
+    }
     return reply.code(200).send({ id: asset.id, status: asset.status });
   });
 
@@ -833,14 +858,27 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
     const { id } = request.params as { id: string };
     const asset = await deps.assets.get(id);
     if (!asset) return notFound(reply, "asset not found");
-    if (claims.role !== "UseCaseAdmin" || claims.useCaseKey !== asset.useCaseKey) {
-      return reply.code(403).send({ error: "FORBIDDEN", message: "only a UseCaseAdmin of this asset's own use case may decide it" });
+    // Eligible deciders: a UseCaseAdmin of the asset's own use case, or ANY
+    // PlatformAdmin — not just one deciding for a use case that happens to
+    // have no UseCaseAdmin onboarded. PlatformAdmin already has platform-wide
+    // authority over every other lifecycle action in this codebase (mint,
+    // transfer, freeze, ...), so this is consistency with the existing role
+    // hierarchy, not a new trust boundary. It also closes a real dead end:
+    // a use case with no UseCaseAdmin member at all (the built-in
+    // generic-asset/generic-certificate use cases ship with none — see
+    // test/helpers.ts's own onboardUseCaseAdmin comment) used to activate
+    // synchronously before this feature; after it, such an asset was stuck
+    // at pending_approval forever, since PlatformAdmin was refused outright
+    // and no UseCaseAdmin existed to decide it.
+    const isEligibleDecider = claims.role === "PlatformAdmin" || (claims.role === "UseCaseAdmin" && claims.useCaseKey === asset.useCaseKey);
+    if (!isEligibleDecider) {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "only a UseCaseAdmin of this asset's own use case, or a PlatformAdmin, may decide it" });
     }
+    // The creator-cannot-decide-own-asset rule applies to a deciding
+    // PlatformAdmin exactly as it does to a UseCaseAdmin — widening WHO may
+    // decide must never widen self-approval.
     if (asset.createdBy === claims.id) {
       return reply.code(403).send({ error: "FORBIDDEN", message: "you cannot decide a review of an asset you created" });
-    }
-    if (asset.status !== "pending_approval") {
-      return reply.code(409).send({ error: "NOT_PENDING", message: `asset is ${asset.status}, not pending_approval` });
     }
     const b = request.body as { decision: "approved" | "rejected"; riskTier?: "low" | "medium" | "high"; rejectionReason?: string };
     if (b.decision === "rejected" && !b.rejectionReason) {
@@ -848,6 +886,22 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
     }
     if (b.decision === "approved" && !b.riskTier) {
       return reply.code(400).send({ error: "RISK_TIER_REQUIRED", message: "an approval requires a risk tier" });
+    }
+    // COMPARE-AND-SET, not a separate read-then-later-write. The OLD check
+    // (`if (asset.status !== "pending_approval") return 409`) read `asset`
+    // once at the top of this handler and only acted on that snapshot several
+    // `await` boundaries later (setDueDiligence, useCases.get,
+    // accounts.findById, then the mint) — two UseCaseAdmins (or a
+    // UseCaseAdmin and a PlatformAdmin) approving/rejecting the same asset
+    // near-simultaneously could both pass that check and both reach the mint,
+    // a real double-mint of on-chain-equivalent supply plus a duplicate
+    // `asset.issued` webhook. This is the sole gate on the transition now:
+    // only the caller that wins it proceeds to mint/refund/email; the loser
+    // gets the identical 409 NOT_PENDING the old sequential check produced.
+    const targetStatus = b.decision === "approved" ? "active" : "rejected";
+    const won = await deps.assets.casStatus(asset.id, "pending_approval", targetStatus);
+    if (!won) {
+      return reply.code(409).send({ error: "NOT_PENDING", message: `asset is not pending_approval` });
     }
     const dd = { ...(asset.dueDiligence ?? {}) };
     if (b.decision === "approved") {
@@ -858,25 +912,35 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
       await deps.assets.setDueDiligence(asset.id, dd);
       const useCase = await deps.useCases.get(asset.useCaseKey);
       const treasury = useCase.treasuryAccountId ? (await deps.accounts.findById(useCase.treasuryAccountId))?.address ?? null : null;
+      // executeIssueActivation also flips status to "active" itself — a
+      // no-op here since the CAS above already won that exact transition,
+      // kept only so the ungated issueAssetCore branch (unreachable today,
+      // see its own comment) still works unmodified if ever reactivated.
       await executeIssueActivation(deps, { id: claims.id, role: claims.role }, asset, {
         initialSupply: dd.pendingInitialSupply ?? undefined,
         treasury,
         sale: dd.pendingSale ?? undefined,
-      });
+      }, request.log);
     } else {
       dd.rejectionReason = b.rejectionReason;
       dd.riskTier = null;
       dd.reviewedBy = null;
       dd.reviewedAt = null;
-      await deps.assets.setDueDiligence(asset.id, dd);
-      await deps.assets.setStatus(asset.id, "rejected");
       // Refund the issuance fee captured at POST /assets time (see
       // issueAssetCore) — mirrors the OLD "issue" proposal kind's
       // `compensate` hook (refundIssuanceFee in proposal-kinds.ts), which no
       // proposal exists any more to run now that review-decision is the sole
       // activation path. Best-effort, same as that hook: logged, not thrown,
       // so a webhook/ledger hiccup here never blocks the rejection itself.
+      // `pendingIssuanceFee` is cleared to null in the SAME dueDiligence
+      // write as the refund below, not left dangling: rejection is no longer
+      // a dead end (see submit-for-review's fix), so a resubmit-then-reject
+      // cycle without this would refund the same fee a second time, and a
+      // resubmit-then-approve cycle would activate an asset that was never
+      // actually charged.
       const fee = dd.pendingIssuanceFee;
+      dd.pendingIssuanceFee = null;
+      await deps.assets.setDueDiligence(asset.id, dd);
       if (fee?.payer && deps.platformFeeAccount) {
         await deps.cash.transfer(fee.currency, deps.platformFeeAccount, fee.payer, fee.amount).catch((refundErr) =>
           request.log.error({ refundErr, assetId: asset.id }, "issuance fee refund failed — manual reconciliation required"));
