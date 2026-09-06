@@ -1035,10 +1035,12 @@ and replace it with (the old copy is now inaccurate — there is no "Approvals t
           ✕ Review rejected{asset.dueDiligence?.rejectionReason ? ` — ${asset.dueDiligence.rejectionReason}` : ""}. Attach the missing documents and resubmit below.
         </div>
       )}
-      {(asset.status === "pending_approval" || asset.status === "rejected") && (
+      {can(role, "issue") && (asset.status === "pending_approval" || asset.status === "rejected") && (
         <DueDiligencePanel asset={asset} onChanged={() => void reload()} />
       )}
 ```
+
+Gate this on `can(role, "issue")`, matching the sibling "List for sale" panel elsewhere in this same file — without it, a Buyer merely viewing a pending/rejected asset (this app's existing read-scoping already lets a same-use-case Buyer load the detail page regardless of status) would see an upload/submit UI that always 403s if used, since only `assets:issue` scope can call the routes behind it. `can` and `role` are already in scope in this component (used by the neighboring "List for sale"/"buy" gates in the same file).
 
 (Use whatever this component's existing reload/refetch function is actually called — check the file for how it re-fetches `asset` after another mutating action, e.g. `setPrice`'s own success handler, and call the same function rather than inventing a new one.)
 
