@@ -6,8 +6,9 @@ import { AssetDetail } from "./AssetDetail.js";
 import { AssetList } from "./AssetList.js";
 import { IssuePanel } from "./IssuePanel.js";
 import { MyHoldings } from "./MyHoldings.js";
+import { ReviewAssets } from "./ReviewAssets.js";
 
-type Sub = "issuance" | "marketplace" | "holdings";
+type Sub = "issuance" | "marketplace" | "holdings" | "review";
 
 /** Identifies any use case whose schema carries the canonical invoice fields. */
 const INVOICE_FIELDS = ["invoiceHash", "invoiceNumber", "buyerName", "currency", "amount", "dueDate"];
@@ -20,11 +21,13 @@ export function AssetManagement({ useCaseKey, useCases, chains }: { useCaseKey: 
   const isPlatform = user?.role === "PlatformAdmin";
   const canIssue = user ? can(user.role, "issue") : false;
   const hasWallet = !!user?.walletAddress;
+  const isUseCaseAdmin = user?.role === "UseCaseAdmin";
 
   const subs: { id: Sub; label: string }[] = [
     ...(canIssue ? [{ id: "issuance" as Sub, label: "Token Issuance" }] : []),
     { id: "marketplace" as Sub, label: "Marketplace" },
     ...(hasWallet ? [{ id: "holdings" as Sub, label: "My Holdings" }] : []),
+    ...(isUseCaseAdmin ? [{ id: "review" as Sub, label: "Review Assets" }] : []),
   ];
   const [selectedSub, setSub] = useState<Sub>(subs[0]?.id ?? "marketplace");
   // Fall back if the selected tab disappears (e.g. active use case changes away from invoices).
@@ -56,6 +59,7 @@ export function AssetManagement({ useCaseKey, useCases, chains }: { useCaseKey: 
       {sub === "issuance" && <IssuePanel useCases={issueUseCases} chains={chains} onIssued={(id) => { setRefreshKey((k) => k + 1); setSelected(id); }} />}
       {sub === "marketplace" && <AssetList chains={chains} useCaseKey={listKey} refreshKey={refreshKey} onSelect={setSelected} />}
       {sub === "holdings" && <MyHoldings onSelect={setSelected} />}
+      {sub === "review" && <ReviewAssets />}
     </div>
   );
 }

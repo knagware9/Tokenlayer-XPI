@@ -203,6 +203,8 @@ export const api = {
   assets: (token: string, useCaseKey?: string) =>
     request<Listed<Asset>>(`/assets?limit=200${useCaseKey ? `&useCaseKey=${encodeURIComponent(useCaseKey)}` : ""}`, token).then((r) => r.data),
   asset: (token: string, id: string) => request<Asset>(`/assets/${id}`, token),
+  decideAssetReview: (token: string, id: string, input: { decision: "approved" | "rejected"; riskTier?: "low" | "medium" | "high"; rejectionReason?: string }) =>
+    request<{ id: string; status: string }>(`/assets/${id}/review-decision`, token, { method: "POST", body: JSON.stringify(input) }),
   assetAccounts: (token: string, id: string) => request<AccountState[]>(`/assets/${id}/accounts`, token),
   assetTokens: (token: string, id: string) => request<TokenInfo[]>(`/assets/${id}/tokens`, token),
   audit: (token: string, id: string) => request<Listed<AuditEntry>>(`/assets/${id}/audit?limit=200`, token).then((r) => r.data),
