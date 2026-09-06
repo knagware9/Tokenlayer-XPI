@@ -182,6 +182,14 @@ export const tokenizationSchemas: Record<string, FastifySchema> = {
     params: { type: "object", required: ["id", "docId"], properties: { id: { type: "string" }, docId: { type: "string" } } },
     response: { ...errs(401, 403, 404) },
   },
+  submitAssetForReview: {
+    tags: ["Assets"],
+    summary: "Mark a pending asset's diligence package ready for review",
+    security: eitherCredential,
+    description: "Requires the `assets:issue` scope. Requires a prospectus to already be attached; the legal opinion and any additional documents are optional. Safe to call again after a rejection.",
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    response: { 200: { type: "object", additionalProperties: true, properties: { id: { type: "string" }, status: { type: "string" } } }, ...errs(400, 401, 403, 404) },
+  },
   assetAccounts: {
     tags: ["Assets"], summary: "Holders: per-account balance + compliance state", security: eitherCredential,
     description:

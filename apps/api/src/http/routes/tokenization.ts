@@ -790,6 +790,14 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
       .send(doc.bytes);
   });
 
+  app.post("/assets/:id/submit-for-review", { schema: S.submitAssetForReview, ...authScoped("assets:issue") }, async (request, reply) => {
+    const asset = await scopedAsset(request, reply, "act");
+    if (!asset) return reply;
+    if (!asset.dueDiligence?.prospectus) {
+      return reply.code(400).send({ error: "PROSPECTUS_REQUIRED", message: "attach a prospectus before submitting for review" });
+    }
+    return reply.code(200).send({ id: asset.id, status: asset.status });
+  });
 
   app.get("/assets/:id/accounts", { schema: S.assetAccounts, ...authScoped("assets:read") }, async (request, reply) => {
     const asset = await scopedAsset(request, reply, "read");
