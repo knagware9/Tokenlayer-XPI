@@ -73,6 +73,16 @@ export interface AssetRepository {
   get(id: string): Promise<AssetRecord | null>;
   list(filter?: AssetFilter, page?: Page): Promise<Paged<AssetRecord>>;
   setStatus(id: string, status: string): Promise<void>;
+  /**
+   * Atomically transition status from `from` to `to` — returns whether the
+   * transition actually happened. The sole defence against two callers (e.g.
+   * two UseCaseAdmins both approving the same pending asset) both passing a
+   * read-then-later-write status check and both reaching the mint. Callers
+   * that need to gate a side effect (mint, refund) on "I am the one who
+   * legitimately moved this asset out of its prior state" must use this, not
+   * a separate get()+setStatus() pair.
+   */
+  casStatus(id: string, from: string, to: string): Promise<boolean>;
   setSaleTerms(id: string, terms: SaleTerms): Promise<void>;
   setDueDiligence(id: string, dueDiligence: AssetDueDiligence): Promise<void>;
   /** First asset in the use case whose metadata[field] === value, else null. */

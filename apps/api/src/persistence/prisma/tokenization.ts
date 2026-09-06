@@ -70,6 +70,15 @@ export class PrismaAssetRepository implements AssetRepository {
   async setStatus(id: string, status: string): Promise<void> {
     await prisma.asset.update({ where: { id }, data: { status } });
   }
+  async casStatus(id: string, from: string, to: string): Promise<boolean> {
+    // updateMany's WHERE clause is evaluated and applied atomically by the
+    // database — this is the real compare-and-set, unlike a findUnique()
+    // followed by a separate update() (which is exactly the read-then-later-
+    // write race this method exists to close). count === 0 means either the
+    // row doesn't exist or its status no longer matches `from`.
+    const result = await prisma.asset.updateMany({ where: { id, status: from }, data: { status: to } });
+    return result.count > 0;
+  }
   async setSaleTerms(id: string, terms: SaleTerms): Promise<void> {
     await prisma.asset.update({ where: { id }, data: { unitPrice: terms.unitPrice, currency: terms.currency, treasuryAccount: terms.treasuryAccount } });
   }

@@ -52,6 +52,16 @@ export class MemoryAssetRepository implements AssetRepository {
     const rec = this.byId.get(assetId);
     if (rec) rec.status = status;
   }
+  async casStatus(assetId: string, from: string, to: string): Promise<boolean> {
+    // No `await` between the read and the write — this process is
+    // single-threaded, so nothing can interleave here. Still models the same
+    // contract as PrismaAssetRepository's WHERE-guarded updateMany, so a test
+    // exercising the memory repo genuinely exercises the CAS semantics.
+    const rec = this.byId.get(assetId);
+    if (!rec || rec.status !== from) return false;
+    rec.status = to;
+    return true;
+  }
   async setSaleTerms(id: string, terms: SaleTerms): Promise<void> {
     const a = this.byId.get(id);
     if (a) { a.unitPrice = terms.unitPrice; a.currency = terms.currency; a.treasuryAccount = terms.treasuryAccount; }
