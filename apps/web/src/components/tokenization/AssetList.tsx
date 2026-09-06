@@ -67,6 +67,7 @@ export function AssetList({ chains, refreshKey, onSelect, useCaseKey }: Props): 
             <th className="text-right font-medium px-4 py-2.5">Total supply</th>
             <th className="text-left font-medium px-4 py-2.5">On-chain</th>
             <th className="text-left font-medium px-4 py-2.5">Available</th>
+            <th className="text-left font-medium px-4 py-2.5">Risk</th>
             <th className="text-right font-medium px-4 py-2.5">{canBuy ? "Buy" : canListForSale ? "List" : ""}</th>
           </tr>
         </thead>
@@ -104,6 +105,15 @@ export function AssetList({ chains, refreshKey, onSelect, useCaseKey }: Props): 
                   {avail === "available" && <Pill tone="ok">Available</Pill>}
                   {avail === "sold-out" && <Pill tone="warn">Sold out</Pill>}
                   {avail === "not-listed" && <Pill tone="muted">Not listed</Pill>}
+                </td>
+                <td className="px-4 py-3">
+                  {a.status === "pending_approval" ? (
+                    <Pill tone="muted">Pending review</Pill>
+                  ) : a.dueDiligence?.riskTier ? (
+                    <Pill tone={a.dueDiligence.riskTier === "low" ? "ok" : a.dueDiligence.riskTier === "medium" ? "warn" : "danger"}>{a.dueDiligence.riskTier}</Pill>
+                  ) : (
+                    <span className="text-slate-300">—</span>
+                  )}
                 </td>
                 <td className="px-4 py-3 text-right">
                   {canBuy && avail === "available" && (

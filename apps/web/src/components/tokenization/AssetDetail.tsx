@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, ApiError, describeApiError } from "../../api.js";
+import { api, ApiError, API_BASE, describeApiError } from "../../api.js";
 import { useAuth } from "../../auth.js";
 import { can } from "../../rbac.js";
 import { CashflowPanel } from "./CashflowPanel.js";
@@ -238,6 +238,8 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
           </span>
         </div>
       </div>
+
+      <DueDiligenceDisplay asset={asset} />
 
       {error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2">{error}</div>}
 
@@ -507,6 +509,58 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
       )}
 
       {auditDetail && <AuditEntryModal entry={auditDetail} chain={chain} onClose={() => setAuditDetail(null)} />}
+    </div>
+  );
+}
+
+/**
+ * Investor-facing read-only summary of an asset's due-diligence package:
+ * risk tier and links to open the prospectus, legal opinion, and any
+ * supporting documents. Visible to anyone who can see the asset (not gated
+ * on `can(role, "issue")` like `DueDiligencePanel` below). Renders nothing
+ * once there is no diligence material to show.
+ */
+function DueDiligenceDisplay({ asset }: { asset: Asset }): JSX.Element | null {
+  const { token } = useAuth();
+  const dd = asset.dueDiligence;
+  if (!dd?.prospectus && !dd?.legalOpinion && !dd?.additionalDocuments?.length) return null;
+
+  // Same synchronous-window-then-redirect pattern as KycReviewPanel's
+  // openDocument in UserManagement.tsx — a plain <a href> would not carry the
+  // Bearer token this codebase uses for auth, and window.open after an await
+  // is silently blocked by real browsers' popup blockers.
+  async function openDocument(docId: string): Promise<void> {
+    if (!token) return;
+    const win = window.open("", "_blank");
+    try {
+      const res = await fetch(`${API_BASE}/assets/${asset.id}/diligence/documents/${docId}`, { headers: { authorization: `Bearer ${token}` } });
+      if (!res.ok) { win?.close(); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      if (win) win.location.href = url; else window.open(url, "_blank");
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch {
+      win?.close();
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-2">
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-semibold text-slate-800">Due diligence</div>
+        {dd.riskTier && (
+          <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${dd.riskTier === "low" ? "bg-emerald-100 text-emerald-700" : dd.riskTier === "medium" ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>
+            {dd.riskTier} risk
+          </span>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-3 text-xs">
+        {dd.prospectus && <button onClick={() => void openDocument(dd.prospectus!.id)} className="text-brand-600 hover:text-brand-700 font-medium">Prospectus ↗</button>}
+        {dd.legalOpinion && <button onClick={() => void openDocument(dd.legalOpinion!.id)} className="text-brand-600 hover:text-brand-700 font-medium">Legal opinion ↗</button>}
+        {dd.additionalDocuments?.map((d) => (
+          <button key={d.id} onClick={() => void openDocument(d.id)} className="text-brand-600 hover:text-brand-700 font-medium">{d.label} ↗</button>
+        ))}
+      </div>
     </div>
   );
 }
