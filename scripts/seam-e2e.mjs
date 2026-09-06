@@ -157,8 +157,20 @@ const issued = await tok("POST", "/assets", {
   useCaseKey: UC, name: `SEAM-${runId}`, chainId: "fabric", initialSupply: "1000",
   treasuryAccount: TREASURY, metadata: { issuer: "Seam Co" },
 }, tkAdmin);
-ok(issued.status === 201, "an offering is minted to the identity-verified treasury", issued.json);
+// Every asset now starts pending_approval — see docs/superpowers/plans/
+// 2026-09-05-asset-due-diligence-plan.md. Complete that flow here (prospectus,
+// submit, and approve as a DIFFERENT admin than the one who issued it — the
+// creator of an asset may never decide its own review) before this script's
+// actual subject, the identity gate, gets to run against an active asset.
+ok(issued.status === 202, "an offering is issued, pending due-diligence review", issued.json);
 const assetId = issued.json?.asset?.id;
+if (assetId) {
+  const pdf = Buffer.from("%PDF-1.4 seam-e2e test prospectus").toString("base64");
+  await tok("POST", `/assets/${assetId}/diligence/documents`, { slot: "prospectus", contentType: "application/pdf", dataBase64: pdf }, tkAdmin);
+  await tok("POST", `/assets/${assetId}/submit-for-review`, {}, tkAdmin);
+  const decided = await tok("POST", `/assets/${assetId}/review-decision`, { decision: "approved", riskTier: "low" }, tkChecker);
+  ok(decided.status === 200, "the offering clears due-diligence review and activates", decided.json);
+}
 const delivered = assetId
   ? await tok("POST", `/assets/${assetId}/actions/transfer`, { from: TREASURY, to: HOLDER, amount: "200" }, tkAdmin)
   : { status: 0, json: "no asset" };

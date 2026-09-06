@@ -108,8 +108,6 @@ const denials = [
   ["identity-verifier", "POST", "/credentials/c1/revoke", "a VERIFIER cannot revoke — it checks, it does not issue"],
   ["identity-verifier", "POST", "/credential-use-cases", "a verifier cannot define a credential programme"],
   ["tokenization-marketplace", "POST", "/assets", "an investor cannot mint an asset"],
-  ["tokenization-marketplace", "POST", "/cash/credit", "an investor cannot credit their own settlement account"],
-  ["tokenization-marketplace", "GET", "/use-cases", "an investor cannot read the issuer's configuration"],
   ["tokenization-marketplace", "GET", "/users", "an investor cannot read the roster"],
 ];
 for (const [persona, method, path, why] of denials) {
@@ -128,6 +126,13 @@ const controls = [
   ["tokenization-issuer", "POST", "/assets", "an ISSUER may mint (refused above for the marketplace)"],
   ["tokenization-admin", "POST", "/cash/credit", "the platform admin may credit a settlement account"],
   ["tokenization-admin", "GET", "/use-cases", "the platform admin may read every use case"],
+  // Deliberately open at this edge too, not refused: /cash/credit POST-only
+  // self-funds one's own account (enforced by the route handler, not the
+  // edge — see personas.ts's tokenization-marketplace grant), and /use-cases
+  // GET backs the asset detail page's compliance/lifecycle rules. Neither
+  // belongs in section 2's denial list.
+  ["tokenization-marketplace", "POST", "/cash/credit", "an investor may self-fund their own settlement account"],
+  ["tokenization-marketplace", "GET", "/use-cases", "an investor may read a use case's compliance/lifecycle rules (asset detail page)"],
 ];
 for (const [persona, method, path, why] of controls) {
   const r = await call(persona, method, path, method === "POST" ? {} : null, admin[persona]);
