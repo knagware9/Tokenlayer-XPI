@@ -138,7 +138,7 @@ export interface AuditAnchorRepository {
 }
 
 /** A writable use-case store. Also satisfies the engine's UseCaseSource. */
-export type DocumentPurpose = "brand-logo" | "kyc";
+export type DocumentPurpose = "brand-logo" | "kyc" | "asset-diligence";
 
 /** An uploaded document (bytes + content-type), referenced from asset metadata. */
 export interface DocumentRecord {

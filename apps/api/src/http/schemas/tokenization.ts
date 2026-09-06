@@ -156,6 +156,32 @@ export const tokenizationSchemas: Record<string, FastifySchema> = {
     params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
     response: { 200: { $ref: "Asset#" }, ...errs(401, 404) },
   },
+  uploadAssetDiligenceDocument: {
+    tags: ["Assets"],
+    summary: "Attach a due-diligence document to a pending asset",
+    security: eitherCredential,
+    description: "Requires the `assets:issue` scope. `slot` picks which part of the diligence package this fills; `label` is required (and free-text) only for `slot: \"additional\"`.",
+    params: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    body: {
+      type: "object",
+      required: ["slot", "contentType", "dataBase64"],
+      properties: {
+        slot: { type: "string", enum: ["prospectus", "legalOpinion", "additional"] },
+        label: { type: "string" },
+        contentType: { type: "string" },
+        dataBase64: { type: "string" },
+      },
+    },
+    response: { 201: { type: "object", additionalProperties: true, properties: { id: { type: "string" }, sha256: { type: "string" }, size: { type: "number" } } }, ...errs(400, 401, 403, 404, 413, 415) },
+  },
+  getAssetDiligenceDocument: {
+    tags: ["Assets"],
+    summary: "Read one of an asset's due-diligence documents",
+    security: eitherCredential,
+    description: "Requires the `assets:read` scope. Visible to anyone scoped to the asset's use case once it is active; visible to the asset's own issuer/use-case staff even while still pending review.",
+    params: { type: "object", required: ["id", "docId"], properties: { id: { type: "string" }, docId: { type: "string" } } },
+    response: { ...errs(401, 403, 404) },
+  },
   assetAccounts: {
     tags: ["Assets"], summary: "Holders: per-account balance + compliance state", security: eitherCredential,
     description:

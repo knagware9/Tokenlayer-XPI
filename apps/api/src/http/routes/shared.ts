@@ -2471,6 +2471,9 @@ export function registerSharedRoutes(app: FastifyInstance, deps: AppDeps, ctx: R
     if (doc.purpose === "kyc") {
       return reply.code(403).send({ error: "FORBIDDEN", message: "KYC documents are read through GET /users/me/kyc/documents/:id" });
     }
+    if (doc.purpose === "asset-diligence") {
+      return reply.code(403).send({ error: "FORBIDDEN", message: "asset diligence documents are read through GET /assets/:id/diligence/documents/:docId" });
+    }
     // Never let the browser sniff/execute stored bytes as the API origin: pin the
     // stored (allowlisted) type, forbid sniffing, and force download.
     return reply

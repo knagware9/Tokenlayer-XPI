@@ -448,6 +448,11 @@ const DOCUMENTATION_DEFERRED: Record<string, string> = {
   // (correctly — it's where a reader looks for it, unlike `getDocument`) so it
   // doesn't escape the check on tag alone.
   "GET /users/me/kyc/documents/:id": "returns opaque bytes (the stored KYC document), not a JSON object",
+  // Same answer as the other document-read routes above: the 200 is the
+  // stored due-diligence document's raw bytes, and this one is tagged
+  // "Assets" (correctly — it belongs beside the rest of the asset surface)
+  // so it doesn't escape the check on tag alone either.
+  "GET /assets/:id/diligence/documents/:docId": "returns opaque bytes (the stored due-diligence document), not a JSON object",
 };
 
 type ResponseSchema = { response?: Record<string, unknown>; tags?: string[]; description?: string };

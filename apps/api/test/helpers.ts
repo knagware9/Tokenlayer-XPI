@@ -63,6 +63,12 @@ export interface TestAppHandle {
   organizations: MemoryOrganizationRepository;
   audit: MemoryAuditRepository;
   /**
+   * Direct repository access for tests that must force an asset into a state
+   * no route reaches yet (e.g. `pending_approval` before Task 8 makes that
+   * the universal issuance default) — same rationale as `users`/`apiKeys` above.
+   */
+  assets: MemoryAssetRepository;
+  /**
    * The very deps this app was built over. Needed where a test must drive a
    * NON-HTTP path of the same instance — EN-C's emit/fan-out is the case:
    * `emitEvent(deps, …)` is what a domain route calls internally, and the
@@ -159,7 +165,7 @@ export async function buildTestAppWithRepos(opts: TestAppOptions = {}): Promise<
   // other test relies on) even when `opts.mail` overrode what the app itself
   // uses — a test that passes `opts.mail` reads the app's real mailer off
   // `deps.mail`, not off this field.
-  return { app: await buildApp(deps), users, apiKeys, loginKeys, organizations, audit, deps, mail: nullMailer };
+  return { app: await buildApp(deps), users, apiKeys, loginKeys, organizations, audit, assets, deps, mail: nullMailer };
 }
 
 /** All v1 API routes live under this prefix. */

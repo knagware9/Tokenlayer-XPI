@@ -734,6 +734,63 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
   });
 
 
+  app.post("/assets/:id/diligence/documents", { schema: S.uploadAssetDiligenceDocument, bodyLimit: DOC_UPLOAD_BODY_LIMIT, ...authScoped("assets:issue") }, async (request, reply) => {
+    const asset = await scopedAsset(request, reply, "act");
+    if (!asset) return reply;
+    const claims = request.user as TokenClaims;
+    const b = request.body as { slot: "prospectus" | "legalOpinion" | "additional"; label?: string; contentType: string; dataBase64: string };
+    if (b.slot === "additional" && !b.label) {
+      return reply.code(400).send({ error: "LABEL_REQUIRED", message: "an additional document needs a label" });
+    }
+    const useCase = await deps.useCases.get(asset.useCaseKey);
+    const doc = await storeUploadedDocument(deps.documents, { contentType: b.contentType, dataBase64: b.dataBase64 }, useCase.ownerOrgId ?? null, "asset-diligence", claims.id);
+    const dd = { ...(asset.dueDiligence ?? {}) };
+    const ref = { id: doc.id, sha256: doc.sha256 };
+    if (b.slot === "prospectus") dd.prospectus = ref;
+    else if (b.slot === "legalOpinion") dd.legalOpinion = ref;
+    else dd.additionalDocuments = [...(dd.additionalDocuments ?? []), { ...ref, label: b.label! }];
+    await deps.assets.setDueDiligence(asset.id, dd);
+    return reply.code(201).send({ id: doc.id, sha256: doc.sha256, size: doc.size });
+  });
+
+  app.get("/assets/:id/diligence/documents/:docId", { schema: S.getAssetDiligenceDocument, ...authScoped("assets:read") }, async (request, reply) => {
+    const asset = await scopedAsset(request, reply, "read");
+    if (!asset) return reply;
+    const claims = request.user as TokenClaims;
+    const { docId } = request.params as { docId: string };
+    // THE ID IN THE URL MUST BE ONE OF *THIS ASSET'S OWN* DILIGENCE DOCUMENTS.
+    // Without this, the checks below only prove the caller may see asset `:id`
+    // — they say nothing about whose bytes `docId` names. A buyer scoped to a
+    // use case with even one ACTIVE asset would otherwise be able to swap in
+    // any other document id in the whole system (another still-pending asset's
+    // prospectus in the same use case, a KYC scan, ...) and read it back,
+    // because `deps.documents.get` alone knows nothing about asset ownership.
+    // Tying `docId` to the asset record already loaded and scope-checked above
+    // is what makes this a dedicated gate rather than a second `GET /documents/:id`.
+    const dd = asset.dueDiligence ?? {};
+    const belongsToAsset = dd.prospectus?.id === docId || dd.legalOpinion?.id === docId || (dd.additionalDocuments ?? []).some((d) => d.id === docId);
+    if (!belongsToAsset) return notFound(reply, "document not found");
+    // A still-pending or rejected asset's diligence package is not yet public —
+    // only this asset's own use-case staff (anyone who can `act` on it, i.e.
+    // Issuer/UseCaseAdmin scoped here) may see it before it goes active. Once
+    // `active`, anyone already scoped to the use case (scopedAsset's own read
+    // check, already passed above) may see it — that IS the point of this
+    // feature: investor-facing diligence documents, not private ones.
+    if (asset.status !== "active") {
+      const canAct = await scopedToCaller(claims, asset.useCaseKey, deps.useCases);
+      const isStaffRole = claims.role === "Issuer" || claims.role === "UseCaseAdmin" || claims.role === "PlatformAdmin";
+      if (!canAct || !isStaffRole) return reply.code(403).send({ error: "FORBIDDEN", message: "this asset's diligence package is not yet public" });
+    }
+    const doc = await deps.documents.get(docId);
+    if (!doc) return notFound(reply, "document not found");
+    return reply
+      .header("content-type", doc.contentType)
+      .header("x-content-type-options", "nosniff")
+      .header("content-disposition", `attachment; filename="asset-diligence-${docId}"`)
+      .send(doc.bytes);
+  });
+
+
   app.get("/assets/:id/accounts", { schema: S.assetAccounts, ...authScoped("assets:read") }, async (request, reply) => {
     const asset = await scopedAsset(request, reply, "read");
     if (!asset) return reply;
