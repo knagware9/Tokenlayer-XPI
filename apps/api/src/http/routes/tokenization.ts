@@ -9,7 +9,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { ApiKeyRecord, AssetRecord, BrandingPatch, CashflowRecord, CompanyProfile, CredentialRecord, DocumentPurpose, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord, WebhookEndpointRecord } from "../../persistence/types/index.js";
+import type { ApiKeyRecord, AssetDueDiligence, AssetRecord, BrandingPatch, CashflowRecord, CompanyProfile, CredentialRecord, DocumentPurpose, KybDocumentRef, KycDetails, KycStatus, ListingRecord, OrganizationRecord, ProposalRecord, UserRecord, VerificationRequestRecord, WebhookEndpointRecord } from "../../persistence/types/index.js";
 import { ListingConflictError } from "../../persistence/types/index.js";
 import { assignableRoles, auditEntryHash, canCreateOrgMember, canCreateUser, canManageUsers, certificatePageSize, computeCashflowSchedule, CREDENTIAL_TEMPLATES, CREDENTIAL_TYPES, credentialTypeDef, credentialUseCaseType, decodeJwt, didKeyFromSeed, generateDidKey, holderPolicyAllows, instantiateTemplate, invoiceFingerprint, issueCredential, issuerBindingAllows, normalizeUseCaseDefinition, ORG_OPERATING_ROLES, orgDomainEnabled, orgRoleEnabled, PolicyError, presentCredential, presentCredentials, splitProRata, TEMPLATE_CATALOG, useCaseDomainOf, validateBrandAccent, validateCertificatePlacements, validateCredentialUseCase, validateEventTypes, validateMetadata, scopeAllows, validateOrgCapabilities, validateScopes, validateTemplate, verifierBindingAllows, verifyChain, verifyDidSignature, verifyPresentation, verifyPresentationCredentials, isDocumentSha256, type Actor, type ApiScope, type ChainEntry, type CredentialTypeSpec, type CredentialUseCaseDefinition, type LifecycleAction, type OrgDomain, type OrgOperatingRole, type OrgType, type UseCaseDefinition, type UseCaseTemplate, type CertificateFieldPlacement } from "@tokenlayer/core";
 import qrcode from "qrcode";
@@ -72,6 +72,46 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
       return null;
     }
     return asset;
+  }
+
+  // Staff of an asset's OWN use case: its Issuer/UseCaseAdmin, or any
+  // PlatformAdmin (platform-wide, matching review-decision's own eligible-
+  // decider rule). Everyone else who can merely READ the asset (a Buyer,
+  // Trader, Auditor scoped to the same use case, or cross-use-case staff) is
+  // an investor-side viewer, not staff — the distinction the response
+  // projection below relies on to decide what of `dueDiligence` to keep.
+  function isStaffForAsset(claims: TokenClaims, useCaseKey: string): boolean {
+    if (claims.role === "PlatformAdmin") return true;
+    return (claims.role === "Issuer" || claims.role === "UseCaseAdmin") && claims.useCaseKey === useCaseKey;
+  }
+
+  // THE SHARED Asset# OpenAPI component declares `dueDiligence` as a wide-open
+  // `additionalProperties: true` object — every field of it, unfiltered,
+  // would otherwise reach any caller who can read the asset at all. Two
+  // different reasons to strip fields, so two different rules:
+  //  - pendingIssuanceFee/pendingInitialSupply/pendingSale are internal
+  //    activation plumbing (the fee payload even carries the issuer's own
+  //    wallet address) that POST /assets/:id/review-decision reads back
+  //    internally — never meant for any API response, for ANY caller.
+  //  - reviewedBy/rejectionReason are reviewer identity and (possibly
+  //    sensitive, e.g. compliance-concern) commentary — visible to this
+  //    asset's own use-case staff (who need it to act) but not to an
+  //    investor with no special relationship to the asset beyond being able
+  //    to see it exists.
+  // prospectus/legalOpinion/additionalDocuments/riskTier are left untouched
+  // for every caller — that's the investor-facing display this whole feature
+  // exists to provide.
+  function projectDueDiligenceForCaller(dd: AssetDueDiligence | null | undefined, opts: { isStaff: boolean }): AssetDueDiligence | null {
+    if (!dd) return dd ?? null;
+    const { pendingIssuanceFee: _fee, pendingInitialSupply: _supply, pendingSale: _sale, reviewedBy, rejectionReason, ...rest } = dd;
+    return opts.isStaff ? { ...rest, reviewedBy, rejectionReason } : rest;
+  }
+
+  /** Shallow-copies an asset with its `dueDiligence` projected for `claims` —
+   *  the one call every route that hands an AssetRecord back over the wire
+   *  must make. */
+  function withProjectedDueDiligence(asset: AssetRecord, claims: TokenClaims): AssetRecord {
+    return { ...asset, dueDiligence: projectDueDiligenceForCaller(asset.dueDiligence, { isStaff: isStaffForAsset(claims, asset.useCaseKey) }) };
   }
 
 
@@ -479,7 +519,8 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
           ...(sale ? { pendingSale: sale } : {}),
           ...(issuanceFeeCharged && feePayer ? { pendingIssuanceFee: { ...issuanceFeeCharged, payer: feePayer } } : {}),
         });
-        return { ok: true, status: 202, body: { asset: await deps.assets.get(id) } };
+        const pending = await deps.assets.get(id);
+        return { ok: true, status: 202, body: { asset: pending ? withProjectedDueDiligence(pending, claims) : pending } };
       }
       // Ungated: activate immediately — sale terms + allowlist treasury + mint supply.
       const created = await deps.assets.get(id);
@@ -509,7 +550,7 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
     // `executeIssueActivation` itself (see that function's own comment), so it
     // is deliberately NOT re-added here: doing so would double-fire the event
     // if this branch were ever reactivated.
-    return { ok: true, status: 201, body: { asset: finalAsset, txHash: result.txHash, ...(issuanceFeeCharged ? { issuanceFee: issuanceFeeCharged } : {}) } };
+    return { ok: true, status: 201, body: { asset: finalAsset ? withProjectedDueDiligence(finalAsset, claims) : finalAsset, txHash: result.txHash, ...(issuanceFeeCharged ? { issuanceFee: issuanceFeeCharged } : {}) } };
   }
 
 
@@ -701,7 +742,7 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
         const totalSupply = state ? state.supply.toString() : null;
         const availableSupply = state && a.treasuryAccount ? balanceOfAddress(state.balances, a.treasuryAccount).toString() : null;
         const settlement = await settlementStatus(deps, a);
-        return { ...a, totalSupply, availableSupply, settlement };
+        return { ...withProjectedDueDiligence(a, claims), totalSupply, availableSupply, settlement };
       }),
     );
     return { data, pagination: { limit: q.limit, offset: q.offset, total } };
