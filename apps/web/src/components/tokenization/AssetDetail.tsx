@@ -243,13 +243,16 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
 
       {asset.status === "pending_approval" && (
         <div className="rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-2">
-          ⏳ Pending approval — supply mints and the asset activates once approved in the Approvals tab.
+          ⏳ Pending due-diligence review — complete the diligence package below and submit it.
         </div>
       )}
       {asset.status === "rejected" && (
         <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2">
-          ✕ Issuance rejected — this asset was never activated.
+          ✕ Review rejected{asset.dueDiligence?.rejectionReason ? ` — ${asset.dueDiligence.rejectionReason}` : ""}. Attach the missing documents and resubmit below.
         </div>
+      )}
+      {(asset.status === "pending_approval" || asset.status === "rejected") && (
+        <DueDiligencePanel asset={asset} onChanged={() => void reload()} />
       )}
 
       {canSeeTreasury && (
@@ -504,6 +507,97 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
       )}
 
       {auditDetail && <AuditEntryModal entry={auditDetail} chain={chain} onClose={() => setAuditDetail(null)} />}
+    </div>
+  );
+}
+
+/**
+ * Issuer-facing due-diligence package: attach a prospectus (required), an
+ * optional legal opinion, and any labelled supporting documents, then submit
+ * for review. Shown on `AssetDetail` while the asset is `pending_approval` or
+ * `rejected`. Follows `KycSubmissionPanel`'s `fileToBase64`/busy/error
+ * conventions.
+ */
+function DueDiligencePanel({ asset, onChanged }: { asset: Asset; onChanged: () => void }): JSX.Element {
+  const { token } = useAuth();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [additionalLabel, setAdditionalLabel] = useState("");
+
+  function fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
+      reader.onerror = () => reject(new Error("Could not read file"));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function upload(slot: "prospectus" | "legalOpinion" | "additional", file: File): Promise<void> {
+    if (!token) return;
+    if (slot === "additional" && !additionalLabel.trim()) { setError("Give the additional document a label first."); return; }
+    setBusy(true);
+    setError(null);
+    try {
+      await api.uploadAssetDiligenceDocument(token, asset.id, {
+        slot, label: slot === "additional" ? additionalLabel.trim() : undefined,
+        contentType: file.type || "application/pdf", dataBase64: await fileToBase64(file),
+      });
+      setAdditionalLabel("");
+      onChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Upload failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submit(): Promise<void> {
+    if (!token) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.submitAssetForReview(token, asset.id);
+      onChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not submit for review");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const dd = asset.dueDiligence;
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-3">
+      <div className="text-sm font-semibold text-slate-800">Complete due diligence</div>
+      <p className="text-xs text-slate-500">Attach a prospectus (required) and, optionally, a legal opinion and any supporting documents, then submit for review.</p>
+      <div className="grid grid-cols-2 gap-3 text-xs">
+        <label className="rounded-lg border border-dashed border-slate-300 px-3 py-2 text-center cursor-pointer hover:border-brand-400">
+          {dd?.prospectus ? "✓ Prospectus attached" : "Attach prospectus"}
+          <input type="file" className="hidden" onChange={(e) => e.target.files?.[0] && void upload("prospectus", e.target.files[0])} />
+        </label>
+        <label className="rounded-lg border border-dashed border-slate-300 px-3 py-2 text-center cursor-pointer hover:border-brand-400">
+          {dd?.legalOpinion ? "✓ Legal opinion attached" : "Attach legal opinion (optional)"}
+          <input type="file" className="hidden" onChange={(e) => e.target.files?.[0] && void upload("legalOpinion", e.target.files[0])} />
+        </label>
+      </div>
+      <div className="flex items-center gap-2">
+        <input className="rounded border border-slate-300 px-2 py-1 text-xs flex-1" placeholder="Label for an additional document" value={additionalLabel} onChange={(e) => setAdditionalLabel(e.target.value)} />
+        <label className="text-xs rounded border border-slate-300 px-3 py-1.5 cursor-pointer hover:border-brand-400">
+          Attach
+          <input type="file" className="hidden" onChange={(e) => e.target.files?.[0] && void upload("additional", e.target.files[0])} />
+        </label>
+      </div>
+      {dd?.additionalDocuments?.length ? (
+        <ul className="text-xs text-slate-600 list-disc list-inside">
+          {dd.additionalDocuments.map((d) => <li key={d.id}>{d.label}</li>)}
+        </ul>
+      ) : null}
+      {error && <p className="text-xs text-red-600">{error}</p>}
+      <button disabled={busy || !dd?.prospectus} onClick={() => void submit()} className="text-xs rounded bg-brand-600 text-white px-3 py-1.5 font-medium hover:bg-brand-700 disabled:opacity-40">
+        Submit for review
+      </button>
     </div>
   );
 }

@@ -183,6 +183,15 @@ export interface Asset {
   unitPrice?: string | null;
   currency?: string | null;
   treasuryAccount?: string | null;
+  dueDiligence?: {
+    prospectus?: { id: string; sha256: string } | null;
+    legalOpinion?: { id: string; sha256: string } | null;
+    additionalDocuments?: { id: string; sha256: string; label: string }[];
+    riskTier?: "low" | "medium" | "high" | null;
+    reviewedBy?: string | null;
+    reviewedAt?: string | null;
+    rejectionReason?: string | null;
+  } | null;
 }
 
 export interface TokenInfo {

@@ -210,7 +210,7 @@ export const api = {
     token: string,
     // The treasury is always derived server-side from the use case — never client-supplied.
     input: { useCaseKey: string; name: string; chainId: string; metadata: Record<string, unknown>; initialSupply?: string; sale?: { unitPrice: string; currency: string } },
-    // 201 → { asset }; 202 (maker-checker gated) → { proposal, asset }.
+    // Always 202 now — every new asset starts pending_approval; see the due-diligence review flow.
   ) => request<{ asset: Asset; txHash?: string; proposal?: Proposal }>("/assets", token, { method: "POST", body: JSON.stringify(input) }),
   action: (token: string, id: string, action: string, body: Record<string, string>) =>
     // 200 → { receipt }; 202 (gated) → { proposal }.
@@ -218,6 +218,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  uploadAssetDiligenceDocument: (token: string, assetId: string, input: { slot: "prospectus" | "legalOpinion" | "additional"; label?: string; contentType: string; dataBase64: string }) =>
+    request<{ id: string; sha256: string; size: number }>(`/assets/${assetId}/diligence/documents`, token, { method: "POST", body: JSON.stringify(input) }),
+  submitAssetForReview: (token: string, assetId: string) =>
+    request<{ id: string; status: string }>(`/assets/${assetId}/submit-for-review`, token, { method: "POST", body: JSON.stringify({}) }),
   uploadDocument: (token: string, contentType: string, dataBase64: string) =>
     request<{ id: string; url: string; sha256: string; size: number }>("/documents", token, { method: "POST", body: JSON.stringify({ contentType, dataBase64 }) }),
   currencies: (token: string) => request<Currency[]>("/currencies", token),
