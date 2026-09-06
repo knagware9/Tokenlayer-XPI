@@ -39,6 +39,7 @@ import {
 } from "../persistence/memory/index.js";
 import { DEFAULT_ACCOUNTS, seedDefaults } from "../shared/seed.js";
 import { seedUseCases } from "../tokenization/use-cases.js";
+import { completeDueDiligence } from "./dev-helpers.js";
 
 const ALICE = DEFAULT_ACCOUNTS[0]!.address;
 const BOB = DEFAULT_ACCOUNTS[1]!.address;
@@ -71,11 +72,20 @@ async function main(): Promise<void> {
   const listings = new MemoryListingRepository();
   const app = await buildApp({ useCases, credentialUseCases: new MemoryCredentialUseCaseRepository(), credentialTemplates: new MemoryCredentialUseCaseTemplateRepository(), rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents: new MemoryDocumentRepository(), cashflows: new MemoryCashflowRepository(), proposals: new MemoryProposalRepository(), organizations, credentials: new MemoryCredentialRepository(), verificationRequests: new MemoryVerificationRequestRepository(), stagedInvoices: new MemoryStagedInvoiceRepository(), apiKeys: new MemoryApiKeyRepository(), passwordResetTokens: new MemoryPasswordResetTokenRepository(), events: new MemoryEventRepository(), webhookEndpoints: new MemoryWebhookEndpointRepository(), webhookDeliveries: new MemoryWebhookDeliveryRepository(), ledgerTransactions: new MemoryLedgerTransactionRepository(), webhooksAllowInsecure: false, secretBox: createSecretBox("22".repeat(32)), mail: new NullMailer(), keystore, didMasterConfigured: true, challenges: createMemoryChallengeStore(), loginKeys: new MemoryLoginKeyRepository(), qrLogin: createMemoryQrLoginStore(), publicWebUrl: "http://localhost:5173", enabledDomains: ["tokenization", "identity"], currencies: loadCurrencies(), jwtSecret: "demo", publicApiUrl: "http://localhost:4000/api/v1" });
   const token = (await post(app, "/auth/login", null, { email: "admin@tokenlayer.dev", password: "admin123" })).body.token;
+  // A second PlatformAdmin to DECIDE every asset's due-diligence review below
+  // — review-decision refuses a creator deciding their own asset, and `token`
+  // (admin@tokenlayer.dev) is the creator of every asset this script issues.
+  // A PlatformAdmin may decide ANY asset's review (not just one whose use
+  // case happens to have no UseCaseAdmin onboarded — see review-decision's
+  // own comment), which is what makes one universal decider workable here
+  // even for corporate-bond (which DOES have a seeded UseCaseAdmin) and for
+  // generic-asset/generic-certificate/forest-offset (which have none at all).
+  const decider = (await post(app, "/auth/login", null, { email: "admin2@tokenlayer.dev", password: "admin123" })).body.token;
 
   // 1. ERC-20 across every available DLT — identical behaviour everywhere.
   for (const chain of chains.list()) {
     console.log(`\n=== ERC-20 "Generic Asset" on ${chain.label} (${chain.family}) ===`);
-    const id = (await issue(app, token, "generic-asset", "Gold Bar", "GOLD", chain.id, { issuer: "ACME", assetClass: "commodity", valuation: 250000 })).id;
+    const id = (await issue(app, token, decider, "generic-asset", "Gold Bar", "GOLD", chain.id, { issuer: "ACME", assetClass: "commodity", valuation: 250000 })).id;
     await post(app, `/assets/${id}/actions/allow`, token, { account: ALICE });
     await post(app, `/assets/${id}/actions/allow`, token, { account: BOB });
     check("mint to Alice", (await post(app, `/assets/${id}/actions/mint`, token, { to: ALICE, amount: "1000" })).status === 200);
@@ -89,7 +99,7 @@ async function main(): Promise<void> {
 
   // 2. ERC-3643 — identity allowlist is mandatory.
   console.log(`\n=== ERC-3643 "Corporate Bond" on Canton (simulated) ===`);
-  const sec = (await issue(app, token, "corporate-bond", "Acme Bond", "ACMEB", "canton", { issuer: "ACME", isin: "INE000A01001", faceValue: 1000 })).id;
+  const sec = (await issue(app, token, decider, "corporate-bond", "Acme Bond", "ACMEB", "canton", { issuer: "ACME", isin: "INE000A01001", faceValue: 1000 })).id;
   const unregistered = await post(app, `/assets/${sec}/actions/mint`, token, { to: ALICE, amount: "100" });
   check("mint to unregistered holder rejected", unregistered.status === 400 && unregistered.body.error === "NOT_ALLOWLISTED");
   await post(app, `/assets/${sec}/actions/allow`, token, { account: ALICE });
@@ -97,7 +107,7 @@ async function main(): Promise<void> {
 
   // 3. ERC-721 — non-fungible, token-id based.
   console.log(`\n=== ERC-721 "Generic Certificate" on Fabric (simulated) ===`);
-  const cert = (await issue(app, token, "generic-certificate", "Reg Cert", "CERT", "fabric", { category: "registration", authority: "Gov" })).id;
+  const cert = (await issue(app, token, decider, "generic-certificate", "Reg Cert", "CERT", "fabric", { category: "registration", authority: "Gov" })).id;
   check("mint token #1 to Alice", (await post(app, `/assets/${cert}/actions/mint`, token, { to: ALICE, tokenId: "1", uri: "ipfs://c1" })).status === 200);
   const tokens = (await get(app, `/assets/${cert}/tokens`, token)).body as { tokenId: string; owner: string }[];
   check("token #1 owned by Alice", tokens.length === 1 && tokens[0]!.owner === ALICE);
@@ -108,7 +118,7 @@ async function main(): Promise<void> {
   // ONCHAINID + registries + modular-compliance suite through the platform.
   if (chains.list().some((c) => c.id === "besu")) {
     console.log(`\n=== ERC-3643 real T-REX on Besu (deploys ONCHAINID + registries) ===`);
-    const trex = (await issue(app, token, "corporate-bond", "Onchain Bond", "OBND", "besu", { issuer: "ACME", isin: "INE000A01002", faceValue: 1000 })).id;
+    const trex = (await issue(app, token, decider, "corporate-bond", "Onchain Bond", "OBND", "besu", { issuer: "ACME", isin: "INE000A01002", faceValue: 1000 })).id;
     const unregistered = await post(app, `/assets/${trex}/actions/mint`, token, { to: ALICE, amount: "100" });
     check("mint to non-identity holder rejected on-chain", unregistered.status === 400);
     await post(app, `/assets/${trex}/actions/allow`, token, { account: ALICE }); // registers an ONCHAINID identity
@@ -131,7 +141,11 @@ async function main(): Promise<void> {
   });
   check("use case created (201)", createdUc.status === 201);
   const cc = await post(app, "/assets", token, { useCaseKey: "forest-offset", name: "Forest Offset", symbol: "CO2", chainId: "fabric", metadata: { project: "Amazon-1" } });
-  check("asset issued from new use case", cc.status === 201);
+  // Every new asset starts pending_approval now (202), never active (201) —
+  // see the due-diligence review feature.
+  check("asset issued from new use case (202, pending review)", cc.status === 202);
+  await completeDueDiligence(app, cc.body.asset.id, token, decider);
+  check("asset activates once its due-diligence review is approved", (await get(app, `/assets/${cc.body.asset.id}`, token)).body.status === "active");
 
   await app.close();
   console.log(`\n${failures === 0 ? "✅ DEMO PASSED" : `❌ DEMO FAILED (${failures} checks)`}`);
@@ -140,16 +154,24 @@ async function main(): Promise<void> {
 
 async function issue(
   app: FastifyInstance,
-  token: string,
+  actorToken: string,
+  deciderToken: string,
   useCaseKey: string,
   name: string,
   symbol: string,
   chainId: string,
   metadata: Record<string, unknown>,
 ): Promise<{ id: string }> {
-  const res = await post(app, "/assets", token, { useCaseKey, name, symbol, chainId, metadata });
-  if (res.status !== 201) throw new Error(`issue failed: ${JSON.stringify(res.body)}`);
-  return { id: res.body.asset.id };
+  const res = await post(app, "/assets", actorToken, { useCaseKey, name, symbol, chainId, metadata });
+  // Every new asset now starts pending_approval — POST /assets returns 202
+  // (asset created, awaiting review), never 201 (immediately active). Every
+  // caller of this helper acts on the returned asset right afterward
+  // (mint/allow/...), so complete the due-diligence review here, once, rather
+  // than in each of this script's call sites.
+  if (res.status !== 202) throw new Error(`issue failed: ${JSON.stringify(res.body)}`);
+  const id = res.body.asset.id as string;
+  await completeDueDiligence(app, id, actorToken, deciderToken);
+  return { id };
 }
 
 async function post(app: FastifyInstance, url: string, token: string | null, payload: unknown) {

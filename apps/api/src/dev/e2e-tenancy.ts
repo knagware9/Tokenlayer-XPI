@@ -28,6 +28,7 @@ import { MemoryAccountRepository, MemoryApiKeyRepository, MemoryAssetRepository,
   MemoryCredentialUseCaseRepository, MemoryCredentialUseCaseTemplateRepository, MemoryUseCaseRepository, MemoryUserRepository, MemoryVerificationRequestRepository } from "../persistence/memory/index.js";
 import { seedDefaults } from "../shared/seed.js";
 import { seedUseCases } from "../tokenization/use-cases.js";
+import { completeDueDiligence } from "./dev-helpers.js";
 
 let failures = 0;
 const check = (label: string, ok: boolean): void => { console.log(`   ${ok ? "✓" : "✗"} ${label}`); if (!ok) failures++; };
@@ -58,6 +59,7 @@ async function main(): Promise<void> {
   const carbonAdmin = await login(app, "carbon.admin@tokenlayer.dev", "carbon123");
   const carbonIssuer = await login(app, "carbon.issuer@tokenlayer.dev", "carbon123");
   const goldIssuer = await login(app, "gold.issuer@tokenlayer.dev", "gold123");
+  const goldAdmin = await login(app, "gold.admin@tokenlayer.dev", "gold123");
 
   const buyerWallet = "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc";
   const secondWallet = "0x976EA74026E726554dB657fA54763abd0C3a0aa9";
@@ -67,8 +69,13 @@ async function main(): Promise<void> {
   check("UseCaseAdmin cannot create a UseCaseAdmin", (await post(app, "/users", carbonAdmin, { email: "x@x.dev", password: "secret1", role: "UseCaseAdmin" })).status === 403);
 
   const issue = await post(app, "/assets", carbonIssuer, { useCaseKey: "carbon-credit", name: "VCU Test", symbol: "VCUT", chainId: "fabric", metadata: { projectName: "P", registry: "Verra", vintage: 2024 } });
-  check("Carbon Issuer issues a credit", issue.status === 201);
+  check("Carbon Issuer issues a credit (pending review)", issue.status === 202);
   const id = issue.body.asset.id as string;
+  // Every new asset starts pending_approval — complete the due-diligence
+  // review (as the carbon Issuer, decided by the carbon UseCaseAdmin) before
+  // acting on it, or the mint/transfer checks below would all fail on a
+  // non-active asset.
+  await completeDueDiligence(app, id, carbonIssuer, carbonAdmin);
   await post(app, `/assets/${id}/actions/allow`, carbonIssuer, { account: buyerWallet });
   check("Carbon Issuer mints to the buyer wallet", (await post(app, `/assets/${id}/actions/mint`, carbonIssuer, { to: buyerWallet, amount: "1000" })).status === 200);
 
@@ -79,7 +86,8 @@ async function main(): Promise<void> {
   check("Gold Issuer cannot read the carbon asset (404)", (await get(app, `/assets/${id}`, goldIssuer)).status === 404);
   check("Gold Issuer cannot act on the carbon asset (403)", (await post(app, `/assets/${id}/actions/mint`, goldIssuer, { to: buyerWallet, amount: "1" })).status === 403);
   const goldIssue = await post(app, "/assets", goldIssuer, { useCaseKey: "gold-loan", name: "GL Test", symbol: "GLT", chainId: "fabric", metadata: { borrower: "R", goldWeightGrams: 1, loanAmountInr: 1 } });
-  check("Gold Issuer issues a gold-loan asset", goldIssue.status === 201);
+  check("Gold Issuer issues a gold-loan asset (pending review)", goldIssue.status === 202);
+  await completeDueDiligence(app, goldIssue.body.asset.id as string, goldIssuer, goldAdmin);
   const goldList = await get(app, "/assets?limit=50", goldIssuer);
   const goldRows = goldList.body.data as { useCaseKey: string }[];
   check("Gold Issuer's list is non-empty and excludes carbon assets", goldRows.length > 0 && goldRows.every((a) => a.useCaseKey === "gold-loan"));

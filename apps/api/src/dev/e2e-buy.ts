@@ -52,6 +52,7 @@ import {
 } from "../persistence/memory/index.js";
 import { DEFAULT_ACCOUNTS, seedDefaults } from "../shared/seed.js";
 import { seedUseCases } from "../tokenization/use-cases.js";
+import { completeDueDiligence } from "./dev-helpers.js";
 
 const BUYER_WALLET = DEFAULT_ACCOUNTS[4]!.address; // "EcoFund Capital" — carbon.buyer's wallet
 const TREASURY = DEFAULT_ACCOUNTS[3]!.address;     // "Treasury" — will hold the minted tokens
@@ -90,6 +91,12 @@ async function main(): Promise<void> {
   // Per-use-case roster seeded by seedDefaults — password is "carbon123" for all.
   const adminToken = await login(app, "carbon.admin@tokenlayer.dev", "carbon123");
   const buyerToken = await login(app, "carbon.buyer@tokenlayer.dev", "carbon123");
+  // `adminToken` (carbon.admin) is the CREATOR of every asset issued below —
+  // review-decision refuses a creator deciding their own asset, so a
+  // distinct PlatformAdmin decides instead (review-decision lets any
+  // PlatformAdmin decide any asset's review, not only one whose use case
+  // lacks a UseCaseAdmin — see that route's own comment).
+  const deciderToken = await login(app, "admin2@tokenlayer.dev", "admin123");
 
   section("MARKETPLACE BUY + CBDC PAYMENT (DvP)");
 
@@ -114,8 +121,14 @@ async function main(): Promise<void> {
       treasuryAccount: TREASURY,
     },
   });
-  check("Admin issues asset with sale terms (201)", issue.status === 201);
+  check("Admin issues asset with sale terms (202, pending review)", issue.status === 202);
   const assetId = issue.body.asset?.id as string;
+  // Every new asset starts pending_approval — complete the due-diligence
+  // review (as carbon.admin, who created it; decided by a distinct
+  // PlatformAdmin, since a creator may never decide their own review) before
+  // acting on it, or every allow/mint/buy step below would fail on a
+  // non-active asset.
+  await completeDueDiligence(app, assetId, adminToken, deciderToken);
 
   // ── 2. Admin KYC-allowlists TREASURY + BUYER_WALLET ──────────────────────
   const allowTreasury = await act(app, adminToken, assetId, "allow", { account: TREASURY });
@@ -200,8 +213,9 @@ async function main(): Promise<void> {
       treasuryAccount: TREASURY,
     },
   });
-  check("Admin issues asset2 for NOT_ALLOWLISTED test (201)", issue2.status === 201);
+  check("Admin issues asset2 for NOT_ALLOWLISTED test (202, pending review)", issue2.status === 202);
   const asset2Id = issue2.body.asset?.id as string;
+  await completeDueDiligence(app, asset2Id, adminToken, deciderToken);
 
   // Allow TREASURY on asset2 but NOT the buyer
   await act(app, adminToken, asset2Id, "allow", { account: TREASURY });

@@ -50,6 +50,7 @@ import {
 } from "../persistence/memory/index.js";
 import { DEFAULT_ACCOUNTS, seedDefaults } from "../shared/seed.js";
 import { seedUseCases } from "../tokenization/use-cases.js";
+import { completeDueDiligence } from "./dev-helpers.js";
 
 const ALICE = DEFAULT_ACCOUNTS[0]!.address; // KYC investor 1
 const BOB = DEFAULT_ACCOUNTS[1]!.address; // KYC investor 2
@@ -92,6 +93,8 @@ async function main(): Promise<void> {
   const app = await buildApp({ useCases, credentialUseCases: new MemoryCredentialUseCaseRepository(), credentialTemplates: new MemoryCredentialUseCaseTemplateRepository(), rbac, engine, users, assets, audit, auditAnchors, accounts, chains, cash, listings, documents: new MemoryDocumentRepository(), cashflows: new MemoryCashflowRepository(), proposals: new MemoryProposalRepository(), organizations, credentials: new MemoryCredentialRepository(), verificationRequests: new MemoryVerificationRequestRepository(), stagedInvoices: new MemoryStagedInvoiceRepository(), apiKeys: new MemoryApiKeyRepository(), passwordResetTokens: new MemoryPasswordResetTokenRepository(), events: new MemoryEventRepository(), webhookEndpoints: new MemoryWebhookEndpointRepository(), webhookDeliveries: new MemoryWebhookDeliveryRepository(), ledgerTransactions: new MemoryLedgerTransactionRepository(), webhooksAllowInsecure: false, secretBox: createSecretBox("22".repeat(32)), mail: new NullMailer(), keystore, didMasterConfigured: true, challenges: createMemoryChallengeStore(), loginKeys: new MemoryLoginKeyRepository(), qrLogin: createMemoryQrLoginStore(), publicWebUrl: "http://localhost:5173", enabledDomains: ["tokenization", "identity"], currencies: loadCurrencies(), jwtSecret: "e2e", publicApiUrl: "http://localhost:4000/api/v1" });
 
   const admin = await login(app, "admin");
+  const goldAdmin = await loginAs(app, "gold.admin@tokenlayer.dev", "gold123");
+  const bondAdmin = await loginAs(app, "bond.admin@tokenlayer.dev", "bond123");
   const evmAvailable = chains.list().some((c) => c.id === "mst" && c.available);
   console.log(`Chains available: ${chains.list().map((c) => c.id).join(", ")}`);
 
@@ -138,8 +141,13 @@ async function main(): Promise<void> {
     chainId: goldChain,
     metadata: { borrower: "R. Sharma", goldWeightGrams: 250, goldPurity: "22K", loanAmountInr: 500000, interestRate: 9.5, maturityDate: "2027-06-21" },
   });
-  check("Issuer onboards the gold loan (metadata validated)", goldIssue.status === 201);
+  check("Issuer onboards the gold loan (metadata validated, pending review)", goldIssue.status === 202);
   const gold = goldIssue.body.asset.id as string;
+  // Every new asset starts pending_approval — complete the due-diligence
+  // review (as the admin who created it, decided by the gold-loan
+  // UseCaseAdmin) before acting on it, or the mint/transfer checks below
+  // would all fail on a non-active asset.
+  await completeDueDiligence(app, gold, admin, goldAdmin);
 
   // KYC the lender treasury + two investors
   for (const acct of [TREASURY, ALICE, BOB]) await act(app, admin, gold, "allow", { account: acct });
@@ -220,9 +228,14 @@ async function main(): Promise<void> {
     chainId: bondChain,
     metadata: { issuer: "Acme Industries Ltd", isin: "INE001A07XYZ", faceValue: 1000, couponRate: 8.5, maturityDate: "2031-06-21", currency: "INR", rating: "AA+" },
   });
-  check("Issuer issues the bond", bondIssue.status === 201);
+  check("Issuer issues the bond (pending review)", bondIssue.status === 202);
   check("Bond recorded as ERC-3643", bondIssue.body.asset.tokenStandard === "ERC-3643");
   const bond = bondIssue.body.asset.id as string;
+  // Every new asset starts pending_approval — complete the due-diligence
+  // review (as the admin who created it, decided by the corporate-bond
+  // UseCaseAdmin) before acting on it, or the identity-gating checks below
+  // would all fail on a non-active asset.
+  await completeDueDiligence(app, bond, admin, bondAdmin);
 
   // identity gating: minting to an un-registered investor must fail
   const preKyc = await act(app, admin, bond, "mint", { to: ALICE, amount: "1000" });
@@ -268,6 +281,14 @@ async function main(): Promise<void> {
 
 async function login(app: FastifyInstance, who: string): Promise<string> {
   const res = await app.inject({ method: "POST", url: "/api/v1/auth/login", payload: { email: `${who}@tokenlayer.dev`, password: `${who}123` } });
+  return res.json().token as string;
+}
+// login()'s `${who}123` password convention only holds for the platform
+// admin ("admin" -> admin123) — the seeded per-use-case UseCaseAdmins below
+// have their OWN prefix-based password ("gold.admin@..." / "gold123", not
+// "gold.admin123"), so they need email+password passed explicitly.
+async function loginAs(app: FastifyInstance, email: string, password: string): Promise<string> {
+  const res = await app.inject({ method: "POST", url: "/api/v1/auth/login", payload: { email, password } });
   return res.json().token as string;
 }
 async function post(app: FastifyInstance, url: string, token: string, payload: unknown) {

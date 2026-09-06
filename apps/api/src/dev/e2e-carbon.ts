@@ -55,6 +55,7 @@ import {
 } from "../persistence/memory/index.js";
 import { DEFAULT_ACCOUNTS, seedDefaults } from "../shared/seed.js";
 import { seedUseCases } from "../tokenization/use-cases.js";
+import { completeDueDiligence } from "./dev-helpers.js";
 
 const BROKER = DEFAULT_ACCOUNTS[0]!.address; // Alice — KYC'd carbon broker
 const BUYER = DEFAULT_ACCOUNTS[1]!.address; // Bob — KYC'd corporate buyer
@@ -125,8 +126,13 @@ async function main(): Promise<void> {
       creditType: "avoidance",
     },
   });
-  check("Issuer onboards the project & issues the credit (metadata validated)", issue.status === 201);
+  check("Issuer onboards the project & issues the credit (metadata validated, pending review)", issue.status === 202);
   const id = issue.body.asset.id as string;
+  // Every new asset starts pending_approval — complete the due-diligence
+  // review (as the Issuer, decided by the carbon UseCaseAdmin, a different
+  // person) before acting on it, or every mint/allow/transfer below would
+  // fail on a non-active asset.
+  await completeDueDiligence(app, id, issuer, carbonAdmin);
 
   // 2. Issuer KYC-verifies the registry participants (allowlist).
   for (const acct of [PROJECT, BROKER, BUYER]) await act(app, issuer, id, "allow", { account: acct });
