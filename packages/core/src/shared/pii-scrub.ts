@@ -67,6 +67,15 @@ export interface ScrubbableEvent {
 }
 
 /**
+ * The same field-name deny-list `scrubEvent` uses, exposed as a plain
+ * value → value redactor. Used anywhere PII risk exists outside a Sentry
+ * event shape — structured logs and trace attributes, notably.
+ */
+export function redactSensitiveFields<T>(value: T): T {
+  return scrubValue(value, 0) as T;
+}
+
+/**
  * `beforeSend`-style scrub: strips known PII/KYC fields before an error event
  * leaves this process for the error-tracking backend. Belt-and-suspenders on
  * top of `sendDefaultPii: false` and never calling `setUser()` — this is what

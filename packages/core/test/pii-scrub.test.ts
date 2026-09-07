@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { scrubEvent } from "../src/index.js";
+import { redactSensitiveFields, scrubEvent } from "../src/index.js";
 
 describe("scrubEvent", () => {
   it("redacts known PII/KYC fields wherever they appear, nested or not", () => {
@@ -59,5 +59,26 @@ describe("scrubEvent", () => {
     const scrubbed = scrubEvent(event);
     expect(scrubbed.event_id).toBe("abc");
     expect(scrubbed.extra.email).toBe("[Redacted]");
+  });
+});
+
+describe("redactSensitiveFields", () => {
+  it("redacts the same fields scrubEvent does, on a plain object (no Sentry-event shape required)", () => {
+    const input = {
+      email: "alice@example.com",
+      assetName: "Gold Bar #12",
+      nested: { kyc: { panNumber: "ABCDE1234F" }, useCaseKey: "carbon-credit" },
+    };
+    const out = redactSensitiveFields(input);
+    expect(out.email).toBe("[Redacted]");
+    expect(out.assetName).toBe("Gold Bar #12");
+    expect((out.nested as Record<string, unknown>).kyc).toBe("[Redacted]");
+    expect((out.nested as Record<string, unknown>).useCaseKey).toBe("carbon-credit");
+  });
+
+  it("leaves non-object values (primitives, arrays of primitives) untouched", () => {
+    expect(redactSensitiveFields("hello")).toBe("hello");
+    expect(redactSensitiveFields(42)).toBe(42);
+    expect(redactSensitiveFields(null)).toBe(null);
   });
 });
