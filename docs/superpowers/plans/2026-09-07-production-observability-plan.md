@@ -449,11 +449,22 @@ export const ledgerRpcDuration = new Histogram({
  * uses gRPC), so a transport-level approach would need separate handling per
  * family. This is transport-agnostic by construction.
  */
+// The fixed method list from the LedgerAdapter interface (packages/core/src/shared/types.ts:100).
+// NOT Object.keys(adapter) — every implementation (EvmLedgerAdapter included) defines these as
+// ordinary class methods on the prototype, not instance-field arrow functions, so Object.keys()
+// on an instance would enumerate none of them (only own fields like chainId/family) and silently
+// wrap nothing.
+const LEDGER_ADAPTER_METHODS = [
+  "deployAsset", "mint", "transfer", "burn", "balanceOf", "totalSupply",
+  "mintToken", "transferToken", "burnToken", "ownerOf", "tokensOf",
+  "setFrozen", "setAllowed", "isFrozen", "isAllowed", "anchor", "getReceipt",
+] as const;
+
 export function instrumentLedgerAdapter(adapter: LedgerAdapter): LedgerAdapter {
   const wrapped: Record<string, unknown> = { chainId: adapter.chainId, family: adapter.family };
-  for (const key of Object.keys(adapter) as (keyof LedgerAdapter)[]) {
+  for (const key of LEDGER_ADAPTER_METHODS) {
     const value = adapter[key];
-    if (typeof value !== "function") continue;
+    if (typeof value !== "function") continue; // getReceipt is optional — absent on simulated/Fabric/Canton adapters
     wrapped[key] = async (...args: unknown[]) => {
       const stop = ledgerRpcDuration.startTimer({ chain: adapter.chainId, operation: key });
       try {
@@ -759,13 +770,17 @@ receivers:
         require_tls: true
 ```
 
-Alertmanager does not expand `${VAR}` in its config file natively — it is rendered at container start via envsubst in the compose overlay (Task 11 wires this: the container's entrypoint runs `envsubst < /etc/alertmanager/alertmanager.yml.template > /etc/alertmanager/alertmanager.yml` before starting Alertmanager, so name this file `alertmanager.yml.template` instead):
+Alertmanager does not expand `${VAR}` in its config file natively, and its official image has no package manager to install `envsubst` into at container start — so this is rendered on the HOST once per deploy, before `docker compose up` (Task 11 wires the compose file to mount the already-rendered output, never the template, and documents this render step in its own header comment). Name this file `alertmanager.yml.template`, not `alertmanager.yml`:
 
 Rename the file to `deploy/observability/alertmanager.yml.template` (same content as above).
 
 - [ ] **Step 4: Verify the Alertmanager config template's structure is valid**
 
-Run: `envsubst < deploy/observability/alertmanager.yml.template > /tmp/alertmanager.yml && SLACK_WEBHOOK_URL=https://example.invalid ALERTMANAGER_ALERT_EMAIL=a@example.com ALERTMANAGER_SMTP_FROM=a@example.com ALERTMANAGER_SMTP_HOST=smtp:587 ALERTMANAGER_SMTP_USER=u ALERTMANAGER_SMTP_PASS=p envsubst < deploy/observability/alertmanager.yml.template > /tmp/alertmanager.yml && docker run --rm -v /tmp/alertmanager.yml:/etc/alertmanager/alertmanager.yml prom/alertmanager:latest amtool check-config /etc/alertmanager/alertmanager.yml`
+```bash
+SLACK_WEBHOOK_URL=https://example.invalid ALERTMANAGER_ALERT_EMAIL=a@example.com ALERTMANAGER_SMTP_FROM=a@example.com ALERTMANAGER_SMTP_HOST=smtp:587 ALERTMANAGER_SMTP_USER=u ALERTMANAGER_SMTP_PASS=p \
+  envsubst < deploy/observability/alertmanager.yml.template > /tmp/alertmanager.yml
+docker run --rm -v /tmp/alertmanager.yml:/etc/alertmanager/alertmanager.yml prom/alertmanager:latest amtool check-config /etc/alertmanager/alertmanager.yml
+```
 Expected: `Checking '/etc/alertmanager/alertmanager.yml'  SUCCESS`.
 
 - [ ] **Step 5: Commit**
@@ -1570,7 +1585,7 @@ git commit -m "feat(observability): Grafana provisioning (datasources + 3 starte
 
 **Interfaces:**
 - Consumes: `deploy/observability/{alert-rules.yml, alertmanager.yml.template, prometheus.*.yml, promtail.yml, grafana/...}` (Tasks 5, 9, 10).
-- Consumes env vars: `PROMETHEUS_CONFIG_FILE` (default `prometheus.main.yml`), `OBSERVABILITY_NETWORK` (required, no default), `SLACK_WEBHOOK_URL`, `ALERTMANAGER_ALERT_EMAIL`, `ALERTMANAGER_SMTP_FROM`, `ALERTMANAGER_SMTP_HOST`, `ALERTMANAGER_SMTP_USER`, `ALERTMANAGER_SMTP_PASS` (all required, no default — Alertmanager's own config template already assumes them, see Task 5).
+- Consumes env vars: `PROMETHEUS_CONFIG_FILE` (default `prometheus.main.yml`), `OBSERVABILITY_NETWORK` (required, no default). `SLACK_WEBHOOK_URL`/`ALERTMANAGER_ALERT_EMAIL`/`ALERTMANAGER_SMTP_*` are consumed at the host-side `envsubst` render step (Task 5), not by `docker compose up` directly — the compose file only ever reads the already-rendered `alertmanager.yml`.
 
 - [ ] **Step 1: Write docker-compose.observability.yml**
 
@@ -1579,6 +1594,18 @@ Create `docker-compose.observability.yml`:
 ```yaml
 # Observability overlay — Prometheus, Grafana, Loki, Promtail, Tempo, Alertmanager.
 # Never runs standalone: always combined with exactly one app-stack compose file.
+#
+# Alertmanager's config carries secrets (Slack webhook, SMTP password) that
+# Alertmanager itself cannot expand from ${VAR} — and its official image has
+# no package manager to install envsubst into at container start. Render it
+# on the host BEFORE `up`, once per deploy, from the required env vars:
+#
+#   SLACK_WEBHOOK_URL=... ALERTMANAGER_ALERT_EMAIL=... ALERTMANAGER_SMTP_FROM=... \
+#   ALERTMANAGER_SMTP_HOST=... ALERTMANAGER_SMTP_USER=... ALERTMANAGER_SMTP_PASS=... \
+#     envsubst < deploy/observability/alertmanager.yml.template > deploy/observability/alertmanager.yml
+#
+# deploy/observability/alertmanager.yml (the rendered file, not the
+# .template) is gitignored — it holds real secrets once rendered.
 #
 #   OBSERVABILITY_NETWORK=tokenlayer-main \
 #     docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d
@@ -1600,17 +1627,11 @@ services:
 
   alertmanager:
     image: prom/alertmanager:latest
-    environment:
-      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:?Set SLACK_WEBHOOK_URL for alert delivery}
-      ALERTMANAGER_ALERT_EMAIL: ${ALERTMANAGER_ALERT_EMAIL:?Set ALERTMANAGER_ALERT_EMAIL}
-      ALERTMANAGER_SMTP_FROM: ${ALERTMANAGER_SMTP_FROM:?Set ALERTMANAGER_SMTP_FROM}
-      ALERTMANAGER_SMTP_HOST: ${ALERTMANAGER_SMTP_HOST:?Set ALERTMANAGER_SMTP_HOST}
-      ALERTMANAGER_SMTP_USER: ${ALERTMANAGER_SMTP_USER:?Set ALERTMANAGER_SMTP_USER}
-      ALERTMANAGER_SMTP_PASS: ${ALERTMANAGER_SMTP_PASS:?Set ALERTMANAGER_SMTP_PASS}
     volumes:
-      - ./deploy/observability/alertmanager.yml.template:/etc/alertmanager/alertmanager.yml.template:ro
+      # The RENDERED file (see the header comment above) — not the .template.
+      - ./deploy/observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager-data:/alertmanager
-    entrypoint: ["sh", "-c", "apk add --no-cache gettext >/dev/null 2>&1 || true; envsubst < /etc/alertmanager/alertmanager.yml.template > /etc/alertmanager/alertmanager.yml && exec /bin/alertmanager --config.file=/etc/alertmanager/alertmanager.yml --storage.path=/alertmanager"]
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml", "--storage.path=/alertmanager"]
     networks: [obs]
 
   loki:
@@ -1677,17 +1698,25 @@ storage:
       path: /var/tempo/traces
 ```
 
-- [ ] **Step 2: Verify the compose file parses and required env vars are enforced**
+- [ ] **Step 2: Gitignore the rendered Alertmanager config**
+
+Add a line to the repo's root `.gitignore`: `deploy/observability/alertmanager.yml` (the rendered file carries real secrets once produced by the `envsubst` step; only `alertmanager.yml.template` is tracked).
+
+- [ ] **Step 3: Verify the compose file parses, and that OBSERVABILITY_NETWORK's required-var guard works**
 
 Run: `docker compose -f docker-compose.yml -f docker-compose.observability.yml config --quiet`
-Expected: exits nonzero with a message naming the first missing required variable (`OBSERVABILITY_NETWORK` or one of the Alertmanager vars) — this is the correct behavior, proving the `:?` guards work. Then run again with all of them set to placeholder values:
-`OBSERVABILITY_NETWORK=tokenlayer-main SLACK_WEBHOOK_URL=https://example.invalid ALERTMANAGER_ALERT_EMAIL=a@example.com ALERTMANAGER_SMTP_FROM=a@example.com ALERTMANAGER_SMTP_HOST=smtp:587 ALERTMANAGER_SMTP_USER=u ALERTMANAGER_SMTP_PASS=p docker compose -f docker-compose.yml -f docker-compose.observability.yml config --quiet`
-Expected: exits 0.
+Expected: exits nonzero, naming `OBSERVABILITY_NETWORK` as missing — proving the `:?` guard works. This will also fail because `deploy/observability/alertmanager.yml` doesn't exist yet (only the `.template` does) — render it first with placeholder values, then verify:
+```bash
+SLACK_WEBHOOK_URL=https://example.invalid ALERTMANAGER_ALERT_EMAIL=a@example.com ALERTMANAGER_SMTP_FROM=a@example.com ALERTMANAGER_SMTP_HOST=smtp:587 ALERTMANAGER_SMTP_USER=u ALERTMANAGER_SMTP_PASS=p \
+  envsubst < deploy/observability/alertmanager.yml.template > deploy/observability/alertmanager.yml
+OBSERVABILITY_NETWORK=tokenlayer-main docker compose -f docker-compose.yml -f docker-compose.observability.yml config --quiet
+```
+Expected: exits 0. Delete the rendered placeholder file afterward (`rm deploy/observability/alertmanager.yml`) — it must not be committed (Step 2's gitignore entry prevents `git add` from picking it up regardless, but don't leave secrets-shaped placeholder content sitting in the worktree unnecessarily).
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add docker-compose.observability.yml deploy/observability/tempo.yml
+git add docker-compose.observability.yml deploy/observability/tempo.yml .gitignore
 git commit -m "feat(observability): docker-compose overlay wiring Prometheus, Grafana, Loki, Promtail, Tempo, Alertmanager"
 ```
 
@@ -1701,7 +1730,9 @@ No new files. This task brings the overlay up against the running main stack and
 
 ```bash
 docker compose -f docker-compose.yml up -d --build
-OBSERVABILITY_NETWORK=tokenlayer-main SLACK_WEBHOOK_URL=<a real or throwaway webhook URL> ALERTMANAGER_ALERT_EMAIL=you@example.com ALERTMANAGER_SMTP_FROM=alerts@example.com ALERTMANAGER_SMTP_HOST=<smtp host:port> ALERTMANAGER_SMTP_USER=<user> ALERTMANAGER_SMTP_PASS=<pass> docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d
+SLACK_WEBHOOK_URL=<a real or throwaway webhook URL> ALERTMANAGER_ALERT_EMAIL=you@example.com ALERTMANAGER_SMTP_FROM=alerts@example.com ALERTMANAGER_SMTP_HOST=<smtp host:port> ALERTMANAGER_SMTP_USER=<user> ALERTMANAGER_SMTP_PASS=<pass> \
+  envsubst < deploy/observability/alertmanager.yml.template > deploy/observability/alertmanager.yml
+OBSERVABILITY_NETWORK=tokenlayer-main docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d
 ```
 
 - [ ] **Step 2: Confirm Prometheus is scraping the API**
