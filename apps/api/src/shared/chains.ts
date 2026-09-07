@@ -9,6 +9,7 @@ import {
   loadArtifact,
 } from "@tokenlayer/adapters";
 import type { ChainFamily, LedgerAdapter, TokenStandard } from "@tokenlayer/core";
+import { instrumentLedgerAdapter } from "./metrics.js";
 
 const CHAINS_FILE = fileURLToPath(new URL("../../../../config/chains.json", import.meta.url));
 
@@ -168,7 +169,7 @@ export function buildChainRegistry(env: Env = process.env): ChainRegistry {
     resolveAdapter(chainId: string): LedgerAdapter {
       const adapter = adapters.get(chainId);
       if (!adapter) throw new Error(`chain '${chainId}' is not configured`);
-      return adapter;
+      return instrumentLedgerAdapter(adapter);
     },
     list: () => infos,
     async probe(chainId: string): Promise<ChainProbeResult> {
