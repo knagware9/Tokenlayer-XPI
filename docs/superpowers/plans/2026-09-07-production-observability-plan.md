@@ -461,11 +461,11 @@ const LEDGER_ADAPTER_METHODS = [
 ] as const;
 
 export function instrumentLedgerAdapter(adapter: LedgerAdapter): LedgerAdapter {
-  const wrapped: Record<string, unknown> = { chainId: adapter.chainId, family: adapter.family };
+  const wrappedMethods = new Map<string, (...args: unknown[]) => Promise<unknown>>();
   for (const key of LEDGER_ADAPTER_METHODS) {
     const value = adapter[key];
     if (typeof value !== "function") continue; // getReceipt is optional — absent on simulated/Fabric/Canton adapters
-    wrapped[key] = async (...args: unknown[]) => {
+    wrappedMethods.set(key, async (...args: unknown[]) => {
       const stop = ledgerRpcDuration.startTimer({ chain: adapter.chainId, operation: key });
       try {
         return await (value as (...a: unknown[]) => unknown).apply(adapter, args);
@@ -475,11 +475,25 @@ export function instrumentLedgerAdapter(adapter: LedgerAdapter): LedgerAdapter {
       } finally {
         stop();
       }
-    };
+    });
   }
-  return wrapped as unknown as LedgerAdapter;
+  // A Proxy, not a plain-object copy: some call sites reach past the LedgerAdapter
+  // interface — ledger-replay.ts does `adapter instanceof SimulatedAdapter` and calls
+  // the simulated-only `.hydrate()`. A copy would break both: every adapter would stop
+  // being `instanceof` its concrete class, and any adapter-specific member not in
+  // LEDGER_ADAPTER_METHODS would silently vanish. The Proxy forwards everything except
+  // the enumerated methods straight to the real adapter, so identity and any
+  // adapter-specific extras pass through untouched.
+  return new Proxy(adapter, {
+    get(target, prop, receiver) {
+      if (typeof prop === "string" && wrappedMethods.has(prop)) return wrappedMethods.get(prop);
+      return Reflect.get(target, prop, receiver);
+    },
+  });
 }
 ```
+
+**Correction, ruled during implementation (see the SDD ledger for Task 3):** the Proxy-based construction above replaces an earlier plain-object-copy draft — the copy would have broken `apps/api/src/tokenization/ledger-replay.ts`'s `adapter instanceof SimulatedAdapter` check and its simulated-only `.hydrate()` call, a real regression caught by that file's own pre-existing test. This is what actually ships; Task 8 (below) extends this Proxy-based version, not the plain-object one.
 
 In `apps/api/src/shared/chains.ts`, add the import:
 
@@ -1285,10 +1299,10 @@ it("opens a ledger.<operation> span alongside the metric", async () => {
 Run: `pnpm --filter @tokenlayer/api test -- metrics`
 Expected: FAIL — no `ledger.balanceOf` span yet.
 
-Modify `instrumentLedgerAdapter` in `apps/api/src/shared/metrics.ts`: add the import `import { withSpan } from "./tracing.js";` and change the wrapped-method body from:
+Modify `instrumentLedgerAdapter` in `apps/api/src/shared/metrics.ts` (the real, Proxy-based version Task 3 shipped — see that task's plan text for the full current file): add the import `import { withSpan } from "./tracing.js";` and change the wrapped-method body from:
 
 ```ts
-    wrapped[key] = async (...args: unknown[]) => {
+    wrappedMethods.set(key, async (...args: unknown[]) => {
       const stop = ledgerRpcDuration.startTimer({ chain: adapter.chainId, operation: key });
       try {
         return await (value as (...a: unknown[]) => unknown).apply(adapter, args);
@@ -1298,13 +1312,13 @@ Modify `instrumentLedgerAdapter` in `apps/api/src/shared/metrics.ts`: add the im
       } finally {
         stop();
       }
-    };
+    });
 ```
 
 to:
 
 ```ts
-    wrapped[key] = async (...args: unknown[]) => {
+    wrappedMethods.set(key, async (...args: unknown[]) => {
       const stop = ledgerRpcDuration.startTimer({ chain: adapter.chainId, operation: key });
       return withSpan(`ledger.${key}`, { chain: adapter.chainId, operation: key }, async () => {
         try {
@@ -1316,8 +1330,10 @@ to:
           stop();
         }
       });
-    };
+    });
 ```
+
+The Proxy wrapper itself (the `new Proxy(adapter, { get(...) {...} })` at the end of the function) is unchanged by this task — only the body stored in `wrappedMethods` changes.
 
 - [ ] **Step 10: Run test to verify it passes**
 
