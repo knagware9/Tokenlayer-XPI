@@ -79,6 +79,11 @@ export function assetReviewDecisionEmail(a: { assetName: string; decision: "appr
   return { subject: `Your asset "${a.assetName}" was ${verb}`, text, html: wrap(htmlParts) };
 }
 
+export function assetSubmittedForReviewEmail(a: { assetName: string }): EmailContent {
+  const text = `"${a.assetName}" was submitted for due-diligence review and is waiting for your decision.`;
+  return { subject: `"${a.assetName}" is waiting for review`, text, html: wrap([esc(text)]) };
+}
+
 export function orgApprovedEmail(a: { orgName: string; loginUrl: string }): EmailContent {
   const text = `${a.orgName} has been approved on TokenLayer.\n\nSign in at ${a.loginUrl}`;
   return {

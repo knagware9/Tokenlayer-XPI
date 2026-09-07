@@ -45,7 +45,7 @@ import { actorOf, claimsOf, contextOf, isPositiveIntString, machinePrincipal, no
 import { NO_USE_CASE, canAdministerUser, BCRYPT_ROUNDS, LOGIN_WINDOW_MS, MAX_DOC_BYTES, DOC_UPLOAD_BODY_LIMIT, ALLOWED_DOC_TYPES, storeUploadedDocument, orgOwnsDocument, decodeVcJti, devKeyFromSeed, orgView, orgCapabilityMissing } from "./common.js";
 import type { BrandLogoErrorCode, RouteContext } from "./context.js";
 import { createProposalAndNotify } from "../../shared/proposal-notify.js";
-import { assetReviewDecisionEmail } from "../../mail/templates.js";
+import { assetReviewDecisionEmail, assetSubmittedForReviewEmail } from "../../mail/templates.js";
 
 /**
  * ONE WORDING FOR ONE FACT. Issuance and `setPrice` refuse for the identical
@@ -848,12 +848,33 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
       const won = await deps.assets.casStatus(asset.id, "rejected", "pending_approval");
       if (won) {
         await deps.assets.setDueDiligence(asset.id, { rejectionReason: null });
+        await notifyUseCaseAdminsOfSubmission(asset.useCaseKey, asset.name);
       }
       const after = await deps.assets.get(asset.id);
       return reply.code(200).send({ id: after!.id, status: after!.status });
     }
+    if (asset.status === "pending_approval") {
+      await notifyUseCaseAdminsOfSubmission(asset.useCaseKey, asset.name);
+    }
     return reply.code(200).send({ id: asset.id, status: asset.status });
   });
+
+  // The reviewer only learns an asset needs a decision by checking the
+  // Review Assets screen — this is the one proactive nudge, mirroring
+  // assetReviewDecisionEmail's own best-effort send (logged, never thrown,
+  // so a mail hiccup never blocks the submission itself). Every UseCaseAdmin
+  // scoped to the use case is notified, not just one — this codebase has no
+  // concept of "the" UseCaseAdmin for a use case, and a use case can (and
+  // the demo rosters do) have exactly one, making the distinction moot in
+  // practice while still being correct if a use case ever has several.
+  async function notifyUseCaseAdminsOfSubmission(useCaseKey: string, assetName: string): Promise<void> {
+    const admins = (await deps.users.list(useCaseKey)).filter((u) => u.role === "UseCaseAdmin" && u.active);
+    const notice = assetSubmittedForReviewEmail({ assetName });
+    for (const admin of admins) {
+      await deps.mail.send(admin.email, notice.subject, notice.text, notice.html).catch((err) =>
+        app.log.error({ err, useCaseKey, assetName }, "[mail] asset-submitted-for-review send failed"));
+    }
+  }
 
   app.post("/assets/:id/review-decision", { schema: S.decideAssetReview, ...auth }, async (request, reply) => {
     if (machinePrincipal(request)) return reply.code(403).send({ error: "MACHINE_PRINCIPAL", message: "an API key may not decide an asset review" });
@@ -882,6 +903,19 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
     // decide must never widen self-approval.
     if (asset.createdBy === claims.id) {
       return reply.code(403).send({ error: "FORBIDDEN", message: "you cannot decide a review of an asset you created" });
+    }
+    // A read-only early exit, not a gate: if the snapshot fetched at the top
+    // of this handler already shows a non-pending asset, this request is
+    // certain to fail the CAS below regardless of the body's validity, so
+    // report that (409, the more specific problem) before field validation
+    // (400) — restores the precedence the CAS introduced an unannounced
+    // change to. This never substitutes for the real CAS check below (which
+    // re-reads the current state atomically at the moment of transition) —
+    // it only ever short-circuits a request already doomed by its own stale
+    // snapshot, so it cannot reintroduce the double-mint race the CAS exists
+    // to close.
+    if (asset.status !== "pending_approval") {
+      return reply.code(409).send({ error: "NOT_PENDING", message: `asset is not pending_approval` });
     }
     const b = request.body as { decision: "approved" | "rejected"; riskTier?: "low" | "medium" | "high"; rejectionReason?: string };
     if (b.decision === "rejected" && !b.rejectionReason) {

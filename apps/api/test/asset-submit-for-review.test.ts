@@ -104,4 +104,44 @@ describe("POST /assets/:id/submit-for-review", () => {
     const activated = await h.assets.get(assetId);
     expect(activated?.status).toBe("active");
   });
+
+  it("notifies every UseCaseAdmin of the use case when an asset is submitted for review", async () => {
+    const h = await buildTestAppWithRepos();
+    const platform = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const assetId = await issueRaw(h, platform);
+    await h.app.inject({
+      method: "POST", url: `${V1}/assets/${assetId}/diligence/documents`, headers: auth(platform),
+      payload: { slot: "prospectus", contentType: "application/pdf", dataBase64: Buffer.from("%PDF-1.4 x").toString("base64") },
+    });
+    const res = await h.app.inject({ method: "POST", url: `${V1}/assets/${assetId}/submit-for-review`, headers: auth(platform) });
+    expect(res.statusCode).toBe(200);
+    expect(h.mail.sent).toHaveLength(1);
+    expect(h.mail.sent[0].to).toBe("carbon.admin@tokenlayer.dev");
+    expect(h.mail.sent[0].subject).toContain("waiting for review");
+  });
+
+  it("notifies again on a resubmission after rejection, not just the first submission", async () => {
+    const h = await buildTestAppWithRepos();
+    const platform = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const carbonAdmin = await loginAs(h.app, "carbon.admin@tokenlayer.dev", "carbon123");
+    const assetId = await issueRaw(h, platform);
+    await h.app.inject({
+      method: "POST", url: `${V1}/assets/${assetId}/diligence/documents`, headers: auth(platform),
+      payload: { slot: "prospectus", contentType: "application/pdf", dataBase64: Buffer.from("%PDF-1.4 x").toString("base64") },
+    });
+    await h.app.inject({ method: "POST", url: `${V1}/assets/${assetId}/submit-for-review`, headers: auth(platform) });
+    await h.app.inject({
+      method: "POST", url: `${V1}/assets/${assetId}/review-decision`, headers: auth(carbonAdmin),
+      payload: { decision: "rejected", rejectionReason: "needs work" },
+    });
+    await h.app.inject({
+      method: "POST", url: `${V1}/assets/${assetId}/diligence/documents`, headers: auth(platform),
+      payload: { slot: "prospectus", contentType: "application/pdf", dataBase64: Buffer.from("%PDF-1.4 fixed").toString("base64") },
+    });
+    await h.app.inject({ method: "POST", url: `${V1}/assets/${assetId}/submit-for-review`, headers: auth(platform) });
+    // Once for the first submission, once for the resubmission — the reviewer
+    // gets notified both times a decision is actually needed, not just once.
+    const submittedMail = h.mail.sent.filter((m) => m.subject.includes("waiting for review"));
+    expect(submittedMail).toHaveLength(2);
+  });
 });

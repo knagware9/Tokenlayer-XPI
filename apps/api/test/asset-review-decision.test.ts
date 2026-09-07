@@ -177,4 +177,17 @@ describe("POST /assets/:id/review-decision", () => {
     expect(res.statusCode).toBe(409);
     expect(res.json().error).toBe("NOT_PENDING");
   });
+
+  it("a non-pending asset reports NOT_PENDING (409) even when the body is also invalid — status wins over validation", async () => {
+    const h = await buildTestAppWithRepos();
+    const platform = await loginAs(h.app, "admin@tokenlayer.dev", "admin123");
+    const assetId = await submittedAsset(h, platform);
+    const carbonAdmin = await loginAs(h.app, "carbon.admin@tokenlayer.dev", "carbon123");
+    await h.app.inject({ method: "POST", url: `${V1}/assets/${assetId}/review-decision`, headers: auth(carbonAdmin), payload: { decision: "approved", riskTier: "low" } });
+    // Now active. Decide again with an INVALID body (approved, no riskTier) —
+    // both the status check and RISK_TIER_REQUIRED would fire; 409 must win.
+    const res = await h.app.inject({ method: "POST", url: `${V1}/assets/${assetId}/review-decision`, headers: auth(carbonAdmin), payload: { decision: "approved" } });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe("NOT_PENDING");
+  });
 });
