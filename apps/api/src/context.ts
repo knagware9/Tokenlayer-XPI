@@ -76,6 +76,8 @@ export interface AppDeps {
    * reverse).
    */
   webhooksAllowInsecure: boolean;
+  /** Bearer token required on GET /metrics. Absent ⇒ /metrics is open (dev/demo default). */
+  metricsToken?: string;
   /**
    * Endpoint signing secrets at rest. REQUIRED, and on AppDeps rather than
    * constructed per call site, because BOTH halves of the system must use the

@@ -201,6 +201,26 @@ describe("documented security matches the gate that actually runs", () => {
  * dispatcher tests that never ran, and nothing said so. So the parser's
  * coverage is itself asserted, in both directions.
  */
+/**
+ * Routes with no `schema: S.<name>` reference AT ALL — not merely
+ * undocumented, orphaned from the schema module entirely.
+ *
+ * Task 2's liveness/readiness/metrics probes (`http/routes/health.ts`) are the
+ * only members: `route-decls.ts` reads every file in `src/http/routes` (health.ts
+ * included, now that it lives there), but these three routes are registered
+ * outside `/api/v1` with `schema: { hide: true }` — the same escape
+ * `/openapi.json` uses in `src/app.ts`, which this parser cannot see because
+ * that route is not in `routes/` at all. They have no JSON request/response
+ * contract to name (`/metrics` returns the Prometheus text exposition format),
+ * so there is nothing an `S.<name>` export would say that health.ts's own doc
+ * comment doesn't already say.
+ */
+const NO_SCHEMA_ROUTES: Record<string, string> = {
+  "GET /health": "liveness probe outside /api/v1; no JSON contract to publish",
+  "GET /ready": "readiness probe outside /api/v1; same posture as /health",
+  "GET /metrics": "Prometheus scrape endpoint; plain-text exposition format, not a JSON API operation",
+};
+
 describe("the consistency check has no blind spot", () => {
   it("the parser reads EVERY route declaration in routes.ts", () => {
     const parsed = new Set(declaredRoutes().map(routeKey));
@@ -217,9 +237,18 @@ describe("the consistency check has no blind spot", () => {
 
   it("every declaration names a schema that exists in schemas.ts", () => {
     const orphans = declaredRoutes()
+      .filter((r) => !(routeKey(r) in NO_SCHEMA_ROUTES))
       .filter((r) => r.schema === null || !S[r.schema])
       .map((r) => `${routeKey(r)} → ${r.schema === null ? "no schema: at all" : `missing S.${r.schema}`}`);
     expect(orphans, `routes with nothing to document: ${orphans.join(", ")}`).toEqual([]);
+  });
+
+  it("the no-schema-route list has no stale entries", () => {
+    // Same discipline as every other exemption list in this suite: an
+    // exemption nobody needs any more is an exemption nobody re-examines.
+    const live = new Set(declaredRoutes().map(routeKey));
+    const stale = Object.keys(NO_SCHEMA_ROUTES).filter((k) => !live.has(k));
+    expect(stale, `no longer a route in routes.ts — drop from NO_SCHEMA_ROUTES: ${stale.join(", ")}`).toEqual([]);
   });
 
   it("no schema object is shared by a scoped and an unscoped route", () => {

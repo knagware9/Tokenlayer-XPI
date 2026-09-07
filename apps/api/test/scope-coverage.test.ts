@@ -46,6 +46,11 @@ import { declaredRoutes, routeKey as key } from "./route-decls.js";
  * as reviewable as adding the gate itself.
  */
 const DELIBERATELY_UNSCOPED: Record<string, string> = {
+  // --- infrastructure: outside /api/v1, no principal, no scope model at all -
+  "GET /health": "liveness probe registered outside /api/v1 (see http/routes/health.ts); no principal exists to scope",
+  "GET /ready": "readiness probe; same posture as /health",
+  "GET /metrics": "Prometheus scrape endpoint; gated (when METRICS_TOKEN is set) by a bearer-token comparison, not the API-key scope model — an operator's token, not a tenant's key",
+
   // --- public: no principal at all, so there is no key to narrow ------------
   "POST /auth/login": "public; a key cannot authenticate here and a service user is refused outright",
   "POST /auth/forgot-password": "public; no principal exists yet — the whole point is to reach an account that can't authenticate",

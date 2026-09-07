@@ -149,6 +149,7 @@ async function main(): Promise<void> {
     webhookDeliveries,
     ledgerTransactions,
     webhooksAllowInsecure: env.webhooksAllowInsecure,
+    metricsToken: env.metricsToken,
     // ONE box, shared by the registration routes (which seal a freshly minted
     // secret) and the dispatcher below (which opens it to sign). A DEDICATED key
     // where the operator has set one; falls back to the DID key so an existing

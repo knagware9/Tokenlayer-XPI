@@ -36,16 +36,27 @@ import { declaredRoutes, routeKey } from "./route-decls.js";
 /**
  * Routes deliberately absent from the published document, with the reason.
  *
- * EMPTY, and that is the point: today every route in `routes.ts` is published.
  * An entry here is a route integrators cannot discover, which needs an argument
  * — not a flag. The staleness check below keeps it from accumulating fiction.
+ *
+ * The three entries are Task 2's liveness/readiness/metrics endpoints
+ * (`http/routes/health.ts`): they are registered directly on the raw Fastify
+ * instance, outside the `/api/v1` prefix this test's `documentedPath()` always
+ * assumes, for orchestrators and Prometheus that cannot do a login flow. They
+ * have no JSON request/response contract — `/metrics` returns the Prometheus
+ * text exposition format — so there is nothing an OpenAPI operation would say
+ * that isn't already in this file's own comment.
  *
  * (`/openapi.json` is not a candidate: it is registered on the docs plugin in
  * `src/app.ts`, not in `routes.ts`, so it is not a declaration this test reads.
  * Hiding the document from itself is the one use of the flag that is obviously
  * right, and it is out of this test's scope by construction.)
  */
-const HIDDEN_ROUTES: Record<string, string> = {};
+const HIDDEN_ROUTES: Record<string, string> = {
+  "GET /health": "liveness probe outside /api/v1; no principal, no JSON contract to publish",
+  "GET /ready": "readiness probe outside /api/v1; same posture as /health",
+  "GET /metrics": "Prometheus scrape endpoint outside /api/v1; plain-text exposition format, not a JSON API operation",
+};
 
 /** The document path an OpenAPI generator gives a Fastify declaration. */
 const documentedPath = (path: string): string => `${V1}${path.replace(/:(\w+)/g, "{$1}")}`;

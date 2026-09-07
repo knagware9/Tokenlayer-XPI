@@ -9,7 +9,9 @@ import { applyDomainGate } from "./http/route-domains.js";
 import { components } from "./http/schemas/index.js";
 import { guardRepositories } from "./persistence/model-domains.js";
 import { registerRoutes } from "./http/routes/index.js";
+import { registerHealthRoutes } from "./http/routes/health.js";
 import { errorHandler, requirePrincipal } from "./http/support.js";
+import { httpRequestDuration, httpRequestsTotal } from "./shared/metrics.js";
 
 /** JWT lifetime — tokens expire so a leaked/stale token is not valid forever. */
 const TOKEN_TTL_MS = 1000 * 60 * 60 * 8; // 8 hours
@@ -62,6 +64,14 @@ export async function buildApp(rawDeps: AppDeps): Promise<FastifyInstance> {
     return payload;
   });
 
+  // HTTP request metrics — every response, gated route or not.
+  app.addHook("onResponse", async (request, reply) => {
+    const route = request.routeOptions?.url ?? "unmatched";
+    const labels = { method: request.method, route, status_code: String(reply.statusCode) };
+    httpRequestsTotal.inc(labels);
+    httpRequestDuration.observe(labels, reply.elapsedTime / 1000);
+  });
+
   // ONE principal preHandler for the whole app: it owns the per-key rate-limit
   // and failed-attempt counters, so the docs gate below and every /api/v1 route
   // must share this instance rather than each build its own.
@@ -100,6 +110,8 @@ export async function buildApp(rawDeps: AppDeps): Promise<FastifyInstance> {
     await docs.register(swaggerUi, { routePrefix: "/docs" });
     docs.get("/openapi.json", { schema: { hide: true } }, async () => docs.swagger());
   });
+
+  registerHealthRoutes(app, deps);
 
   await app.register(
     async (instance) => {
