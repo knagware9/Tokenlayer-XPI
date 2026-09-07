@@ -51,6 +51,38 @@ describe("invoice register", () => {
     expect((retry.json().results as { status: string }[])[0].status).toBe("skipped");
   });
 
+  it("tokenize → reject → resubmit → approve: the staged row's asset reaches active, not stuck at pending forever", async () => {
+    const app = await buildTestApp();
+    const issuer = await loginAs(app, "m1.issuer@tokenlayer.dev", "m1issuer123");
+    const admin = await loginAs(app, "m1.admin@tokenlayer.dev", "m1admin123");
+    const staged = (await app.inject({ method: "POST", url: `${V1}/use-cases/${KEY}/invoices/import`, headers: { authorization: `Bearer ${issuer}` }, payload: { rows: [row] } })).json().results[0];
+    const tok = (await app.inject({ method: "POST", url: `${V1}/use-cases/${KEY}/invoices/tokenize`, headers: { authorization: `Bearer ${issuer}` }, payload: { ids: [staged.id], chainId: "fabric" } })).json();
+    const assetId = (tok.results as { assetId: string }[])[0].assetId;
+
+    // Reject it — the staged row's own status ("tokenized", meaning "has an
+    // associated asset") never reflects the asset's review state, so the
+    // register itself has nothing to get stuck on; what matters is that the
+    // ASSET can still reach active from here.
+    const prospectus = { slot: "prospectus", contentType: "application/pdf", dataBase64: Buffer.from("%PDF-1.4 x").toString("base64") };
+    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/diligence/documents`, headers: { authorization: `Bearer ${issuer}` }, payload: prospectus });
+    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/submit-for-review`, headers: { authorization: `Bearer ${issuer}` } });
+    const rejected = await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/review-decision`, headers: { authorization: `Bearer ${admin}` }, payload: { decision: "rejected", rejectionReason: "amount looks wrong" } });
+    expect(rejected.statusCode).toBe(200);
+
+    // Resubmit (same prospectus already attached) and approve.
+    const resubmitted = await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/submit-for-review`, headers: { authorization: `Bearer ${issuer}` } });
+    expect(resubmitted.statusCode).toBe(200);
+    const approved = await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/review-decision`, headers: { authorization: `Bearer ${admin}` }, payload: { decision: "approved", riskTier: "low" } });
+    expect(approved.statusCode).toBe(200);
+
+    const asset = (await app.inject({ method: "GET", url: `${V1}/assets/${assetId}`, headers: { authorization: `Bearer ${issuer}` } })).json();
+    expect(asset.status).toBe("active");
+    // The row stays "tokenized" throughout — it was never re-staged, and the
+    // invoice pipeline's own view of it never depended on the asset's status.
+    const stagedRow = (await app.inject({ method: "GET", url: `${V1}/use-cases/${KEY}/invoices?status=tokenized`, headers: { authorization: `Bearer ${issuer}` } })).json();
+    expect(stagedRow.some((r: { id: string; assetId: string }) => r.id === staged.id && r.assetId === assetId)).toBe(true);
+  });
+
   it("delete staged ok, tokenized 409-guarded; foreign-use-case issuer 403", async () => {
     const app = await buildTestApp();
     const issuer = await loginAs(app, "m1.issuer@tokenlayer.dev", "m1issuer123");

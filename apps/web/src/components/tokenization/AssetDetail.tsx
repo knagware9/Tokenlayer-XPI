@@ -243,14 +243,19 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
 
       {error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2">{error}</div>}
 
-      {asset.status === "pending_approval" && (
+      {can(role, "issue") && asset.status === "pending_approval" && (
         <div className="rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-2">
           ⏳ Pending due-diligence review — complete the diligence package below and submit it.
         </div>
       )}
-      {asset.status === "rejected" && (
+      {can(role, "issue") && asset.status === "rejected" && (
         <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2">
           ✕ Review rejected{asset.dueDiligence?.rejectionReason ? ` — ${asset.dueDiligence.rejectionReason}` : ""}. Attach the missing documents and resubmit below.
+        </div>
+      )}
+      {!can(role, "issue") && (asset.status === "pending_approval" || asset.status === "rejected") && (
+        <div className="rounded-lg bg-slate-50 border border-slate-200 text-slate-600 text-sm px-4 py-2">
+          {asset.status === "pending_approval" ? "⏳ This asset is pending due-diligence review." : "✕ This asset's due-diligence review was rejected."}
         </div>
       )}
       {can(role, "issue") && (asset.status === "pending_approval" || asset.status === "rejected") && (
