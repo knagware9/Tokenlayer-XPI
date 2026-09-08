@@ -39,8 +39,30 @@ export async function buildApp(rawDeps: AppDeps): Promise<FastifyInstance> {
     logger: {
       level: env.logLevel,
       formatters: {
+        // `req`/`res`/`err` are excluded from the redaction walk on purpose:
+        // Fastify's own automatic request/response logging passes REAL
+        // FastifyRequest/FastifyReply instances here (method/url/statusCode
+        // etc. are prototype getters, invisible to redactSensitiveFields's
+        // Object.entries()-based walk), and pino only applies its registered
+        // req/res/err serializers to whatever this hook returns — AFTER this
+        // hook runs, not before. Redacting them first silently empties them
+        // to `{}` before the serializer ever sees the real object, so every
+        // request/response log line loses method/url/statusCode entirely.
+        // Fastify's default serializers only ever surface
+        // method/url/host/remoteAddress/remotePort/statusCode (none of which
+        // are PII per the deny-list) and pino's stdSerializers.err surfaces
+        // message/stack/type, so leaving these three keys untouched here
+        // introduces no new PII exposure. Every ad-hoc field from a manual
+        // `app.log.error({email, ...}, "msg")` call is always a plain object
+        // at the call site (never a getter-based class instance), so it still
+        // goes through redactSensitiveFields exactly as before.
         log(obj) {
-          return redactSensitiveFields(obj) as Record<string, unknown>;
+          const { req, res, err, ...rest } = obj as Record<string, unknown>;
+          const redacted = redactSensitiveFields(rest) as Record<string, unknown>;
+          if (req !== undefined) redacted.req = req;
+          if (res !== undefined) redacted.res = res;
+          if (err !== undefined) redacted.err = err;
+          return redacted;
         },
       },
       // Injects trace_id/span_id into every log line when a trace is active
