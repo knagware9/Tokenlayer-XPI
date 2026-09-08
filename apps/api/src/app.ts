@@ -48,14 +48,25 @@ export async function buildApp(rawDeps: AppDeps): Promise<FastifyInstance> {
         // hook runs, not before. Redacting them first silently empties them
         // to `{}` before the serializer ever sees the real object, so every
         // request/response log line loses method/url/statusCode entirely.
-        // Fastify's default serializers only ever surface
-        // method/url/host/remoteAddress/remotePort/statusCode (none of which
-        // are PII per the deny-list) and pino's stdSerializers.err surfaces
-        // message/stack/type, so leaving these three keys untouched here
-        // introduces no new PII exposure. Every ad-hoc field from a manual
-        // `app.log.error({email, ...}, "msg")` call is always a plain object
-        // at the call site (never a getter-based class instance), so it still
-        // goes through redactSensitiveFields exactly as before.
+        // Fastify's default serializers surface
+        // method/url/host/remoteAddress/remotePort/statusCode, and pino's
+        // stdSerializers.err surfaces message/stack/type. Two of those are
+        // accepted residual exposure rather than gaps this fix introduces:
+        // `remoteAddress` technically substring-matches the deny-list's
+        // "address" fragment (packages/core/src/shared/pii-scrub.ts), but
+        // that fragment's neighbors — bankAccount, walletKey, privateKey,
+        // cardNumber — show it targets mailing/financial addresses, not
+        // network addresses, and logging the client IP on access-log-style
+        // lines (incoming request / request completed) is standard,
+        // deliberate practice for security auditing, rate-limiting
+        // investigation, and abuse detection. `err`'s message/stack is left
+        // unredacted for the same reason redaction can't reach it here — an
+        // Error thrown with a raw secret embedded in its message would leak
+        // it regardless of this hook, so callers must not do that. Every
+        // ad-hoc field from a manual `app.log.error({email, ...}, "msg")`
+        // call is always a plain object at the call site (never a
+        // getter-based class instance), so it still goes through
+        // redactSensitiveFields exactly as before.
         log(obj) {
           const { req, res, err, ...rest } = obj as Record<string, unknown>;
           const redacted = redactSensitiveFields(rest) as Record<string, unknown>;
