@@ -1,5 +1,6 @@
 import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from "prom-client";
 import type { LedgerAdapter } from "@tokenlayer/core";
+import type { ProposalRepository } from "../persistence/types/index.js";
 
 export const registry = new Registry();
 collectDefaultMetrics({ register: registry });
@@ -82,4 +83,42 @@ export function instrumentLedgerAdapter(adapter: LedgerAdapter): LedgerAdapter {
       return Reflect.get(target, prop, receiver);
     },
   });
+}
+
+export const proposalPendingTotal = new Gauge({
+  name: "proposal_pending_total",
+  help: "Currently pending proposals",
+  labelNames: ["kind"],
+  registers: [registry],
+});
+
+export const proposalPendingAgeSecondsMax = new Gauge({
+  name: "proposal_pending_age_seconds_max",
+  help: "Age in seconds of the oldest pending proposal",
+  labelNames: ["kind"],
+  registers: [registry],
+});
+
+/**
+ * Refreshes the two backlog gauges from a platform-wide pending-proposal
+ * scan. Called on an interval (see server.ts), never synchronously inside
+ * the /metrics handler — a scrape must stay cheap regardless of backlog size.
+ */
+export async function refreshProposalBacklogMetrics(proposals: ProposalRepository): Promise<void> {
+  const pending = await proposals.list(undefined, "pending");
+  const byKind = new Map<string, { count: number; oldestMs: number }>();
+  const now = Date.now();
+  for (const p of pending) {
+    const ageMs = now - new Date(p.createdAt).getTime();
+    const entry = byKind.get(p.kind) ?? { count: 0, oldestMs: 0 };
+    entry.count += 1;
+    entry.oldestMs = Math.max(entry.oldestMs, ageMs);
+    byKind.set(p.kind, entry);
+  }
+  proposalPendingTotal.reset();
+  proposalPendingAgeSecondsMax.reset();
+  for (const [kind, { count, oldestMs }] of byKind) {
+    proposalPendingTotal.set({ kind }, count);
+    proposalPendingAgeSecondsMax.set({ kind }, oldestMs / 1000);
+  }
 }

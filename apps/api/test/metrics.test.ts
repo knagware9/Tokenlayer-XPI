@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { LedgerAdapter } from "@tokenlayer/core";
-import { instrumentLedgerAdapter, ledgerRpcDuration, ledgerRpcErrorsTotal, registry } from "../src/shared/metrics.js";
+import {
+  instrumentLedgerAdapter,
+  ledgerRpcDuration,
+  ledgerRpcErrorsTotal,
+  proposalPendingAgeSecondsMax,
+  proposalPendingTotal,
+  refreshProposalBacklogMetrics,
+  registry,
+} from "../src/shared/metrics.js";
+import { buildTestAppWithRepos } from "./helpers.js";
 
 function stubAdapter(overrides: Partial<LedgerAdapter> = {}): LedgerAdapter {
   return {
@@ -93,5 +102,41 @@ describe("instrumentLedgerAdapter", () => {
       (v) => v.labels.chain === "test-chain" && v.labels.operation === "balanceOf" && v.metricName?.endsWith("_count"),
     );
     expect(duration?.value).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("refreshProposalBacklogMetrics", () => {
+  it("sets pending count and max age per kind, and clears a kind that emptied out", async () => {
+    const h = await buildTestAppWithRepos();
+    const now = Date.now();
+    await h.deps.proposals.create({
+      useCaseKey: "carbon-credit", orgId: null, assetId: "asset_1", kind: "mint",
+      payload: {}, proposerId: "u1", proposerLabel: "Alice", required: 1,
+    });
+    // Backdate one row directly through the repository's own row store isn't
+    // available generically — instead assert on "at least the count is right
+    // and age is non-negative", which is what the gauge computation actually
+    // promises; a precise age assertion belongs to a unit test of the pure
+    // grouping logic, not this integration-level one.
+    await refreshProposalBacklogMetrics(h.deps.proposals);
+    const count = (await registry.getSingleMetric(proposalPendingTotal.name)?.get())?.values.find(
+      (v) => v.labels.kind === "mint",
+    );
+    expect(count?.value).toBe(1);
+    const age = (await registry.getSingleMetric(proposalPendingAgeSecondsMax.name)?.get())?.values.find(
+      (v) => v.labels.kind === "mint",
+    );
+    expect(age?.value).toBeGreaterThanOrEqual(0);
+    expect(Date.now() - now).toBeLessThan(5000); // sanity: test itself ran fast
+
+    // Decide the proposal away, then refresh again — the gauge must not keep
+    // reporting a stale count for a kind with zero pending proposals left.
+    const [p] = await h.deps.proposals.list("carbon-credit", "pending");
+    await h.deps.proposals.setStatus(p!.id, "approved");
+    await refreshProposalBacklogMetrics(h.deps.proposals);
+    const countAfter = (await registry.getSingleMetric(proposalPendingTotal.name)?.get())?.values.find(
+      (v) => v.labels.kind === "mint",
+    );
+    expect(countAfter).toBeUndefined();
   });
 });

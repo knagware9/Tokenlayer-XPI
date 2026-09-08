@@ -49,6 +49,7 @@ import { createSecretBox } from "./webhooks/secret-box.js";
 import { SmtpMailer } from "./mail/mailer.js";
 import { startConfirmer } from "./shared/ledger-confirmer.js";
 import { captureFatalAndFlush, initObservability } from "./shared/observability.js";
+import { refreshProposalBacklogMetrics } from "./shared/metrics.js";
 
 async function main(): Promise<void> {
   // Before anything else can throw — boot failures (a down chain, a bad
@@ -276,6 +277,15 @@ async function main(): Promise<void> {
   const chainList = chains.list().map((c) => c.id).join(", ");
   console.log(`TokenLayer API listening on http://localhost:${env.port}  (chains: ${chainList})`);
 
+  // Refreshes the proposal-backlog gauges every 30s — not on every /metrics
+  // scrape, so a scrape stays cheap regardless of backlog size.
+  const PROPOSAL_BACKLOG_REFRESH_MS = 30_000;
+  await refreshProposalBacklogMetrics(deps.proposals); // populate immediately, don't wait 30s for the first value
+  const proposalBacklogInterval = setInterval(() => {
+    void refreshProposalBacklogMetrics(deps.proposals);
+  }, PROPOSAL_BACKLOG_REFRESH_MS);
+  proposalBacklogInterval.unref?.();
+
   // Started HERE and nowhere else — deliberately NOT inside buildApp, so the
   // test harness (which builds hundreds of apps) never starts a live timer that
   // outlives the test that created it.
@@ -345,6 +355,7 @@ async function main(): Promise<void> {
   for (const sig of ["SIGTERM", "SIGINT"] as const) {
     process.once(sig, () => {
       stopConfirmer();
+      clearInterval(proposalBacklogInterval);
       void Promise.race([
         stopDispatcher ? stopDispatcher() : Promise.resolve(),
         new Promise((r) => setTimeout(r, SHUTDOWN_GRACE_MS).unref?.()),
