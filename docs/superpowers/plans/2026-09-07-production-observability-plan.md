@@ -933,7 +933,8 @@ git commit -m "feat(observability): structured JSON logging with PII redaction a
 **Interfaces:**
 - Produces: `startTracing(opts: { serviceName: string; otlpEndpoint: string | undefined }): NodeSDK | undefined` — consumed by `bootstrap.ts`.
 - Produces: `withSpan<T>(name: string, attributes: Record<string, string>, fn: () => Promise<T>): Promise<T>` — consumed by Task 8.
-- Produces: `getTestSpanExporter(): InMemorySpanExporter` (test-only helper) — consumed by this task's own test and Task 8's.
+
+**Correction, ruled during implementation (see the SDD ledger for Task 7):** this section originally also listed a `getTestSpanExporter(): InMemorySpanExporter` production export — that never matched the Step 2 test code below, which always constructed its own local `InMemorySpanExporter`/`NodeTracerProvider` directly. Adding a real `getTestSpanExporter()` to `tracing.ts` would leak test-only devDependencies (`@opentelemetry/sdk-trace-base`/`sdk-trace-node`) into a production file. Task 8's own tests follow the same self-contained local-exporter pattern (see its Step 9) — no task actually needs this export, so it's removed here rather than built to satisfy a stale interface line.
 
 **Mechanical note (a correction to the spec's own wording):** the spec says "server.ts's very first lines call startTracing(...) ahead of importing ./app.js." That is not achievable by ordering statements within `server.ts` itself — ES module `import` statements are hoisted and the entire import graph (`./app.js`, and everything it imports, including `fastify`) is evaluated **before** any of `server.ts`'s own top-level code runs, regardless of where `startTracing()` is textually placed inside that file. The actual fix is a separate, minimal entry point (`bootstrap.ts`) whose only top-level imports are `tracing.ts` and `env.ts`, which calls `startTracing()` synchronously and only **then** `await import("./server.js")` — a dynamic import, which runs after `bootstrap.ts`'s own top-level code, deferring `server.ts` (and therefore `app.ts`, `fastify`, `undici`) until tracing is already initialized. `apps/api/package.json`'s `dev`/`start` scripts and `apps/api/Dockerfile`'s CMD both need to point at `bootstrap.ts` instead of `server.ts` for this to take effect for the real running process.
 
@@ -941,7 +942,7 @@ git commit -m "feat(observability): structured JSON logging with PII redaction a
 
 ```bash
 pnpm add --filter @tokenlayer/api @opentelemetry/sdk-node @opentelemetry/instrumentation-fastify @opentelemetry/instrumentation-undici @opentelemetry/exporter-trace-otlp-http @opentelemetry/resources @opentelemetry/semantic-conventions
-pnpm add --filter @tokenlayer/api -D @opentelemetry/sdk-trace-base
+pnpm add --filter @tokenlayer/api -D @opentelemetry/sdk-trace-base @opentelemetry/sdk-trace-node
 ```
 
 - [ ] **Step 2: Write the failing test**
@@ -995,9 +996,9 @@ import { NodeSDK } from "@opentelemetry/sdk-node";
 import { FastifyInstrumentation } from "@opentelemetry/instrumentation-fastify";
 import { UndiciInstrumentation } from "@opentelemetry/instrumentation-undici";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
-import { Resource } from "@opentelemetry/resources";
-import { SemanticResourceAttributes } from "@opentelemetry/semantic-conventions";
-import { SpanStatusCode, context, trace } from "@opentelemetry/api";
+import { resourceFromAttributes } from "@opentelemetry/resources";
+import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
+import { SpanStatusCode, trace } from "@opentelemetry/api";
 
 /**
  * No-op unless otlpEndpoint is set — same posture as Sentry (SENTRY_DSN) and
@@ -1011,7 +1012,7 @@ import { SpanStatusCode, context, trace } from "@opentelemetry/api";
 export function startTracing(opts: { serviceName: string; otlpEndpoint: string | undefined }): NodeSDK | undefined {
   if (!opts.otlpEndpoint) return undefined;
   const sdk = new NodeSDK({
-    resource: new Resource({ [SemanticResourceAttributes.SERVICE_NAME]: opts.serviceName }),
+    resource: resourceFromAttributes({ [ATTR_SERVICE_NAME]: opts.serviceName }),
     traceExporter: new OTLPTraceExporter({ url: `${opts.otlpEndpoint}/v1/traces` }),
     instrumentations: [new FastifyInstrumentation(), new UndiciInstrumentation()],
   });
@@ -1019,17 +1020,26 @@ export function startTracing(opts: { serviceName: string; otlpEndpoint: string |
   return sdk;
 }
 
-const tracer = trace.getTracer("tokenlayer-api");
-
 /**
  * Runs fn inside a new active span, ending it (and recording any exception)
  * regardless of outcome. Safe to call even when startTracing() was never
  * invoked (e.g. in tests, or a deployment with tracing off) — @opentelemetry/api
  * falls back to a no-op tracer provider by default, so this never throws on
  * its own account.
+ *
+ * The tracer is looked up fresh on every call, not cached at module scope —
+ * a `ProxyTracer` obtained via `trace.getTracer()` binds permanently to
+ * whichever `ProxyTracerProvider` answered that specific call, so a tracer
+ * captured before `startTracing()`/`provider.register()` runs can orphan
+ * itself from the real provider (confirmed: this silently produced zero
+ * recorded spans under Vitest's SSR module handling, where the API module
+ * instance a test's `NodeTracerProvider.register()` operates on and the one
+ * a module-scope `trace.getTracer()` call resolved were different instances
+ * of the same package). Looking it up per call is also the generally
+ * OTel-recommended pattern, not just a workaround for that one environment.
  */
 export async function withSpan<T>(name: string, attributes: Record<string, string>, fn: () => Promise<T>): Promise<T> {
-  return tracer.startActiveSpan(name, { attributes }, async (span) => {
+  return trace.getTracer("tokenlayer-api").startActiveSpan(name, { attributes }, async (span) => {
     try {
       return await fn();
     } catch (err) {
