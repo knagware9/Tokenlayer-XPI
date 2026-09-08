@@ -1,6 +1,7 @@
 import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from "prom-client";
 import type { LedgerAdapter } from "@tokenlayer/core";
 import type { ProposalRepository } from "../persistence/types/index.js";
+import { withSpan } from "./tracing.js";
 
 export const registry = new Registry();
 collectDefaultMetrics({ register: registry });
@@ -60,14 +61,16 @@ export function instrumentLedgerAdapter(adapter: LedgerAdapter): LedgerAdapter {
     if (typeof value !== "function") continue; // getReceipt is optional — absent on simulated/Fabric/Canton adapters
     wrappedMethods.set(key, async (...args: unknown[]) => {
       const stop = ledgerRpcDuration.startTimer({ chain: adapter.chainId, operation: key });
-      try {
-        return await (value as (...a: unknown[]) => unknown).apply(adapter, args);
-      } catch (err) {
-        ledgerRpcErrorsTotal.inc({ chain: adapter.chainId, operation: key });
-        throw err;
-      } finally {
-        stop();
-      }
+      return withSpan(`ledger.${key}`, { chain: adapter.chainId, operation: key }, async () => {
+        try {
+          return await (value as (...a: unknown[]) => unknown).apply(adapter, args);
+        } catch (err) {
+          ledgerRpcErrorsTotal.inc({ chain: adapter.chainId, operation: key });
+          throw err;
+        } finally {
+          stop();
+        }
+      });
     });
   }
   // A Proxy, not a plain-object copy: some call sites reach past the LedgerAdapter

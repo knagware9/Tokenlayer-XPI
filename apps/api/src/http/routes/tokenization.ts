@@ -46,6 +46,7 @@ import { NO_USE_CASE, canAdministerUser, BCRYPT_ROUNDS, LOGIN_WINDOW_MS, MAX_DOC
 import type { BrandLogoErrorCode, RouteContext } from "./context.js";
 import { createProposalAndNotify } from "../../shared/proposal-notify.js";
 import { assetReviewDecisionEmail, assetSubmittedForReviewEmail } from "../../mail/templates.js";
+import { withSpan } from "../../shared/tracing.js";
 
 /**
  * ONE WORDING FOR ONE FACT. Issuance and `setPrice` refuse for the identical
@@ -946,50 +947,52 @@ export function registerTokenizationRoutes(app: FastifyInstance, deps: AppDeps, 
     // merged copy, since nothing else ever writes those three fields after
     // issuance — only this route reads and clears them, so the snapshot is
     // safe here even though other fields (documents) may change concurrently.
-    if (b.decision === "approved") {
-      await deps.assets.setDueDiligence(asset.id, {
-        riskTier: b.riskTier,
-        reviewedBy: claims.id,
-        reviewedAt: new Date().toISOString(),
-        rejectionReason: null,
-      });
-      const useCase = await deps.useCases.get(asset.useCaseKey);
-      const treasury = useCase.treasuryAccountId ? (await deps.accounts.findById(useCase.treasuryAccountId))?.address ?? null : null;
-      // executeIssueActivation also flips status to "active" itself — a
-      // no-op here since the CAS above already won that exact transition,
-      // kept only so the ungated issueAssetCore branch (unreachable today,
-      // see its own comment) still works unmodified if ever reactivated.
-      await executeIssueActivation(deps, { id: claims.id, role: claims.role }, asset, {
-        initialSupply: asset.dueDiligence?.pendingInitialSupply ?? undefined,
-        treasury,
-        sale: asset.dueDiligence?.pendingSale ?? undefined,
-      }, request.log);
-    } else {
-      // Refund the issuance fee captured at POST /assets time (see
-      // issueAssetCore) — mirrors the OLD "issue" proposal kind's
-      // `compensate` hook (refundIssuanceFee in proposal-kinds.ts), which no
-      // proposal exists any more to run now that review-decision is the sole
-      // activation path. Best-effort, same as that hook: logged, not thrown,
-      // so a webhook/ledger hiccup here never blocks the rejection itself.
-      // `pendingIssuanceFee` is cleared to null in the SAME dueDiligence
-      // write as the refund below, not left dangling: rejection is no longer
-      // a dead end (see submit-for-review's fix), so a resubmit-then-reject
-      // cycle without this would refund the same fee a second time, and a
-      // resubmit-then-approve cycle would activate an asset that was never
-      // actually charged.
-      const fee = asset.dueDiligence?.pendingIssuanceFee;
-      await deps.assets.setDueDiligence(asset.id, {
-        rejectionReason: b.rejectionReason,
-        riskTier: null,
-        reviewedBy: null,
-        reviewedAt: null,
-        pendingIssuanceFee: null,
-      });
-      if (fee?.payer && deps.platformFeeAccount) {
-        await deps.cash.transfer(fee.currency, deps.platformFeeAccount, fee.payer, fee.amount).catch((refundErr) =>
-          request.log.error({ refundErr, assetId: asset.id }, "issuance fee refund failed — manual reconciliation required"));
+    await withSpan("review-decision", { "proposal.kind": "asset-review-decision", decision: b.decision }, async () => {
+      if (b.decision === "approved") {
+        await deps.assets.setDueDiligence(asset.id, {
+          riskTier: b.riskTier,
+          reviewedBy: claims.id,
+          reviewedAt: new Date().toISOString(),
+          rejectionReason: null,
+        });
+        const useCase = await deps.useCases.get(asset.useCaseKey);
+        const treasury = useCase.treasuryAccountId ? (await deps.accounts.findById(useCase.treasuryAccountId))?.address ?? null : null;
+        // executeIssueActivation also flips status to "active" itself — a
+        // no-op here since the CAS above already won that exact transition,
+        // kept only so the ungated issueAssetCore branch (unreachable today,
+        // see its own comment) still works unmodified if ever reactivated.
+        await executeIssueActivation(deps, { id: claims.id, role: claims.role }, asset, {
+          initialSupply: asset.dueDiligence?.pendingInitialSupply ?? undefined,
+          treasury,
+          sale: asset.dueDiligence?.pendingSale ?? undefined,
+        }, request.log);
+      } else {
+        // Refund the issuance fee captured at POST /assets time (see
+        // issueAssetCore) — mirrors the OLD "issue" proposal kind's
+        // `compensate` hook (refundIssuanceFee in proposal-kinds.ts), which no
+        // proposal exists any more to run now that review-decision is the sole
+        // activation path. Best-effort, same as that hook: logged, not thrown,
+        // so a webhook/ledger hiccup here never blocks the rejection itself.
+        // `pendingIssuanceFee` is cleared to null in the SAME dueDiligence
+        // write as the refund below, not left dangling: rejection is no longer
+        // a dead end (see submit-for-review's fix), so a resubmit-then-reject
+        // cycle without this would refund the same fee a second time, and a
+        // resubmit-then-approve cycle would activate an asset that was never
+        // actually charged.
+        const fee = asset.dueDiligence?.pendingIssuanceFee;
+        await deps.assets.setDueDiligence(asset.id, {
+          rejectionReason: b.rejectionReason,
+          riskTier: null,
+          reviewedBy: null,
+          reviewedAt: null,
+          pendingIssuanceFee: null,
+        });
+        if (fee?.payer && deps.platformFeeAccount) {
+          await deps.cash.transfer(fee.currency, deps.platformFeeAccount, fee.payer, fee.amount).catch((refundErr) =>
+            request.log.error({ refundErr, assetId: asset.id }, "issuance fee refund failed — manual reconciliation required"));
+        }
       }
-    }
+    });
     const issuer = await deps.users.findById(asset.createdBy);
     if (issuer) {
       const notice = assetReviewDecisionEmail({ assetName: asset.name, decision: b.decision, rejectionReason: b.rejectionReason });

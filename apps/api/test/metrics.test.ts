@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { LedgerAdapter } from "@tokenlayer/core";
+import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
+import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import {
   instrumentLedgerAdapter,
   ledgerRpcDuration,
@@ -10,6 +12,9 @@ import {
   registry,
 } from "../src/shared/metrics.js";
 import { buildTestAppWithRepos } from "./helpers.js";
+
+const spanExporter = new InMemorySpanExporter();
+new NodeTracerProvider({ spanProcessors: [new SimpleSpanProcessor(spanExporter)] }).register();
 
 function stubAdapter(overrides: Partial<LedgerAdapter> = {}): LedgerAdapter {
   return {
@@ -102,6 +107,16 @@ describe("instrumentLedgerAdapter", () => {
       (v) => v.labels.chain === "test-chain" && v.labels.operation === "balanceOf" && v.metricName?.endsWith("_count"),
     );
     expect(duration?.value).toBeGreaterThanOrEqual(1);
+  });
+
+  it("opens a ledger.<operation> span alongside the metric", async () => {
+    spanExporter.reset();
+    const adapter = instrumentLedgerAdapter(stubAdapter());
+    await adapter.balanceOf({ chainId: "test-chain", address: "0x1" } as never, "0xaccount");
+    const span = spanExporter.getFinishedSpans().find((s) => s.name === "ledger.balanceOf");
+    expect(span).toBeDefined();
+    expect(span!.attributes.chain).toBe("test-chain");
+    expect(span!.attributes.operation).toBe("balanceOf");
   });
 });
 

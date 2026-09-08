@@ -18,6 +18,7 @@ import { coded, executeCashflowCore, executeIssueActivation, runGatedAction } fr
 import type { TokenClaims } from "../http/support.js";
 import { scopedToCaller } from "../http/support.js";
 import type { ProposalRecord } from "../persistence/types/index.js";
+import { withSpan } from "./tracing.js";
 import { orgCapabilityChangeKind } from "./org-kinds.js";
 import { kycDecisionKind } from "./kyc-kinds.js";
 import { onboardUserBatchKind, onboardUserKind, revokeUserIdentityKind } from "./user-kinds.js";
@@ -147,7 +148,10 @@ const actionKind = (kind: string): ProposalKindHandler => ({
 
 const HANDLERS = new Map<string, ProposalKindHandler>();
 export function registerProposalKind(h: ProposalKindHandler): void {
-  HANDLERS.set(h.kind, h);
+  HANDLERS.set(h.kind, {
+    ...h,
+    execute: (ctx, proposer, p) => withSpan("proposal.execute", { "proposal.kind": h.kind }, () => h.execute(ctx, proposer, p)),
+  });
 }
 for (const h of [issueKind, cashflowKind, ...["mint", "transfer", "burn", "freeze", "unfreeze"].map(actionKind)]) {
   registerProposalKind(h);
