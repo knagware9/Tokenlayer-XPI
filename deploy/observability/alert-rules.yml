@@ -1,0 +1,51 @@
+groups:
+  - name: api-health
+    rules:
+      - alert: APIDown
+        expr: up{job="tokenlayer-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "TokenLayer API instance {{ $labels.instance }} is down"
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(http_requests_total{status_code=~"5.."}[5m]))
+          / sum(rate(http_requests_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "5xx rate above 5% over the last 5 minutes"
+      - alert: HighLatency
+        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, route)) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 latency for {{ $labels.route }} above 2s"
+  - name: ledger
+    rules:
+      - alert: LedgerRPCFailures
+        expr: sum(rate(ledger_rpc_errors_total[2m])) by (chain) > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Ledger RPC calls to {{ $labels.chain }} are failing"
+  - name: proposals
+    rules:
+      - alert: ProposalBacklogAging
+        expr: proposal_pending_age_seconds_max > 86400
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A pending {{ $labels.kind }} proposal has been unreviewed for over 24h"
+      - alert: ProposalBacklogSize
+        expr: proposal_pending_total > 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "More than 20 pending {{ $labels.kind }} proposals"
