@@ -1,0 +1,12 @@
+{
+  "title": "Ledger Health",
+  "uid": "tokenlayer-ledger-health",
+  "panels": [
+    { "title": "RPC error rate by chain", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [{ "expr": "sum(rate(ledger_rpc_errors_total[5m])) by (chain)" }] },
+    { "title": "RPC duration p95 by chain/operation", "type": "timeseries", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum(rate(ledger_rpc_duration_seconds_bucket[5m])) by (le, chain, operation))" }] }
+  ],
+  "schemaVersion": 39,
+  "time": { "from": "now-1h", "to": "now" }
+}
