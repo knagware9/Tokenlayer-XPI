@@ -1,3 +1,4 @@
+import type { Writable } from "node:stream";
 import { RbacPolicy } from "@tokenlayer/core";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.js";
@@ -48,7 +49,7 @@ export const TEST_MARKET_ESCROW = "0xcd3B766CCDd6AE721141F452C550Ca635964ce71";
 /** A second seeded PlatformAdmin (test-only) — the SoD checker for null-scope / brand-new-use-case onboarding proposals the sole admin proposes. */
 export const PLATFORM_ADMIN_2 = { email: "admin2@tokenlayer.dev", password: "admin123" } as const;
 
-export interface TestAppOptions { loginRateLimitMax?: number; apiKeyRateLimitMax?: number; apiKeyFailedAttemptMax?: number; apiKeyReserveIntervalMs?: number; platformFeeAccount?: string; marketEscrowAccount?: string; trustedKycIssuers?: string[]; devIssuerSeed?: string; isProduction?: boolean; didMasterConfigured?: boolean; registry?: IdentityRegistry; enabledDomains?: string[]; subjectIdentifiers?: "did" | "plain"; brandLogoPruneGraceMs?: number; /** Overrides the default NullMailer — e.g. a stub whose send() never resolves, to prove a route doesn't await it. `buildApp` shallow-copies deps at build time, so this must be set here rather than mutated on the returned handle afterward. */ mail?: Mailer; /** When set, GET /metrics requires a matching `Authorization: Bearer <token>` header. Unset (the default) leaves /metrics open, matching production's opt-in-via-env-var posture. */ metricsToken?: string }
+export interface TestAppOptions { loginRateLimitMax?: number; apiKeyRateLimitMax?: number; apiKeyFailedAttemptMax?: number; apiKeyReserveIntervalMs?: number; platformFeeAccount?: string; marketEscrowAccount?: string; trustedKycIssuers?: string[]; devIssuerSeed?: string; isProduction?: boolean; didMasterConfigured?: boolean; registry?: IdentityRegistry; enabledDomains?: string[]; subjectIdentifiers?: "did" | "plain"; brandLogoPruneGraceMs?: number; /** Overrides the default NullMailer — e.g. a stub whose send() never resolves, to prove a route doesn't await it. `buildApp` shallow-copies deps at build time, so this must be set here rather than mutated on the returned handle afterward. */ mail?: Mailer; /** When set, GET /metrics requires a matching `Authorization: Bearer <token>` header. Unset (the default) leaves /metrics open, matching production's opt-in-via-env-var posture. */ metricsToken?: string; /** Redirects the app's pino logger to this stream instead of real stdout — lets a test capture and assert on structured log lines (e.g. PII redaction). Unset (the default) writes to real stdout, same as production. */ logStream?: Writable }
 
 /**
  * The app plus the repositories tests need to reach directly — used where a
@@ -161,6 +162,7 @@ export async function buildTestAppWithRepos(opts: TestAppOptions = {}): Promise<
     // `BRAND_LOGO_PRUNE_GRACE_MS` explicitly.
     brandLogoPruneGraceMs: opts.brandLogoPruneGraceMs ?? 0,
     metricsToken: opts.metricsToken,
+    logStream: opts.logStream,
   };
   // `mail` on the handle stays the NullMailer (the `.sent` assertions every
   // other test relies on) even when `opts.mail` overrode what the app itself

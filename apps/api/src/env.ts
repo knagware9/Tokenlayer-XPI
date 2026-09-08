@@ -64,6 +64,8 @@ export interface Env {
   corsOrigins: string[];
   /** Error tracking (Sentry). Unset ⇒ observability is a total no-op. See shared/observability.ts. */
   sentryDsn?: string;
+  /** pino log level (fatal/error/warn/info/debug/trace/silent). Unset ⇒ "info". */
+  logLevel: string;
   /** Bearer token required on GET /metrics. Unset ⇒ /metrics is open (dev/demo default). */
   metricsToken?: string;
   /** Defaults to nodeEnv; set explicitly to distinguish deployments sharing one Sentry project (e.g. per persona). */
@@ -244,6 +246,7 @@ export const env: Env = {
   // Comma-separated allowlist; defaults to the local dashboard origin.
   corsOrigins: (process.env.CORS_ORIGINS ?? "http://localhost:5173").split(",").map((s) => s.trim()).filter(Boolean),
   sentryDsn: process.env.SENTRY_DSN?.trim() || undefined,
+  logLevel: process.env.LOG_LEVEL?.trim() || "info",
   metricsToken: process.env.METRICS_TOKEN?.trim() || undefined,
   sentryEnvironment: process.env.SENTRY_ENVIRONMENT?.trim() || process.env.NODE_ENV || "development",
   evmRpcUrl: process.env.EVM_RPC_URL,

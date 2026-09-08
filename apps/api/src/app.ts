@@ -2,8 +2,11 @@ import cors from "@fastify/cors";
 import jwt from "@fastify/jwt";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
+import { context, trace } from "@opentelemetry/api";
+import { redactSensitiveFields } from "@tokenlayer/core";
 import Fastify, { type FastifyInstance } from "fastify";
 import type { AppDeps } from "./context.js";
+import { env } from "./env.js";
 import { openapiConfig } from "./http/openapi.js";
 import { applyDomainGate } from "./http/route-domains.js";
 import { components } from "./http/schemas/index.js";
@@ -31,7 +34,27 @@ export async function buildApp(rawDeps: AppDeps): Promise<FastifyInstance> {
   // objects) on a deployment that serves both products, which is the default.
   const deps = guardRepositories(rawDeps, rawDeps.enabledDomains);
   // 256 KB body cap — bounds payload-size abuse.
-  const app = Fastify({ logger: false, bodyLimit: 256 * 1024 });
+  const app = Fastify({
+    bodyLimit: 256 * 1024,
+    logger: {
+      level: env.logLevel,
+      formatters: {
+        log(obj) {
+          return redactSensitiveFields(obj) as Record<string, unknown>;
+        },
+      },
+      // Injects trace_id/span_id into every log line when a trace is active
+      // (Task 7) — a no-op object when tracing isn't configured, since
+      // trace.getSpan(context.active()) returns undefined either way.
+      mixin() {
+        const span = trace.getSpan(context.active());
+        if (!span) return {};
+        const { traceId, spanId } = span.spanContext();
+        return { trace_id: traceId, span_id: spanId };
+      },
+      ...(rawDeps.logStream ? { stream: rawDeps.logStream } : {}),
+    },
+  });
 
   // CORS: explicit origin allowlist (no blanket reflection). Defaults to the local dashboard.
   await app.register(cors, { origin: deps.corsOrigins ?? ["http://localhost:5173"] });

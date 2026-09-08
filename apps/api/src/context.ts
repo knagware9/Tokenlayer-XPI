@@ -162,6 +162,12 @@ export interface AppDeps {
    * second upload still prunes the first immediately.
    */
   brandLogoPruneGraceMs?: number;
+  /**
+   * Test-only override for pino's output destination. Unset in production,
+   * where pino writes to real stdout; a test passes a Writable to capture
+   * and assert on structured log lines (e.g. PII redaction).
+   */
+  logStream?: NodeJS.WritableStream;
 }
 
 /**
