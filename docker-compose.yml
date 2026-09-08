@@ -59,3 +59,7 @@ services:
 
 volumes:
   api-data:
+
+networks:
+  default:
+    name: tokenlayer-main
