@@ -1,0 +1,85 @@
+# Observability overlay — Prometheus, Grafana, Loki, Promtail, Tempo, Alertmanager.
+# Never runs standalone: always combined with exactly one app-stack compose file.
+#
+# Alertmanager's config carries secrets (Slack webhook, SMTP password) that
+# Alertmanager itself cannot expand from ${VAR} — and its official image has
+# no package manager to install envsubst into at container start. Render it
+# on the host BEFORE `up`, once per deploy, from the required env vars:
+#
+#   SLACK_WEBHOOK_URL=... ALERTMANAGER_ALERT_EMAIL=... ALERTMANAGER_SMTP_FROM=... \
+#   ALERTMANAGER_SMTP_HOST=... ALERTMANAGER_SMTP_USER=... ALERTMANAGER_SMTP_PASS=... \
+#     envsubst < deploy/observability/alertmanager.yml.template > deploy/observability/alertmanager.yml
+#
+# deploy/observability/alertmanager.yml (the rendered file, not the
+# .template) is gitignored — it holds real secrets once rendered.
+#
+#   OBSERVABILITY_NETWORK=tokenlayer-main \
+#     docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d
+#
+#   OBSERVABILITY_NETWORK=xi-net PROMETHEUS_CONFIG_FILE=prometheus.identity.yml \
+#     docker compose -f docker-compose.identity.yml -f docker-compose.observability.yml up -d
+#
+#   OBSERVABILITY_NETWORK=xi-net PROMETHEUS_CONFIG_FILE=prometheus.tokenization.yml \
+#     docker compose -f docker-compose.tokenization.yml -f docker-compose.observability.yml up -d
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./deploy/observability/${PROMETHEUS_CONFIG_FILE:-prometheus.main.yml}:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/observability/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
+      - prometheus-data:/prometheus
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus"]
+    networks: [obs]
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    volumes:
+      # The RENDERED file (see the header comment above) — not the .template.
+      - ./deploy/observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml", "--storage.path=/alertmanager"]
+    networks: [obs]
+
+  loki:
+    image: grafana/loki:latest
+    volumes:
+      - loki-data:/loki
+    networks: [obs]
+
+  promtail:
+    image: grafana/promtail:latest
+    volumes:
+      - ./deploy/observability/promtail.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: ["-config.file=/etc/promtail/config.yml"]
+    networks: [obs]
+
+  tempo:
+    image: grafana/tempo:latest
+    command: ["-config.file=/etc/tempo/tempo.yml"]
+    volumes:
+      - ./deploy/observability/tempo.yml:/etc/tempo/tempo.yml:ro
+      - tempo-data:/var/tempo
+    networks: [obs]
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      - ./deploy/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    networks: [obs]
+
+volumes:
+  prometheus-data:
+  alertmanager-data:
+  loki-data:
+  tempo-data:
+  grafana-data:
+
+networks:
+  obs:
+    name: ${OBSERVABILITY_NETWORK:?Set OBSERVABILITY_NETWORK to the app stack's Docker network name (tokenlayer-main for docker-compose.yml, xi-net for the identity/tokenization split stacks)}
+    external: true

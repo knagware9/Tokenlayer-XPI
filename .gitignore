@@ -32,3 +32,8 @@ infra/fabric/.runtime/
 # Local screen recordings / demo captures — never committed (large binaries)
 tmp-videos/
 .env.personas
+
+# Rendered Alertmanager config — carries real secrets (Slack webhook, SMTP
+# password) once produced by the envsubst render step; only the .template
+# is tracked.
+deploy/observability/alertmanager.yml
