@@ -206,6 +206,10 @@ export interface Env {
   smtpRequireTls?: boolean;
   /** The `From:` address on every outbound email. */
   mailFrom: string;
+  /** OpenTelemetry resource service.name. Defaults to "tokenlayer-api". */
+  otelServiceName: string;
+  /** OTLP HTTP collector base URL (traces posted to `${this}/v1/traces`). Unset ⇒ tracing is a total no-op — same posture as SENTRY_DSN. */
+  otelExporterOtlpEndpoint: string | undefined;
 }
 
 const platformFeeAccount =
@@ -308,6 +312,8 @@ export const env: Env = {
   smtpSecure: process.env.SMTP_SECURE === "true",
   smtpRequireTls: process.env.SMTP_REQUIRE_TLS === "true" ? true : process.env.SMTP_REQUIRE_TLS === "false" ? false : undefined,
   mailFrom: process.env.MAIL_FROM ?? "no-reply@tokenlayer.dev",
+  otelServiceName: process.env.OTEL_SERVICE_NAME?.trim() || "tokenlayer-api",
+  otelExporterOtlpEndpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT?.trim() || undefined,
 };
 
 /**

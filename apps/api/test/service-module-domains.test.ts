@@ -32,7 +32,7 @@ const SRC = fileURLToPath(new URL("../src", import.meta.url));
 const FAMILIES = ["shared", "tokenization", "identity", "dev"] as const;
 
 /** The composition root: config and wiring, owned by no single product. */
-const COMPOSITION_ROOT = ["app.ts", "context.ts", "env.ts", "server.ts"];
+const COMPOSITION_ROOT = ["app.ts", "bootstrap.ts", "context.ts", "env.ts", "server.ts"];
 
 /**
  * The ONE module tokenization may reach into identity for. It is the in-process
