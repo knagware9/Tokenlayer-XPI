@@ -30,6 +30,17 @@ services:
       # dev-only issuer seed enabling POST /identity/mint for the demo. From .env.
       TRUSTED_KYC_ISSUERS: ${TRUSTED_KYC_ISSUERS:-}
       DEV_KYC_ISSUER_SEED: ${DEV_KYC_ISSUER_SEED:-}
+      # REQUIRED: NODE_ENV is hardcoded to "production" above, and env.ts now
+      # refuses to boot in production without this set — an unset token means
+      # GET /metrics is open with no authentication on this container's
+      # publicly-published port. Not defaulted, like JWT_SECRET/DID_MASTER_KEY.
+      METRICS_TOKEN: ${METRICS_TOKEN:?Set METRICS_TOKEN in .env (see .env.example) — e.g. openssl rand -hex 32}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Distributed tracing: unset OTEL_EXPORTER_OTLP_ENDPOINT ⇒ a total no-op,
+      # same posture as SENTRY_DSN. Set it (e.g. to a Tempo instance from the
+      # observability overlay: http://tempo:4318) to enable it.
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-tokenlayer-api}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       # Organizations hold custodial DID seeds, encrypted at rest under this
       # key. REQUIRED, like the split stacks require it, and not defaulted to
       # empty: an unset key does not degrade the platform gracefully, it makes
