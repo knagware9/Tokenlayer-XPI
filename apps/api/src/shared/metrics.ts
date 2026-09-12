@@ -44,10 +44,17 @@ export const ledgerRpcDuration = new Histogram({
  * family. This is transport-agnostic by construction.
  */
 // The fixed method list from the LedgerAdapter interface (packages/core/src/shared/types.ts:100).
-// NOT Object.keys(adapter) — every implementation (EvmLedgerAdapter included) defines these as
-// ordinary class methods on the prototype, not instance-field arrow functions, so Object.keys()
-// on an instance would enumerate none of them (only own fields like chainId/family) and silently
-// wrap nothing.
+// NOT Object.keys(adapter) — for two different reasons depending on the adapter:
+//   - EvmLedgerAdapter (and the simulated base adapter) define these as ordinary
+//     class methods on the prototype, not instance-field arrow functions, so
+//     Object.keys() on an instance enumerates none of them (only own fields like
+//     chainId/family) and would silently wrap nothing.
+//   - The real Fabric/Canton adapters (packages/adapters/src/{fabric,canton}/) are
+//     a MIX: some methods (e.g. deployAsset) are prototype methods like Evm's,
+//     others (e.g. mint) are instance-field arrow functions Object.keys() WOULD
+//     catch. That inconsistent shape across chain families is its own reason
+//     Object.keys() can't be relied on uniformly, even setting Evm aside.
+// Either way, the fixed list below is what's correct.
 const LEDGER_ADAPTER_METHODS = [
   "deployAsset", "mint", "transfer", "burn", "balanceOf", "totalSupply",
   "mintToken", "transferToken", "burnToken", "ownerOf", "tokensOf",

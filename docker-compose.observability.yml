@@ -24,6 +24,8 @@
 services:
   prometheus:
     image: prom/prometheus:latest
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./deploy/observability/${PROMETHEUS_CONFIG_FILE:-prometheus.main.yml}:/etc/prometheus/prometheus.yml:ro
       - ./deploy/observability/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
@@ -33,6 +35,8 @@ services:
 
   alertmanager:
     image: prom/alertmanager:latest
+    ports:
+      - "${ALERTMANAGER_PORT:-9093}:9093"
     volumes:
       # The RENDERED file (see the header comment above) — not the .template.
       - ./deploy/observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro

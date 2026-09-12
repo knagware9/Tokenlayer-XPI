@@ -17,4 +17,4 @@ export CORS_ORIGINS="${CORS_ORIGINS:-http://localhost:5173}"
 export LOGIN_RATE_LIMIT_MAX="${LOGIN_RATE_LIMIT_MAX:-1000}"
 export DATABASE_URL="file:./dev.db"
 cd "$ROOT/apps/api"
-exec ./node_modules/.bin/tsx src/server.ts
+exec ./node_modules/.bin/tsx src/bootstrap.ts

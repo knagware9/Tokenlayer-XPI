@@ -38,6 +38,31 @@ export async function buildApp(rawDeps: AppDeps): Promise<FastifyInstance> {
     bodyLimit: 256 * 1024,
     logger: {
       level: env.logLevel,
+      serializers: {
+        // ADDITIONAL to the `req`/`res`/`err` exclusion in `formatters.log`
+        // below (commit 505036a) — this replaces only the SOURCE of the
+        // `url` field Fastify's default `req` serializer produces, it does
+        // not reintroduce `req` into the redaction walk. Fastify's default
+        // logs `request.url`, the raw path — and two real routes carry a DID
+        // in it (`GET /dids/:did/resolve`, `GET /dids/:did/document`). The
+        // redaction deny-list is key-name-based and can never catch a DID
+        // embedded inside a URL *string*, so the fix has to happen here, at
+        // the serializer, using the route TEMPLATE instead — the same
+        // `request.routeOptions?.url` the httpRequestsTotal/httpRequestDuration
+        // hook below already uses to avoid path-based cardinality. Every
+        // other field (method, host, remoteAddress, remotePort) still comes
+        // from Fastify's own default req serializer.
+        req(request) {
+          return {
+            method: request.method,
+            url: request.routeOptions?.url ?? request.url,
+            version: request.headers?.["accept-version"],
+            host: request.host,
+            remoteAddress: request.ip,
+            remotePort: request.socket ? request.socket.remotePort : undefined,
+          };
+        },
+      },
       formatters: {
         // `req`/`res`/`err` are excluded from the redaction walk on purpose:
         // Fastify's own automatic request/response logging passes REAL
@@ -64,9 +89,15 @@ export async function buildApp(rawDeps: AppDeps): Promise<FastifyInstance> {
         // Error thrown with a raw secret embedded in its message would leak
         // it regardless of this hook, so callers must not do that. Every
         // ad-hoc field from a manual `app.log.error({email, ...}, "msg")`
-        // call is always a plain object at the call site (never a
-        // getter-based class instance), so it still goes through
-        // redactSensitiveFields exactly as before.
+        // call still goes through redactSensitiveFields exactly as before.
+        // NOTE this is only true of the call sites that exist in this
+        // codebase TODAY, which pass plain objects with primitive or
+        // plain-object values — not a guarantee for every possible future
+        // caller. The walk below is Object.entries()-based, so a `Date`,
+        // `Buffer`, or any other class instance NESTED inside a logged
+        // object (not just at the top level) gets flattened to `{}` by
+        // redactSensitiveFields, the same way a top-level getter-based
+        // instance would.
         log(obj) {
           const { req, res, err, ...rest } = obj as Record<string, unknown>;
           const redacted = redactSensitiveFields(rest) as Record<string, unknown>;

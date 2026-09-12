@@ -38,7 +38,7 @@ Sign in with a seeded demo account, e.g. `carbon.admin@tokenlayer.dev` / `carbon
 
 | Image | Base | Contents |
 |-------|------|----------|
-| `api` | `node:20-slim` | Installs only `@tokenlayer/api` + its workspace deps (`core`, `adapters`) via a filtered pnpm install, generates the Prisma client, then on start runs `prisma db push` → seed → `tsx src/server.ts`. |
+| `api` | `node:20-slim` | Installs only `@tokenlayer/api` + its workspace deps (`core`, `adapters`) via a filtered pnpm install, generates the Prisma client, then on start runs `prisma db push` → seed → `tsx src/bootstrap.ts`. |
 | `web` | build on `node:20-slim`, served by `nginx:alpine` | `vite build` with `VITE_API_URL` baked in, static output served by nginx with SPA fallback. |
 
 The API uses **SQLite** on a named volume (`api-data` → `/data/dev.db`), so data

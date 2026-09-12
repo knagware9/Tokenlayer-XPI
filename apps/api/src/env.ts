@@ -388,6 +388,24 @@ if (env.subjectIdentifiers === "plain") {
   );
 }
 
+/**
+ * Unset SENTRY_DSN / OTEL_EXPORTER_OTLP_ENDPOINT are both safe defaults — no
+ * error tracking, no tracing, nothing is exposed. METRICS_TOKEN is the
+ * opposite: unset means GET /metrics is OPEN, with no authentication, to
+ * anyone who can reach this process — route templates, error counts and
+ * process metrics. `docker-compose.yml` publishes the API on 0.0.0.0:4000, so
+ * "unset in production" is not a quiet no-op, it is an exposed endpoint.
+ * Refuse at boot, the same fail-closed posture as `JWT_SECRET`, rather than
+ * start in a state nobody chose.
+ */
+if (env.nodeEnv === "production" && !env.metricsToken) {
+  throw new Error(
+    "METRICS_TOKEN is not set. In production, GET /metrics would be open with no authentication to anyone who " +
+      "can reach this process, exposing route templates, error counts and process metrics. " +
+      "Set METRICS_TOKEN (e.g. `openssl rand -hex 32`) before any production deployment.",
+  );
+}
+
 if (!env.didMasterConfigured) {
   console.warn(
     "[keystore] DID_MASTER_KEY is not set — using an INSECURE dev key to encrypt custodial DID seeds. " +
