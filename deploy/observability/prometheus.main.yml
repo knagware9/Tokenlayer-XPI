@@ -13,5 +13,12 @@ alerting:
 scrape_configs:
   - job_name: tokenlayer-api
     metrics_path: /metrics
+    # METRICS_TOKEN is required (env.ts refuses to boot in production
+    # without it), so /metrics always needs this. `credentials_file` reads
+    # the token from a file at scrape time, since Prometheus never expands
+    # ${VAR} in its own config — see docker-compose.observability.yml's
+    # header comment for how that file gets written.
+    authorization:
+      credentials_file: /etc/prometheus/metrics-token
     static_configs:
       - targets: ["api:4000"]

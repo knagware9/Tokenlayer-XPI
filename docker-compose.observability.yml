@@ -13,6 +13,13 @@
 # deploy/observability/alertmanager.yml (the rendered file, not the
 # .template) is gitignored — it holds real secrets once rendered.
 #
+# Prometheus needs the SAME METRICS_TOKEN the app stack requires to boot
+# (env.ts refuses to start in production without it) — write it to a plain
+# file Prometheus reads via `authorization.credentials_file` (its own config
+# can't expand ${VAR} either), also gitignored, before `up`:
+#
+#   printf '%s' "$METRICS_TOKEN" > deploy/observability/metrics-token
+#
 #   OBSERVABILITY_NETWORK=tokenlayer-main \
 #     docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d
 #
@@ -29,6 +36,7 @@ services:
     volumes:
       - ./deploy/observability/${PROMETHEUS_CONFIG_FILE:-prometheus.main.yml}:/etc/prometheus/prometheus.yml:ro
       - ./deploy/observability/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
+      - ./deploy/observability/metrics-token:/etc/prometheus/metrics-token:ro
       - prometheus-data:/prometheus
     command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus"]
     networks: [obs]

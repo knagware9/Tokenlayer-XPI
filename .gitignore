@@ -37,3 +37,6 @@ tmp-videos/
 # password) once produced by the envsubst render step; only the .template
 # is tracked.
 deploy/observability/alertmanager.yml
+
+# Plain-text METRICS_TOKEN file Prometheus reads via credentials_file.
+deploy/observability/metrics-token

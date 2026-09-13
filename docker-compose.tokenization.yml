@@ -93,6 +93,16 @@ services:
       # apps/api/src/shared/observability.ts.
       SENTRY_DSN: ${SENTRY_DSN:-}
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-}
+      # REQUIRED: NODE_ENV is hardcoded to "production" above, and env.ts
+      # refuses to boot in production without this set — an unset token means
+      # GET /metrics is open with no authentication. Not defaulted, like
+      # JWT_SECRET/DID_MASTER_KEY above.
+      METRICS_TOKEN: ${METRICS_TOKEN:?Set METRICS_TOKEN in .env.personas — e.g. openssl rand -hex 32}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Distributed tracing: unset OTEL_EXPORTER_OTLP_ENDPOINT ⇒ a total no-op,
+      # same posture as SENTRY_DSN.
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-tokenlayer-api-tokenization}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       SMTP_HOST: ${TOKENIZATION_SMTP_HOST:-tokenization-mailpit}
       SMTP_PORT: ${TOKENIZATION_SMTP_PORT:-1025}
       SMTP_USER: ${TOKENIZATION_SMTP_USER:-}
