@@ -41,6 +41,10 @@
       "creditType": {
         "type": "string",
         "description": "e.g. avoidance / removal"
+      },
+      "sourcePlotAssetId": {
+        "type": "string",
+        "description": "Asset id of the RWA plot (e.g. a bamboo-plot asset) this credit batch's sequestration was verified against, if the project also tokenizes the underlying land — optional; most carbon-credit projects have no linked RWA plot"
       }
     },
     "required": [

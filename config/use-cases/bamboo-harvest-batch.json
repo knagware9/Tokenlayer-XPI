@@ -1,0 +1,70 @@
+{
+  "key": "bamboo-harvest-batch",
+  "name": "Bamboo Harvest Batch",
+  "description": "Chain-of-custody tracking for a physical lot of harvested bamboo (ERC-721) — a distinct instrument from bamboo-plot's fractional land ownership. Each batch is minted by the grower/cooperative once a lot is harvested, then transferred hop-by-hop as physical custody moves through processing and distribution: the current token holder is the current physical custodian, timestamped and anchored by the platform's existing audit trail. Roles map onto the platform's fixed role set: Issuer originates a batch (grower/cooperative), Trader represents any intermediate handler (processor, distributor), Buyer is the final holder (retailer or end consumer). Burning retires a batch once its bamboo is fully consumed/converted into an end product.",
+  "tokenStandard": "ERC-721",
+  "symbol": "BHARVEST",
+  "allowedChainIds": [
+    "besu",
+    "mst",
+    "fabric",
+    "canton"
+  ],
+  "defaultChainId": "besu",
+  "metadataSchema": {
+    "type": "object",
+    "properties": {
+      "batchId": {
+        "type": "string",
+        "description": "Registry identifier for this specific harvest lot — enforced unique so one physical lot is tokenized only once"
+      },
+      "sourcePlotAssetId": {
+        "type": "string",
+        "description": "Asset id of the bamboo-plot this batch was harvested from"
+      },
+      "harvestDate": {
+        "type": "string",
+        "description": "Date this lot was harvested (YYYY-MM-DD)",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+      },
+      "weightKg": {
+        "type": "number",
+        "description": "Harvested weight of this lot, in kilograms",
+        "min": 0
+      },
+      "species": {
+        "type": "string",
+        "description": "Bamboo species harvested, e.g. Bambusa balcooa, Dendrocalamus strictus"
+      },
+      "originGrower": {
+        "type": "string",
+        "description": "Cultivating entity that harvested this lot — cooperative, farmer collective, or individual grower"
+      }
+    },
+    "required": [
+      "batchId",
+      "sourcePlotAssetId",
+      "harvestDate",
+      "weightKg",
+      "species"
+    ]
+  },
+  "lifecycle": {
+    "mint": true,
+    "transfer": true,
+    "burn": true,
+    "freeze": true
+  },
+  "compliance": {
+    "allowlist": true,
+    "transferRestrictions": true
+  },
+  "uniqueBy": "batchId",
+  "roles": [
+    "UseCaseAdmin",
+    "Issuer",
+    "Trader",
+    "Buyer",
+    "Auditor"
+  ]
+}

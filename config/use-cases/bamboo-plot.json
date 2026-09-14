@@ -70,6 +70,10 @@
       "carbonVerifier": {
         "type": "string",
         "description": "Third party that verified the carbon sequestration claim"
+      },
+      "linkedCarbonCreditAssetId": {
+        "type": "string",
+        "description": "Asset id of the carbon-credit (VCU) instrument separately minted against this plot's verified sequestration, if any — the plot token and its carbon credits are independently tradable, this field only records the link"
       }
     },
     "required": [
@@ -89,7 +93,16 @@
   },
   "compliance": {
     "allowlist": true,
-    "transferRestrictions": true
+    "transferRestrictions": true,
+    "allowedJurisdictions": ["IN"],
+    "lockupDays": 30,
+    "maxHolders": 200
+  },
+  "fees": {
+    "marketplaceBps": 25
+  },
+  "saleTermsDefault": {
+    "currency": "CBDC-INR"
   },
   "workflow": {
     "approvals": {
