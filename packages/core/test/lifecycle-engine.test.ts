@@ -260,6 +260,15 @@ describe("LifecycleEngine — engine-enforced compliance rules", () => {
     key: "lockup",
     compliance: { allowlist: false, transferRestrictions: true, lockupDays: 30 },
   };
+  // Same lockup gate, but with a registered treasury — proves the treasury
+  // exemption (mirrors JURISDICTION_TREASURY_UC below) independently of
+  // whether acquiredAt happens to be null for the treasury.
+  const LOCKUP_TREASURY_UC: UseCaseDefinition = {
+    ...FUNGIBLE_USE_CASE,
+    key: "lockup-treasury",
+    treasuryAccountId: "treasury-acct-2",
+    compliance: { allowlist: false, transferRestrictions: true, lockupDays: 30 },
+  };
   const JURISDICTION_UC: UseCaseDefinition = {
     ...FUNGIBLE_USE_CASE,
     key: "jurisdiction",
@@ -287,13 +296,14 @@ describe("LifecycleEngine — engine-enforced compliance rules", () => {
 
   const holderCtx: AssetContext = { ref: { id: "h1", chainId: "fake", contractRef: "fake:h1" }, useCaseKey: "holder-limit" };
   const lockupCtx: AssetContext = { ref: { id: "l1", chainId: "fake", contractRef: "fake:l1" }, useCaseKey: "lockup" };
+  const lockupTreasuryCtx: AssetContext = { ref: { id: "l2", chainId: "fake", contractRef: "fake:l2" }, useCaseKey: "lockup-treasury" };
   const jurCtx: AssetContext = { ref: { id: "j1", chainId: "fake", contractRef: "fake:j1" }, useCaseKey: "jurisdiction" };
   const jurTreasuryCtx: AssetContext = { ref: { id: "j2", chainId: "fake", contractRef: "fake:j2" }, useCaseKey: "jurisdiction-treasury" };
   const jurTreasuryCtx2: AssetContext = { ref: { id: "j3", chainId: "fake", contractRef: "fake:j3" }, useCaseKey: "jurisdiction-treasury-2" };
 
   function makeEngine(now: () => string): LifecycleEngine {
     return new LifecycleEngine({
-      useCases: new StaticUseCaseSource([HOLDER_LIMIT_UC, LOCKUP_UC, JURISDICTION_UC, JURISDICTION_TREASURY_UC, JURISDICTION_TREASURY_UC_2]),
+      useCases: new StaticUseCaseSource([HOLDER_LIMIT_UC, LOCKUP_UC, LOCKUP_TREASURY_UC, JURISDICTION_UC, JURISDICTION_TREASURY_UC, JURISDICTION_TREASURY_UC_2]),
       rbac: new RbacPolicy(),
       resolveAdapter: () => adapter,
       audit,
@@ -340,6 +350,28 @@ describe("LifecycleEngine — engine-enforced compliance rules", () => {
     await adapter.mint(lockupCtx.ref, "treasury", "100");
     // provider.acquiredAt('treasury') is null → allowed
     await expect(engine_transfer(engine, lockupCtx, "treasury", "bob", "10")).resolves.toBeDefined();
+  });
+
+  it("lockup: the use case's own treasury is exempt even with a recent acquiredAt (fresh-mint distribution)", async () => {
+    // Mirrors the real ComplianceProvider, where a mint counts as a credit
+    // event for acquiredAt purposes — so a use case's own treasury, right
+    // after its very first mint, would otherwise be "within lockup" of its
+    // own tokens and could never make its first distribution. This is the
+    // real-world bug this exemption fixes: without it, a lockupDays rule
+    // active from a use case's first mint would block the treasury forever.
+    const engine = makeEngine(() => "2026-01-01T00:00:00.000Z");
+    provider.treasuryAccounts.set("treasury-acct-2", "treasury");
+    provider.acquired.set("treasury", "2026-01-01T00:00:00.000Z"); // "acquired" via mint, right now
+    await adapter.mint(lockupTreasuryCtx.ref, "treasury", "100");
+    await expect(engine_transfer(engine, lockupTreasuryCtx, "treasury", "buyer", "10")).resolves.toBeDefined();
+  });
+
+  it("lockup: the treasury exemption doesn't leak to an ordinary holder still within lockup", async () => {
+    const engine = makeEngine(() => "2026-01-11T00:00:00.000Z");
+    provider.treasuryAccounts.set("treasury-acct-2", "treasury"); // "treasury" is exempt, "alice" is not
+    provider.acquired.set("alice", "2026-01-01T00:00:00.000Z");
+    await adapter.mint(lockupTreasuryCtx.ref, "alice", "100");
+    await expect(engine_transfer(engine, lockupTreasuryCtx, "alice", "bob", "10")).rejects.toThrow(/LOCKUP_ACTIVE|lockup/);
   });
 
   it("jurisdiction: allows an in-list holder, blocks out-of-list and null", async () => {

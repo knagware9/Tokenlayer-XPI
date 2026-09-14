@@ -445,6 +445,14 @@ export class LifecycleEngine {
   private async requireLockup(ref: AssetRef, useCase: UseCaseDefinition, from: string): Promise<void> {
     const lockupDays = useCase.compliance.lockupDays;
     if (lockupDays === undefined || !this.compliance) return;
+    // The use case's own treasury is an operational reserve, not a customer
+    // holder (same reasoning as requireJurisdiction's identical check below) —
+    // its mint is the primary distribution event, not an acquisition to lock.
+    // Without this, a lockup rule active from a use case's first mint blocks
+    // the treasury from ever making its first distribution: acquiredAt()
+    // below counts "mint" as a credit like any transfer, so the treasury's own
+    // mint starts its own lockup clock.
+    if (await this.compliance.isUseCaseTreasury(from, useCase.treasuryAccountId)) return;
     const acq = await this.compliance.acquiredAt(ref, from);
     if (acq === null) return; // never acquired → not locked (mint path)
     const acquiredMs = Date.parse(acq);
