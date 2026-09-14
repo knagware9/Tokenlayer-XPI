@@ -560,7 +560,11 @@ describe("per-use-case tenancy", () => {
     const wallet = "0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc";
     const h = { authorization: `Bearer ${platform}` };
     await app.inject({ method: "POST", url: `${V1}/assets/${id}/actions/allow`, headers: h, payload: { account: wallet } });
-    await app.inject({ method: "POST", url: `${V1}/assets/${id}/actions/mint`, headers: h, payload: { to: wallet, amount: "100" } });
+    const mintRes = await app.inject({ method: "POST", url: `${V1}/assets/${id}/actions/mint`, headers: h, payload: { to: wallet, amount: "100" } });
+    // carbon-credit gates mint behind maker-checker — approve as a second
+    // PlatformAdmin (self-approval is refused) before the balance exists to burn.
+    const admin2 = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    await app.inject({ method: "POST", url: `${V1}/proposals/${mintRes.json().proposal.id}/approve`, headers: { authorization: `Bearer ${admin2}` }, payload: {} });
     await app.inject({ method: "POST", url: `${V1}/assets/${id}/actions/burn`, headers: h, payload: { from: wallet, amount: "10" } });
     const audit = (await app.inject({ method: "GET", url: `${V1}/assets/${id}/audit`, headers: h })).json();
     const burn = (audit.data as { action: string; payload: Record<string, unknown> }[]).find((e) => e.action === "burn");
@@ -681,8 +685,12 @@ describe("marketplace: buy (DvP) + cash/credit", () => {
     await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: treasury } });
     await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/allow`, headers: { authorization: `Bearer ${platform}` }, payload: { account: BUYER_WALLET } });
 
-    // Mint 100 tokens to treasury
-    await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/mint`, headers: { authorization: `Bearer ${platform}` }, payload: { to: treasury, amount: "100" } });
+    // Mint 100 tokens to treasury — carbon-credit gates mint behind
+    // maker-checker, so a second PlatformAdmin (self-approval is refused)
+    // approves the proposal before the buyer can purchase from it.
+    const mintRes = await app.inject({ method: "POST", url: `${V1}/assets/${assetId}/actions/mint`, headers: { authorization: `Bearer ${platform}` }, payload: { to: treasury, amount: "100" } });
+    const admin2 = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+    await app.inject({ method: "POST", url: `${V1}/proposals/${mintRes.json().proposal.id}/approve`, headers: { authorization: `Bearer ${admin2}` }, payload: {} });
 
     // Fund the buyer with 1000 CBDC-INR via cash/credit (platform admin can always credit)
     const creditRes = await app.inject({

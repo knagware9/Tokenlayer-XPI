@@ -299,6 +299,21 @@ describe("GET /analytics (route)", () => {
       headers: { authorization: `Bearer ${token}` },
       payload: { to, amount },
     });
+    // Some use cases (e.g. carbon-credit) gate mint behind maker-checker —
+    // a second PlatformAdmin approves the resulting proposal, same as any
+    // other gated action (self-approval is refused, so it can't be `token`).
+    if (res.statusCode === 202) {
+      const proposalId = res.json().proposal.id as string;
+      const admin2 = await loginAs(app, "admin2@tokenlayer.dev", "admin123");
+      const decided = await app.inject({
+        method: "POST",
+        url: `${V1}/proposals/${proposalId}/approve`,
+        headers: auth(admin2),
+        payload: {},
+      });
+      if (decided.json().proposal?.status !== "executed") throw new Error(`mint proposal not executed: ${decided.body}`);
+      return;
+    }
     if (res.statusCode !== 200) throw new Error(`mint failed: ${res.statusCode} ${res.body}`);
   }
 
