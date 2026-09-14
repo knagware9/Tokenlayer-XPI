@@ -50,6 +50,30 @@
         "type": "string",
         "description": "Whether the biomass this credit is claimed against ends up in a durable carbon pool. DURABLE: panel, construction, or biochar pathways. NON_DURABLE: combustion end-uses (e.g. agarbatti round-stick, biomass fuel) — the carbon is released on a short horizon and such volumes should be excluded from removal claims. Optional; most non-biomass carbon projects (e.g. avoidance methodologies) leave this unset.",
         "pattern": "^(DURABLE|NON_DURABLE)$"
+      },
+      "methodologyTrack": {
+        "type": "string",
+        "description": "For a biomass-sourced credit: A_ARR (standing-biomass afforestation/reforestation removals, e.g. Verra VM0047) or B_BIOCHAR (durable biochar from processing residue, e.g. Verra VM0044 / Puro.earth). The two tracks have different permanence profiles, pricing and MRV — optional, most non-biomass credits leave this unset.",
+        "pattern": "^(A_ARR|B_BIOCHAR)$"
+      },
+      "quantificationApproach": {
+        "type": "string",
+        "description": "For Track A_ARR credits: CENSUS_BASED (dispersed plantings — bund, boundary, intercrop — enumerated one by one, no control plots needed) or AREA_BASED (block plantings on land-use-changed land, requires matched control plots and a dynamic performance benchmark). Locked for the credit's whole crediting period once chosen — this field records that choice, it does not enforce immutability. Optional; only meaningful for A_ARR."
+      },
+      "netTco2ePerHaLifetime": {
+        "type": "number",
+        "description": "Net tCO2e per hectare over the full crediting period, AFTER buffer, leakage and uncertainty deductions, computed from a declining sequestration curve (fast early growth to an equilibrium plateau, not a flat annual rate). A flat-rate projection typically overstates lifetime volume by roughly 3.5x and is the first thing a validation body flags — always populate this from the curve model, never from (assumed annual rate × years). Optional; only meaningful for biomass-sourced credits.",
+        "min": 0
+      },
+      "bufferPct": {
+        "type": "number",
+        "description": "Non-permanence buffer-pool contribution, as a percentage of gross credits withheld against reversal risk (e.g. fire, disease, land-use reversal). Typically 15-20% for smallholder Indian agroforestry under ARR methodologies. Optional.",
+        "min": 0
+      },
+      "uncertaintyDeductionPct": {
+        "type": "number",
+        "description": "Conservative deduction applied for measurement/model uncertainty in the underlying growth attestation, before net issuance. Optional.",
+        "min": 0
       }
     },
     "required": [

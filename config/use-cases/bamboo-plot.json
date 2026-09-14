@@ -60,7 +60,7 @@
       },
       "co2SequesteredTonsPerYear": {
         "type": "number",
-        "description": "Verified or estimated CO2e sequestered by this plot per year (tonnes)",
+        "description": "Verified or estimated CO2e sequestered by this plot in the CURRENT monitoring period only (tonnes) — a bamboo clump's annual sequestration is not constant: it ramps for years 1-8 then plateaus near equilibrium (aboveground biomass stops growing once harvest offsets recruitment), so this figure changes attestation to attestation. Never multiply this by 30 to project lifetime volume — that overstates true yield by roughly 3.5x. See the linked carbon-credit asset's netTco2ePerHaLifetime for the declining-curve lifetime figure.",
         "min": 0
       },
       "carbonMethodology": {
@@ -74,6 +74,21 @@
       "linkedCarbonCreditAssetId": {
         "type": "string",
         "description": "Asset id of the carbon-credit (VCU) instrument separately minted against this plot's verified sequestration, if any — the plot token and its carbon credits are independently tradable, this field only records the link"
+      },
+      "landClass": {
+        "type": "string",
+        "description": "PRIVATE or REVENUE_NON_FOREST land only — forest land is permanently ineligible for carbon crediting (transit-permit exemption and clean tenure both depend on non-forest status). Optional; only relevant to plots pursuing a carbon claim.",
+        "pattern": "^(PRIVATE|REVENUE_NON_FOREST)$"
+      },
+      "baselineLanduse": {
+        "type": "string",
+        "description": "Land use in the ≥10-year period before this plot was planted — DEGRADED, FALLOW, CROPLAND or BUND. This is the core additionality evidence a validator asks for first: why wasn't bamboo already the rational crop choice here without carbon revenue. Optional; only relevant to plots pursuing a carbon claim, and must be captured at enrolment — a plot enrolled without it cannot retrofit this evidence later.",
+        "pattern": "^(DEGRADED|FALLOW|CROPLAND|BUND)$"
+      },
+      "plantingGeometry": {
+        "type": "string",
+        "description": "BUND (field-boundary planting), INTERCROP (scattered among another crop), or BLOCK (contiguous plantation over 1 hectare). Determines which carbon quantification approach applies: BUND/INTERCROP plots use CENSUS_BASED (this plot registry already IS the census — every clump enumerated and geo-located), while BLOCK plantations require AREA_BASED accounting with matched control plots. Optional; only relevant to plots pursuing a carbon claim.",
+        "pattern": "^(BUND|INTERCROP|BLOCK)$"
       }
     },
     "required": [
