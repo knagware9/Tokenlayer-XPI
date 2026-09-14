@@ -45,6 +45,11 @@
       "sourcePlotAssetId": {
         "type": "string",
         "description": "Asset id of the RWA plot (e.g. a bamboo-plot asset) this credit batch's sequestration was verified against, if the project also tokenizes the underlying land — optional; most carbon-credit projects have no linked RWA plot"
+      },
+      "endUseDurability": {
+        "type": "string",
+        "description": "Whether the biomass this credit is claimed against ends up in a durable carbon pool. DURABLE: panel, construction, or biochar pathways. NON_DURABLE: combustion end-uses (e.g. agarbatti round-stick, biomass fuel) — the carbon is released on a short horizon and such volumes should be excluded from removal claims. Optional; most non-biomass carbon projects (e.g. avoidance methodologies) leave this unset.",
+        "pattern": "^(DURABLE|NON_DURABLE)$"
       }
     },
     "required": [
