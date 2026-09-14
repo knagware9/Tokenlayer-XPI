@@ -1,0 +1,106 @@
+{
+  "key": "bamboo-plot",
+  "name": "Bamboo Plot Tokenization",
+  "description": "Real-world-asset tokenization of sustainable bamboo cultivation plots (ERC-20) where the total token supply for a plot represents 100% fractional ownership of that plot's yield rights — investors buy tokens for any fraction of a registered plot. Minting registers a new plot's shares against a verified land/cultivation record (gated behind maker-checker approval, since it asserts both land rights and a carbon claim). Transfers double as the on-chain chain-of-custody record as physical custody of the harvested bamboo passes from grower to processor to distributor to retailer — the current token holder is the current custodian, timestamped and anchored by the platform's existing audit trail. Burning retires a plot's shares (e.g. on full buyout or end-of-life). Freeze places a compliance hold on an account.",
+  "tokenStandard": "ERC-20",
+  "symbol": "BAMBOO",
+  "allowedChainIds": [
+    "besu",
+    "mst",
+    "fabric",
+    "canton"
+  ],
+  "defaultChainId": "besu",
+  "metadataSchema": {
+    "type": "object",
+    "properties": {
+      "plotId": {
+        "type": "string",
+        "description": "Registry identifier for the specific bamboo plot/parcel — enforced unique so one plot is tokenized only once"
+      },
+      "location": {
+        "type": "string",
+        "description": "Plot location (region/district, or GPS coordinates)"
+      },
+      "areaHectares": {
+        "type": "number",
+        "description": "Plot area under cultivation",
+        "min": 0
+      },
+      "species": {
+        "type": "string",
+        "description": "Bamboo species cultivated, e.g. Bambusa balcooa, Dendrocalamus strictus"
+      },
+      "cooperativeOrGrower": {
+        "type": "string",
+        "description": "Cultivating entity — cooperative, farmer collective, or individual grower"
+      },
+      "totalShares": {
+        "type": "number",
+        "description": "Total token supply that represents 100% fractional ownership of this plot — a holder's fraction of the plot is their balance divided by this figure",
+        "min": 1
+      },
+      "cultivationStartDate": {
+        "type": "string",
+        "description": "Date cultivation began on this plot (YYYY-MM-DD)",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+      },
+      "certificationBody": {
+        "type": "string",
+        "description": "Sustainable-cultivation certification authority, e.g. FSC, organic certifier"
+      },
+      "certificateUrl": {
+        "type": "document",
+        "description": "Off-ledger link to the cultivation/sustainability certificate (only its hash lives on-ledger)"
+      },
+      "certificateHash": {
+        "type": "string",
+        "description": "SHA-256 of the certificate (pins the off-ledger document as proof of origin)",
+        "pattern": "^0x[0-9a-fA-F]{64}$"
+      },
+      "co2SequesteredTonsPerYear": {
+        "type": "number",
+        "description": "Verified or estimated CO2e sequestered by this plot per year (tonnes)",
+        "min": 0
+      },
+      "carbonMethodology": {
+        "type": "string",
+        "description": "Carbon-accounting methodology applied, e.g. a Verra AR/ALM methodology reference"
+      },
+      "carbonVerifier": {
+        "type": "string",
+        "description": "Third party that verified the carbon sequestration claim"
+      }
+    },
+    "required": [
+      "plotId",
+      "location",
+      "areaHectares",
+      "species",
+      "cooperativeOrGrower",
+      "totalShares"
+    ]
+  },
+  "lifecycle": {
+    "mint": true,
+    "transfer": true,
+    "burn": true,
+    "freeze": true
+  },
+  "compliance": {
+    "allowlist": true,
+    "transferRestrictions": true
+  },
+  "workflow": {
+    "approvals": {
+      "mint": 1
+    }
+  },
+  "uniqueBy": "plotId",
+  "roles": [
+    "UseCaseAdmin",
+    "Issuer",
+    "Buyer",
+    "Auditor"
+  ]
+}
