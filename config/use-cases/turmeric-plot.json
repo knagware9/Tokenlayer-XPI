@@ -1,0 +1,136 @@
+{
+  "key": "turmeric-plot",
+  "name": "Turmeric Plot Tokenization",
+  "description": "Real-world-asset tokenization of turmeric cultivation plots (ERC-20) — a fast-cycle (~9-month) second vertical alongside bamboo-plot within the same commodity-agnostic agri-RWA pattern. Shares the same additionality/provenance field shape as bamboo-plot (plotId, location, areaHectares, landClass, baselineLanduse, plantingGeometry, carbonRegistryBinding, certificate hash-pinning) so a cross-commodity registry view can treat both plot types uniformly; crop-specific fields are swapped for what actually drives turmeric's value (curcumin content, harvest cycle) instead of bamboo's standing-biomass carbon story. Total token supply for a plot represents 100% fractional ownership of that plot's yield rights. Minting registers a new plot's shares against a verified land/cultivation record (gated behind maker-checker approval). Transfers double as the on-chain chain-of-custody record as physical custody of harvested rhizomes passes from grower to processor to distributor to retailer. Burning retires a plot's shares. Freeze places a compliance hold on an account.",
+  "tokenStandard": "ERC-20",
+  "symbol": "TURM",
+  "allowedChainIds": [
+    "besu",
+    "mst",
+    "fabric",
+    "canton"
+  ],
+  "defaultChainId": "besu",
+  "metadataSchema": {
+    "type": "object",
+    "properties": {
+      "plotId": {
+        "type": "string",
+        "description": "Registry identifier for the specific turmeric plot/parcel — enforced unique so one plot is tokenized only once"
+      },
+      "location": {
+        "type": "string",
+        "description": "Plot location (region/district, or GPS coordinates)"
+      },
+      "areaHectares": {
+        "type": "number",
+        "description": "Plot area under cultivation",
+        "min": 0
+      },
+      "variety": {
+        "type": "string",
+        "description": "Turmeric variety cultivated, e.g. Alleppey Finger, Erode, Salem, Rajapuri — the bamboo-plot equivalent of 'species'"
+      },
+      "cooperativeOrGrower": {
+        "type": "string",
+        "description": "Cultivating entity — cooperative, farmer collective, or individual grower"
+      },
+      "totalShares": {
+        "type": "number",
+        "description": "Total token supply that represents 100% fractional ownership of this plot — a holder's fraction of the plot is their balance divided by this figure",
+        "min": 1
+      },
+      "cultivationStartDate": {
+        "type": "string",
+        "description": "Date cultivation began on this plot (YYYY-MM-DD)",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+      },
+      "harvestCycleMonths": {
+        "type": "number",
+        "description": "Length of this plot's cultivation-to-harvest cycle, in months. Turmeric is typically 8-10 months — the concrete evidence of the 'faster-cycle' difference from bamboo's multi-year establishment window.",
+        "min": 1
+      },
+      "curcuminContentPct": {
+        "type": "number",
+        "description": "Curcumin content, the primary quality/export-price driver for turmeric (export-grade is typically 3-5%+). Verified at harvest via lab test — the turmeric equivalent of bamboo's species-verification premium.",
+        "min": 0
+      },
+      "certificationBody": {
+        "type": "string",
+        "description": "Sustainable-cultivation certification authority, e.g. organic certifier, GI-tag authority"
+      },
+      "certificateUrl": {
+        "type": "document",
+        "description": "Off-ledger link to the cultivation/sustainability/GI certificate (only its hash lives on-ledger)"
+      },
+      "certificateHash": {
+        "type": "string",
+        "description": "SHA-256 of the certificate (pins the off-ledger document as proof of origin)",
+        "pattern": "^0x[0-9a-fA-F]{64}$"
+      },
+      "linkedCarbonCreditAssetId": {
+        "type": "string",
+        "description": "Asset id of a carbon-credit (VCU) instrument separately minted against this plot, if a soil-carbon or other claim applies — optional; most annual-crop plots have no linked carbon instrument, unlike bamboo's standing-biomass claim"
+      },
+      "landClass": {
+        "type": "string",
+        "description": "PRIVATE or REVENUE_NON_FOREST land only — forest land is permanently ineligible for any carbon claim. Optional; only relevant if this plot pursues a carbon claim.",
+        "pattern": "^(PRIVATE|REVENUE_NON_FOREST)$"
+      },
+      "baselineLanduse": {
+        "type": "string",
+        "description": "Land use in the period before this plot was planted — DEGRADED, FALLOW, CROPLAND or BUND. Additionality evidence, only relevant if this plot pursues a carbon claim. Optional.",
+        "pattern": "^(DEGRADED|FALLOW|CROPLAND|BUND)$"
+      },
+      "plantingGeometry": {
+        "type": "string",
+        "description": "BUND, INTERCROP, or BLOCK. Optional; only relevant if this plot pursues a carbon claim.",
+        "pattern": "^(BUND|INTERCROP|BLOCK)$"
+      },
+      "carbonRegistryBinding": {
+        "type": "string",
+        "description": "Which carbon registry this plot's sequestration is (or will be) credited under, if any — NONE, VERRA_VM0047, BEE_CCTS, GOLD_STANDARD. Same controlled vocabulary as bamboo-plot's field of the same name, so a cross-commodity registry view can compare both. Optional.",
+        "pattern": "^(NONE|VERRA_VM0047|BEE_CCTS|GOLD_STANDARD)$"
+      }
+    },
+    "required": [
+      "plotId",
+      "location",
+      "areaHectares",
+      "variety",
+      "cooperativeOrGrower",
+      "totalShares"
+    ]
+  },
+  "lifecycle": {
+    "mint": true,
+    "transfer": true,
+    "burn": true,
+    "freeze": true
+  },
+  "compliance": {
+    "allowlist": true,
+    "transferRestrictions": true,
+    "allowedJurisdictions": ["IN"],
+    "lockupDays": 30,
+    "maxHolders": 200
+  },
+  "fees": {
+    "marketplaceBps": 25
+  },
+  "saleTermsDefault": {
+    "currency": "CBDC-INR"
+  },
+  "workflow": {
+    "approvals": {
+      "mint": 1
+    }
+  },
+  "uniqueBy": "plotId",
+  "roles": [
+    "UseCaseAdmin",
+    "Issuer",
+    "Buyer",
+    "Auditor"
+  ]
+}
