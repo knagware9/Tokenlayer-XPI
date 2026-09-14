@@ -102,6 +102,12 @@
     "allowlist": true,
     "transferRestrictions": true
   },
+  "fees": {
+    "marketplaceBps": 25
+  },
+  "saleTermsDefault": {
+    "currency": "USDC"
+  },
   "workflow": {
     "approvals": {
       "mint": 1
