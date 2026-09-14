@@ -89,6 +89,11 @@
         "type": "string",
         "description": "BUND (field-boundary planting), INTERCROP (scattered among another crop), or BLOCK (contiguous plantation over 1 hectare). Determines which carbon quantification approach applies: BUND/INTERCROP plots use CENSUS_BASED (this plot registry already IS the census — every clump enumerated and geo-located), while BLOCK plantations require AREA_BASED accounting with matched control plots. Optional; only relevant to plots pursuing a carbon claim.",
         "pattern": "^(BUND|INTERCROP|BLOCK)$"
+      },
+      "carbonRegistryBinding": {
+        "type": "string",
+        "description": "Which carbon registry this plot's sequestration is (or will be) credited under — NONE, VERRA_VM0047, BEE_CCTS, or GOLD_STANDARD. A plot should bind to exactly one registry for its whole crediting period; the same tonne credited twice under two registries is double-counting. This field only RECORDS that choice — the platform does not enforce one-way binding or reject a second registry's claim against the same plot; treat it as a declared commitment to check manually, not a guarantee.",
+        "pattern": "^(NONE|VERRA_VM0047|BEE_CCTS|GOLD_STANDARD)$"
       }
     },
     "required": [
