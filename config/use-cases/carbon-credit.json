@@ -74,6 +74,11 @@
         "type": "number",
         "description": "Conservative deduction applied for measurement/model uncertainty in the underlying growth attestation, before net issuance. Optional.",
         "min": 0
+      },
+      "carbonRegistryBinding": {
+        "type": "string",
+        "description": "Which registry this specific credit batch is issued under, in the same controlled vocabulary as sourcePlotAssetId's plot-level carbonRegistryBinding field (NONE, VERRA_VM0047, BEE_CCTS, GOLD_STANDARD) — 'registry' above is free text for display, this is the machine-comparable cross-check value. When sourcePlotAssetId is set, this SHOULD match that plot's own carbonRegistryBinding; a mismatch means the same land is being claimed under two different registries, which is double-counting. The platform does not check this automatically — it must be compared manually. Optional.",
+        "pattern": "^(NONE|VERRA_VM0047|BEE_CCTS|GOLD_STANDARD)$"
       }
     },
     "required": [
