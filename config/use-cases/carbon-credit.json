@@ -79,6 +79,11 @@
         "type": "string",
         "description": "Which registry this specific credit batch is issued under, in the same controlled vocabulary as sourcePlotAssetId's plot-level carbonRegistryBinding field (NONE, VERRA_VM0047, BEE_CCTS, GOLD_STANDARD) — 'registry' above is free text for display, this is the machine-comparable cross-check value. When sourcePlotAssetId is set, this SHOULD match that plot's own carbonRegistryBinding; a mismatch means the same land is being claimed under two different registries, which is double-counting. The platform does not check this automatically — it must be compared manually. Optional.",
         "pattern": "^(NONE|VERRA_VM0047|BEE_CCTS|GOLD_STANDARD)$"
+      },
+      "verraListingStatus": {
+        "type": "string",
+        "description": "Where the underlying carbon project actually sits in the registry pipeline: DESIGN (PDD not yet submitted) | LISTED (submitted, awaiting validation) | UNDER_VALIDATION (a VVB is reviewing it) | REGISTERED (validated and registered) | MONITORING (registered, between verification cycles) | ISSUING (a verification cycle has produced registry-issued serials). A batch minted before REGISTERED/ISSUING is a platform-side claim only, not yet backed by an actual registry serial — Indian AFOLU projects commonly spend 2-3 years in DESIGN through UNDER_VALIDATION before first issuance. Optional, but an approver reviewing a mint proposal should check this before approving a large quantity against an early-stage project.",
+        "pattern": "^(DESIGN|LISTED|UNDER_VALIDATION|REGISTERED|MONITORING|ISSUING)$"
       }
     },
     "required": [
@@ -96,6 +101,11 @@
   "compliance": {
     "allowlist": true,
     "transferRestrictions": true
+  },
+  "workflow": {
+    "approvals": {
+      "mint": 1
+    }
   },
   "roles": [
     "UseCaseAdmin",
