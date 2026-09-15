@@ -1,0 +1,136 @@
+{
+  "key": "redd-plot",
+  "name": "REDD+ Forest Conservation",
+  "description": "Tokenized rights over an avoided-deforestation (REDD+) forest conservation area (ERC-20) — the conservation counterpart to bamboo-plot and turmeric-plot's cultivation claims. Where those two credit NEW planting, this credits EXISTING standing forest that would otherwise be lost: total token supply represents 100% fractional ownership of the area's conservation-credit rights. Roughly half of bamboo-plot/turmeric-plot's universal field pattern carries over unchanged (plotId, location, areaHectares, cooperativeOrGrower, totalShares, certificate hash-pinning, landClass, carbonRegistryBinding, linkedCarbonCreditAssetId); the cultivation-specific fields (species, planting date/geometry, prior land-use baseline) are replaced with what a REDD+ claim actually needs — a deforestation-risk baseline, tenure rights, and a leakage belt. Minting registers a new conservation area's shares against a verified tenure and baseline record (gated behind maker-checker approval, since it asserts both land rights and a counterfactual deforestation claim). Transfers move ownership of the area's conservation-credit rights. Burning retires an area's shares. Freeze places a compliance hold on an account.",
+  "tokenStandard": "ERC-20",
+  "symbol": "REDD",
+  "allowedChainIds": [
+    "besu",
+    "mst",
+    "fabric",
+    "canton"
+  ],
+  "defaultChainId": "besu",
+  "metadataSchema": {
+    "type": "object",
+    "properties": {
+      "plotId": {
+        "type": "string",
+        "description": "Registry identifier for the specific conservation area — enforced unique so one area is tokenized only once"
+      },
+      "location": {
+        "type": "string",
+        "description": "Area location (region/district, or GPS coordinates)"
+      },
+      "areaHectares": {
+        "type": "number",
+        "description": "Forest area under conservation (excludes the leakage belt — see leakageBeltHectares)",
+        "min": 0
+      },
+      "forestType": {
+        "type": "string",
+        "description": "Forest type under protection, e.g. tropical moist, dry deciduous, mangrove — drives which allometric/emission-factor model applies to the baseline"
+      },
+      "cooperativeOrGrower": {
+        "type": "string",
+        "description": "Managing entity for the conservation area — community forest-rights holder, NGO, or forest department (the bamboo-plot/turmeric-plot equivalent of 'cooperativeOrGrower', kept for cross-vertical consistency even though nothing is grown here)"
+      },
+      "totalShares": {
+        "type": "number",
+        "description": "Total token supply that represents 100% fractional ownership of this area's conservation-credit rights — a holder's fraction is their balance divided by this figure",
+        "min": 1
+      },
+      "projectStartDate": {
+        "type": "string",
+        "description": "Date the conservation project's crediting period began — NOT a planting date (nothing is planted); this is when the counterfactual baseline starts being measured against",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+      },
+      "baselineDeforestationRatePctPerYear": {
+        "type": "number",
+        "description": "The counterfactual: estimated percentage of this forest that would be lost per year WITHOUT the project. This is the entire additionality argument for a REDD+ claim — the direct analog of a cultivation plot's baselineLanduse — and must be evidenced (historical deforestation trend in the reference region), not asserted.",
+        "min": 0
+      },
+      "tenureRightsHolder": {
+        "type": "string",
+        "description": "Who legally holds rights over this forest — often contested and the single most common reason a REDD+ project stalls, unlike a farmed plot with clean private title. Record the actual holder (e.g. a named community forest-rights committee, state forest department) and how that right is documented."
+      },
+      "leakageBeltHectares": {
+        "type": "number",
+        "description": "Area of the buffer zone monitored for displaced deforestation pressure — deforestation avoided in the core area but merely pushed into the belt is not a real reduction. A mandatory REDD+ methodology requirement (the conservation-side analog of a carbon-credit batch's bufferPct).",
+        "min": 0
+      },
+      "redMethodology": {
+        "type": "string",
+        "description": "REDD+ methodology applied, e.g. VM0007 (REDD Methodology Framework), VM0015 (Avoided Unplanned Deforestation)"
+      },
+      "certificationBody": {
+        "type": "string",
+        "description": "Certification/verification authority overseeing the conservation claim"
+      },
+      "certificateUrl": {
+        "type": "document",
+        "description": "Off-ledger link to the tenure/certification/baseline-study document (only its hash lives on-ledger)"
+      },
+      "certificateHash": {
+        "type": "string",
+        "description": "SHA-256 of the certificate (pins the off-ledger document as proof)",
+        "pattern": "^0x[0-9a-fA-F]{64}$"
+      },
+      "linkedCarbonCreditAssetId": {
+        "type": "string",
+        "description": "Asset id of the carbon-credit instrument separately minted against this area's avoided-deforestation claim, if any — the conservation-rights token and its carbon credits are independently tradable, this field only records the link. On the linked credit, set creditType to 'avoidance', not 'removal'."
+      },
+      "landClass": {
+        "type": "string",
+        "description": "PRIVATE or REVENUE_NON_FOREST — NOTE: unlike bamboo-plot/turmeric-plot, a REDD+ area is expected to already BE forest, so this field here instead records the land's formal revenue/administrative classification (which determines tenure and permit pathway), not a forest/non-forest eligibility gate.",
+        "pattern": "^(PRIVATE|REVENUE_NON_FOREST)$"
+      },
+      "carbonRegistryBinding": {
+        "type": "string",
+        "description": "Which carbon registry this area's avoided-deforestation claim is (or will be) credited under, if any — NONE, VERRA_VM0047, BEE_CCTS, GOLD_STANDARD. Same controlled vocabulary as bamboo-plot/turmeric-plot's field of the same name, so a cross-vertical registry view can compare all three. Optional.",
+        "pattern": "^(NONE|VERRA_VM0047|BEE_CCTS|GOLD_STANDARD)$"
+      }
+    },
+    "required": [
+      "plotId",
+      "location",
+      "areaHectares",
+      "forestType",
+      "cooperativeOrGrower",
+      "totalShares",
+      "baselineDeforestationRatePctPerYear",
+      "tenureRightsHolder"
+    ]
+  },
+  "lifecycle": {
+    "mint": true,
+    "transfer": true,
+    "burn": true,
+    "freeze": true
+  },
+  "compliance": {
+    "allowlist": true,
+    "transferRestrictions": true,
+    "allowedJurisdictions": ["IN"],
+    "lockupDays": 30,
+    "maxHolders": 200
+  },
+  "fees": {
+    "marketplaceBps": 25
+  },
+  "saleTermsDefault": {
+    "currency": "CBDC-INR"
+  },
+  "workflow": {
+    "approvals": {
+      "mint": 1
+    }
+  },
+  "uniqueBy": "plotId",
+  "roles": [
+    "UseCaseAdmin",
+    "Issuer",
+    "Buyer",
+    "Auditor"
+  ]
+}
