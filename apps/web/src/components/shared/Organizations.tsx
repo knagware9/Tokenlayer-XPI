@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError, api } from "../../api.js";
 import { useAuth } from "../../auth.js";
+import { activePersona } from "../../lib/shared/persona.js";
 import { clampAccent } from "../../lib/shared/branding.js";
 import { DOMAIN_LABELS, ROLE_LABELS, fullCapabilities, isOrgOperatingRole, orgRoleEnabled, toggleCapability, validateEnvelope } from "../../lib/shared/capabilities.js";
 import { ORG_DOMAINS, ORG_OPERATING_ROLES, type CompanyCategory, type CredentialStatusInfo, type CredentialUseCase, type DidDocument, type KybDocumentRef, type OrgCapabilities, type OrgDomain, type OrgMember, type OrgOperatingRole, type OrgType, type Organization, type Role, type UseCase } from "../../types.js";
@@ -439,14 +440,19 @@ export function Organizations(): JSX.Element {
 
   // PlatformAdmin only, and only for the dashboard's use-case badges below —
   // every other role never needs this fetch. Both domains: an org can own a
-  // tokenization use case, a credential use case, or (rarely) both.
+  // tokenization use case, a credential use case, or (rarely) both. But an
+  // identity-only persona's edge never serves /use-cases at all (a
+  // tokenization-only concept — see personas.ts), so that half of the fetch
+  // is skipped there rather than firing a request that can only fail as a
+  // CORS-shaped rejection (same reasoning as App.tsx's useCasesSurfaced).
+  const useCasesSurfaced = !activePersona() || activePersona()!.surfaces.includes("use-cases");
   const [useCases, setUseCases] = useState<UseCase[]>([]);
   const [credentialUseCases, setCredentialUseCases] = useState<CredentialUseCase[]>([]);
   useEffect(() => {
     if (!token || !isPlatform) return;
-    void api.useCases(token).then(setUseCases).catch(() => setUseCases([]));
+    if (useCasesSurfaced) void api.useCases(token).then(setUseCases).catch(() => setUseCases([]));
     void api.credentialUseCases(token).then(setCredentialUseCases).catch(() => setCredentialUseCases([]));
-  }, [token, isPlatform]);
+  }, [token, isPlatform, useCasesSurfaced]);
 
   /** Every use case (either domain) a given org owns, as short display labels. */
   const useCasesOwnedBy = (orgId: string): { key: string; name: string; domain: "tokenization" | "identity" }[] => [

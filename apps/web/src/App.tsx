@@ -83,6 +83,14 @@ export function App(): JSX.Element {
     if (token && user?.useCaseKey) void api.credentialUseCase(token, user.useCaseKey).then(setDeskCredUC).catch(() => setDeskCredUC(null));
   };
 
+  // A split-topology persona whose edge never serves /use-cases at all (a
+  // tokenization-only concept — see personas.ts) would otherwise fire that
+  // fetch anyway and let it fail as a CORS-shaped rejection: the route was
+  // never registered for that edge, so every load of an identity persona
+  // logged console noise for a request that could never succeed. Same
+  // no-active-persona-means-everything-exists reasoning as holderRequestsSurfaced.
+  const useCasesSurfaced = !activePersona() || activePersona()!.surfaces.includes("use-cases");
+
   useEffect(() => {
     if (!token) return;
     // chains and useCases fetched independently, not as one Promise.all: an
@@ -92,7 +100,8 @@ export function App(): JSX.Element {
     // rejection it was always going to hit. Same isolation reasoning as the
     // /config fetch below.
     void api.chains(token).then(setChains).catch(() => { setChains([]); });
-    void api.useCases(token).then(setUseCases).catch(() => { setUseCases([]); });
+    if (useCasesSurfaced) void api.useCases(token).then(setUseCases).catch(() => { setUseCases([]); });
+    else setUseCases([]);
     // Isolated from chains/useCases: a /config failure must not blank the dashboard —
     // it only falls back to all domains, leaving the rest of the app fully functional.
     void api.config(token).then((cfg) => {
@@ -101,7 +110,7 @@ export function App(): JSX.Element {
       setEnabledDomains(eff);
       setActiveDomain((cur) => (eff.includes(cur) ? cur : loadActiveDomain(eff)));
     }).catch(() => { setEnabledDomains(DOMAIN_KEYS); });
-  }, [token]);
+  }, [token, useCasesSurfaced]);
 
   // Scoped users are clamped to their own use case's path. A PlatformAdmin who
   // just authenticated from /login or /signup must leave that path too: routeKey
