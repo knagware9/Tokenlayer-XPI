@@ -113,7 +113,9 @@
     "transferRestrictions": true,
     "allowedJurisdictions": ["IN"],
     "lockupDays": 30,
-    "maxHolders": 200
+    "maxHolders": 200,
+    "requireVerifiedIdentity": true,
+    "requiredCredentialTypes": ["ImpactInvestorCredential"]
   },
   "fees": {
     "marketplaceBps": 25
