@@ -165,6 +165,7 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
   const [allowlist, setAllowlist] = useState(true);
   const [transferRestrictions, setTransferRestrictions] = useState(true);
   const [requireVerifiedIdentity, setRequireVerifiedIdentity] = useState(false);
+  const [requiredCredentialTypes, setRequiredCredentialTypes] = useState("");
   const [allowedJurisdictions, setAllowedJurisdictions] = useState("");
   const [maxHolders, setMaxHolders] = useState("");
   const [lockupDays, setLockupDays] = useState("");
@@ -295,7 +296,11 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
     }
     try {
       const complianceOut: UseCase["compliance"] = { allowlist, transferRestrictions };
-      if (requireVerifiedIdentity) complianceOut.requireVerifiedIdentity = true;
+      if (requireVerifiedIdentity) {
+        complianceOut.requireVerifiedIdentity = true;
+        const credTypes = requiredCredentialTypes.split(",").map((v) => v.trim()).filter(Boolean);
+        if (credTypes.length) complianceOut.requiredCredentialTypes = credTypes;
+      }
       if (maxHolders.trim()) complianceOut.maxHolders = Number(maxHolders);
       if (lockupDays.trim()) complianceOut.lockupDays = Number(lockupDays);
       const jurisdictions = allowedJurisdictions.split(",").map((v) => v.trim()).filter(Boolean);
@@ -600,8 +605,15 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
                   </Toggle>
                 </div>
                 <p className="text-[11px] text-slate-400">
-                  Only holders with a valid, unrevoked KYC credential may receive this asset.
+                  {requireVerifiedIdentity && requiredCredentialTypes.trim()
+                    ? "Only holders with a valid, unrevoked credential of one of the listed types may receive this asset."
+                    : "Only holders with a valid, unrevoked KYC credential may receive this asset."}
                 </p>
+                {requireVerifiedIdentity && (
+                  <L label="Required credential type(s)" hint="Comma-separated; holder needs ANY ONE. Leave blank for the platform's KYC credential.">
+                    <input className="input" value={requiredCredentialTypes} onChange={(e) => setRequiredCredentialTypes(e.target.value)} placeholder="KycCredential, AccreditedInvestorCredential" />
+                  </L>
+                )}
                 <div className="grid sm:grid-cols-3 gap-4">
                   <L label="Allowed jurisdictions" hint="Comma-separated, e.g. US, GB, SG">
                     <input className="input" value={allowedJurisdictions} onChange={(e) => setAllowedJurisdictions(e.target.value)} placeholder="US, GB, SG" />
@@ -686,7 +698,9 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
                       </Pill>
                     ))}
                     {allowlist && <Pill tone="ok">allowlist</Pill>}
-                    {requireVerifiedIdentity && <Pill tone="ok">verified identity required</Pill>}
+                    {requireVerifiedIdentity && (
+                      <Pill tone="ok">{requiredCredentialTypes.trim() ? `requires: ${requiredCredentialTypes.trim()}` : "verified identity required"}</Pill>
+                    )}
                     {allowedJurisdictions.trim() && <Pill tone="info">{allowedJurisdictions}</Pill>}
                     {marketplaceBps.trim() && <Pill tone="warn">{marketplaceBps} bps</Pill>}
                     {Object.entries(approvals).filter(([, n]) => n.trim() && Number(n) > 0).map(([op, n]) => (

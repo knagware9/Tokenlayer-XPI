@@ -113,6 +113,24 @@ describe("validateUseCaseDefinition", () => {
     expect(() => validateUseCaseDefinition(bad)).toThrowError(/allowedJurisdictions/);
   });
 
+  it("accepts requireVerifiedIdentity with custom requiredCredentialTypes", () => {
+    const ok = {
+      ...FUNGIBLE_USE_CASE,
+      compliance: { ...FUNGIBLE_USE_CASE.compliance, requireVerifiedIdentity: true, requiredCredentialTypes: ["AccreditedInvestorCredential"] },
+    };
+    expect(() => validateUseCaseDefinition(ok)).not.toThrow();
+  });
+
+  it("rejects an empty requiredCredentialTypes", () => {
+    const bad = { ...FUNGIBLE_USE_CASE, compliance: { ...FUNGIBLE_USE_CASE.compliance, requiredCredentialTypes: [] } };
+    expect(() => validateUseCaseDefinition(bad)).toThrowError(/requiredCredentialTypes/);
+  });
+
+  it("rejects a non-string entry in requiredCredentialTypes", () => {
+    const bad = { ...FUNGIBLE_USE_CASE, compliance: { ...FUNGIBLE_USE_CASE.compliance, requiredCredentialTypes: [42] } };
+    expect(() => validateUseCaseDefinition(bad)).toThrowError(/requiredCredentialTypes/);
+  });
+
   // A base definition that declares an `invoiceHash` metadata property, so the
   // derivedFields/uniqueBy positive cases below have a real target field.
   const withInvoiceHash = {

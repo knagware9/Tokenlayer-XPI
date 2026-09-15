@@ -199,8 +199,15 @@ export interface UseCaseDefinition {
     lockupDays?: number;
     /** Holder KYC country codes permitted to receive tokens. */
     allowedJurisdictions?: string[];
-    /** Require the receiver to hold a valid, unrevoked identity (KYC) credential. */
+    /** Require the receiver to hold a valid, unrevoked identity credential. */
     requireVerifiedIdentity?: boolean;
+    /**
+     * Which credential type(s) satisfy `requireVerifiedIdentity` — the holder
+     * needs ANY ONE of these, not all. Defaults to the platform's KYC
+     * credential type when `requireVerifiedIdentity` is true and this is
+     * unset, so every existing use case means exactly what it always did.
+     */
+    requiredCredentialTypes?: string[];
   };
   /** Optional fee configuration; the API layer applies the cash movements. */
   fees?: {
@@ -271,8 +278,8 @@ export interface ComplianceProvider {
   acquiredAt(ref: AssetRef, account: string): Promise<string | null>;
   /** Holder address → KYC country code, or null if unknown. */
   jurisdictionOf(account: string): Promise<string | null>;
-  /** True iff the account's user holds a valid, unrevoked identity (KYC) credential. */
-  hasVerifiedIdentity(account: string): Promise<boolean>;
+  /** True iff the account's user holds a valid, unrevoked credential of ANY ONE of `credentialTypes`. */
+  hasVerifiedIdentity(account: string, credentialTypes: string[]): Promise<boolean>;
   /**
    * True iff `account` is the resolved address of `treasuryAccountId` — the use
    * case's OWN registered treasury (an issuer's operational reserve), not a

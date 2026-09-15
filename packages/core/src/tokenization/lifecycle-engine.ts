@@ -492,20 +492,27 @@ export class LifecycleEngine {
   }
 
   /**
-   * Require the recipient to hold a valid, unrevoked identity (KYC) credential.
-   * No-op unless the rule is set AND a ComplianceProvider is wired.
+   * Require the recipient to hold a valid, unrevoked credential of one of the
+   * use case's required types. No-op unless the rule is set AND a
+   * ComplianceProvider is wired.
    */
   private async requireVerifiedIdentity(useCase: UseCaseDefinition, to: string): Promise<void> {
     if (!useCase.compliance.requireVerifiedIdentity || !this.compliance) return;
     // Same treasury exemption as requireJurisdiction: an operational reserve
     // has no identity credential of its own to present.
     if (await this.compliance.isUseCaseTreasury(to, useCase.treasuryAccountId)) return;
-    const ok = await this.compliance.hasVerifiedIdentity(to);
+    // Default matches apps/api's IDENTITY_CREDENTIAL_TYPE ("KycCredential") —
+    // core has no business naming a specific credential type, so this is a
+    // deliberately duplicated literal, not an import. An unset
+    // requiredCredentialTypes means every existing use case keeps meaning
+    // exactly what it always did.
+    const types = useCase.compliance.requiredCredentialTypes ?? ["KycCredential"];
+    const ok = await this.compliance.hasVerifiedIdentity(to, types);
     if (!ok) {
       throw new PolicyError(
         "IDENTITY_NOT_VERIFIED",
-        `account '${to}' has no valid verified identity (DID/VC) credential`,
-        { useCase: useCase.key, account: to },
+        `account '${to}' has no valid verified identity (DID/VC) credential of type: ${types.join(", ")}`,
+        { useCase: useCase.key, account: to, requiredCredentialTypes: types },
       );
     }
   }

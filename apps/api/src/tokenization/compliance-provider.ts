@@ -10,7 +10,7 @@
  */
 import type { AssetRef, ComplianceProvider } from "@tokenlayer/core";
 import { firstAcquisitionOf, holderCountOf } from "./holders.js";
-import { IDENTITY_CREDENTIAL_TYPE, type IdentityAssertions } from "../identity/identity-assertions.js";
+import type { IdentityAssertions } from "../identity/identity-assertions.js";
 import type { AccountRepository, AuditRepository, UserRepository } from "../persistence/types/index.js";
 
 export interface ComplianceProviderDeps {
@@ -49,9 +49,11 @@ export function createComplianceProvider(deps: ComplianceProviderDeps): Complian
       const user = (await users.list()).find((u) => u.accountId === acct.id);
       return user?.kyc?.country ?? null;
     },
-    async hasVerifiedIdentity(account: string): Promise<boolean> {
+    async hasVerifiedIdentity(account: string, credentialTypes: string[]): Promise<boolean> {
       // Same address → account → user resolution as jurisdictionOf, then check
-      // the user's custodial DID for a held, unrevoked KycCredential.
+      // the user's custodial DID for a held, unrevoked credential of ANY ONE
+      // of the passed types (OR semantics — a use case can accept KYC OR a
+      // more specific credential, e.g. an accredited-investor attestation).
       //
       // NOTE WHERE THE BOUNDARY FALLS. The wallet resolution stays here, in
       // tokenization's half, and only the DID crosses to `identity.holds`.
@@ -68,7 +70,10 @@ export function createComplianceProvider(deps: ComplianceProviderDeps): Complian
       if (!acct) return false;
       const user = (await users.list()).find((u) => u.accountId === acct.id);
       if (!user?.did) return false;
-      return identity.holds(user.did, IDENTITY_CREDENTIAL_TYPE);
+      for (const type of credentialTypes) {
+        if (await identity.holds(user.did, type)) return true;
+      }
+      return false;
     },
     async isUseCaseTreasury(account: string, treasuryAccountId: string | undefined): Promise<boolean> {
       if (!treasuryAccountId) return false;

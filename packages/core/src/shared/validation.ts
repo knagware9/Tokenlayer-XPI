@@ -161,7 +161,7 @@ function validateCompliance(
   key: string,
   fail: (msg: string) => never,
 ): void {
-  const { maxHolders, lockupDays, allowedJurisdictions, requireVerifiedIdentity } = compliance;
+  const { maxHolders, lockupDays, allowedJurisdictions, requireVerifiedIdentity, requiredCredentialTypes } = compliance;
   if (maxHolders !== undefined) {
     if (typeof maxHolders !== "number" || !Number.isInteger(maxHolders) || maxHolders <= 0) {
       fail(`use case '${key}' compliance.maxHolders must be a positive integer`);
@@ -184,6 +184,16 @@ function validateCompliance(
   }
   if (requireVerifiedIdentity !== undefined && typeof requireVerifiedIdentity !== "boolean") {
     fail(`use case '${key}' compliance.requireVerifiedIdentity must be a boolean`);
+  }
+  if (requiredCredentialTypes !== undefined) {
+    if (!Array.isArray(requiredCredentialTypes) || requiredCredentialTypes.length === 0) {
+      fail(`use case '${key}' compliance.requiredCredentialTypes must be a non-empty array`);
+    }
+    for (const t of requiredCredentialTypes as unknown[]) {
+      if (typeof t !== "string" || t.length === 0) {
+        fail(`use case '${key}' compliance.requiredCredentialTypes entries must be non-empty strings`);
+      }
+    }
   }
 }
 

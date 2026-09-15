@@ -217,6 +217,12 @@ class FakeCompliance implements ComplianceProvider {
   acquired = new Map<string, string | null>();
   jurisdictions = new Map<string, string | null>();
   verified = new Map<string, boolean>();
+  /** account → the set of credential types it "holds", for tests that exercise
+   *  requiredCredentialTypes matching directly. Checked BEFORE the legacy
+   *  `verified` boolean map when set for that account. */
+  verifiedTypes = new Map<string, Set<string>>();
+  /** Every credentialTypes list this was actually called with, for asserting the default. */
+  hasVerifiedIdentityCalls: string[][] = [];
   /** treasuryAccountId → the account address it resolves to, mirroring the real
    *  provider's address→Account.id lookup without needing a repo here. */
   treasuryAccounts = new Map<string, string>();
@@ -234,8 +240,11 @@ class FakeCompliance implements ComplianceProvider {
     if (this.throwOnJurisdiction) throw new Error("jurisdictionOf should not be consulted once the treasury exemption applies");
     return this.jurisdictions.get(account) ?? null;
   }
-  async hasVerifiedIdentity(account: string): Promise<boolean> {
+  async hasVerifiedIdentity(account: string, credentialTypes: string[]): Promise<boolean> {
     if (this.throwOnVerify) throw new Error("hasVerifiedIdentity should not be consulted when the flag is off");
+    this.hasVerifiedIdentityCalls.push(credentialTypes);
+    const held = this.verifiedTypes.get(account);
+    if (held) return credentialTypes.some((t) => held.has(t));
     return this.verified.get(account) ?? false;
   }
   async isUseCaseTreasury(account: string, treasuryAccountId: string | undefined): Promise<boolean> {
@@ -456,14 +465,26 @@ describe("LifecycleEngine — compliance.requireVerifiedIdentity gate", () => {
     treasuryAccountId: "treasury-acct-2",
     compliance: { allowlist: false, transferRestrictions: true, requireVerifiedIdentity: true },
   };
+  // Custom requiredCredentialTypes — accepts EITHER of two specific types, not the default KYC one.
+  const VERIFIED_ID_CUSTOM_TYPES_UC: UseCaseDefinition = {
+    ...FUNGIBLE_USE_CASE,
+    key: "verified-id-custom-types",
+    compliance: {
+      allowlist: false,
+      transferRestrictions: true,
+      requireVerifiedIdentity: true,
+      requiredCredentialTypes: ["AccreditedInvestorCredential", "ImpactInvestorCredential"],
+    },
+  };
 
   const idCtx: AssetContext = { ref: { id: "v1", chainId: "fake", contractRef: "fake:v1" }, useCaseKey: "verified-id" };
   const offCtx: AssetContext = { ref: { id: "v2", chainId: "fake", contractRef: "fake:v2" }, useCaseKey: "verified-id-off" };
   const idTreasuryCtx: AssetContext = { ref: { id: "v3", chainId: "fake", contractRef: "fake:v3" }, useCaseKey: "verified-id-treasury" };
+  const idCustomTypesCtx: AssetContext = { ref: { id: "v4", chainId: "fake", contractRef: "fake:v4" }, useCaseKey: "verified-id-custom-types" };
 
   function makeEngine(): LifecycleEngine {
     return new LifecycleEngine({
-      useCases: new StaticUseCaseSource([VERIFIED_ID_UC, FLAG_OFF_UC, VERIFIED_ID_TREASURY_UC]),
+      useCases: new StaticUseCaseSource([VERIFIED_ID_UC, FLAG_OFF_UC, VERIFIED_ID_TREASURY_UC, VERIFIED_ID_CUSTOM_TYPES_UC]),
       rbac: new RbacPolicy(),
       resolveAdapter: () => adapter,
       audit,
@@ -534,6 +555,26 @@ describe("LifecycleEngine — compliance.requireVerifiedIdentity gate", () => {
     provider.treasuryAccounts.set("treasury-acct-2", "treasury-addr");
     provider.verified.set("someone-else", false);
     await expect(engine.mint(ADMIN, idTreasuryCtx, "someone-else", "10")).rejects.toThrow(/IDENTITY_NOT_VERIFIED|verified identity/);
+  });
+
+  it("requiredCredentialTypes unset: defaults to the platform's KYC credential type", async () => {
+    const engine = makeEngine();
+    provider.verified.set("alice", true);
+    await engine.mint(ADMIN, idCtx, "alice", "10");
+    expect(provider.hasVerifiedIdentityCalls).toContainEqual(["KycCredential"]);
+  });
+
+  it("requiredCredentialTypes: blocks a holder of an unlisted credential type", async () => {
+    const engine = makeEngine();
+    provider.verifiedTypes.set("alice", new Set(["KycCredential"])); // holds KYC, but this use case doesn't accept it
+    await expect(engine.mint(ADMIN, idCustomTypesCtx, "alice", "10")).rejects.toThrow(/IDENTITY_NOT_VERIFIED|verified identity/);
+  });
+
+  it("requiredCredentialTypes: allows a holder of ANY ONE of the listed types (OR semantics)", async () => {
+    const engine = makeEngine();
+    provider.verifiedTypes.set("alice", new Set(["ImpactInvestorCredential"])); // the 2nd listed type, not the 1st
+    await expect(engine.mint(ADMIN, idCustomTypesCtx, "alice", "10")).resolves.toBeDefined();
+    expect(provider.hasVerifiedIdentityCalls).toContainEqual(["AccreditedInvestorCredential", "ImpactInvestorCredential"]);
   });
 });
 

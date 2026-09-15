@@ -143,8 +143,12 @@ export interface UseCase {
     lockupDays?: number;
     allowedJurisdictions?: string[];
     /** When true, a buy/mint/transfer to a wallet is refused unless its user
-     * holds a valid, unrevoked KYC credential (DID/VC identity gate). */
+     * holds a valid, unrevoked credential of one of requiredCredentialTypes
+     * (DID/VC identity gate). */
     requireVerifiedIdentity?: boolean;
+    /** Which credential type(s) satisfy requireVerifiedIdentity — holder
+     * needs ANY ONE. Defaults to the platform's KYC credential type when unset. */
+    requiredCredentialTypes?: string[];
   };
   fees?: { marketplaceBps?: number; issuanceFlat?: string };
   saleTermsDefault?: { unitPrice?: string; currency?: string };
