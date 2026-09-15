@@ -1,0 +1,123 @@
+{
+  "key": "agri-warehouse-receipt",
+  "name": "Agri Warehouse Receipt (eNWR)",
+  "description": "A WDRA-style electronic Negotiable Warehouse Receipt tokenized as fungible units (ERC-20) where 1 token = 1 quintal of crop held in an accredited warehouse — the same shape as gold-egr, generalized from bullion to agri commodities. A warehouse operator issues receipts against a physical deposit (mint, gated behind maker-checker approval since it asserts both a physical stock position and its market value), the depositing farmer can pledge the receipt to an NBFC or bank as loan collateral (freeze = lien) — the whole point of a WDRA-accredited warehouse receipt is that verifiable, de-risked collateral prices materially cheaper than unsecured credit, which is exactly why the scheme exists. Transfer records negotiation/assignment of the receipt (the same 'transfer = ownership of the claim' semantics used across every RWA instrument tonight). Burn is a physical withdrawal from the warehouse — gated behind maker-checker since releasing real stored grain needs a second pair of eyes, same as gold-egr's bullion release. The receipt id is enforced unique so one physical deposit is tokenized only once; the quality/grading certificate stays off-ledger with only its hash on-chain.",
+  "tokenStandard": "ERC-20",
+  "symbol": "AWR",
+  "allowedChainIds": [
+    "besu",
+    "mst",
+    "fabric",
+    "canton"
+  ],
+  "defaultChainId": "besu",
+  "metadataSchema": {
+    "type": "object",
+    "properties": {
+      "receiptId": {
+        "type": "string",
+        "description": "WDRA electronic Negotiable Warehouse Receipt (eNWR) number the warehouse operator issues against a physical deposit — enforced unique so one deposit is tokenized only once"
+      },
+      "warehouseOperator": {
+        "type": "string",
+        "description": "WDRA-accredited warehouse operator holding the physical crop"
+      },
+      "warehouseLocation": {
+        "type": "string",
+        "description": "Physical warehouse location (district/mandi)"
+      },
+      "farmerDepositor": {
+        "type": "string",
+        "description": "Farmer or FPO who deposited the crop"
+      },
+      "commodity": {
+        "type": "string",
+        "description": "Stored commodity, e.g. Wheat, Paddy, Soybean, Turmeric, Chana"
+      },
+      "grade": {
+        "type": "string",
+        "description": "Quality grade per WDRA grading norms, e.g. FAQ (Fair Average Quality), Grade A"
+      },
+      "quantityQuintals": {
+        "type": "number",
+        "description": "Stored quantity in quintals — 1 token = 1 quintal",
+        "min": 1
+      },
+      "depositDate": {
+        "type": "string",
+        "description": "Date the crop was deposited (YYYY-MM-DD)",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+      },
+      "expiryDate": {
+        "type": "string",
+        "description": "Storage validity / warehouse insurance coverage end date (YYYY-MM-DD)",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+      },
+      "marketValuePerQuintalInr": {
+        "type": "number",
+        "description": "Reference mandi price per quintal at deposit (INR) — the basis a lender uses for loan-to-value",
+        "min": 0
+      },
+      "totalDepositValueInr": {
+        "type": "number",
+        "description": "Total value of this deposit (quantityQuintals × marketValuePerQuintalInr), INR — drives the platform's own valuation display",
+        "min": 0
+      },
+      "financierName": {
+        "type": "string",
+        "description": "NBFC or bank the receipt is currently pledged to, if any — informational only; the actual lien is enforced via the freeze action, not this field"
+      },
+      "qualityCertificateUrl": {
+        "type": "document",
+        "description": "Off-ledger link to the grading/quality certificate (only its hash lives on-ledger)"
+      },
+      "qualityCertificateHash": {
+        "type": "string",
+        "description": "SHA-256 of the quality certificate (pins the off-ledger document as proof)",
+        "pattern": "^0x[0-9a-fA-F]{64}$"
+      }
+    },
+    "required": [
+      "receiptId",
+      "warehouseOperator",
+      "warehouseLocation",
+      "farmerDepositor",
+      "commodity",
+      "quantityQuintals"
+    ]
+  },
+  "lifecycle": {
+    "mint": true,
+    "transfer": true,
+    "burn": true,
+    "freeze": true
+  },
+  "compliance": {
+    "allowlist": true,
+    "transferRestrictions": true,
+    "allowedJurisdictions": ["IN"]
+  },
+  "fees": {
+    "marketplaceBps": 25
+  },
+  "saleTermsDefault": {
+    "currency": "CBDC-INR"
+  },
+  "valuation": {
+    "metadataField": "totalDepositValueInr",
+    "currency": "CBDC-INR"
+  },
+  "workflow": {
+    "approvals": {
+      "mint": 1,
+      "burn": 1
+    }
+  },
+  "uniqueBy": "receiptId",
+  "roles": [
+    "UseCaseAdmin",
+    "Issuer",
+    "Buyer",
+    "Auditor"
+  ]
+}

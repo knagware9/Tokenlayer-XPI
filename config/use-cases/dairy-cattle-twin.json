@@ -1,0 +1,129 @@
+{
+  "key": "dairy-cattle-twin",
+  "name": "Dairy Cattle Digital Twin",
+  "description": "A verifiable digital twin of a dairy animal (ERC-721) — identity, milk yield, vaccination and health records — so an NBFC or bank can extend credit against it without relying on the farmer's unverifiable word. One token = one animal, identified the way India's own livestock-ID system (Pashu Aadhaar / INAPH) does: a unique ear-tag number. Minting registers a new animal against a verified valuation and health record (gated behind maker-checker approval, since it asserts both animal identity and a creditworthiness figure a lender will rely on). Transfer records a change of ownership (e.g. sale). Freeze places a lien on the twin while it is pledged as loan collateral — the actual loan (disbursement, rate, repayment schedule) is a separate instrument, the same way gold-egr and gold-loan are two separate use cases rather than one: the twin is decided at registration, loan terms are decided later by whichever lender extends credit, and metadata here is immutable once minted. Burn deregisters an animal (e.g. deceased, culled, or exited the scheme).",
+  "tokenStandard": "ERC-721",
+  "symbol": "DCOW",
+  "allowedChainIds": [
+    "besu",
+    "mst",
+    "fabric",
+    "canton"
+  ],
+  "defaultChainId": "besu",
+  "metadataSchema": {
+    "type": "object",
+    "properties": {
+      "animalTagId": {
+        "type": "string",
+        "description": "Unique ear-tag / RFID identifier, in the spirit of India's Pashu Aadhaar (INAPH) livestock-ID system — enforced unique so one animal is tokenized only once"
+      },
+      "species": {
+        "type": "string",
+        "description": "COW or BUFFALO",
+        "pattern": "^(COW|BUFFALO)$"
+      },
+      "breed": {
+        "type": "string",
+        "description": "e.g. Gir, Sahiwal, Holstein Friesian cross, Murrah"
+      },
+      "dateOfBirth": {
+        "type": "string",
+        "description": "Animal's date of birth (YYYY-MM-DD)",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+      },
+      "ownerFarmer": {
+        "type": "string",
+        "description": "Owning farmer or dairy cooperative member"
+      },
+      "location": {
+        "type": "string",
+        "description": "Village/district where the animal is kept"
+      },
+      "avgDailyMilkYieldLitres": {
+        "type": "number",
+        "description": "Average daily milk yield (litres) — the core creditworthiness signal a lender actually looks at",
+        "min": 0
+      },
+      "lactationNumber": {
+        "type": "number",
+        "description": "Which lactation cycle this is — yield trajectory differs materially by lactation number",
+        "min": 0
+      },
+      "vaccinationStatus": {
+        "type": "string",
+        "description": "UP_TO_DATE, OVERDUE, or UNKNOWN",
+        "pattern": "^(UP_TO_DATE|OVERDUE|UNKNOWN)$"
+      },
+      "lastVaccinationDate": {
+        "type": "string",
+        "description": "Date of the most recent vaccination (YYYY-MM-DD)",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+      },
+      "nextVaccinationDue": {
+        "type": "string",
+        "description": "Date the next vaccination falls due (YYYY-MM-DD)",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+      },
+      "healthStatus": {
+        "type": "string",
+        "description": "HEALTHY, UNDER_TREATMENT, or UNKNOWN",
+        "pattern": "^(HEALTHY|UNDER_TREATMENT|UNKNOWN)$"
+      },
+      "insurancePolicyNumber": {
+        "type": "string",
+        "description": "Cattle insurance policy number, if the animal is insured — optional, but materially de-risks the collateral for a lender"
+      },
+      "valuationInr": {
+        "type": "number",
+        "description": "Assessed value of the animal (INR) — the figure a lender would reference for a loan-to-value calculation",
+        "min": 0
+      },
+      "certificateUrl": {
+        "type": "document",
+        "description": "Off-ledger link to the veterinary health / insurance certificate (only its hash lives on-ledger)"
+      },
+      "certificateHash": {
+        "type": "string",
+        "description": "SHA-256 of the certificate (pins the off-ledger document as proof)",
+        "pattern": "^0x[0-9a-fA-F]{64}$"
+      }
+    },
+    "required": [
+      "animalTagId",
+      "species",
+      "breed",
+      "ownerFarmer",
+      "location",
+      "avgDailyMilkYieldLitres",
+      "vaccinationStatus"
+    ]
+  },
+  "lifecycle": {
+    "mint": true,
+    "transfer": true,
+    "burn": true,
+    "freeze": true
+  },
+  "compliance": {
+    "allowlist": true,
+    "transferRestrictions": true,
+    "allowedJurisdictions": ["IN"]
+  },
+  "valuation": {
+    "metadataField": "valuationInr",
+    "currency": "CBDC-INR"
+  },
+  "workflow": {
+    "approvals": {
+      "mint": 1
+    }
+  },
+  "uniqueBy": "animalTagId",
+  "roles": [
+    "UseCaseAdmin",
+    "Issuer",
+    "Buyer",
+    "Auditor"
+  ]
+}
