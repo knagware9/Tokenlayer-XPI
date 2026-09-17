@@ -419,10 +419,20 @@ export function StatCard(props: {
   sub?: string;
   icon?: IconName;
   trend?: { direction: "up" | "down" | "flat"; label: string };
+  /** "primary" marks this as the screen's headline number — larger value
+   *  text, bordered treatment. Defaults to "default" (today's exact look). */
+  emphasis?: "primary" | "default";
 }): JSX.Element {
-  const { label, value, sub, icon, trend } = props;
+  const { label, value, sub, icon, trend, emphasis = "default" } = props;
+  const isPrimary = emphasis === "primary";
   return (
-    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-4 flex items-start gap-3 group">
+    <div
+      className={`rounded-2xl p-4 flex items-start gap-3 group ${
+        isPrimary
+          ? "bg-white border-2 border-brand-400/25 shadow-sm"
+          : "bg-white border border-slate-200/80 shadow-sm"
+      }`}
+    >
       {icon && (
         <div className="shrink-0 w-9 h-9 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center ring-1 ring-brand-100 group-hover:ring-brand-200 transition">
           <Icon name={icon} className="w-5 h-5" />
@@ -430,7 +440,13 @@ export function StatCard(props: {
       )}
       <div className="min-w-0 flex-1">
         <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-400 mb-0.5">{label}</div>
-        <div className="text-xl font-bold text-slate-900 leading-7 truncate font-display font-data">{value}</div>
+        <div
+          className={`font-bold text-slate-900 leading-7 truncate font-display font-data animate-count-in ${
+            isPrimary ? "text-3xl" : "text-xl"
+          }`}
+        >
+          {value}
+        </div>
         <div className="flex items-center gap-2 mt-0.5">
           {sub && <div className="text-xs text-slate-400 truncate">{sub}</div>}
           {trend && (
@@ -466,7 +482,7 @@ export function MetricBlock(props: {
   const tone = props.tone ?? "default";
   return (
     <div className={`flex flex-col gap-0.5 ${props.className ?? ""}`}>
-      <div className={`text-2xl font-bold tabular-nums leading-none font-display ${TONE_CLASSES[tone]}`}>
+      <div className={`text-2xl font-bold tabular-nums leading-none font-display animate-count-in ${TONE_CLASSES[tone]}`}>
         {typeof props.value === "number" ? props.value.toLocaleString() : props.value}
       </div>
       <div className="text-[11px] font-medium text-slate-500 uppercase tracking-wide">{props.label}</div>
