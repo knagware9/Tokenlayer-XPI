@@ -1,5 +1,20 @@
 import { useState } from "react";
 
+// ─── staggerClass ─────────────────────────────────────────────────────────────
+
+/**
+ * `animate-slide-up`, optionally with a numbered `stagger-N` delay class
+ * (index.css defines stagger-1 through stagger-7 — anything outside that
+ * range clamps to the nearest end rather than emitting a class that doesn't
+ * exist). Extracted because the exact same string was being built
+ * independently in Dashboard.tsx's Stat and IdentityDashboard.tsx's Tile.
+ */
+export function staggerClass(n?: number): string {
+  if (!n || n <= 0) return "animate-slide-up";
+  const clamped = Math.min(n, 7);
+  return `animate-slide-up stagger-${clamped}`;
+}
+
 // Shared UI primitives for the TokenLayer console.
 // Fonts: Bricolage Grotesque (headings) · Manrope (body) · JetBrains Mono (data)
 // All components are zero-dependency beyond Tailwind + hand-drawn SVG.
