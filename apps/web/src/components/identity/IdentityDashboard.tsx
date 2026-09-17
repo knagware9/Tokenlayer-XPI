@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../../api.js";
 import { useAuth } from "../../auth.js";
 import type { DerivedCredentialStatus, IdentityDashboardData, Proposal } from "../../types.js";
-import { Pager, SectionHeader } from "../shared/ui.js";
+import { Pager, SectionHeader, TableShell, staggerClass } from "../shared/ui.js";
 
 const PAGE_SIZE = 5;
 
@@ -34,10 +34,10 @@ function StatusPill({ status }: { status: DerivedCredentialStatus }): JSX.Elemen
 }
 
 function Tile({ label, value, tone, stagger, active, onClick }: { label: string; value: number; tone?: string; stagger?: number; active?: boolean; onClick?: () => void }): JSX.Element {
-  const shared = `text-left w-full bg-white rounded-2xl border p-4 animate-slide-up shadow-sm transition-shadow ${stagger ? `stagger-${stagger}` : ""} ${active ? "border-brand-400 ring-1 ring-brand-300" : "border-slate-200/80"}`;
+  const shared = `text-left w-full bg-white rounded-2xl border p-4 shadow-sm transition-shadow ${staggerClass(stagger)} ${active ? "border-brand-400 ring-1 ring-brand-300" : "border-slate-200/80"}`;
   const body = (
     <>
-      <div className={`text-2xl font-bold tabular-nums font-display ${tone ?? "text-slate-900"}`}>{value.toLocaleString()}</div>
+      <div className={`text-2xl font-bold tabular-nums font-display animate-count-in ${tone ?? "text-slate-900"}`}>{value.toLocaleString()}</div>
       <div className="text-[11px] font-semibold uppercase tracking-widest text-slate-400 mt-1">{label}</div>
     </>
   );
@@ -369,42 +369,40 @@ export function IdentityDashboard(): JSX.Element {
         {data.boardTotal > data.board.length && (
           <p className="text-xs text-slate-500">Showing the newest {data.board.length} of {data.boardTotal} credentials.</p>
         )}
-        <div className="overflow-x-auto rounded-lg border border-slate-200">
-          <table className="w-full text-xs">
-            <thead className="text-[10px] text-slate-400 bg-slate-50/80 uppercase tracking-widest">
-              <tr>
-                <th className="text-left font-semibold px-3 py-2.5">Holder</th>
-                <th className="text-left font-semibold px-3 py-2.5">Credential</th>
-                <th className="text-left font-semibold px-3 py-2.5">Use case</th>
-                <th className="text-left font-semibold px-3 py-2.5">Issued</th>
-                <th className="text-left font-semibold px-3 py-2.5">Expires</th>
-                <th className="text-left font-semibold px-3 py-2.5">Status</th>
-                <th className="px-3 py-2.5"></th>
+        <TableShell>
+          <thead>
+            <tr>
+              <th>Holder</th>
+              <th>Credential</th>
+              <th>Use case</th>
+              <th>Issued</th>
+              <th>Expires</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {pagedRows.map((r) => (
+              <tr key={r.credentialId}>
+                <td className="text-slate-700 font-medium">{r.holderLabel}</td>
+                <td className="text-slate-700">{r.type}</td>
+                <td className="text-slate-400">{r.useCaseName}</td>
+                <td className="text-slate-400 font-data">{new Date(r.issuedAt).toLocaleDateString()}</td>
+                <td className="text-slate-400 font-data">{r.expiresAt ? new Date(r.expiresAt).toLocaleDateString() : "—"}</td>
+                <td>
+                  <StatusPill status={r.status} />
+                  {r.acceptanceNote && <div className="text-[11px] text-rose-500 mt-0.5">{r.acceptanceNote}</div>}
+                </td>
+                <td className="text-right">
+                  <button className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px]" onClick={() => setBoardDetailId(r.credentialId)}>View</button>
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {pagedRows.map((r) => (
-                <tr key={r.credentialId} className="border-t border-slate-100 hover:bg-slate-50/70 transition-colors">
-                  <td className="px-3 py-2 text-slate-700 font-medium text-xs">{r.holderLabel}</td>
-                  <td className="px-3 py-2 text-slate-700 text-xs">{r.type}</td>
-                  <td className="px-3 py-2 text-slate-400 text-xs">{r.useCaseName}</td>
-                  <td className="px-3 py-2 text-slate-400 text-xs font-data">{new Date(r.issuedAt).toLocaleDateString()}</td>
-                  <td className="px-3 py-2 text-slate-400 text-xs font-data">{r.expiresAt ? new Date(r.expiresAt).toLocaleDateString() : "—"}</td>
-                  <td className="px-3 py-2">
-                    <StatusPill status={r.status} />
-                    {r.acceptanceNote && <div className="text-[11px] text-rose-500 mt-0.5">{r.acceptanceNote}</div>}
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <button className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px]" onClick={() => setBoardDetailId(r.credentialId)}>View</button>
-                  </td>
-                </tr>
-              ))}
-              {rows.length === 0 && (
-                <tr><td colSpan={7} className="px-3 py-6 text-center text-slate-400 text-xs">No credentials match.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+            ))}
+            {rows.length === 0 && (
+              <tr><td colSpan={7} className="px-3 py-6 text-center text-slate-400">No credentials match.</td></tr>
+            )}
+          </tbody>
+        </TableShell>
         <Pager page={boardPage} pageSize={PAGE_SIZE} total={rows.length} onPage={setBoardPage} />
       </div>
 
