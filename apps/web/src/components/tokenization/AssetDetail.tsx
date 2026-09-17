@@ -4,7 +4,7 @@ import { useAuth } from "../../auth.js";
 import { can } from "../../rbac.js";
 import { CashflowPanel } from "./CashflowPanel.js";
 import type { AccountState, Asset, AuditEntry, ChainInfo, Listing, Role, TokenInfo, Trade, UseCase } from "../../types.js";
-import { DataBadge, EmptyState, Icon, Pill as UIPill, Skeleton, type IconName } from "../shared/ui.js";
+import { DataBadge, EmptyState, Icon, Pill as UIPill, Skeleton, TableShell, type IconName } from "../shared/ui.js";
 
 interface Props {
   assetId: string;
@@ -770,25 +770,25 @@ function Market({
 
           <div>
             <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Open asks</div>
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-slate-400 text-[11px] uppercase">
+            <TableShell>
+              <thead>
                 <tr>
-                  <th className="text-left font-medium px-3 py-2">Seller</th>
-                  <th className="text-right font-medium px-3 py-2">Remaining</th>
-                  <th className="text-right font-medium px-3 py-2">Unit price</th>
-                  {canBuy && <th className="text-right font-medium px-3 py-2">Take</th>}
+                  <th>Seller</th>
+                  <th>Remaining</th>
+                  <th>Unit price</th>
+                  {canBuy && <th>Take</th>}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody>
                 {listings.map((l) => {
                   const own = wallet !== null && l.seller.toLowerCase() === wallet;
                   return (
                     <tr key={l.id}>
-                      <td className="px-3 py-2 font-mono text-[11px] text-slate-500">{short(l.seller)}{own && <Pill tone="gray">you</Pill>}</td>
-                      <td className="px-3 py-2 text-right font-mono text-slate-700">{l.quantity}</td>
-                      <td className="px-3 py-2 text-right text-slate-700">{l.unitPrice} {l.currency}</td>
+                      <td className="font-mono text-[11px] text-slate-500">{short(l.seller)}{own && <Pill tone="gray">you</Pill>}</td>
+                      <td className="num font-mono text-slate-700">{l.quantity}</td>
+                      <td className="num text-slate-700">{l.unitPrice} {l.currency}</td>
                       {canBuy && (
-                        <td className="px-3 py-2">
+                        <td>
                           <div className="flex justify-end gap-1.5">
                             <input
                               className="input w-20 text-xs"
@@ -820,7 +820,7 @@ function Market({
                   </tr>
                 )}
               </tbody>
-            </table>
+            </TableShell>
           </div>
 
           {canList && user?.walletAddress && (
