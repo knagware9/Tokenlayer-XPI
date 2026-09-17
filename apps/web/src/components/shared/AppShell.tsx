@@ -6,6 +6,7 @@ import type { DomainDef, DomainKey } from "../../domains.js";
 import { brandCssVars } from "../../lib/shared/branding.js";
 import { Logo } from "./Logo.js";
 import { Icon, type IconName } from "./ui.js";
+import { CommandPalette } from "./CommandPalette.js";
 
 export type NavItem = { id: string; label: string; icon: IconName; pinned?: boolean; badge?: number };
 
@@ -102,6 +103,18 @@ export function AppShell({
   // this shell is refused by `GET /documents/:id`, which is why the sidebar mark
   // was invisible to all of them before Task 6b.
   const orgLogo = useOrgLogo(user?.brandLogoDocumentId, token, user?.orgId);
+
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent): void {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   // ONLY FOR SESSIONS THAT PREDATE TASK 6b. `POST /auth/login` and the QR poll
   // now carry the brand, so a session created from either arrives with both
@@ -202,15 +215,27 @@ export function AppShell({
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0">
-        <div className="h-14 border-b border-slate-200/80 bg-white/50 backdrop-blur-sm flex items-center justify-end px-6 gap-3">
-          <div className="text-xs font-medium text-slate-500 truncate" style={{ fontFamily: "'Manrope', system-ui, sans-serif" }}>{user?.email}</div>
-          {user?.role && (
-            <span className="hidden sm:inline-flex items-center gap-1.5 text-[11px] font-semibold text-brand-600 bg-brand-50 border border-brand-200/60 rounded-full px-2.5 py-1 whitespace-nowrap" style={{ fontFamily: "'Manrope', system-ui, sans-serif" }}>
-              <span className="w-1.5 h-1.5 rounded-full bg-brand-500 animate-pulse" aria-hidden="true" />
-              {user.role}
-            </span>
-          )}
+        <div className="h-14 border-b border-slate-200/80 bg-white/50 backdrop-blur-sm flex items-center justify-between px-6 gap-3">
+          <button
+            type="button"
+            onClick={() => setPaletteOpen(true)}
+            className="flex items-center gap-2 text-xs text-slate-400 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 transition-colors"
+          >
+            <Icon name="filter" className="w-3.5 h-3.5" />
+            <span>Search…</span>
+            <kbd className="ml-2 text-[10px] font-semibold bg-white border border-slate-200 rounded px-1.5">⌘K</kbd>
+          </button>
+          <div className="flex items-center gap-3">
+            <div className="text-xs font-medium text-slate-500 truncate" style={{ fontFamily: "'Manrope', system-ui, sans-serif" }}>{user?.email}</div>
+            {user?.role && (
+              <span className="hidden sm:inline-flex items-center gap-1.5 text-[11px] font-semibold text-brand-600 bg-brand-50 border border-brand-200/60 rounded-full px-2.5 py-1 whitespace-nowrap" style={{ fontFamily: "'Manrope', system-ui, sans-serif" }}>
+                <span className="w-1.5 h-1.5 rounded-full bg-brand-500 animate-pulse" aria-hidden="true" />
+                {user.role}
+              </span>
+            )}
+          </div>
         </div>
+        <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} navItems={shown} onSelectNav={(id) => { onSelect(id); setPaletteOpen(false); }} />
         <main className="flex-1" style={{ fontFamily: "'Manrope', system-ui, sans-serif" }}>
           <div className="max-w-6xl mx-auto px-6 py-7">{children}</div>
         </main>
