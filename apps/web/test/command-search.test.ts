@@ -44,4 +44,13 @@ describe("rankCommandResults", () => {
     expect(() => rankCommandResults("zzz-nonexistent", items)).not.toThrow();
     expect(rankCommandResults("zzz-nonexistent", items)).toEqual([]);
   });
+
+  it("ranks a weak (mid-string) label match above a strong (exact) sublabel-only match", () => {
+    const items = [
+      item("a", "Agri Loan for Cow Farmers"),
+      { id: "b", label: "Something Else", sublabel: "COW", kind: "use-case" as const, onSelect: () => undefined },
+    ];
+    const ranked = rankCommandResults("cow", items);
+    expect(ranked.map((i) => i.id)).toEqual(["a", "b"]);
+  });
 });

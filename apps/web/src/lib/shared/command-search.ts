@@ -31,11 +31,12 @@ export function rankCommandResults(query: string, items: readonly CommandItem[])
   const scored: { item: CommandItem; score: number }[] = [];
   for (const item of items) {
     const labelScore = scoreField(item.label, q);
-    // A sublabel match ranks below any label match at the same tier, so
-    // sort by (labelScore ?? 0) first, then total score as the tiebreak.
+    // Label matches are weighted 3x over sublabel matches so that even the
+    // weakest label match (a mid-string hit, scored 40) outranks the strongest
+    // possible sublabel-only match (an exact hit, scored 100).
     const subScore = scoreField(item.sublabel, q);
     if (labelScore === null && subScore === null) continue;
-    const total = (labelScore ?? 0) * 2 + (subScore ?? 0);
+    const total = (labelScore ?? 0) * 3 + (subScore ?? 0);
     scored.push({ item, score: total });
   }
 
