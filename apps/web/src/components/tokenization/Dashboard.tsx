@@ -6,7 +6,7 @@ import type { AnalyticsSummary, Asset, ChainInfo, UseCase } from "../../types.js
 import { AreaChart } from "../charts/AreaChart.js";
 import { BarChart } from "../charts/BarChart.js";
 import { Donut, type DonutSlice } from "../charts/Donut.js";
-import { Card, EmptyState, Pager, Pill, Skeleton, StatCard, type IconName } from "../shared/ui.js";
+import { Card, EmptyState, Pager, Pill, Skeleton, StatCard, TableShell, staggerClass, type IconName } from "../shared/ui.js";
 import { AssetDetail } from "./AssetDetail.js";
 import { availability } from "./AssetList.js";
 
@@ -250,7 +250,7 @@ export function Dashboard({ useCaseKey, useCases, chains }: { useCaseKey?: strin
       {/* headline cards — click to drill into the matching breakdown */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <Stat icon="coins" label="Tokenized value" value={fmtMoney(t.valueByCurrency)} sub={`${t.assets} assets · ${t.useCases} use case${t.useCases === 1 ? "" : "s"}`} onClick={() => openAssets("all")} stagger={1} />
-        <Stat icon="spark" label="Total supply" value={fmtInt(t.supply)} sub="minted − burned" onClick={() => openAssets("all")} stagger={2} />
+        <Stat icon="spark" label="Total supply" value={fmtInt(t.supply)} sub="minted − burned" onClick={() => openAssets("all")} stagger={2} primary />
         <Stat icon="users" label="Holders" value={String(t.holders)} sub="distinct accounts" onClick={openHolders} stagger={3} />
         <Stat icon="arrow" label={`Traded (${data.activity.length}d)`} value={fmtMoney(t.tradedByCurrency)} sub={`${t.trades} trade${t.trades === 1 ? "" : "s"}`} onClick={() => scrollTo("dash-recent")} stagger={4} />
       </div>
@@ -401,38 +401,35 @@ export function Dashboard({ useCaseKey, useCases, chains }: { useCaseKey?: strin
       {data.scope === "platform" && data.byUseCase.length > 0 && (
         <div id="dash-usecases" className={flash("dash-usecases")}>
           <Card title="By use case">
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead className="text-[10px] text-slate-400 bg-slate-50/80 uppercase tracking-widest">
-                  <tr>
-                    <th className="text-left font-semibold px-3 py-2.5">Use case</th>
-                    <th className="text-left font-semibold px-3 py-2.5">Ledger</th>
-                    <th className="text-right font-semibold px-3 py-2.5">Supply</th>
-                    <th className="text-right font-semibold px-3 py-2.5">Holders</th>
-                    <th className="text-right font-semibold px-3 py-2.5">Value</th>
+            <TableShell>
+              <thead>
+                <tr>
+                  <th>Use case</th>
+                  <th>Ledger</th>
+                  <th>Supply</th>
+                  <th>Holders</th>
+                  <th>Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.byUseCase.map((u) => (
+                  <tr key={u.useCaseKey} onClick={() => navigate(`/${u.useCaseKey}`)} title={`Open ${u.name}`} className="cursor-pointer">
+                    <td className="font-medium text-slate-800">
+                      {u.name} <span className="font-normal text-slate-400">{u.symbol}</span>
+                    </td>
+                    <td>
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: colorFor(u.chainId) }} />
+                        <span className="text-slate-600">{u.chainId}</span>
+                      </span>
+                    </td>
+                    <td className="num text-slate-700">{fmtInt(u.supply)}</td>
+                    <td className="num text-slate-700">{u.holders}</td>
+                    <td className="num text-slate-600">{fmtMoney(u.valueByCurrency)}</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {data.byUseCase.map((u) => (
-                    <tr key={u.useCaseKey} onClick={() => navigate(`/${u.useCaseKey}`)} title={`Open ${u.name}`}
-                      className="border-t border-slate-100 cursor-pointer hover:bg-slate-50/70 transition-colors">
-                      <td className="px-3 py-2.5 font-medium text-slate-800">
-                        {u.name} <span className="font-normal text-slate-400">{u.symbol}</span>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <span className="inline-flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: colorFor(u.chainId) }} />
-                          <span className="text-slate-600">{u.chainId}</span>
-                        </span>
-                      </td>
-                      <td className="px-3 py-2.5 text-right font-data tabular-nums text-slate-700">{fmtInt(u.supply)}</td>
-                      <td className="px-3 py-2.5 text-right font-data tabular-nums text-slate-700">{u.holders}</td>
-                      <td className="px-3 py-2.5 text-right text-slate-600">{fmtMoney(u.valueByCurrency)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                ))}
+              </tbody>
+            </TableShell>
           </Card>
         </div>
       )}
@@ -483,14 +480,14 @@ export function Dashboard({ useCaseKey, useCases, chains }: { useCaseKey?: strin
   );
 }
 
-function Stat({ icon, label, value, sub, onClick, stagger }: { icon: IconName; label: string; value: string; sub?: string; onClick?: () => void; stagger?: number }): JSX.Element {
+function Stat({ icon, label, value, sub, onClick, stagger, primary }: { icon: IconName; label: string; value: string; sub?: string; onClick?: () => void; stagger?: number; primary?: boolean }): JSX.Element {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`text-left w-full cursor-pointer transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md rounded-2xl animate-slide-up ${stagger ? `stagger-${stagger}` : ""}`}
+      className={`text-left w-full cursor-pointer transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md rounded-2xl ${staggerClass(stagger)}`}
     >
-      <StatCard icon={icon} label={label} value={value} sub={sub} />
+      <StatCard icon={icon} label={label} value={value} sub={sub} emphasis={primary ? "primary" : "default"} />
     </button>
   );
 }
