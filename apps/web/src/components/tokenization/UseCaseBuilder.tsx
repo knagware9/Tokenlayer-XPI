@@ -5,7 +5,7 @@ import type { ChainInfo, ContractCode, Role, TokenStandard, UseCase } from "../.
 import { ContractCodeView } from "./ContractCodeView.js";
 import { familyIcon } from "./NetworksPanel.js";
 import { SchemaFieldEditor, fieldsToSchema, type FieldRow } from "../shared/SchemaFieldEditor.js";
-import { Icon, Pill, Skeleton } from "../shared/ui.js";
+import { Icon, Pill, Skeleton, staggerClass } from "../shared/ui.js";
 
 interface Props {
   chains: ChainInfo[];
@@ -670,13 +670,13 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
               <StepIntro title="Review & create" hint="Everything the platform will provision — including the contract that deploys per ledger." />
 
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <SummaryTile label="Basics">
+                <SummaryTile label="Basics" stagger={1}>
                   <div className="text-sm font-semibold text-slate-800">{name || "—"}</div>
                   <div className="text-xs text-slate-500">
                     {key} · {symbol} · {standard}
                   </div>
                 </SummaryTile>
-                <SummaryTile label="Ledgers">
+                <SummaryTile label="Ledgers" stagger={2}>
                   <div className="flex flex-wrap gap-1">
                     {allowedChainIds.map((id) => (
                       <Pill key={id} tone={id === defaultChainId ? "info" : "muted"}>
@@ -686,11 +686,11 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
                     ))}
                   </div>
                 </SummaryTile>
-                <SummaryTile label="Fields">
+                <SummaryTile label="Fields" stagger={3}>
                   <div className="text-sm font-semibold text-slate-800">{namedFields.length}</div>
                   <div className="text-xs text-slate-500">{namedFields.filter((f) => f.required).length} required</div>
                 </SummaryTile>
-                <SummaryTile label="Rules">
+                <SummaryTile label="Rules" stagger={4}>
                   <div className="flex flex-wrap gap-1">
                     {(["mint", "transfer", "burn", "freeze"] as const).filter((k) => lifecycle[k]).map((k) => (
                       <Pill key={k} tone="muted">
@@ -925,9 +925,9 @@ function StepIntro({ title, hint }: { title: string; hint: string }): JSX.Elemen
   );
 }
 
-function SummaryTile({ label, children }: { label: string; children: React.ReactNode }): JSX.Element {
+function SummaryTile({ label, children, stagger }: { label: string; children: React.ReactNode; stagger?: number }): JSX.Element {
   return (
-    <div className="rounded-xl border border-slate-200 p-3">
+    <div className={`rounded-xl border border-slate-200 p-3 ${staggerClass(stagger)}`}>
       <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400 mb-1.5">{label}</div>
       {children}
     </div>

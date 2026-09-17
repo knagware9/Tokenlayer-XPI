@@ -5,7 +5,7 @@ import { withoutStalePlacements } from "../../lib/identity/certificate-layout.js
 import type { CertificateFieldPlacement, CredentialTypeSpec, CredentialUseCase, HolderPolicy, IssuerBinding, Organization, OrgType, UseCaseTemplate, VerifierBinding } from "../../types.js";
 import { CertificateDesigner } from "./CertificateDesigner.js";
 import { SchemaFieldEditor, fieldsToSchema, type FieldKind, type FieldRow } from "../shared/SchemaFieldEditor.js";
-import { Icon } from "../shared/ui.js";
+import { Icon, staggerClass } from "../shared/ui.js";
 
 interface Props {
   onCreated: () => void;
@@ -658,19 +658,19 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
             <div className="space-y-5">
               <StepIntro title="Review & create" hint="Confirm the credential use case before it is authored." />
               <div className="grid gap-3 sm:grid-cols-2">
-                <SummaryTile label="Basics">
+                <SummaryTile label="Basics" stagger={1}>
                   <div className="text-sm font-semibold text-slate-800">{name || "—"}</div>
                   <div className="text-xs text-slate-500">{key}</div>
                   {description && <div className="text-xs text-slate-500 mt-1">{description}</div>}
                 </SummaryTile>
-                <SummaryTile label="Credential types">
+                <SummaryTile label="Credential types" stagger={2}>
                   <div className="text-sm font-semibold text-slate-800">{namedCredTypes.length}</div>
                   <div className="text-xs text-slate-500">{namedCredTypes.map((c) => c.name.trim()).join(", ") || "—"}</div>
                 </SummaryTile>
-                <SummaryTile label="Issuer">
+                <SummaryTile label="Issuer" stagger={3}>
                   <div className="text-sm text-slate-700">{issuerKind === "platform" ? "The platform" : `Org: ${orgLabel(issuerOrgId)}`}</div>
                 </SummaryTile>
-                <SummaryTile label="Holders">
+                <SummaryTile label="Holders" stagger={4}>
                   <div className="text-sm text-slate-700">
                     {holderWho === "any-onboarded"
                       ? "Any onboarded org"
@@ -679,7 +679,7 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
                         : `Orgs: ${holderOrgIds.map(orgLabel).join(", ") || "—"}`}
                   </div>
                 </SummaryTile>
-                <SummaryTile label="Verifiers">
+                <SummaryTile label="Verifiers" stagger={5}>
                   <div className="text-sm text-slate-700">{verifierKind === "any" ? "Anyone" : `Orgs: ${verifierOrgIds.map(orgLabel).join(", ") || "—"}`}</div>
                 </SummaryTile>
               </div>
@@ -786,9 +786,9 @@ function StepIntro({ title, hint }: { title: string; hint: string }): JSX.Elemen
   );
 }
 
-function SummaryTile({ label, children }: { label: string; children: React.ReactNode }): JSX.Element {
+function SummaryTile({ label, children, stagger }: { label: string; children: React.ReactNode; stagger?: number }): JSX.Element {
   return (
-    <div className="rounded-xl border border-slate-200 p-3">
+    <div className={`rounded-xl border border-slate-200 p-3 ${staggerClass(stagger)}`}>
       <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400 mb-1.5">{label}</div>
       {children}
     </div>
