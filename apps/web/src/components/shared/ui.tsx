@@ -639,3 +639,23 @@ export function Pager(props: { page: number; pageSize: number; total: number; on
     </div>
   );
 }
+
+// ─── TableShell ───────────────────────────────────────────────────────────────
+
+/**
+ * Wraps an existing <table> (does not replace its markup) to apply
+ * consistent header styling, tabular-nums on numeric cells, a sticky header,
+ * and alternating-row hover — without every screen re-deriving the same
+ * table CSS by hand. Adopted incrementally, screen by screen (tasks 7-9);
+ * deliberately not a data-driven <Table rows columns> abstraction — that
+ * would mean rewriting every table call site in one pass.
+ */
+export function TableShell(props: { children: React.ReactNode; className?: string }): JSX.Element {
+  return (
+    <div className={`overflow-x-auto rounded-xl border border-slate-100 ${props.className ?? ""}`}>
+      <table className="w-full text-xs [&_thead]:sticky [&_thead]:top-0 [&_thead]:bg-slate-50/95 [&_thead]:backdrop-blur-sm [&_thead]:text-[10px] [&_thead]:text-slate-400 [&_thead]:uppercase [&_thead]:tracking-widest [&_th]:text-left [&_th]:font-semibold [&_th]:px-3 [&_th]:py-2.5 [&_tbody_tr]:border-t [&_tbody_tr]:border-slate-100 [&_tbody_tr:hover]:bg-slate-50/70 [&_tbody_tr]:transition-colors [&_td]:px-3 [&_td]:py-2.5 [&_td.num]:text-right [&_td.num]:tabular-nums [&_td.num]:font-data">
+        {props.children}
+      </table>
+    </div>
+  );
+}
