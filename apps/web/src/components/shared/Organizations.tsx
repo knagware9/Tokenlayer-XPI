@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ApiError, api } from "../../api.js";
 import { useAuth } from "../../auth.js";
 import { activePersona } from "../../lib/shared/persona.js";
+import { personaReadsUseCases } from "../../personas.js";
 import { clampAccent } from "../../lib/shared/branding.js";
 import { DOMAIN_LABELS, ROLE_LABELS, fullCapabilities, isOrgOperatingRole, orgRoleEnabled, toggleCapability, validateEnvelope } from "../../lib/shared/capabilities.js";
 import { ORG_DOMAINS, ORG_OPERATING_ROLES, type CompanyCategory, type CredentialStatusInfo, type CredentialUseCase, type DidDocument, type KybDocumentRef, type OrgCapabilities, type OrgDomain, type OrgMember, type OrgOperatingRole, type OrgType, type Organization, type Role, type UseCase } from "../../types.js";
@@ -445,7 +446,7 @@ export function Organizations(): JSX.Element {
   // tokenization-only concept — see personas.ts), so that half of the fetch
   // is skipped there rather than firing a request that can only fail as a
   // CORS-shaped rejection (same reasoning as App.tsx's useCasesSurfaced).
-  const useCasesSurfaced = !activePersona() || activePersona()!.surfaces.includes("use-cases");
+  const useCasesSurfaced = personaReadsUseCases(activePersona());
   const [useCases, setUseCases] = useState<UseCase[]>([]);
   const [credentialUseCases, setCredentialUseCases] = useState<CredentialUseCase[]>([]);
   useEffect(() => {

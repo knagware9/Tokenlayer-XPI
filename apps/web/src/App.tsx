@@ -5,6 +5,7 @@ import { useRoute } from "./router.js";
 import { ApprovalsPanel } from "./components/shared/ApprovalsPanel.js";
 import { AppShell, type NavItem } from "./components/shared/AppShell.js";
 import { activePersona, landingView, narrowToPersona } from "./lib/shared/persona.js";
+import { personaReadsUseCases } from "./personas.js";
 import { PersonaHome } from "./components/shared/PersonaHome.js";
 import { AssetManagement, isInvoiceUseCase } from "./components/tokenization/AssetManagement.js";
 import { Dashboard } from "./components/tokenization/Dashboard.js";
@@ -89,7 +90,10 @@ export function App(): JSX.Element {
   // never registered for that edge, so every load of an identity persona
   // logged console noise for a request that could never succeed. Same
   // no-active-persona-means-everything-exists reasoning as holderRequestsSurfaced.
-  const useCasesSurfaced = !activePersona() || activePersona()!.surfaces.includes("use-cases");
+  // personaReadsUseCases also covers a persona that reads this data without
+  // showing the Use Cases surface itself (e.g. an asset detail page's
+  // compliance/lifecycle rules) — see its doc in personas.ts.
+  const useCasesSurfaced = personaReadsUseCases(activePersona());
 
   useEffect(() => {
     if (!token) return;

@@ -25,6 +25,18 @@ export interface WebPersona {
   shell: "self-service" | "console";
   surfaces: string[];
   defaultView: string;
+  /**
+   * True when this persona's UI needs use-case metadata to render something
+   * it does show (e.g. an asset's compliance/lifecycle rules), even though it
+   * has no "use-cases" surface of its own. This is deliberately NOT a mirror
+   * of a server route grant — it carries no prefix or method, only "does this
+   * screen need this data" — so it stays outside the boundary the class doc
+   * above says never to restate. `surfaces.includes("use-cases")` answers a
+   * different question (does the Use Cases nav item/tab appear); conflating
+   * the two previously meant a persona like this one could only ever see a
+   * loading skeleton for screens that needed the data but not the tab.
+   */
+  needsUseCaseData?: boolean;
 }
 
 export const PERSONAS: WebPersona[] = [
@@ -59,6 +71,7 @@ export const PERSONAS: WebPersona[] = [
     description: "An investor browses offerings, buys and sells units, and watches their portfolio.",
     defaultView: "portfolio",
     surfaces: ["portfolio", "offerings", "transactions", "profile", "logout"],
+    needsUseCaseData: true,
   },
   {
     key: "tokenization-admin", shell: "console", domain: "tokenization", label: "Platform Admin",
@@ -71,4 +84,16 @@ export const PERSONAS: WebPersona[] = [
 
 export function personaByKey(key: string): WebPersona | undefined {
   return PERSONAS.find((p) => p.key === key);
+}
+
+/**
+ * Whether the active persona's edge can be asked for use-case data — true for
+ * the combined console (no persona narrows it), for any persona whose Use
+ * Cases surface is shown, and for one that needs the data without the surface
+ * (see `needsUseCaseData`). Centralised so nav-visibility and data-fetch
+ * permission are computed the same way everywhere that needs it, instead of
+ * each call site re-deriving (and risking re-diverging on) the same check.
+ */
+export function personaReadsUseCases(persona: WebPersona | null | undefined): boolean {
+  return !persona || persona.surfaces.includes("use-cases") || !!persona.needsUseCaseData;
 }

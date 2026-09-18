@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api.js";
 import { useAuth } from "../../auth.js";
 import { activePersona } from "../../lib/shared/persona.js";
+import { personaReadsUseCases } from "../../personas.js";
 import { rankCommandResults, type CommandItem } from "../../lib/shared/command-search.js";
 import { Icon, type IconName } from "./ui.js";
 import type { NavItem } from "./AppShell.js";
@@ -22,6 +23,10 @@ const KIND_ICON: Record<CommandItem["kind"], IconName> = {
  * identity-only persona's edge never serves that route (see App.tsx's
  * useCasesSurfaced), so this palette must not call it there either or it
  * repeats the same doomed-CORS-fetch bug fixed in App.tsx/Organizations.tsx.
+ * Gating goes through `personaReadsUseCases` (personas.ts), not a raw
+ * `surfaces.includes("use-cases")` check, so a persona that reads use-case
+ * data without showing the Use Cases surface (e.g. the marketplace's asset
+ * detail page) still gets results here instead of a permanently empty search.
  *
  * THE MIRROR IMAGE HOLDS TOO, BUT IT ISN'T THE WHOLE IDENTITY DOMAIN.
  * `credential-use-cases` is an identity-domain route, but not every identity
@@ -52,7 +57,7 @@ export function CommandPalette(props: {
   const inputRef = useRef<HTMLInputElement>(null);
   const selectedRef = useRef<HTMLButtonElement>(null);
   const persona = activePersona();
-  const useCasesSurfaced = !persona || persona.surfaces.includes("use-cases");
+  const useCasesSurfaced = personaReadsUseCases(persona);
   // See the class doc above: gate on a surface that positively indicates
   // this persona manages/reads credential-use-case programmes, not on the
   // whole identity domain — identity-holder is domain "identity" too but
