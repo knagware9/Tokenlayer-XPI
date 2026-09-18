@@ -33,10 +33,15 @@ describe("OrgAdmin role", () => {
     expect(ROLES).toContain("OrgAdmin");
   });
 
-  it("has only read authority in the RBAC matrix", () => {
+  it("has the same operator authority as UseCaseAdmin, but not the investor actions", () => {
+    // OrgAdmin runs every use case its org owns directly (not just proposes
+    // them) — the same operator set UseCaseAdmin has. buy/list/cancel-listing
+    // stay investor-only: an OrgAdmin does not thereby become a Trader.
     const rbac = new RbacPolicy();
-    expect(rbac.can("OrgAdmin", "read")).toBe(true);
-    for (const action of ["issue", "mint", "transfer", "burn", "freeze", "unfreeze", "allow", "disallow", "buy", "list", "cancel-listing"] as const) {
+    for (const action of ["read", "issue", "mint", "transfer", "burn", "freeze", "unfreeze", "allow", "disallow"] as const) {
+      expect(rbac.can("OrgAdmin", action)).toBe(true);
+    }
+    for (const action of ["buy", "list", "cancel-listing"] as const) {
       expect(rbac.can("OrgAdmin", action)).toBe(false);
     }
   });
