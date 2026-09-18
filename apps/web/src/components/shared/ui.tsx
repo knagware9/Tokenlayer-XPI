@@ -644,18 +644,27 @@ export function Pager(props: { page: number; pageSize: number; total: number; on
 
 /**
  * Wraps an existing <table> (does not replace its markup) to apply
- * consistent header styling, tabular-nums on numeric cells, a sticky header,
- * and alternating-row hover — without every screen re-deriving the same
+ * consistent header styling, tabular-nums on numeric cells, and
+ * alternating-row hover — without every screen re-deriving the same
  * table CSS by hand. Adopted incrementally, screen by screen (tasks 7-9);
  * deliberately not a data-driven <Table rows columns> abstraction — that
  * would mean rewriting every table call site in one pass.
  *
- * Sticky header: positioning lives on `th` (`[&_thead_th]:sticky`), not on
- * `thead` itself. `thead`-level sticky computes `position: sticky` (so a
- * naive `getComputedStyle` check passes) but the wrapping div here is only
- * `overflow-x-auto` with no vertical scroll container, so it never actually
- * sticks during a page scroll. Per-`th` sticky doesn't have that problem and
- * is more broadly supported besides.
+ * Sticky header (NOT YET LIVE — known limitation, not a bug in this file
+ * alone): `[&_thead_th]:sticky` is applied for correctness and broader
+ * browser support than `thead`-level sticky, but it cannot visibly stick in
+ * ANY of the 3 current adopters. Root cause: the wrapper div's
+ * `overflow-x-auto` forces the browser to also compute `overflow-y: auto`
+ * on it (CSS overflow spec: one non-`visible` axis forces the other away
+ * from `visible`), which makes the wrapper itself — not the page — the
+ * nearest scrolling ancestor for the sticky `th`. Since no adopter bounds
+ * the wrapper's height, it never overflows internally, so it never scrolls,
+ * so the sticky `th` never has anything to visibly stick against. Verified
+ * experimentally: forcing the wrapper to `overflow: visible` on both axes
+ * makes sticky work correctly; restoring `overflow-x: auto` breaks it again.
+ * Closing this needs either a bounded-height scroll container per adopter
+ * (a layout decision, not a one-line fix) or a JS-driven sticky
+ * implementation — tracked as a follow-up, not fixed here.
  *
  * Per-cell padding has real CSS specificity: `[&_td]:px-3 [&_td]:py-2.5`
  * (an arbitrary-variant descendant selector, ~0,1,1) beats a plain utility
