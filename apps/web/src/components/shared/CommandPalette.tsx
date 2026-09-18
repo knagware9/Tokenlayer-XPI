@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api.js";
 import { useAuth } from "../../auth.js";
+import { useRoute } from "../../router.js";
 import { activePersona } from "../../lib/shared/persona.js";
 import { personaReadsUseCases } from "../../personas.js";
 import { rankCommandResults, type CommandItem } from "../../lib/shared/command-search.js";
@@ -51,6 +52,10 @@ export function CommandPalette(props: {
 }): JSX.Element | null {
   const { open, onClose, navItems, onSelectNav } = props;
   const { token } = useAuth();
+  // Use-case and asset results jump to a DIFFERENT use case's console, which is
+  // `activeUseCase` (sourced from the URL) — not `view` (nav-item ids only), so
+  // these two go through the router directly rather than onSelectNav/setView.
+  const { navigate } = useRoute();
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
   const [extra, setExtra] = useState<CommandItem[]>([]);
@@ -81,7 +86,7 @@ export function CommandPalette(props: {
         api.useCases(token).then((rows) =>
           rows.map((u): CommandItem => ({
             id: `uc-${u.key}`, label: u.name, sublabel: u.symbol, kind: "use-case",
-            onSelect: () => onSelectNav(u.key),
+            onSelect: () => navigate(`/${u.key}`),
           })),
         ).catch(() => []),
       );
@@ -101,14 +106,14 @@ export function CommandPalette(props: {
         api.assets(token).then((rows) =>
           rows.map((a): CommandItem => ({
             id: `asset-${a.id}`, label: a.name, sublabel: a.symbol, kind: "asset",
-            onSelect: () => onSelectNav(a.useCaseKey),
+            onSelect: () => navigate(`/${a.useCaseKey}`),
           })),
         ).catch(() => []),
       );
     }
     void Promise.all(loaders).then((lists) => { if (!cancelled) setExtra(lists.flat()); });
     return () => { cancelled = true; };
-  }, [open, token, useCasesSurfaced, credentialUseCasesSurfaced, onSelectNav]);
+  }, [open, token, useCasesSurfaced, credentialUseCasesSurfaced, onSelectNav, navigate]);
 
   const navAsItems: CommandItem[] = useMemo(
     () => navItems
