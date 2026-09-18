@@ -650,21 +650,20 @@ export function Pager(props: { page: number; pageSize: number; total: number; on
  * deliberately not a data-driven <Table rows columns> abstraction — that
  * would mean rewriting every table call site in one pass.
  *
- * Sticky header (NOT YET LIVE — known limitation, not a bug in this file
- * alone): `[&_thead_th]:sticky` is applied for correctness and broader
- * browser support than `thead`-level sticky, but it cannot visibly stick in
- * ANY of the 3 current adopters. Root cause: the wrapper div's
- * `overflow-x-auto` forces the browser to also compute `overflow-y: auto`
- * on it (CSS overflow spec: one non-`visible` axis forces the other away
- * from `visible`), which makes the wrapper itself — not the page — the
- * nearest scrolling ancestor for the sticky `th`. Since no adopter bounds
- * the wrapper's height, it never overflows internally, so it never scrolls,
- * so the sticky `th` never has anything to visibly stick against. Verified
- * experimentally: forcing the wrapper to `overflow: visible` on both axes
- * makes sticky work correctly; restoring `overflow-x: auto` breaks it again.
- * Closing this needs either a bounded-height scroll container per adopter
- * (a layout decision, not a one-line fix) or a JS-driven sticky
- * implementation — tracked as a follow-up, not fixed here.
+ * Sticky header: the wrapper div bounds its own height
+ * (`max-h-[420px] overflow-y-auto`, alongside `overflow-x-auto` for narrow
+ * viewports) so it is the nearest scrolling ancestor for `[&_thead_th]:sticky`
+ * and actually has something to stick against. The cap is generous enough
+ * that every adopter's paginated tables (5-8 rows) never reach it — the box
+ * just sizes to its content and no internal scrollbar appears, so this is a
+ * no-op for them. Only a table with more rows than fit in 420px (e.g.
+ * AssetDetail's unpaginated "Open asks" list) starts scrolling internally,
+ * at which point its header visibly pins to the top of the table's own box
+ * while the rest of the page scrolls normally around it. Verified live by
+ * padding a table past the cap and scrolling: header stays pinned, and
+ * `getComputedStyle().position === "sticky"` alone is not sufficient
+ * evidence of this working (it also reported "sticky" back when nothing
+ * visibly stuck).
  *
  * Per-cell padding has real CSS specificity: `[&_td]:px-3 [&_td]:py-2.5`
  * (an arbitrary-variant descendant selector, ~0,1,1) beats a plain utility
@@ -676,7 +675,7 @@ export function Pager(props: { page: number; pageSize: number; total: number; on
  */
 export function TableShell(props: { children: React.ReactNode; className?: string }): JSX.Element {
   return (
-    <div className={`overflow-x-auto rounded-xl border border-slate-100 ${props.className ?? ""}`}>
+    <div className={`overflow-x-auto overflow-y-auto max-h-[420px] rounded-xl border border-slate-100 ${props.className ?? ""}`}>
       <table className="w-full text-xs [&_thead]:bg-slate-50/95 [&_thead]:backdrop-blur-sm [&_thead]:text-[10px] [&_thead]:text-slate-400 [&_thead]:uppercase [&_thead]:tracking-widest [&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:bg-slate-50/95 [&_thead_th]:backdrop-blur-sm [&_th]:text-left [&_th]:font-semibold [&_th]:px-3 [&_th]:py-2.5 [&_tbody_tr]:border-t [&_tbody_tr]:border-slate-100 [&_tbody_tr:hover]:bg-slate-50/70 [&_tbody_tr]:transition-colors [&_td]:px-3 [&_td]:py-2.5 [&_td.num]:text-right [&_td.num]:tabular-nums [&_td.num]:font-data">
         {props.children}
       </table>
