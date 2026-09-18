@@ -111,14 +111,22 @@ describe("end-user apps get self-service and nothing else", () => {
     // rules — without it the page can only ever show a loading skeleton for
     // this persona. Read-only; only POST (define/reconfigure) stays refused.
     expect(personaAllows(market, "GET", "/use-cases")).toBe(true);
-    expect(personaAllows(market, "POST", "/cash/credit")).toBe(false);
+    // POST is allowed, but only this one exact route: self-funding. The route
+    // handler itself enforces self-only (a Buyer can never credit anyone
+    // else's account); the edge just needs to reach it.
+    expect(personaAllows(market, "POST", "/cash/credit")).toBe(true);
   });
 
-  it("the marketplace reads its own balance without reaching the credit route", () => {
-    // `/cash/balances` is allowed; `/cash` is not — an investor crediting their
-    // own settlement account would be minting money.
+  it("the marketplace can read its balance and self-fund it, but reaches no other cash surface", () => {
+    // `/cash/balances` (own balance) and `/cash/credit` (self-funding) are
+    // allowed; the rest of `/cash` is not — an investor crediting someone
+    // else's settlement account, or reading/altering the ledger at large,
+    // would be minting money on another party's behalf.
     expect(personaAllows(market, "GET", "/cash/balances")).toBe(true);
-    expect(personaAllows(market, "POST", "/cash/credit")).toBe(false);
+    expect(personaAllows(market, "POST", "/cash/credit")).toBe(true);
+    expect(personaAllows(market, "GET", "/cash")).toBe(false);
+    expect(personaAllows(market, "PATCH", "/cash/balances")).toBe(false);
+    expect(personaAllows(market, "DELETE", "/cash/balances")).toBe(false);
   });
 });
 
