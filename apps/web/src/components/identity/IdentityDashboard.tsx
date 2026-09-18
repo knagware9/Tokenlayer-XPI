@@ -399,7 +399,7 @@ export function IdentityDashboard(): JSX.Element {
               </tr>
             ))}
             {rows.length === 0 && (
-              <tr><td colSpan={7} className="px-3 py-6 text-center text-slate-400">No credentials match.</td></tr>
+              <tr><td colSpan={7} className="px-3 !py-6 text-center text-slate-400">No credentials match.</td></tr>
             )}
           </tbody>
         </TableShell>

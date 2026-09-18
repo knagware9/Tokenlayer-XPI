@@ -816,7 +816,7 @@ function Market({
                 })}
                 {listings.length === 0 && (
                   <tr>
-                    <td colSpan={canBuy ? 4 : 3} className="px-3 py-3 text-center text-sm text-slate-400">No open asks.</td>
+                    <td colSpan={canBuy ? 4 : 3} className="px-3 !py-3 text-center text-sm text-slate-400">No open asks.</td>
                   </tr>
                 )}
               </tbody>

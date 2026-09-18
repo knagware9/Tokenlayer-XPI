@@ -649,11 +649,26 @@ export function Pager(props: { page: number; pageSize: number; total: number; on
  * table CSS by hand. Adopted incrementally, screen by screen (tasks 7-9);
  * deliberately not a data-driven <Table rows columns> abstraction — that
  * would mean rewriting every table call site in one pass.
+ *
+ * Sticky header: positioning lives on `th` (`[&_thead_th]:sticky`), not on
+ * `thead` itself. `thead`-level sticky computes `position: sticky` (so a
+ * naive `getComputedStyle` check passes) but the wrapping div here is only
+ * `overflow-x-auto` with no vertical scroll container, so it never actually
+ * sticks during a page scroll. Per-`th` sticky doesn't have that problem and
+ * is more broadly supported besides.
+ *
+ * Per-cell padding has real CSS specificity: `[&_td]:px-3 [&_td]:py-2.5`
+ * (an arbitrary-variant descendant selector, ~0,1,1) beats a plain utility
+ * class like `py-6` placed directly on a `<td>` by a call site (~0,1,0),
+ * regardless of class order. A call site that needs different cell padding
+ * or alignment must use an `!`-important utility (e.g. `!py-6`) to win —
+ * see IdentityDashboard.tsx's and AssetDetail.tsx's empty-state rows for
+ * the pattern.
  */
 export function TableShell(props: { children: React.ReactNode; className?: string }): JSX.Element {
   return (
     <div className={`overflow-x-auto rounded-xl border border-slate-100 ${props.className ?? ""}`}>
-      <table className="w-full text-xs [&_thead]:sticky [&_thead]:top-0 [&_thead]:bg-slate-50/95 [&_thead]:backdrop-blur-sm [&_thead]:text-[10px] [&_thead]:text-slate-400 [&_thead]:uppercase [&_thead]:tracking-widest [&_th]:text-left [&_th]:font-semibold [&_th]:px-3 [&_th]:py-2.5 [&_tbody_tr]:border-t [&_tbody_tr]:border-slate-100 [&_tbody_tr:hover]:bg-slate-50/70 [&_tbody_tr]:transition-colors [&_td]:px-3 [&_td]:py-2.5 [&_td.num]:text-right [&_td.num]:tabular-nums [&_td.num]:font-data">
+      <table className="w-full text-xs [&_thead]:bg-slate-50/95 [&_thead]:backdrop-blur-sm [&_thead]:text-[10px] [&_thead]:text-slate-400 [&_thead]:uppercase [&_thead]:tracking-widest [&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:bg-slate-50/95 [&_thead_th]:backdrop-blur-sm [&_th]:text-left [&_th]:font-semibold [&_th]:px-3 [&_th]:py-2.5 [&_tbody_tr]:border-t [&_tbody_tr]:border-slate-100 [&_tbody_tr:hover]:bg-slate-50/70 [&_tbody_tr]:transition-colors [&_td]:px-3 [&_td]:py-2.5 [&_td.num]:text-right [&_td.num]:tabular-nums [&_td.num]:font-data">
         {props.children}
       </table>
     </div>

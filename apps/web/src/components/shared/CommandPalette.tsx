@@ -23,13 +23,20 @@ const KIND_ICON: Record<CommandItem["kind"], IconName> = {
  * useCasesSurfaced), so this palette must not call it there either or it
  * repeats the same doomed-CORS-fetch bug fixed in App.tsx/Organizations.tsx.
  *
- * THE MIRROR IMAGE HOLDS TOO. `credential-use-cases` is an identity-domain
- * route: in the standard linked-stacks topology (stack-up.sh, IDENTITY_SERVICE_URL
- * set) a tokenization persona's own API narrows ENABLED_DOMAINS to just
- * "tokenization" and never serves it at all — verified live, it 404s with no
- * CORS headers, the same failure shape as the bug above. So this is gated by
- * `persona.domain === "identity"` the same way the use-case/asset calls are
- * gated by `useCasesSurfaced`, for the same reason.
+ * THE MIRROR IMAGE HOLDS TOO, BUT IT ISN'T THE WHOLE IDENTITY DOMAIN.
+ * `credential-use-cases` is an identity-domain route, but not every identity
+ * persona's server-side edge admits it: `identity-holder` (the Wallet app)
+ * has no `/credential-use-cases` entry in its `allow` list (see
+ * packages/core/src/shared/personas.ts) — only `identity-issuer` and
+ * `identity-verifier` do. Gating on `persona.domain === "identity"` alone
+ * used to fire this fetch for identity-holder too, which fails as a CORS
+ * preflight error, the exact bug class this file exists to prevent. Instead
+ * this checks for a `surfaces` entry that positively indicates the persona
+ * manages or reads credential-use-case programmes — `credential-schemas`
+ * (issuer) or `verify` (verifier) — the same pattern `useCasesSurfaced`
+ * already uses, and one that never needs the web bundle to restate a route
+ * allowlist (see the class doc on WebPersona in personas.ts: `allow`/`methods`
+ * are deliberately never mirrored to web).
  */
 export function CommandPalette(props: {
   open: boolean;
@@ -43,11 +50,15 @@ export function CommandPalette(props: {
   const [selected, setSelected] = useState(0);
   const [extra, setExtra] = useState<CommandItem[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+  const selectedRef = useRef<HTMLButtonElement>(null);
   const persona = activePersona();
   const useCasesSurfaced = !persona || persona.surfaces.includes("use-cases");
-  // See the class doc: a tokenization-only persona's own API does not serve
-  // this identity-domain route in the standard linked-stacks topology.
-  const credentialUseCasesSurfaced = !persona || persona.domain === "identity";
+  // See the class doc above: gate on a surface that positively indicates
+  // this persona manages/reads credential-use-case programmes, not on the
+  // whole identity domain — identity-holder is domain "identity" too but
+  // its edge has no /credential-use-cases route.
+  const credentialUseCasesSurfaced =
+    !persona || persona.surfaces.includes("credential-schemas") || persona.surfaces.includes("verify");
 
   useEffect(() => {
     if (!open) return;
@@ -107,6 +118,14 @@ export function CommandPalette(props: {
 
   useEffect(() => { setSelected(0); }, [query]);
 
+  // Arrow-key navigation can move `selected` past the visible fold (the
+  // result list is max-h-80/overflow-y-auto but rankCommandResults can
+  // return up to 20 rows) — keep the highlighted row in view, no smooth
+  // animation so this respects prefers-reduced-motion by default.
+  useEffect(() => {
+    selectedRef.current?.scrollIntoView({ block: "nearest" });
+  }, [selected]);
+
   function choose(item: CommandItem): void {
     item.onSelect();
     onClose();
@@ -148,6 +167,7 @@ export function CommandPalette(props: {
           {shown.map((item, i) => (
             <button
               key={item.id}
+              ref={i === selected ? selectedRef : undefined}
               type="button"
               onClick={() => choose(item)}
               onMouseEnter={() => setSelected(i)}

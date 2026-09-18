@@ -85,6 +85,17 @@ h1, h2, h3, h4, h5 {
 .stagger-6 { animation-delay: 0.29s; }
 .stagger-7 { animation-delay: 0.34s; }
 
+/* Respect the OS-level reduced-motion preference for every animation class
+   above — entrance animations and stagger delays alike. Placed after their
+   definitions so it naturally overrides them via cascade order. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-slide-up, .animate-fade-in, .animate-bar-grow, .animate-count-in, .animate-pulse-ring,
+  .stagger-1, .stagger-2, .stagger-3, .stagger-4, .stagger-5, .stagger-6, .stagger-7 {
+    animation: none;
+    animation-delay: 0s;
+  }
+}
+
 /* ─── Component layer ─────────────────────────────────────────────────────── */
 @layer components {
   /* Form controls */
