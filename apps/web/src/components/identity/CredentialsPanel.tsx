@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { ApiError, api } from "../../api.js";
 import { useAuth } from "../../auth.js";
 import type { CredentialTypeInfo, IssuedCredential, OrgMember, Organization } from "../../types.js";
-import { Card, EmptyState, Pill, SectionHeader, Skeleton } from "../shared/ui.js";
+import { Card, EmptyState, Pill, SectionHeader, Skeleton, TableShell } from "../shared/ui.js";
 
 function truncateDid(v: string): string {
   return v.length > 28 ? `${v.slice(0, 18)}…${v.slice(-6)}` : v;
@@ -55,7 +55,7 @@ export function CredentialsPanel({ org, members }: { org: Organization; members:
         title="Credentials"
         description="Issue verifiable credentials from this organization's DID. Issuance and revocation both require approval."
       />
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-danger">{error}</p>}
 
       {types === null ? (
         <Card><Skeleton lines={3} /></Card>
@@ -148,8 +148,8 @@ function IssueCredential({
   }
 
   return (
-    <form onSubmit={submit} className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 space-y-4 max-w-2xl">
-      <h2 className="font-semibold text-slate-900">Request a credential</h2>
+    <form onSubmit={submit} className="bg-surface rounded-2xl border border-border/80 shadow-sm p-6 space-y-4 max-w-2xl">
+      <h2 className="font-semibold text-fg">Request a credential</h2>
       <div className="grid grid-cols-2 gap-4">
         <select className="select" value={selected?.type ?? ""} onChange={(e) => setTypeName(e.target.value)}>
           {types.map((t) => <option key={t.type} value={t.type}>{t.type}</option>)}
@@ -159,7 +159,7 @@ function IssueCredential({
         </select>
       </div>
       {selected && (
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-muted prose-measure">
           {selected.description} · valid {selected.validityDays} days · {selected.requiredApprovals} approval(s)
           {selected.selfIssuedOnly && " · self-issued only"}
         </p>
@@ -169,8 +169,8 @@ function IssueCredential({
         <div className="grid grid-cols-2 gap-4">
           {props.map(([key, spec]) => (
             <label key={key} className="block">
-              <span className="text-xs font-medium text-slate-600">
-                {key}{required.includes(key) && <span className="text-rose-600"> *</span>}
+              <span className="text-xs font-medium text-muted">
+                {key}{required.includes(key) && <span className="text-danger"> *</span>}
               </span>
               {spec.enum ? (
                 <select
@@ -195,12 +195,12 @@ function IssueCredential({
       )}
 
       {ok && (
-        <div className="rounded-lg bg-amber-50 border border-amber-100 p-3">
-          <p className="text-xs font-medium text-amber-800">{ok}</p>
-          <p className="text-[11px] text-amber-700 mt-1">Decide it in the Approvals inbox — it is not issued yet.</p>
+        <div className="rounded-lg bg-warning/10 border border-warning/25 p-3">
+          <p className="text-xs font-medium text-warning">{ok}</p>
+          <p className="text-[11px] text-warning mt-1">Decide it in the Approvals inbox — it is not issued yet.</p>
         </div>
       )}
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-danger">{error}</p>}
       <button type="submit" disabled={busy} className="rounded-lg bg-brand-600 text-white py-1.5 px-4 text-sm font-medium hover:bg-brand-700 disabled:opacity-40">
         Request credential
       </button>
@@ -236,54 +236,52 @@ function IssuedList({ credentials, onRevoked }: { credentials: IssuedCredential[
 
   return (
     <div className="space-y-3">
-      {note && <div className="rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-2">{note}</div>}
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {note && <div className="rounded-lg bg-warning/10 border border-warning/25 text-warning text-sm px-4 py-2">{note}</div>}
+      {error && <p className="text-sm text-danger">{error}</p>}
       {credentials.length === 0 ? (
         <Card>
           <EmptyState icon="doc" title="No credentials issued yet" hint="Approved requests appear here once they are issued." />
         </Card>
       ) : (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="text-xs text-slate-500 bg-slate-50 uppercase tracking-wide">
-              <tr>
-                <th className="text-left font-medium px-4 py-2.5">Type</th>
-                <th className="text-left font-medium px-4 py-2.5">Holder</th>
-                <th className="text-left font-medium px-4 py-2.5">Issued</th>
-                <th className="text-left font-medium px-4 py-2.5">Status</th>
-                <th className="px-4 py-2.5" />
+        <TableShell>
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>Holder</th>
+              <th>Issued</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {credentials.map((c) => (
+              <tr key={c.id}>
+                <td>{c.type}</td>
+                <td className="font-mono text-xs text-muted" title={c.holderDid}>
+                  {truncateDid(c.holderDid)}
+                </td>
+                <td className="text-muted">{fmtDate(c.issuedAt)}</td>
+                <td>
+                  <Pill tone={c.revoked ? "muted" : "ok"}>{c.revoked ? "revoked" : "valid"}</Pill>
+                  {c.revoked && c.revokedReason && (
+                    <div className="text-xs text-danger mt-1">{c.revokedReason}</div>
+                  )}
+                </td>
+                <td className="text-right">
+                  {!c.revoked && (
+                    <button
+                      onClick={() => void revoke(c)}
+                      disabled={busy === c.id}
+                      className="rounded-lg border border-border text-muted px-3 py-1.5 text-xs font-medium hover:bg-elevated disabled:opacity-40"
+                    >
+                      Revoke
+                    </button>
+                  )}
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {credentials.map((c) => (
-                <tr key={c.id} className="border-t border-slate-100 align-top">
-                  <td className="px-4 py-2">{c.type}</td>
-                  <td className="px-4 py-2 font-mono text-xs text-slate-500" title={c.holderDid}>
-                    {truncateDid(c.holderDid)}
-                  </td>
-                  <td className="px-4 py-2 text-slate-500">{fmtDate(c.issuedAt)}</td>
-                  <td className="px-4 py-2">
-                    <Pill tone={c.revoked ? "muted" : "ok"}>{c.revoked ? "revoked" : "valid"}</Pill>
-                    {c.revoked && c.revokedReason && (
-                      <div className="text-xs text-rose-600 mt-1">{c.revokedReason}</div>
-                    )}
-                  </td>
-                  <td className="px-4 py-2 text-right">
-                    {!c.revoked && (
-                      <button
-                        onClick={() => void revoke(c)}
-                        disabled={busy === c.id}
-                        className="rounded-lg border border-slate-200 text-slate-600 px-3 py-1.5 text-xs font-medium hover:bg-slate-50 disabled:opacity-40"
-                      >
-                        Revoke
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </TableShell>
       )}
     </div>
   );

@@ -1,10 +1,28 @@
-/* Bricolage Grotesque (headings) · Manrope (body) · JetBrains Mono (data/code) */
-@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700;12..96,800&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&display=swap');
+/* Inter (headings/body, cv02/cv03/cv04/cv11 stylistic sets) · JetBrains Mono (data/code) */
+@import url('https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Design tokens. Two layers, both read as `rgb(var(--x) / <alpha-value>)`
+ * so Tailwind utilities and hand-written CSS see identical values:
+ *
+ *  - `--brand-*` (EN-E): the org-white-label accent scale. An organization's
+ *    shell overrides these and every existing component that already reads
+ *    them (buttons, focus rings, the metric-shimmer, etc.) re-themes for
+ *    free. Left untouched by this pass.
+ *  - `--bg` / `--surface` / `--elevated` / `--border` / `--fg` / `--muted` /
+ *    `--primary` / `--danger` / `--warning` / `--success`: the semantic
+ *    layer new components are written against. `--primary` is `--brand-600`
+ *    itself (not a copy) so an org override of the brand scale flows into
+ *    every new primary-colored control without a second place to re-theme.
+ *
+ * Redefined under `@media (prefers-color-scheme: dark)` guarded by
+ * `:root:not([data-theme='light'])`, and again under `:root[data-theme='dark']`
+ * so an explicit in-app theme toggle wins in both directions.
+ */
 :root {
   color-scheme: light;
 
@@ -15,26 +33,87 @@
   --brand-500: 18 179 154;    /* #12b39a */
   --brand-600: 14 140 117;    /* #0E8C75 */
   --brand-700: 10 111 93;     /* #0a6f5d */
+
+  /* Semantic layer — light */
+  --bg:       246 247 251;
+  --surface:  255 255 255;
+  --elevated: 238 241 246;
+  --border:   228 232 240;
+  --fg:       15 23 42;
+  --muted:    100 116 139;
+  --primary:  var(--brand-600);
+  --danger:   225 29 72;
+  --warning:  217 119 6;
+  --success:  5 150 105;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --bg:       11 18 32;
+    --surface:  17 27 46;
+    --elevated: 30 41 59;
+    --border:   51 65 85;
+    --fg:       241 245 249;
+    --muted:    148 163 184;
+    --primary:  var(--brand-600);
+    --danger:   225 29 72;
+    --warning:  217 119 6;
+    --success:  5 150 105;
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg:       11 18 32;
+  --surface:  17 27 46;
+  --elevated: 30 41 59;
+  --border:   51 65 85;
+  --fg:       241 245 249;
+  --muted:    148 163 184;
+  --primary:  var(--brand-600);
+  --danger:   225 29 72;
+  --warning:  217 119 6;
+  --success:  5 150 105;
 }
 
 /* ─── Base typography ─────────────────────────────────────────────────────── */
 body {
-  @apply antialiased text-slate-800;
-  font-family: 'Manrope', 'Segoe UI', system-ui, sans-serif;
-  background-color: #F6F9F8;
+  @apply antialiased;
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  background-color: rgb(var(--bg));
+  color: rgb(var(--fg));
 }
 
 h1, h2, h3, h4, h5 {
-  font-family: 'Bricolage Grotesque', system-ui, sans-serif;
+  font-family: 'Inter', system-ui, sans-serif;
   letter-spacing: -0.01em;
 }
 
 .font-display {
-  font-family: 'Bricolage Grotesque', system-ui, sans-serif;
+  font-family: 'Inter', system-ui, sans-serif;
 }
 
 .font-data {
   font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+}
+
+/* Reading measure for any block of running text (rule 2). */
+.prose-measure {
+  max-width: 68ch;
+}
+
+/* Hairline border — the default separator (rule 3): a 1px line, not a filled
+   card. Reach for `.card-surface` only when something is genuinely a
+   separate object; never nest a hairline/card inside another. */
+.hairline {
+  border-color: color-mix(in srgb, rgb(var(--border)) 78%, transparent);
+}
+
+/* One soft elevation level. Never stack this with a second shadow. */
+.shadow-card {
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
 }
 
 /* ─── Keyframes ───────────────────────────────────────────────────────────── */
@@ -85,31 +164,41 @@ h1, h2, h3, h4, h5 {
 .stagger-6 { animation-delay: 0.29s; }
 .stagger-7 { animation-delay: 0.34s; }
 
-/* Respect the OS-level reduced-motion preference for every animation class
-   above — entrance animations and stagger delays alike. Placed after their
-   definitions so it naturally overrides them via cascade order. */
+/* Respect the OS-level reduced-motion preference globally: clamp every
+   animation and transition on the page, not just the named entrance/stagger
+   classes above, so this covers anything added later too. */
 @media (prefers-reduced-motion: reduce) {
-  .animate-slide-up, .animate-fade-in, .animate-bar-grow, .animate-count-in, .animate-pulse-ring,
-  .stagger-1, .stagger-2, .stagger-3, .stagger-4, .stagger-5, .stagger-6, .stagger-7 {
-    animation: none;
-    animation-delay: 0s;
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
+}
+
+/* Every interactive element gets the same visible focus ring: 2px primary,
+   offset by 2px in the page background so it reads on any surface. */
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgb(var(--bg)), 0 0 0 4px rgb(var(--primary));
 }
 
 /* ─── Component layer ─────────────────────────────────────────────────────── */
 @layer components {
-  /* Form controls */
+  /* Form controls — the multi-step-flow form-control spec, applied via the
+     shared classes so every screen that uses `.input`/`.select` re-themes
+     together rather than call-site by call-site. */
   .input {
-    @apply w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm
-           placeholder:text-slate-400 shadow-sm
-           focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-400
+    @apply w-full rounded-xl border border-border bg-elevated/80 px-3.5 py-2.5 text-sm
+           placeholder:text-muted
+           focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15
            transition duration-150;
     font-family: inherit;
   }
 
   .select {
-    @apply w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm
-           focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-400
+    @apply w-full rounded-xl border border-border bg-elevated/80 px-3.5 py-2.5 text-sm
+           focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15
            transition duration-150;
     font-family: inherit;
   }

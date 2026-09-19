@@ -169,7 +169,7 @@ export function CertificateDesignPanel(props: CertificateDesignPanelProps): JSX.
   if (!type) {
     return (
       <Card>
-        <p className="text-xs text-slate-500">This use case has no credential type named “{credentialTypeName}”.</p>
+        <p className="text-xs text-muted">This use case has no credential type named “{credentialTypeName}”.</p>
       </Card>
     );
   }
@@ -182,7 +182,7 @@ export function CertificateDesignPanel(props: CertificateDesignPanelProps): JSX.
         actions={
           <button
             onClick={props.onClose}
-            className="rounded-lg border border-slate-200 text-slate-600 px-3 py-1.5 text-xs font-medium hover:border-brand-400 hover:text-brand-700"
+            className="rounded-lg border border-border text-muted px-3 py-1.5 text-xs font-medium hover:border-brand-400 hover:text-brand-700"
           >
             ← Back to list
           </button>
@@ -203,13 +203,13 @@ export function CertificateDesignPanel(props: CertificateDesignPanelProps): JSX.
             of every already-issued credential's claims. Say so before the click,
             not in the 400 that would otherwise follow it. */}
         {!cert && (
-          <p className="mt-4 rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-800">
+          <p className="mt-4 rounded border border-warning/25 bg-warning/10 px-2 py-1.5 text-[11px] text-warning prose-measure">
             This credential type has no certificate yet. Saving turns one on — and certificate PDFs are downloadable
             from a <strong>public link</strong> by anyone holding the credential&rsquo;s id, including for credentials
             already issued under this type.
           </p>
         )}
-        <div className="mt-4 flex items-center gap-3 border-t border-slate-100 pt-3">
+        <div className="mt-4 flex items-center gap-3 border-t border-border pt-3">
           <button
             type="button"
             disabled={busy}
@@ -227,21 +227,21 @@ export function CertificateDesignPanel(props: CertificateDesignPanelProps): JSX.
               type="button"
               disabled={busy}
               onClick={() => { setBackground(null); setArtworkUrl(null); fetchedFor.current = null; setArtworkTouched(true); setSaved(false); }}
-              className="rounded-lg border border-slate-200 text-slate-600 px-3 py-1.5 text-xs font-medium hover:border-brand-400 hover:text-brand-700"
+              className="rounded-lg border border-border text-muted px-3 py-1.5 text-xs font-medium hover:border-brand-400 hover:text-brand-700"
             >
               Remove artwork
             </button>
           )}
-          {saved && <span className="text-[11px] text-emerald-600">Saved.</span>}
-          {error && <span className="text-[11px] text-rose-600">{error}</span>}
+          {saved && <span className="text-[11px] text-success">Saved.</span>}
+          {error && <span className="text-[11px] text-danger">{error}</span>}
         </div>
         {storedUnpinned && !artworkTouched && (
-          <p className="mt-2 text-[11px] text-amber-700">
+          <p className="mt-2 text-[11px] text-warning prose-measure">
             This artwork predates digest pinning, so it can be kept or removed here but not edited in place. To change
             it, upload the file again.
           </p>
         )}
-        <p className="mt-2 text-[11px] text-slate-500">
+        <p className="mt-2 text-[11px] text-muted prose-measure">
           Removing the artwork reverts this credential type to the built-in certificate layout. Your placements are
           kept and simply stop printing until artwork is uploaded again.
         </p>

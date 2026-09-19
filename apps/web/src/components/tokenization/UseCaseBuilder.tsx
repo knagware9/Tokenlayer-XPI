@@ -382,17 +382,17 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
 
   if (!canConfigure) {
     return (
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 text-sm text-slate-500">
-        Only a <span className="font-medium text-slate-700">Platform Admin</span> or an <span className="font-medium text-slate-700">Org Admin</span> can configure use cases.
+      <div className="bg-surface rounded-2xl border border-border/80 shadow-card p-6 text-sm text-muted">
+        Only a <span className="font-medium text-fg">Platform Admin</span> or an <span className="font-medium text-fg">Org Admin</span> can configure use cases.
       </div>
     );
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm">
+    <div className="bg-surface rounded-2xl border border-border/80 shadow-card">
       <div className="flex flex-col md:flex-row">
         {/* progress rail */}
-        <nav className="md:w-56 shrink-0 border-b md:border-b-0 md:border-r border-slate-100 p-4 md:p-5">
+        <nav className="md:w-56 shrink-0 border-b md:border-b-0 md:border-r border-border p-4 md:p-5">
           <ol className="flex md:flex-col gap-1 md:gap-0.5 overflow-x-auto">
             {STEPS.map((label, i) => {
               const reachable = i <= step || STEPS.slice(0, i).every((_, j) => stepValid[j]);
@@ -405,12 +405,12 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
                     disabled={!reachable}
                     onClick={() => reachable && setStep(i)}
                     className={`w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm whitespace-nowrap ${
-                      current ? "bg-brand-50 text-brand-700 font-semibold" : "text-slate-600 hover:bg-slate-50"
+                      current ? "bg-brand-50 text-brand-700 font-semibold" : "text-muted hover:bg-elevated"
                     } disabled:opacity-40 disabled:cursor-not-allowed`}
                   >
                     <span
                       className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-semibold shrink-0 ${
-                        done ? "bg-emerald-100 text-emerald-700" : current ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-500"
+                        done ? "bg-success/15 text-success" : current ? "bg-brand-600 text-white" : "bg-elevated text-muted"
                       }`}
                     >
                       {done ? <Icon name="check" className="w-3.5 h-3.5" /> : i + 1}
@@ -425,8 +425,8 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
 
         {/* step pane */}
         <div className="flex-1 p-5 md:p-6 min-w-0">
-          {ok && <div className="mb-4 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm px-4 py-2">{ok}</div>}
-          {notice && <div className="mb-4 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm px-4 py-2">{notice}</div>}
+          {ok && <div className="mb-4 rounded-lg bg-success/10 border border-success/25 text-success text-sm px-4 py-2">{ok}</div>}
+          {notice && <div className="mb-4 rounded-lg bg-success/10 border border-success/25 text-success text-sm px-4 py-2">{notice}</div>}
 
           {step === 0 && (
             <StepBasics
@@ -477,7 +477,7 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
                         }
                       }}
                       className={`relative cursor-pointer rounded-xl border p-4 transition ${
-                        selected ? "border-brand-500 bg-brand-50/40 shadow-sm" : "border-slate-200 hover:border-brand-300"
+                        selected ? "border-brand-500 bg-brand-50/40 shadow-sm" : "border-border hover:border-brand-300"
                       }`}
                     >
                       {selected && (
@@ -486,14 +486,14 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
                         </span>
                       )}
                       <div className="flex items-center gap-2 pr-6">
-                        <span className="text-slate-400">
+                        <span className="text-muted">
                           <Icon name={familyIcon(c.family)} className="w-4 h-4" />
                         </span>
-                        <span className="text-sm font-semibold text-slate-800">{c.label}</span>
+                        <span className="text-sm font-semibold text-fg">{c.label}</span>
                       </div>
                       <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                         {c.configured === false ? <Pill tone="muted">not configured</Pill> : c.mode === "real" ? <Pill tone="ok">REAL</Pill> : <Pill tone="info">SIMULATED</Pill>}
-                        {offline && <span className="text-[11px] text-slate-400">deploys when connected</span>}
+                        {offline && <span className="text-[11px] text-muted">deploys when connected</span>}
                       </div>
                       <button
                         type="button"
@@ -502,7 +502,7 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
                           starChain(c.id);
                         }}
                         title={isDefault ? "Default chain" : "Make this the default chain"}
-                        className={`absolute bottom-2.5 right-2.5 text-base leading-none ${isDefault ? "text-amber-500" : "text-slate-300 hover:text-amber-400"}`}
+                        className={`absolute bottom-2.5 right-2.5 text-base leading-none ${isDefault ? "text-amber-500" : "text-muted hover:text-amber-400"}`}
                       >
                         {isDefault ? "★" : "☆"}
                       </button>
@@ -511,12 +511,12 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
                 })}
               </div>
               {chainChoices.length > 0 && !hasLiveChain && (
-                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                <p className="text-xs text-warning bg-warning/10 border border-warning/25 rounded-lg px-3 py-2">
                   Select at least one connected chain — assets cannot be issued until a ledger that is online is in the mix.
                 </p>
               )}
               {!chainsValid && allowedChainIds.length > 0 && (
-                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                <p className="text-xs text-warning bg-warning/10 border border-warning/25 rounded-lg px-3 py-2">
                   The default ledger must be one of the selected ledgers.
                 </p>
               )}
@@ -527,35 +527,35 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
             <div className="space-y-4">
               <StepIntro title="Asset fields" hint="The metadata captured for every asset issued under this use case." />
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-medium text-slate-500">Start from preset:</span>
+                <span className="text-xs font-medium text-muted">Start from preset:</span>
                 {PRESETS.map((p) => (
                   <button
                     key={p.id}
                     type="button"
                     onClick={() => applyPreset(p)}
-                    className={`rounded-full border px-3 py-1 text-xs font-medium ${
-                      presetApplied === p.id ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-600 hover:border-brand-400"
+                    className={`rounded-full border px-3 py-1.5 text-xs font-medium ${
+                      presetApplied === p.id ? "bg-primary text-white border-primary" : "bg-surface text-muted border-border hover:bg-elevated"
                     }`}
                   >
                     {p.label}
                   </button>
                 ))}
-                {presetApplied && <span className="text-[11px] text-slate-400">preset prefills fields and rules — everything stays editable</span>}
+                {presetApplied && <span className="text-[11px] text-muted">preset prefills fields and rules — everything stays editable</span>}
               </div>
 
               <div className="grid gap-5 lg:grid-cols-2">
                 <SchemaFieldEditor fields={fields} onChange={setFields} />
 
                 <div>
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Issue form preview</div>
-                  <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/60 p-4 space-y-3">
-                    {namedFields.length === 0 && <p className="text-xs text-slate-400">Add fields to see how the issue form will look.</p>}
+                  <div className="text-xs font-semibold text-muted mb-2">Issue form preview</div>
+                  <div className="rounded-xl border border-dashed border-border bg-elevated/60 p-4 space-y-3">
+                    {namedFields.length === 0 && <p className="text-xs text-muted">Add fields to see how the issue form will look.</p>}
                     {namedFields.map((f) => (
                       <div key={f.name}>
-                        <div className="text-xs font-medium text-slate-600 mb-1">
+                        <div className="text-xs font-medium text-muted mb-1">
                           {f.name}
-                          {f.required && <span className="text-red-500"> *</span>}
-                          <span className="ml-1.5 text-[10px] text-slate-400">{f.kind}</span>
+                          {f.required && <span className="text-danger"> *</span>}
+                          <span className="ml-1.5 text-[10px] text-muted">{f.kind}</span>
                         </div>
                         {f.kind === "enum" ? (
                           <select className="select text-xs" disabled>
@@ -564,7 +564,7 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
                         ) : f.kind === "boolean" ? (
                           <input type="checkbox" disabled />
                         ) : f.kind === "document" ? (
-                          <div className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-400">Upload PDF / paste URL</div>
+                          <div className="rounded-lg border border-border bg-surface px-3 py-2 text-xs text-muted">Upload PDF / paste URL</div>
                         ) : (
                           <input className="input text-xs" type={f.kind === "number" ? "number" : "text"} placeholder={f.description || f.name} disabled />
                         )}
@@ -581,7 +581,7 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
               <StepIntro title="Rules" hint="Lifecycle, compliance, fees and approvals — all enforced by the platform on every operation." />
 
               <section>
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Lifecycle</div>
+                <div className="text-xs font-semibold text-muted mb-2">Lifecycle</div>
                 <div className="flex flex-wrap gap-2">
                   {(["mint", "transfer", "burn", "freeze"] as const).map((k) => (
                     <Toggle key={k} active={lifecycle[k]} onClick={() => setLifecycle((l) => ({ ...l, [k]: !l[k] }))}>
@@ -591,8 +591,8 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
                 </div>
               </section>
 
-              <section className="rounded-lg border border-slate-200 p-4 space-y-3">
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Compliance</div>
+              <section className="rounded-lg border border-border p-4 space-y-3">
+                <div className="text-xs font-semibold text-muted">Compliance</div>
                 <div className="flex flex-wrap gap-2">
                   <Toggle active={allowlist} onClick={() => setAllowlist((v) => !v)}>
                     allowlist
@@ -604,7 +604,7 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
                     Require verified identity (DID/VC)
                   </Toggle>
                 </div>
-                <p className="text-[11px] text-slate-400">
+                <p className="text-[11px] text-muted prose-measure">
                   {requireVerifiedIdentity && requiredCredentialTypes.trim()
                     ? "Only holders with a valid, unrevoked credential of one of the listed types may receive this asset."
                     : "Only holders with a valid, unrevoked KYC credential may receive this asset."}
@@ -627,8 +627,8 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
                 </div>
               </section>
 
-              <section className="rounded-lg border border-slate-200 p-4 space-y-3">
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Fees</div>
+              <section className="rounded-lg border border-border p-4 space-y-3">
+                <div className="text-xs font-semibold text-muted">Fees</div>
                 <div className="grid sm:grid-cols-2 gap-4">
                   <L label="Marketplace fee" hint="Basis points, e.g. 250 = 2.5%">
                     <input className="input" type="number" min="0" max="10000" value={marketplaceBps} onChange={(e) => setMarketplaceBps(e.target.value)} placeholder="e.g. 250" />
@@ -639,10 +639,10 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
                 </div>
               </section>
 
-              <section className="rounded-lg border border-slate-200 p-4">
+              <section className="rounded-lg border border-border p-4">
                 <button type="button" onClick={() => setApprovalsOpen((v) => !v)} className="w-full flex items-center justify-between text-left">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Maker-checker approvals</span>
-                  <span className="text-slate-400 text-xs">{approvalsOpen ? "▴ hide" : "▾ show"}</span>
+                  <span className="text-xs font-semibold text-muted">Maker-checker approvals</span>
+                  <span className="text-muted text-xs">{approvalsOpen ? "▴ hide" : "▾ show"}</span>
                 </button>
                 {approvalsOpen && (
                   <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -671,8 +671,8 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
 
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <SummaryTile label="Basics" stagger={1}>
-                  <div className="text-sm font-semibold text-slate-800">{name || "—"}</div>
-                  <div className="text-xs text-slate-500">
+                  <div className="text-sm font-semibold text-fg">{name || "—"}</div>
+                  <div className="text-xs text-muted">
                     {key} · {symbol} · {standard}
                   </div>
                 </SummaryTile>
@@ -687,8 +687,8 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
                   </div>
                 </SummaryTile>
                 <SummaryTile label="Fields" stagger={3}>
-                  <div className="text-sm font-semibold text-slate-800">{namedFields.length}</div>
-                  <div className="text-xs text-slate-500">{namedFields.filter((f) => f.required).length} required</div>
+                  <div className="text-sm font-semibold text-fg">{namedFields.length}</div>
+                  <div className="text-xs text-muted">{namedFields.filter((f) => f.required).length} required</div>
                 </SummaryTile>
                 <SummaryTile label="Rules" stagger={4}>
                   <div className="flex flex-wrap gap-1">
@@ -713,15 +713,15 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
               </div>
 
               <div>
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Contract code per ledger</div>
+                <div className="text-xs font-semibold text-muted mb-2">Contract code per ledger</div>
                 <div className="flex gap-1 mb-3 flex-wrap">
                   {allowedChainIds.map((id) => (
                     <button
                       key={id}
                       type="button"
                       onClick={() => setPreviewTab(id)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-medium ${
-                        previewTab === id ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                      className={`rounded-full border px-3 py-1.5 text-xs font-medium ${
+                        previewTab === id ? "bg-primary text-white border-primary" : "bg-surface text-muted border-border hover:bg-elevated"
                       }`}
                     >
                       {chainOf(id)?.label ?? id}
@@ -730,22 +730,22 @@ export function UseCaseBuilder({ chains, existing, onCreated }: Props): JSX.Elem
                 </div>
                 {previewTab && previews[previewTab]?.loading && <Skeleton lines={6} />}
                 {previewTab && previews[previewTab]?.error && (
-                  <p className="text-sm text-red-600 rounded-lg bg-red-50 border border-red-200 px-4 py-2">{previews[previewTab].error}</p>
+                  <p className="text-sm text-danger rounded-lg bg-danger/10 border border-danger/25 px-4 py-2">{previews[previewTab].error}</p>
                 )}
                 {previewTab && previews[previewTab]?.code && <ContractCodeView code={previews[previewTab].code} />}
               </div>
 
-              {error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2">{error}</div>}
+              {error && <div className="rounded-lg bg-danger/10 border border-danger/25 text-danger text-sm px-4 py-2">{error}</div>}
             </div>
           )}
 
           {/* footer nav */}
-          <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between">
+          <div className="mt-6 pt-4 border-t border-border flex items-center justify-between">
             <button
               type="button"
               onClick={() => setStep((s) => Math.max(0, s - 1))}
               disabled={step === 0}
-              className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+              className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted hover:bg-elevated disabled:opacity-40"
             >
               ← Back
             </button>
@@ -803,18 +803,18 @@ function StepBasics(props: {
         </L>
         <L label="Token symbol" hint="Uppercase, up to 6 characters — auto-suggested from the name">
           <input className="input" value={symbol} onChange={(e) => onSymbol(e.target.value)} placeholder="e.g. VCU" />
-          {symbol && !symbolValid && <span className="block text-[11px] text-red-600 mt-1">1–6 uppercase letters or digits.</span>}
+          {symbol && !symbolValid && <span className="block text-[11px] text-danger mt-1">1–6 uppercase letters or digits.</span>}
         </L>
       </div>
 
-      <div className="text-xs text-slate-500">
+      <div className="text-xs text-muted">
         Key:{" "}
-        <code className="font-mono rounded bg-slate-100 text-slate-700 px-1.5 py-0.5">{keyValue || "—"}</code>
+        <code className="font-mono rounded bg-elevated text-fg px-1.5 py-0.5">{keyValue || "—"}</code>
         <button type="button" onClick={onToggleKeyEditor} className="ml-2 text-brand-600 hover:text-brand-700 font-medium">
           {showKeyEditor ? "done" : "advanced"}
         </button>
-        {keyTaken && <span className="ml-2 text-red-600">A use case with this key already exists.</span>}
-        {keyValue && !keyValid && <span className="ml-2 text-red-600">Lowercase letters, digits and hyphens only.</span>}
+        {keyTaken && <span className="ml-2 text-danger">A use case with this key already exists.</span>}
+        {keyValue && !keyValid && <span className="ml-2 text-danger">Lowercase letters, digits and hyphens only.</span>}
       </div>
       {showKeyEditor && (
         <L label="Key (unique id)" hint="Lowercase, hyphen-separated — used in URLs and the API">
@@ -824,7 +824,7 @@ function StepBasics(props: {
 
       <L label="Description">
         <textarea
-          className="input resize-y min-h-[72px]"
+          className="input resize-y min-h-[6rem] leading-relaxed"
           value={description}
           onChange={(e) => onDescription(e.target.value)}
           placeholder="What this asset type represents"
@@ -832,7 +832,7 @@ function StepBasics(props: {
       </L>
 
       <div>
-        <span className="block text-xs font-medium text-slate-600 mb-2">Token standard</span>
+        <span className="block text-xs font-medium text-muted mb-2">Token standard</span>
         <div className="grid gap-3 sm:grid-cols-3">
           {STANDARD_CARDS.map((s) => (
             <button
@@ -840,18 +840,18 @@ function StepBasics(props: {
               type="button"
               onClick={() => onStandard(s.id)}
               className={`text-left rounded-xl border p-4 transition ${
-                standard === s.id ? "border-brand-500 bg-brand-50/40 shadow-sm" : "border-slate-200 hover:border-brand-300"
+                standard === s.id ? "border-brand-500 bg-brand-50/40 shadow-sm" : "border-border hover:border-brand-300"
               }`}
             >
               <div className="flex items-center justify-between">
-                <span className="text-sm font-semibold text-slate-800">{s.title}</span>
+                <span className="text-sm font-semibold text-fg">{s.title}</span>
                 {standard === s.id && (
                   <span className="w-5 h-5 rounded-full bg-brand-600 text-white flex items-center justify-center shrink-0">
                     <Icon name="check" className="w-3.5 h-3.5" />
                   </span>
                 )}
               </div>
-              <p className="text-xs text-slate-500 mt-1">{s.blurb}</p>
+              <p className="text-xs text-muted mt-1">{s.blurb}</p>
             </button>
           ))}
         </div>
@@ -885,7 +885,7 @@ export function ChainDeployBadge({
       : undefined;
     const body = <span title={deployed.contractRef}>⛓ {label}</span>;
     return (
-      <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 text-[10px] font-medium">
+      <span className="px-1.5 py-0.5 rounded bg-success/15 text-success text-[10px] font-medium">
         {href ? <a href={href} target="_blank" rel="noreferrer" className="hover:underline">{body}</a> : body}
       </span>
     );
@@ -909,7 +909,7 @@ export function ChainDeployBadge({
       onClick={deploy}
       disabled={busy}
       title={err ?? `Deploy the contract on ${label}`}
-      className={`px-1.5 py-0.5 rounded text-[10px] font-medium disabled:opacity-50 ${err ? "bg-red-100 text-red-700" : "bg-slate-200 text-slate-600 hover:bg-slate-300"}`}
+      className={`px-1.5 py-0.5 rounded text-[10px] font-medium disabled:opacity-50 ${err ? "bg-danger/15 text-danger" : "bg-elevated text-muted hover:bg-border"}`}
     >
       {busy ? "deploying…" : err ? `⚠ ${label}` : `Deploy ${label}`}
     </button>
@@ -919,16 +919,16 @@ export function ChainDeployBadge({
 function StepIntro({ title, hint }: { title: string; hint: string }): JSX.Element {
   return (
     <div>
-      <h3 className="text-base font-semibold text-slate-900">{title}</h3>
-      <p className="text-xs text-slate-500 mt-0.5">{hint}</p>
+      <h3 className="text-base font-semibold text-fg">{title}</h3>
+      <p className="text-xs text-muted mt-0.5 prose-measure">{hint}</p>
     </div>
   );
 }
 
 function SummaryTile({ label, children, stagger }: { label: string; children: React.ReactNode; stagger?: number }): JSX.Element {
   return (
-    <div className={`rounded-xl border border-slate-200 p-3 ${staggerClass(stagger)}`}>
-      <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400 mb-1.5">{label}</div>
+    <div className={`rounded-xl border border-border p-3 ${staggerClass(stagger)}`}>
+      <div className="text-[11px] font-medium text-muted mb-1.5">{label}</div>
       {children}
     </div>
   );
@@ -937,9 +937,9 @@ function SummaryTile({ label, children, stagger }: { label: string; children: Re
 function L({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }): JSX.Element {
   return (
     <label className="block">
-      <span className="block text-xs font-medium text-slate-600 mb-1">{label}</span>
+      <span className="block text-xs font-medium text-muted mb-1">{label}</span>
       {children}
-      {hint && <span className="block text-[11px] text-slate-400 mt-1">{hint}</span>}
+      {hint && <span className="block text-[11px] text-muted mt-1">{hint}</span>}
     </label>
   );
 }
@@ -950,7 +950,7 @@ function Toggle({ active, onClick, children }: { active: boolean; onClick: () =>
       type="button"
       onClick={onClick}
       className={`px-2.5 py-1 rounded-full text-xs font-medium border ${
-        active ? "bg-brand-600 text-white border-brand-600" : "bg-white text-slate-500 border-slate-200 hover:border-brand-400"
+        active ? "bg-brand-600 text-white border-brand-600" : "bg-surface text-muted border-border hover:border-brand-400"
       }`}
     >
       {children}

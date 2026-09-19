@@ -26,7 +26,7 @@ import { activityCsv, atEnd } from "../../lib/shared/activity-log.js";
 import type { DomainKey } from "../../domains.js";
 import { EVENT_TYPES, type PlatformEvent } from "../../types.js";
 import { IntegrityPanel } from "./IntegrityPanel.js";
-import { Card, EmptyState, Pill, SectionHeader } from "./ui.js";
+import { Card, EmptyState, Pill, SectionHeader, TableShell } from "./ui.js";
 
 const PAGE = 100;
 
@@ -120,7 +120,7 @@ function ActivityTab(): JSX.Element {
           </select>
           <button
             onClick={() => void reload(type)} disabled={busy}
-            className="rounded-lg border border-slate-300 text-slate-600 px-3 py-1.5 text-sm font-medium hover:bg-slate-50 disabled:opacity-50"
+            className="rounded-lg border border-border text-muted px-3 py-1.5 text-sm font-medium hover:bg-elevated disabled:opacity-50"
           >
             Refresh
           </button>
@@ -132,7 +132,7 @@ function ActivityTab(): JSX.Element {
           </button>
         </div>
 
-        {error && <div className="mb-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2">{error}</div>}
+        {error && <div className="mb-3 rounded-lg bg-danger/10 border border-danger/30 text-danger text-sm px-4 py-2">{error}</div>}
 
         {/*
           WHAT THIS VIEW IS AND IS NOT, said here rather than discovered later.
@@ -141,7 +141,7 @@ function ActivityTab(): JSX.Element {
           otherwise open. And `seq` is a global counter, so gaps between your
           rows are other tenants' volume — not events you lost.
         */}
-        <p className="text-xs text-slate-500 mb-3">
+        <p className="text-xs text-muted mb-3 prose-measure">
           {user?.role === "PlatformAdmin"
             ? "Platform-wide: every organization's events."
             : "Scoped to your organization — every use case in it, not just the ones you operate."}
@@ -155,38 +155,36 @@ function ActivityTab(): JSX.Element {
             hint="Events appear as credentials are issued, assets move and proposals execute."
           />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
-                <tr>
-                  <th className="text-right font-medium px-3 py-2.5">Seq</th>
-                  <th className="text-left font-medium px-3 py-2.5">When</th>
-                  <th className="text-left font-medium px-3 py-2.5">Event</th>
-                  <th className="text-left font-medium px-3 py-2.5">Use case</th>
-                  <th className="text-left font-medium px-3 py-2.5">Subject</th>
+          <TableShell>
+            <thead>
+              <tr>
+                <th className="text-right">Seq</th>
+                <th>When</th>
+                <th>Event</th>
+                <th>Use case</th>
+                <th>Subject</th>
+              </tr>
+            </thead>
+            <tbody>
+              {events.map((e) => (
+                <tr key={e.id}>
+                  <td className="num font-mono text-muted">{e.seq}</td>
+                  <td className="text-muted whitespace-nowrap" title={e.occurredAt}>{ago(e.occurredAt)}</td>
+                  <td><Pill tone={toneFor(e.type)}>{e.type}</Pill></td>
+                  <td className="text-muted">{e.useCaseKey ?? <span className="text-muted/70">—</span>}</td>
+                  <td className="font-mono text-muted break-all">{e.subjectId ?? <span className="text-muted/70 font-sans">—</span>}</td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {events.map((e) => (
-                  <tr key={e.id}>
-                    <td className="px-3 py-2 text-right font-mono text-xs text-slate-400">{e.seq}</td>
-                    <td className="px-3 py-2 text-xs text-slate-600 whitespace-nowrap" title={e.occurredAt}>{ago(e.occurredAt)}</td>
-                    <td className="px-3 py-2"><Pill tone={toneFor(e.type)}>{e.type}</Pill></td>
-                    <td className="px-3 py-2 text-xs text-slate-600">{e.useCaseKey ?? <span className="text-slate-300">—</span>}</td>
-                    <td className="px-3 py-2 font-mono text-xs text-slate-500 break-all">{e.subjectId ?? <span className="text-slate-300 font-sans">—</span>}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </TableShell>
         )}
 
         {events.length > 0 && (
           <div className="flex items-center justify-between mt-3">
-            <span className="text-xs text-slate-500">{events.length} event{events.length === 1 ? "" : "s"} loaded</span>
+            <span className="text-xs text-muted">{events.length} event{events.length === 1 ? "" : "s"} loaded</span>
             <button
               onClick={() => void more()} disabled={busy || done}
-              className="rounded-lg border border-slate-300 text-slate-600 px-3 py-1.5 text-sm font-medium hover:bg-slate-50 disabled:opacity-40"
+              className="rounded-lg border border-border text-muted px-3 py-1.5 text-sm font-medium hover:bg-elevated disabled:opacity-40"
             >
               {done ? "End of log" : busy ? "Loading…" : "Load more"}
             </button>
@@ -222,7 +220,7 @@ export function AuditConsole(props: { useCaseKey?: string; enabledDomains: Domai
       />
 
       {tabs.length > 1 && (
-        <div className="flex flex-wrap gap-1 border-b border-slate-200">
+        <div className="flex flex-wrap gap-1 border-b border-border">
           {tabs.map((t) => (
             <button
               key={t.id}
@@ -232,7 +230,7 @@ export function AuditConsole(props: { useCaseKey?: string; enabledDomains: Domai
               className={`-mb-px rounded-t-lg border-b-2 px-3.5 py-2 text-sm font-medium ${
                 t.id === tab
                   ? "border-brand-600 text-brand-700"
-                  : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300"
+                  : "border-transparent text-muted hover:text-fg hover:border-border"
               }`}
             >
               {t.label}

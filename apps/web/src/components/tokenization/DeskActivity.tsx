@@ -62,7 +62,7 @@ export function DeskActivity({ useCaseKey, useCases, chains }: { useCaseKey: str
     return <AssetDetail assetId={detailAssetId} useCases={useCases} chains={chains} onBack={() => setDetailAssetId(null)} onChanged={() => {}} />;
   }
 
-  if (error) return <p className="text-sm text-red-600">{error}</p>;
+  if (error) return <p className="text-sm text-danger">{error}</p>;
   if (!rows)
     return (
       <Card>
@@ -80,8 +80,8 @@ export function DeskActivity({ useCaseKey, useCases, chains }: { useCaseKey: str
     <Card>
       <div className="flex items-center justify-between gap-3 mb-4">
         <div>
-          <div className="text-sm font-semibold text-slate-900">Activity</div>
-          <div className="text-xs text-slate-400">Every mint, transfer, buy, allow, freeze and burn across this use case's assets — newest first.</div>
+          <div className="text-sm font-semibold text-fg">Activity</div>
+          <div className="text-xs text-muted prose-measure">Every mint, transfer, buy, allow, freeze and burn across this use case's assets — newest first.</div>
         </div>
         <input
           className="input w-56 text-xs"
@@ -96,20 +96,20 @@ export function DeskActivity({ useCaseKey, useCases, chains }: { useCaseKey: str
         <>
           <ol className="space-y-2">
             {paged.map((e) => (
-              <li key={e.id} className="flex items-start gap-3 text-sm border-t border-slate-100 pt-2 first:border-0 first:pt-0">
+              <li key={e.id} className="flex items-start gap-3 text-sm border-t border-border pt-2 first:border-0 first:pt-0">
                 <span className="mt-0.5 inline-block w-20 shrink-0 text-[11px] font-semibold text-brand-600 uppercase">{e.action}</span>
-                <button onClick={() => setDetailAssetId(e.assetId ?? null)} className="w-40 shrink-0 text-left text-slate-700 hover:text-brand-700 hover:underline truncate" title={e.assetName}>
-                  {e.assetName} <span className="text-slate-400">{e.assetSymbol}</span>
+                <button onClick={() => setDetailAssetId(e.assetId ?? null)} className="w-40 shrink-0 text-left text-fg hover:text-brand-700 hover:underline truncate" title={e.assetName}>
+                  {e.assetName} <span className="text-muted">{e.assetSymbol}</span>
                 </button>
-                <span className="flex-1 text-slate-600">
+                <span className="flex-1 text-muted">
                   {summarize(e)}
                   {e.txHash && (
-                    <span className="ml-2 font-mono text-[10px] text-slate-400">
+                    <span className="ml-2 font-mono text-[10px] text-muted">
                       <ExplorerLink chain={chainOf(e.chainId)} kind="tx" value={e.txHash}>{short(e.txHash)}</ExplorerLink>
                     </span>
                   )}
                 </span>
-                <span className="text-[11px] text-slate-400 shrink-0" title={new Date(e.createdAt).toLocaleString()}>{new Date(e.createdAt).toLocaleTimeString()}</span>
+                <span className="text-[11px] text-muted shrink-0" title={new Date(e.createdAt).toLocaleString()}>{new Date(e.createdAt).toLocaleTimeString()}</span>
               </li>
             ))}
           </ol>

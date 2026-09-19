@@ -8,7 +8,7 @@ import { DOMAIN_LABELS, ROLE_LABELS, fullCapabilities, isOrgOperatingRole, orgRo
 import { ORG_DOMAINS, ORG_OPERATING_ROLES, type CompanyCategory, type CredentialStatusInfo, type CredentialUseCase, type DidDocument, type KybDocumentRef, type OrgCapabilities, type OrgDomain, type OrgMember, type OrgOperatingRole, type OrgType, type Organization, type Role, type UseCase } from "../../types.js";
 import { useOrgLogo } from "./AppShell.js";
 import { CredentialsPanel } from "../identity/CredentialsPanel.js";
-import { Card, EmptyState, Pill, SectionHeader } from "./ui.js";
+import { Card, EmptyState, Pill, SectionHeader, TableShell } from "./ui.js";
 
 const ORG_TYPES: OrgType[] = ["bank", "corporate", "msme", "government", "verifier"];
 
@@ -42,8 +42,8 @@ const CATEGORY_LABELS: Record<CompanyCategory, string> = {
 function Kv({ label, value }: { label: string; value: string }): JSX.Element {
   return (
     <div className="min-w-0">
-      <dt className="text-slate-400">{label}</dt>
-      <dd className="font-medium text-slate-700 truncate">{value}</dd>
+      <dt className="text-muted">{label}</dt>
+      <dd className="font-medium text-fg truncate">{value}</dd>
     </div>
   );
 }
@@ -88,26 +88,26 @@ function CapabilityEditor({ value, onChange, disabled }: {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
       <fieldset>
-        <legend className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1.5">Domains</legend>
+        <legend className="text-xs font-semibold text-muted mb-1.5">Domains</legend>
         {ORG_DOMAINS.map((d) => (
-          <label key={d} className="flex items-center gap-2 py-1 text-sm text-slate-700 cursor-pointer">
+          <label key={d} className="flex items-center gap-2 py-1 text-sm text-fg cursor-pointer">
             <input
               type="checkbox" disabled={disabled} checked={value.domains.includes(d)}
               onChange={() => onChange({ ...value, domains: toggleCapability<OrgDomain>(value.domains, d) })}
-              className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+              className="h-4 w-4 rounded border-border text-brand-600 focus:ring-brand-500"
             />
             {DOMAIN_LABELS[d]}
           </label>
         ))}
       </fieldset>
       <fieldset>
-        <legend className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1.5">Operating roles</legend>
+        <legend className="text-xs font-semibold text-muted mb-1.5">Operating roles</legend>
         {ORG_OPERATING_ROLES.map((r) => (
-          <label key={r} className="flex items-center gap-2 py-1 text-sm text-slate-700 cursor-pointer">
+          <label key={r} className="flex items-center gap-2 py-1 text-sm text-fg cursor-pointer">
             <input
               type="checkbox" disabled={disabled} checked={value.roles.includes(r)}
               onChange={() => onChange({ ...value, roles: toggleCapability<OrgOperatingRole>(value.roles, r) })}
-              className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+              className="h-4 w-4 rounded border-border text-brand-600 focus:ring-brand-500"
             />
             {ROLE_LABELS[r]}
           </label>
@@ -183,7 +183,7 @@ function OrgCapabilitiesCard({ org, onChanged }: { org: Organization; onChanged:
         {(isPlatform || canRequest) && (
           <button
             onClick={() => { setEditing((v) => !v); setError(null); setNote(null); setDraft(org.capabilities ?? fullCapabilities()); }}
-            className="ml-auto text-xs rounded border border-slate-300 text-slate-600 px-3 py-1.5 font-medium hover:bg-slate-50"
+            className="ml-auto text-xs rounded border border-border text-muted px-3 py-1.5 font-medium hover:bg-elevated"
           >
             {editing ? "Cancel" : isPlatform ? "Edit" : "Request change"}
           </button>
@@ -191,9 +191,9 @@ function OrgCapabilitiesCard({ org, onChanged }: { org: Organization; onChanged:
       </div>
 
       {editing && (
-        <div className="mt-4 space-y-3 border-t border-slate-100 pt-4">
+        <div className="mt-4 space-y-3 border-t border-border/60 pt-4">
           <CapabilityEditor value={draft} onChange={setDraft} disabled={busy} />
-          {invalid && <p className="text-xs text-amber-700">{invalid}</p>}
+          {invalid && <p className="text-xs text-warning">{invalid}</p>}
           <div className="flex flex-wrap gap-2">
             <button
               onClick={() => void (isPlatform ? save(draft) : requestChange())}
@@ -206,7 +206,7 @@ function OrgCapabilitiesCard({ org, onChanged }: { org: Organization; onChanged:
               <button
                 onClick={() => void save(null)}
                 disabled={busy}
-                className="rounded-lg border border-slate-300 text-slate-600 py-1.5 px-4 text-sm font-medium hover:bg-slate-50 disabled:opacity-40"
+                className="rounded-lg border border-border text-muted py-1.5 px-4 text-sm font-medium hover:bg-elevated disabled:opacity-40"
               >
                 Clear to legacy
               </button>
@@ -215,8 +215,8 @@ function OrgCapabilitiesCard({ org, onChanged }: { org: Organization; onChanged:
         </div>
       )}
 
-      {note && <p className="mt-3 text-sm text-emerald-700">{note}</p>}
-      {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+      {note && <p className="mt-3 text-sm text-success">{note}</p>}
+      {error && <p className="mt-3 text-sm text-danger">{error}</p>}
     </Card>
   );
 }
@@ -348,41 +348,41 @@ function OrgBrandingCard({ org, onChanged }: { org: Organization; onChanged: () 
     >
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
         <div className="space-y-2">
-          <span className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Accent colour</span>
+          <span className="block text-xs font-semibold text-muted">Accent colour</span>
           <div className="flex items-center gap-3">
             <input
               type="color" value={accent} disabled={busy}
               onChange={(e) => { setAccent(e.target.value); setNote(null); }}
-              className="h-9 w-14 rounded border border-slate-300 bg-white p-1 cursor-pointer disabled:opacity-40"
+              className="h-9 w-14 rounded border border-border bg-surface p-1 cursor-pointer disabled:opacity-40"
               aria-label="Accent colour"
             />
-            <span className="font-mono text-sm text-slate-600">{accent}</span>
+            <span className="font-mono text-sm text-muted">{accent}</span>
           </div>
           {darkened && (
-            <p className="text-[11px] text-amber-700">
+            <p className="text-[11px] text-warning">
               Darkened for legibility — white text on your colour would not meet contrast guidelines. Your saved colour is unchanged.
             </p>
           )}
         </div>
 
         <div className="space-y-2">
-          <span className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Logo</span>
+          <span className="block text-xs font-semibold text-muted">Logo</span>
           <div className="flex items-center gap-3">
-            <div className="h-12 w-24 rounded border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden shrink-0">
+            <div className="h-12 w-24 rounded border border-border bg-elevated flex items-center justify-center overflow-hidden shrink-0">
               {preview
                 ? <img src={preview} alt="" className="max-h-full max-w-full object-contain" />
-                : <span className="text-[11px] text-slate-400">none</span>}
+                : <span className="text-[11px] text-muted">none</span>}
             </div>
             <input
               type="file" accept="image/png,image/jpeg" disabled={busy}
               onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void upload(f); }}
-              className="block w-full text-xs text-slate-600 file:mr-3 file:rounded file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-slate-700 hover:file:bg-slate-200"
+              className="block w-full text-xs text-muted file:mr-3 file:rounded file:border-0 file:bg-elevated file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-fg hover:file:bg-border/40"
             />
           </div>
         </div>
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
+      <div className="mt-4 flex flex-wrap gap-2 border-t border-border/60 pt-4">
         <button
           onClick={() => void save(changedBranding())}
           disabled={busy || !dirty}
@@ -394,15 +394,15 @@ function OrgBrandingCard({ org, onChanged }: { org: Organization; onChanged: () 
           <button
             onClick={() => void save({ brandAccent: null, brandLogoDocumentId: null })}
             disabled={busy}
-            className="rounded-lg border border-slate-300 text-slate-600 py-1.5 px-4 text-sm font-medium hover:bg-slate-50 disabled:opacity-40"
+            className="rounded-lg border border-border text-muted py-1.5 px-4 text-sm font-medium hover:bg-elevated disabled:opacity-40"
           >
             Clear branding
           </button>
         )}
       </div>
 
-      {note && <p className="mt-3 text-sm text-emerald-700">{note}</p>}
-      {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+      {note && <p className="mt-3 text-sm text-success">{note}</p>}
+      {error && <p className="mt-3 text-sm text-danger">{error}</p>}
     </Card>
   );
 }
@@ -482,10 +482,10 @@ export function Organizations(): JSX.Element {
         title="Organizations"
         description={isPlatform ? "Provision organizations and their members. Each gets a DID; members receive a membership credential." : "Your organization and its members."}
       />
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-danger">{error}</p>}
 
       {isPlatform && issued && (
-        <p className="text-sm rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-2">
+        <p className="text-sm rounded-lg bg-success/10 border border-success/25 text-success px-4 py-2">
           <span className="font-semibold">{issued.name}</span> approved — DID issued by TokenLayer Platform
           <span className="font-mono text-xs"> {issued.did.slice(0, 24)}…</span> · registered on-chain · OrganizationCredential anchored.
         </p>
@@ -547,10 +547,10 @@ function OrgCard({ org, selected, registration, onSelect, useCasesOwned }: {
   return (
     <button
       onClick={onSelect}
-      className={`text-left bg-white rounded-2xl border shadow-sm p-4 space-y-2 hover:border-brand-400 ${selected ? "border-brand-500 ring-1 ring-brand-200" : "border-slate-200/80"}`}
+      className={`text-left bg-surface rounded-2xl border shadow-sm p-4 space-y-2 hover:border-brand-400 ${selected ? "border-brand-500 ring-1 ring-brand-200" : "border-border/80"}`}
     >
       <div className="flex items-start justify-between gap-2">
-        <div className="text-sm font-semibold text-slate-900 truncate">{org.name}</div>
+        <div className="text-sm font-semibold text-fg truncate">{org.name}</div>
         <Pill tone={org.verified ? "ok" : "warn"}>{org.verified ? "verified" : "unverified"}</Pill>
       </div>
       <div className="flex flex-wrap items-center gap-2">
@@ -565,7 +565,7 @@ function OrgCard({ org, selected, registration, onSelect, useCasesOwned }: {
       ) : (
         <div className="space-y-1">
           <div className="flex items-center gap-2 min-w-0">
-            <span className="text-[11px] font-mono text-slate-500 truncate" title={org.did}>
+            <span className="text-[11px] font-mono text-muted truncate" title={org.did}>
               {truncateDid(org.did)}
             </span>
             {registration?.registered && (
@@ -576,7 +576,7 @@ function OrgCard({ org, selected, registration, onSelect, useCasesOwned }: {
             const oc = org.credentials?.find((c) => c.type === "OrganizationCredential" && !c.revoked);
             return oc ? (
               <span className="flex items-center gap-1.5">
-                <span className="text-xs text-slate-500">Issued by <span className="font-medium text-slate-700">TokenLayer Platform</span></span>
+                <span className="text-xs text-muted">Issued by <span className="font-medium text-fg">TokenLayer Platform</span></span>
                 <CredStatusPill id={oc.id} />
               </span>
             ) : null;
@@ -585,7 +585,7 @@ function OrgCard({ org, selected, registration, onSelect, useCasesOwned }: {
       )}
       {useCasesOwned !== undefined && (
         useCasesOwned.length === 0 ? (
-          <p className="text-[11px] text-slate-400">No use case subscribed yet</p>
+          <p className="text-[11px] text-muted">No use case subscribed yet</p>
         ) : (
           <div className="flex flex-wrap items-center gap-1.5 pt-1">
             {useCasesOwned.map((u) => (
@@ -649,15 +649,15 @@ function PendingOrgs({ pending, onIssued, onApproved, onRejected }: {
 
   return (
     <Card title="Pending corporate registrations" description="Self-service sign-ups awaiting a platform decision.">
-      {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
+      {error && <p className="text-sm text-danger mb-3">{error}</p>}
       <div className="space-y-2">
         {pending.map((o) => {
           const p = o.companyProfile;
           return (
-            <div key={o.id} className="rounded-lg border border-slate-200 px-4 py-3">
+            <div key={o.id} className="rounded-lg border border-border px-4 py-3">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <div className="text-sm font-semibold text-slate-900 truncate">{o.name}</div>
+                  <div className="text-sm font-semibold text-fg truncate">{o.name}</div>
                   <div className="mt-1 flex flex-wrap items-center gap-2">
                     <Pill tone="info">{o.orgType}</Pill>
                     {p && <Pill tone="muted">{CATEGORY_LABELS[p.category] ?? p.category}</Pill>}
@@ -668,7 +668,7 @@ function PendingOrgs({ pending, onIssued, onApproved, onRejected }: {
                 <div className="flex gap-2 shrink-0">
                   <button
                     onClick={() => setOpen((cur) => (cur === o.id ? null : o.id))}
-                    className="text-xs rounded border border-slate-300 text-slate-600 px-3 py-1.5 font-medium hover:bg-slate-50"
+                    className="text-xs rounded border border-border text-muted px-3 py-1.5 font-medium hover:bg-elevated"
                   >
                     {open === o.id ? "Hide" : "Review"}
                   </button>
@@ -682,7 +682,7 @@ function PendingOrgs({ pending, onIssued, onApproved, onRejected }: {
                   <button
                     onClick={() => void reject(o.id)}
                     disabled={busy === o.id}
-                    className="text-xs rounded border border-slate-300 text-slate-600 px-3 py-1.5 font-medium hover:bg-slate-50 disabled:opacity-40"
+                    className="text-xs rounded border border-border text-muted px-3 py-1.5 font-medium hover:bg-elevated disabled:opacity-40"
                   >
                     Reject
                   </button>
@@ -691,14 +691,14 @@ function PendingOrgs({ pending, onIssued, onApproved, onRejected }: {
               {open === o.id && (
                 <>
                   {/* The requested capability envelope is part of what is being approved. */}
-                  <div className="mt-3 border-t border-slate-100 pt-3">
-                    <div className="text-xs text-slate-400 mb-1.5">Requested capabilities</div>
+                  <div className="mt-3 border-t border-border/60 pt-3">
+                    <div className="text-xs text-muted mb-1.5">Requested capabilities</div>
                     <div className="flex flex-wrap items-center gap-1.5">
                       <CapabilityPills caps={o.capabilities} />
                     </div>
                   </div>
                   {p && (
-                    <dl className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5 border-t border-slate-100 pt-3 text-xs">
+                    <dl className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5 border-t border-border/60 pt-3 text-xs">
                       <Kv label="CIN" value={p.cin} />
                       <Kv label="PAN" value={p.pan} />
                       <Kv label="GSTIN" value={p.gstin || "—"} />
@@ -748,10 +748,10 @@ function DocLink({ token, label, doc }: { token: string; label: string; doc: Kyb
     <button
       onClick={() => void download()}
       disabled={busy}
-      className="text-xs rounded border border-slate-300 text-slate-600 px-2.5 py-1 font-medium hover:bg-slate-50 disabled:opacity-40"
+      className="text-xs rounded border border-border text-muted px-2.5 py-1 font-medium hover:bg-elevated disabled:opacity-40"
     >
-      ⬇ {label} <span className="text-slate-400 font-normal">{doc.sha256.slice(0, 10)}…</span>
-      {error && <span className="text-red-500"> — failed</span>}
+      ⬇ {label} <span className="text-muted font-normal">{doc.sha256.slice(0, 10)}…</span>
+      {error && <span className="text-danger"> — failed</span>}
     </button>
   );
 }
@@ -807,8 +807,8 @@ function CreateOrg({ onCreated }: { onCreated: () => void }): JSX.Element {
   }
 
   return (
-    <form onSubmit={create} className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 space-y-4 max-w-2xl">
-      <h2 className="font-semibold text-slate-900">Create an organization</h2>
+    <form onSubmit={create} className="bg-surface rounded-2xl border border-border/80 shadow-sm p-6 space-y-4 max-w-2xl">
+      <h2 className="font-semibold text-fg">Create an organization</h2>
       <div className="grid grid-cols-2 gap-4">
         <input className="input" placeholder="name" value={name} onChange={(e) => setName(e.target.value)} />
         <select className="select" value={orgType} onChange={(e) => setOrgType(e.target.value as OrgType)}>
@@ -817,7 +817,7 @@ function CreateOrg({ onCreated }: { onCreated: () => void }): JSX.Element {
         <input className="input" placeholder="registration id (optional)" value={registrationId} onChange={(e) => setRegistrationId(e.target.value)} />
         <input className="input" placeholder="jurisdiction (optional, e.g. IN)" value={jurisdiction} onChange={(e) => setJurisdiction(e.target.value)} />
       </div>
-      <label className="flex items-center gap-2 text-sm text-slate-700">
+      <label className="flex items-center gap-2 text-sm text-fg">
         <input type="checkbox" checked={withAdmin} onChange={(e) => setWithAdmin(e.target.checked)} />
         Set up its admin login now (active immediately — no approval queue)
       </label>
@@ -828,8 +828,8 @@ function CreateOrg({ onCreated }: { onCreated: () => void }): JSX.Element {
           <input className="input" type="password" placeholder="admin password (8+ chars)" value={adminPassword} onChange={(e) => setAdminPassword(e.target.value)} />
         </div>
       )}
-      {error && <p className="text-sm text-red-600">{error}</p>}
-      {notice && <p className="text-sm text-emerald-700">{notice}</p>}
+      {error && <p className="text-sm text-danger">{error}</p>}
+      {notice && <p className="text-sm text-success">{notice}</p>}
       <button type="submit" disabled={busy} className="rounded-lg bg-brand-600 text-white py-1.5 px-4 text-sm font-medium hover:bg-brand-700 disabled:opacity-40">
         Create organization
       </button>
@@ -861,55 +861,53 @@ function Members({ org }: { org: Organization }): JSX.Element {
         actions={
           <button
             onClick={() => setAdding((v) => !v)}
-            className="rounded-lg border border-slate-200 text-slate-600 px-3 py-1.5 text-xs font-medium hover:bg-slate-50"
+            className="rounded-lg border border-border text-muted px-3 py-1.5 text-xs font-medium hover:bg-elevated"
           >
             {adding ? "Close" : "Add member"}
           </button>
         }
       />
       {adding && <AddMember orgId={orgId} capabilities={org.capabilities ?? null} onAdded={reload} />}
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-danger">{error}</p>}
       {rows.length === 0 ? (
         <Card>
           <EmptyState icon="users" title="No members yet" hint="Add a member to mint their DID and membership credential." />
         </Card>
       ) : (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="text-xs text-slate-500 bg-slate-50 uppercase tracking-wide">
-              <tr>
-                <th className="text-left font-medium px-4 py-2.5">Email</th>
-                <th className="text-left font-medium px-4 py-2.5">Role</th>
-                <th className="text-left font-medium px-4 py-2.5">Use case</th>
-                <th className="text-left font-medium px-4 py-2.5">DID</th>
-                <th className="text-left font-medium px-4 py-2.5">KYC</th>
-                <th className="text-left font-medium px-4 py-2.5">Access</th>
+        <TableShell>
+          <thead>
+            <tr>
+              <th>Email</th>
+              <th>Role</th>
+              <th>Use case</th>
+              <th>DID</th>
+              <th>KYC</th>
+              <th>Access</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((m) => (
+              <tr key={m.id}>
+                <td>{m.email}</td>
+                <td>{m.role}</td>
+                <td className="text-muted">{m.useCaseKey ?? "—"}</td>
+                <td className="font-mono text-xs text-muted" title={m.did ?? ""}>
+                  {m.did ? truncateDid(m.did) : "—"}
+                </td>
+                <td>
+                  <Pill tone={m.kycStatus === "approved" ? "ok" : m.kycStatus === "rejected" ? "danger" : "warn"}>{m.kycStatus}</Pill>
+                </td>
+                {/* `active` was fetched on every row and rendered nowhere, so a
+                    SUSPENDED member was indistinguishable from a working one in
+                    the only roster an admin has. Suspension is exactly what a
+                    roster is read to confirm. */}
+                <td>
+                  <Pill tone={m.active ? "ok" : "danger"}>{m.active ? "active" : "suspended"}</Pill>
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {rows.map((m) => (
-                <tr key={m.id} className="border-t border-slate-100">
-                  <td className="px-4 py-2">{m.email}</td>
-                  <td className="px-4 py-2">{m.role}</td>
-                  <td className="px-4 py-2 text-slate-500">{m.useCaseKey ?? "—"}</td>
-                  <td className="px-4 py-2 font-mono text-xs text-slate-500" title={m.did ?? ""}>
-                    {m.did ? truncateDid(m.did) : "—"}
-                  </td>
-                  <td className="px-4 py-2">
-                    <Pill tone={m.kycStatus === "approved" ? "ok" : m.kycStatus === "rejected" ? "danger" : "warn"}>{m.kycStatus}</Pill>
-                  </td>
-                  {/* `active` was fetched on every row and rendered nowhere, so a
-                      SUSPENDED member was indistinguishable from a working one in
-                      the only roster an admin has. Suspension is exactly what a
-                      roster is read to confirm. */}
-                  <td className="px-4 py-2">
-                    <Pill tone={m.active ? "ok" : "danger"}>{m.active ? "active" : "suspended"}</Pill>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </TableShell>
       )}
 
       <CredentialsPanel org={org} members={rows} />
@@ -963,8 +961,8 @@ function AddMember({ orgId, capabilities, onAdded }: { orgId: string; capabiliti
   }
 
   return (
-    <form onSubmit={create} className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 space-y-4 max-w-2xl">
-      <h2 className="font-semibold text-slate-900">Add a member</h2>
+    <form onSubmit={create} className="bg-surface rounded-2xl border border-border/80 shadow-sm p-6 space-y-4 max-w-2xl">
+      <h2 className="font-semibold text-fg">Add a member</h2>
       <div className="grid grid-cols-2 gap-4">
         <input className="input" placeholder="email" value={email} onChange={(e) => setEmail(e.target.value)} />
         <input className="input" type="password" placeholder="password (min 6)" value={password} onChange={(e) => setPassword(e.target.value)} />
@@ -973,19 +971,19 @@ function AddMember({ orgId, capabilities, onAdded }: { orgId: string; capabiliti
         </select>
         <input className="input" placeholder="use-case key (optional)" value={useCaseKey} onChange={(e) => setUseCaseKey(e.target.value)} />
         {hiddenByEnvelope.length > 0 && (
-          <p className="col-span-2 text-xs text-slate-500">
+          <p className="col-span-2 text-xs text-muted prose-measure">
             {hiddenByEnvelope.join(", ")} {hiddenByEnvelope.length === 1 ? "is" : "are"} not offered — this organization&rsquo;s capability envelope does not include {hiddenByEnvelope.length === 1 ? "that role" : "those roles"}.
           </p>
         )}
         <input className="input col-span-2" placeholder="wallet address 0x… (optional)" value={walletAddress} onChange={(e) => setWalletAddress(e.target.value)} />
       </div>
       {ok && (
-        <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-3">
-          <p className="text-xs font-medium text-emerald-700">Member created · membership credential issued</p>
-          <p className="text-[11px] font-mono text-emerald-800 break-all mt-1">{ok.did}</p>
+        <div className="rounded-lg bg-success/10 border border-success/25 p-3">
+          <p className="text-xs font-medium text-success">Member created · membership credential issued</p>
+          <p className="text-[11px] font-mono text-success break-all mt-1">{ok.did}</p>
         </div>
       )}
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-danger">{error}</p>}
       <button type="submit" disabled={busy} className="rounded-lg bg-brand-600 text-white py-1.5 px-4 text-sm font-medium hover:bg-brand-700 disabled:opacity-40">
         Create member
       </button>

@@ -153,26 +153,26 @@ export function CommandPalette(props: {
   return (
     <div className="fixed inset-0 bg-black/30 flex items-start justify-center pt-[15vh] p-4 z-50" onClick={onClose}>
       <div
-        className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden animate-fade-in"
+        className="bg-surface rounded-2xl shadow-xl w-full max-w-lg overflow-hidden animate-fade-in"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-label="Command palette"
       >
-        <div className="flex items-center gap-2.5 px-4 py-3 border-b border-slate-100">
-          <Icon name="filter" className="w-4 h-4 text-slate-400 shrink-0" />
+        <div className="flex items-center gap-2.5 px-4 py-3 border-b border-border">
+          <Icon name="filter" className="w-4 h-4 text-muted shrink-0" />
           <input
             ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
             placeholder="Jump to a use case, asset, or page…"
-            className="flex-1 text-sm outline-none placeholder:text-slate-400"
+            className="flex-1 text-sm outline-none placeholder:text-muted"
           />
-          <kbd className="text-[10px] font-semibold text-slate-400 bg-slate-100 rounded px-1.5 py-0.5">Esc</kbd>
+          <kbd className="text-[10px] font-semibold text-muted bg-elevated rounded px-1.5 py-0.5">Esc</kbd>
         </div>
         <div className="max-h-80 overflow-y-auto py-1.5">
           {shown.length === 0 && (
-            <div className="px-4 py-6 text-center text-xs text-slate-400">No matches for "{query}"</div>
+            <div className="px-4 py-6 text-center text-xs text-muted">No matches for "{query}"</div>
           )}
           {shown.map((item, i) => (
             <button
@@ -182,12 +182,12 @@ export function CommandPalette(props: {
               onClick={() => choose(item)}
               onMouseEnter={() => setSelected(i)}
               className={`w-full flex items-center gap-2.5 px-4 py-2 text-left text-sm transition-colors ${
-                i === selected ? "bg-brand-50 text-brand-700" : "text-slate-700 hover:bg-slate-50"
+                i === selected ? "bg-brand-50 text-brand-700" : "text-fg hover:bg-elevated"
               }`}
             >
-              <Icon name={KIND_ICON[item.kind]} className={`w-4 h-4 shrink-0 ${i === selected ? "text-brand-500" : "text-slate-400"}`} />
+              <Icon name={KIND_ICON[item.kind]} className={`w-4 h-4 shrink-0 ${i === selected ? "text-brand-500" : "text-muted"}`} />
               <span className="truncate">{item.label}</span>
-              {item.sublabel && <span className="text-xs text-slate-400 shrink-0">{item.sublabel}</span>}
+              {item.sublabel && <span className="text-xs text-muted shrink-0">{item.sublabel}</span>}
             </button>
           ))}
         </div>

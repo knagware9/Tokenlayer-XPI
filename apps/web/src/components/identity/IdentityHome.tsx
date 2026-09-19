@@ -74,7 +74,7 @@ export function IdentityHome(): JSX.Element {
           actions={
             <button
               onClick={() => setShowBuilder(false)}
-              className="rounded-lg border border-slate-200 text-slate-600 px-3 py-1.5 text-xs font-medium hover:border-brand-400 hover:text-brand-700"
+              className="rounded-lg border border-border text-muted px-3 py-1.5 text-xs font-medium hover:border-brand-400 hover:text-brand-700"
             >
               ← Back to list
             </button>
@@ -96,7 +96,7 @@ export function IdentityHome(): JSX.Element {
         <div className="flex justify-end mb-2">
           <button
             onClick={() => setShowProvision(false)}
-            className="rounded-lg border border-slate-200 text-slate-600 px-3 py-1.5 text-xs font-medium hover:border-brand-400 hover:text-brand-700"
+            className="rounded-lg border border-border text-muted px-3 py-1.5 text-xs font-medium hover:border-brand-400 hover:text-brand-700"
           >
             ← Back to list
           </button>
@@ -122,7 +122,7 @@ export function IdentityHome(): JSX.Element {
               {canProvision && (
                 <button
                   onClick={() => setShowProvision(true)}
-                  className="rounded-lg border border-slate-200 text-slate-600 px-3.5 py-1.5 text-xs font-medium hover:border-brand-400 hover:text-brand-700"
+                  className="rounded-lg border border-border text-muted px-3.5 py-1.5 text-xs font-medium hover:border-brand-400 hover:text-brand-700"
                 >
                   Provision from template
                 </button>
@@ -158,11 +158,11 @@ export function IdentityHome(): JSX.Element {
             <Card key={u.key} className="flex flex-col">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <div className="text-sm font-semibold text-slate-900 truncate">{u.name}</div>
-                  <div className="text-xs text-slate-400">{u.key}</div>
+                  <div className="text-sm font-semibold text-fg truncate">{u.name}</div>
+                  <div className="text-xs text-muted">{u.key}</div>
                 </div>
               </div>
-              {u.description && <p className="text-xs text-slate-500 mt-2 line-clamp-3">{u.description}</p>}
+              {u.description && <p className="text-xs text-muted mt-2 line-clamp-3">{u.description}</p>}
               <div className="flex flex-wrap items-center gap-1 mt-3">
                 {u.credentialTypes.map((ct) => (
                   <span key={ct.name} className="inline-flex items-center gap-1">
@@ -174,7 +174,7 @@ export function IdentityHome(): JSX.Element {
                       <button
                         onClick={() => setDesigning({ key: u.key, typeName: ct.name })}
                         title={`Design the ${ct.name} certificate`}
-                        className="rounded border border-slate-200 px-1.5 py-0.5 text-[10px] font-medium text-slate-500 hover:border-brand-400 hover:text-brand-700"
+                        className="rounded border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted hover:border-brand-400 hover:text-brand-700"
                       >
                         Design certificate
                       </button>
@@ -182,11 +182,11 @@ export function IdentityHome(): JSX.Element {
                   </span>
                 ))}
               </div>
-              <div className="mt-3 pt-3 border-t border-slate-100 text-[11px] text-slate-500">{bindingSummary(u, orgNames)}</div>
+              <div className="mt-3 pt-3 border-t border-border text-[11px] text-muted">{bindingSummary(u, orgNames)}</div>
               {canIssue(u) && (
                 <button
                   onClick={() => setExpandedKey((k) => (k === u.key ? null : u.key))}
-                  className="mt-3 self-start rounded-lg border border-slate-200 text-slate-600 px-3 py-1.5 text-xs font-medium hover:border-brand-400 hover:text-brand-700"
+                  className="mt-3 self-start rounded-lg border border-border text-muted px-3 py-1.5 text-xs font-medium hover:border-brand-400 hover:text-brand-700"
                 >
                   {expandedKey === u.key ? "Close" : "Issue credential"}
                 </button>

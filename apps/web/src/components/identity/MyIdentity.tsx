@@ -67,7 +67,7 @@ export function MyIdentity(): JSX.Element {
   return (
     <div className="space-y-5">
       <SectionHeader title="My identity" description="Your decentralized identifier and the credentials issued to you." />
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-danger">{error}</p>}
 
       <Card title="Decentralized identifier" description={user?.email} className="animate-slide-up" actions={doc && <RegistrationPill registration={doc.registration} />}>
         <DataBadge value={did} chars={16} />

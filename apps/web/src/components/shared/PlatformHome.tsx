@@ -41,7 +41,7 @@ export function PlatformHome({ useCases, chains, onReloadUseCases, view }: { use
             <button
               key={t.id}
               onClick={() => setInternalTab(t.id)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium ${tab === t.id ? "bg-white text-brand-700 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-800"}`}
+              className={`rounded-full border px-3 py-1.5 text-xs font-medium ${tab === t.id ? "bg-primary text-white border-primary" : "bg-surface text-muted border-border hover:bg-elevated"}`}
             >
               {t.label}
             </button>
@@ -116,15 +116,15 @@ export function UseCasesTab({ useCases, chains, onChanged }: { useCases: UseCase
             <Card key={u.key} className="flex flex-col">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <div className="text-sm font-semibold text-slate-900 truncate">{u.name}</div>
-                  <div className="text-xs text-slate-400">{u.key}</div>
+                  <div className="text-sm font-semibold text-fg truncate">{u.name}</div>
+                  <div className="text-xs text-muted">{u.key}</div>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
                   <Pill tone="info">{u.tokenStandard}</Pill>
                   <Pill tone="muted">{u.symbol}</Pill>
                 </div>
               </div>
-              {u.description && <p className="text-xs text-slate-500 mt-2 line-clamp-3">{u.description}</p>}
+              {u.description && <p className="text-xs text-muted mt-2 line-clamp-3">{u.description}</p>}
               <div className="flex flex-wrap gap-1 mt-3">
                 {u.allowedChainIds.map((cid) => (
                   <ChainDeployBadge
@@ -137,7 +137,7 @@ export function UseCasesTab({ useCases, chains, onChanged }: { useCases: UseCase
                   />
                 ))}
               </div>
-              <div className="mt-4 pt-3 border-t border-slate-100 flex flex-wrap items-center gap-2">
+              <div className="mt-4 pt-3 border-t border-border flex flex-wrap items-center gap-2">
                 <button
                   onClick={() => open(u.key)}
                   className="rounded-lg bg-brand-600 text-white px-3.5 py-1.5 text-xs font-semibold hover:bg-brand-700"
@@ -146,7 +146,7 @@ export function UseCasesTab({ useCases, chains, onChanged }: { useCases: UseCase
                 </button>
                 <button
                   onClick={() => setCodeFor(u)}
-                  className="rounded-lg border border-slate-200 text-slate-600 px-3 py-1.5 text-xs font-medium hover:border-brand-400 hover:text-brand-700"
+                  className="rounded-lg border border-border text-muted px-3 py-1.5 text-xs font-medium hover:border-brand-400 hover:text-brand-700"
                 >
                   View code
                 </button>
@@ -183,11 +183,11 @@ function CodeModal({ useCase, chains, onClose }: { useCase: UseCase; chains: Cha
 
   return (
     <div className="fixed inset-0 bg-black/30 flex items-start justify-center p-4 sm:p-8 z-50 overflow-y-auto" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl my-4" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-slate-100">
+      <div className="bg-surface rounded-2xl shadow-xl w-full max-w-3xl my-4" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-border">
           <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-slate-900 truncate">
-              Contract code — {useCase.name} <span className="text-slate-400 font-normal">({useCase.symbol})</span>
+            <h3 className="text-sm font-semibold text-fg truncate">
+              Contract code — {useCase.name} <span className="text-muted font-normal">({useCase.symbol})</span>
             </h3>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -198,14 +198,14 @@ function CodeModal({ useCase, chains, onClose }: { useCase: UseCase; chains: Cha
                 </option>
               ))}
             </select>
-            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-lg leading-none px-1">
+            <button onClick={onClose} className="text-muted hover:text-fg text-lg leading-none px-1">
               ×
             </button>
           </div>
         </div>
         <div className="p-5">
           {loading && <Skeleton lines={6} />}
-          {error && <p className="text-sm text-red-600 rounded-lg bg-red-50 border border-red-200 px-4 py-2">{error}</p>}
+          {error && <p className="text-sm text-danger rounded-lg bg-danger/10 border border-danger/25 px-4 py-2">{error}</p>}
           {code && <ContractCodeView code={code} />}
         </div>
       </div>

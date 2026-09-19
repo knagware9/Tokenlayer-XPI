@@ -17,7 +17,7 @@ export function IssueUsecaseCredential({ useCase, onIssued }: { useCase: Credent
   }, [useCase.credentialTypes]);
 
   return (
-    <div className="rounded-lg border border-slate-200 p-4 mt-3">
+    <div className="rounded-lg border border-border p-4 mt-3">
       <div className="flex items-center justify-between mb-2">
         <div className="text-sm font-medium">Issue a credential</div>
         <button
@@ -27,7 +27,7 @@ export function IssueUsecaseCredential({ useCase, onIssued }: { useCase: Credent
           {mode === "single" ? "Batch issue (CSV)" : "Single issue"}
         </button>
       </div>
-      <label className="block text-xs text-slate-500 mb-1">Credential type</label>
+      <label className="block text-xs text-muted mb-1">Credential type</label>
       <select className="input w-full mb-2" value={typeName} onChange={(e) => setTypeName(e.target.value)}>
         {useCase.credentialTypes.map((t) => <option key={t.name} value={t.name}>{t.title} ({t.name})</option>)}
       </select>
@@ -79,16 +79,16 @@ function SingleIssue({ useCase, spec, typeName, onIssued }: { useCase: Credentia
 
   return (
     <div>
-      {err && <div className="text-sm text-rose-600 mb-2">{err}</div>}
-      {msg && <div className="text-sm text-emerald-600 mb-2">{msg}</div>}
-      <label className="block text-xs text-slate-500 mb-1">Holder</label>
+      {err && <div className="text-sm text-danger mb-2">{err}</div>}
+      {msg && <div className="text-sm text-success mb-2">{msg}</div>}
+      <label className="block text-xs text-muted mb-1">Holder</label>
       <select className="input w-full mb-2" value={subjectId} onChange={(e) => setSubjectId(e.target.value)}>
         <option value="">— select an eligible holder —</option>
         {holders.map((h) => <option key={`${h.kind}:${h.id}`} value={h.id}>{h.kind === "org" ? "🏢 " : ""}{h.label}{h.subLabel ? ` · ${h.subLabel}` : ""}</option>)}
       </select>
       {spec && Object.entries(spec.claimSchema.properties).map(([field, p]) => (
         <div key={field} className="mb-2">
-          <label className="block text-xs text-slate-500 mb-1">{field}{spec.claimSchema.required?.includes(field) ? " *" : ""}</label>
+          <label className="block text-xs text-muted mb-1">{field}{spec.claimSchema.required?.includes(field) ? " *" : ""}</label>
           {Array.isArray(p.enum) ? (
             <select className="input w-full" value={claims[field] ?? ""} onChange={(e) => setClaims({ ...claims, [field]: e.target.value })}>
               <option value="">—</option>

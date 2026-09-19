@@ -53,19 +53,19 @@ export function CertificateDesigner(props: CertificateDesignerProps): JSX.Elemen
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-3">
-        <label className="text-[11px] text-slate-600">
+        <label className="text-[11px] text-muted">
           Artwork:
           <input type="file" accept="image/png,image/jpeg" className="ml-2 text-[11px]"
             onChange={(e) => { const f = e.target.files?.[0]; if (f) props.onUploadArtwork(f); }} />
         </label>
-        {props.backgroundDocumentId && <span className="text-[11px] text-emerald-600">✓ uploaded</span>}
+        {props.backgroundDocumentId && <span className="text-[11px] text-success">✓ uploaded</span>}
         <button type="button" onClick={props.onPreview}
-          className="ml-auto rounded border border-slate-300 px-2 py-1 text-[11px] font-medium hover:bg-slate-50">
+          className="ml-auto rounded border border-border px-2 py-1 text-[11px] font-medium hover:bg-elevated">
           Preview PDF
         </button>
       </div>
 
-      <p className="text-[11px] text-slate-500">
+      <p className="text-[11px] text-muted prose-measure">
         This canvas is an approximation — the browser lays text out differently from the PDF renderer.
         Use <strong>Preview PDF</strong> to see exactly what prints.
       </p>
@@ -74,7 +74,7 @@ export function CertificateDesigner(props: CertificateDesignerProps): JSX.Elemen
           the placement pointing at nothing. Saving drops these rather than
           letting the server refuse the whole use case, so say so here. */}
       {stale.length > 0 && (
-        <p className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-700">
+        <p className="rounded border border-warning/30 bg-warning/10 px-2 py-1 text-[11px] text-warning">
           {stale.length === 1 ? "A placed field references" : "Placed fields reference"} a claim this credential
           type no longer defines ({stale.join(", ")}). {stale.length === 1 ? "It" : "They"} will not be saved —
           remove {stale.length === 1 ? "it" : "them"} below, or restore the claim.
@@ -85,13 +85,13 @@ export function CertificateDesigner(props: CertificateDesignerProps): JSX.Elemen
         {paletteFields(claimKeys, placements).map((f) => (
           <button type="button" key={f} disabled={atCap}
             onClick={() => { onChange(addPlacement(placements, f)); setSelected(placements.length); }}
-            className="rounded-full border border-slate-200 px-2 py-0.5 text-[11px] text-slate-600 hover:border-brand-400 hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-40">
+            className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted hover:border-brand-400 hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-40">
             {fieldLabel(f)}
           </button>
         ))}
       </div>
       {atCap && (
-        <p className="text-[11px] text-slate-500">
+        <p className="text-[11px] text-muted">
           {MAX_CERTIFICATE_PLACEMENTS} placements is the maximum — remove one to place another.
         </p>
       )}
@@ -116,24 +116,24 @@ export function CertificateDesigner(props: CertificateDesignerProps): JSX.Elemen
       </div>
 
       {sel && selected !== null && (
-        <div className="grid grid-cols-2 gap-2 rounded border border-slate-200 p-2 text-[11px] sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-2 rounded border border-border p-2 text-[11px] sm:grid-cols-3">
           <label>Size
             {/* min/max are advisory here — the value is clamped in
                 clampFontSize, because a number input reports out-of-range
                 typing to onChange regardless of them. */}
             <input type="number" min={4} max={96} value={sel.fontSize ?? ""} placeholder="11"
               onChange={(e) => patch(selected, { fontSize: clampFontSize(e.target.value) })}
-              className="mt-0.5 w-full rounded border-slate-300 text-[11px]" />
+              className="mt-0.5 w-full rounded-lg border border-border bg-elevated/80 px-2 py-0.5 text-[11px] focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15" />
           </label>
           <label>Font
             <select value={sel.font ?? "sans"} onChange={(e) => patch(selected, { font: e.target.value as CertificateFont })}
-              className="mt-0.5 w-full rounded border-slate-300 text-[11px]">
+              className="mt-0.5 w-full rounded-lg border border-border bg-elevated/80 px-2 py-0.5 text-[11px] focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15">
               <option value="sans">Sans</option><option value="serif">Serif</option><option value="mono">Mono</option>
             </select>
           </label>
           <label>Align
             <select value={sel.align ?? "left"} onChange={(e) => patch(selected, { align: e.target.value as CertificateAlign })}
-              className="mt-0.5 w-full rounded border-slate-300 text-[11px]">
+              className="mt-0.5 w-full rounded-lg border border-border bg-elevated/80 px-2 py-0.5 text-[11px] focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15">
               <option value="left">Left</option><option value="center">Center</option><option value="right">Right</option>
             </select>
           </label>
@@ -147,7 +147,7 @@ export function CertificateDesigner(props: CertificateDesignerProps): JSX.Elemen
           </label>
           <button type="button"
             onClick={() => { onChange(removePlacement(placements, selected)); setSelected(null); }}
-            className="self-end rounded border border-rose-300 px-2 py-1 text-rose-700 hover:bg-rose-50">
+            className="self-end rounded border border-danger/30 px-2 py-1 text-danger hover:bg-danger/10">
             Remove
           </button>
         </div>

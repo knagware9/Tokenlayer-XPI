@@ -4,7 +4,7 @@ import { useAuth } from "../../auth.js";
 import { can } from "../../rbac.js";
 import { CashflowPanel } from "./CashflowPanel.js";
 import type { AccountState, Asset, AuditEntry, ChainInfo, Listing, Role, TokenInfo, Trade, UseCase } from "../../types.js";
-import { DataBadge, EmptyState, Icon, Pill as UIPill, Skeleton, TableShell, type IconName } from "../shared/ui.js";
+import { Card, DataBadge, EmptyState, Icon, Pill as UIPill, Skeleton, TableShell, type IconName } from "../shared/ui.js";
 
 interface Props {
   assetId: string;
@@ -181,7 +181,7 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
 
   if (!asset || !useCase)
     return (
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6">
+      <div className="bg-surface rounded-2xl border border-border/80 shadow-sm p-6">
         <Skeleton lines={5} />
       </div>
     );
@@ -194,46 +194,46 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
 
   return (
     <div className="space-y-5">
-      <button onClick={onBack} className="text-xs text-slate-500 hover:text-slate-800">
+      <button onClick={onBack} className="text-xs text-muted hover:text-fg">
         ← Back to assets
       </button>
 
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6">
+      <div className="bg-surface rounded-2xl border border-border/80 shadow-sm p-6">
         <div className="flex items-start justify-between">
           <div>
-            <h2 className="text-xl font-bold text-slate-900">
-              {asset.name} <span className="text-slate-400 font-normal">{asset.symbol}</span>
+            <h2 className="text-xl font-bold text-fg">
+              {asset.name} <span className="text-muted font-normal">{asset.symbol}</span>
             </h2>
             <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
               <span className="px-1.5 py-0.5 rounded bg-brand-600 text-white font-semibold">{asset.tokenStandard}</span>
-              <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 font-medium">{asset.tokenType}</span>
+              <span className="px-1.5 py-0.5 rounded bg-elevated text-muted font-medium">{asset.tokenType}</span>
               <ChainPill chain={chain} />
             </p>
           </div>
           <div className="text-right">
-            <div className="text-2xl font-bold text-slate-900">{asset.totalSupply ?? "—"}</div>
-            <div className="text-[11px] text-slate-400 uppercase tracking-wide">{isNft ? "Tokens" : "Total supply"}</div>
+            <div className="text-2xl font-bold text-fg">{asset.totalSupply ?? "—"}</div>
+            <div className="text-[11px] text-muted">{isNft ? "Tokens" : "Total supply"}</div>
           </div>
         </div>
         <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
           {Object.entries(asset.metadata).map(([k, v]) => (
-            <div key={k} className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2">
-              <div className="text-slate-400 uppercase tracking-wide text-[10px]">{k}</div>
-              <div className="text-slate-700 font-medium truncate">{String(v)}</div>
+            <div key={k} className="rounded-lg bg-elevated border border-border px-3 py-2">
+              <div className="text-muted text-[10px]">{k}</div>
+              <div className="text-fg font-medium truncate">{String(v)}</div>
             </div>
           ))}
         </div>
         <div className="mt-3 flex items-center gap-2 flex-wrap">
           {chain?.mode === "real" ? (
-            <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-success/10 text-success">
               ⛓ Verified on-chain{chain ? ` · ${chain.label}` : ""}
             </span>
           ) : (
-            <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-elevated text-muted">
               🧪 Simulated ledger{chain ? ` · ${chain.label}` : ""}
             </span>
           )}
-          <span className="text-[11px] text-slate-400 font-mono break-all">
+          <span className="text-[11px] text-muted font-mono break-all">
             ref: <ExplorerLink chain={chain} kind="address" value={asset.contractRef}>{asset.contractRef}</ExplorerLink>
           </span>
         </div>
@@ -241,20 +241,20 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
 
       <DueDiligenceDisplay asset={asset} />
 
-      {error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2">{error}</div>}
+      {error && <div className="rounded-lg bg-danger/10 border border-danger/25 text-danger text-sm px-4 py-2">{error}</div>}
 
       {can(role, "issue") && asset.status === "pending_approval" && (
-        <div className="rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-2">
+        <div className="rounded-lg bg-warning/10 border border-warning/25 text-warning text-sm px-4 py-2">
           ⏳ Pending due-diligence review — complete the diligence package below and submit it.
         </div>
       )}
       {can(role, "issue") && asset.status === "rejected" && (
-        <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2">
+        <div className="rounded-lg bg-danger/10 border border-danger/25 text-danger text-sm px-4 py-2">
           ✕ Review rejected{asset.dueDiligence?.rejectionReason ? ` — ${asset.dueDiligence.rejectionReason}` : ""}. Attach the missing documents and resubmit below.
         </div>
       )}
       {!can(role, "issue") && (asset.status === "pending_approval" || asset.status === "rejected") && (
-        <div className="rounded-lg bg-slate-50 border border-slate-200 text-slate-600 text-sm px-4 py-2">
+        <div className="rounded-lg bg-elevated border border-border text-muted text-sm px-4 py-2">
           {asset.status === "pending_approval" ? "⏳ This asset is pending due-diligence review." : "✕ This asset's due-diligence review was rejected."}
         </div>
       )}
@@ -263,33 +263,33 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
       )}
 
       {canSeeTreasury && (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-3">
-          <div className="text-sm font-semibold text-slate-800">Treasury account</div>
+        <div className="bg-surface rounded-2xl border border-border/80 shadow-sm p-5 space-y-3">
+          <div className="text-sm font-semibold text-fg">Treasury account</div>
           {treasuryAddress ? (
             <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
               <div>
-                <div className="text-[10px] text-slate-400 uppercase tracking-wide">Wallet address</div>
+                <div className="text-[10px] text-muted">Wallet address</div>
                 <DataBadge value={treasuryAddress} chars={25} />
               </div>
               <div>
-                <div className="text-[10px] text-slate-400 uppercase tracking-wide">Balance</div>
-                <div className="font-mono text-slate-700">{treasuryAcc?.balance ?? "0"}</div>
+                <div className="text-[10px] text-muted">Balance</div>
+                <div className="font-mono text-fg">{treasuryAcc?.balance ?? "0"}</div>
               </div>
               <div>
-                <div className="text-[10px] text-slate-400 uppercase tracking-wide">State</div>
+                <div className="text-[10px] text-muted">State</div>
                 {treasuryAcc?.frozen && <Pill tone="red">frozen</Pill>}
                 {useCase.compliance.allowlist && (treasuryAcc?.allowed ? <Pill tone="green">allowed</Pill> : <Pill tone="gray">not listed</Pill>)}
-                {!treasuryAcc?.frozen && !useCase.compliance.allowlist && <span className="text-slate-300 text-xs">—</span>}
+                {!treasuryAcc?.frozen && !useCase.compliance.allowlist && <span className="text-muted text-xs">—</span>}
               </div>
               {(canAllow || canFreeze) && (
                 <div className="flex gap-1.5 ml-auto">
                   {canAllow && (
-                    <button disabled={busy} onClick={() => run(treasuryAcc?.allowed ? "disallow" : "allow", { account: treasuryAddress })} className="btn-sm border-slate-200 text-slate-600 hover:border-brand-500">
+                    <button disabled={busy} onClick={() => run(treasuryAcc?.allowed ? "disallow" : "allow", { account: treasuryAddress })} className="btn-sm border-border text-muted hover:border-brand-500">
                       {treasuryAcc?.allowed ? "Disallow" : "Allow"}
                     </button>
                   )}
                   {canFreeze && (
-                    <button disabled={busy} onClick={() => run(treasuryAcc?.frozen ? "unfreeze" : "freeze", { account: treasuryAddress })} className="btn-sm border-slate-200 text-slate-600 hover:border-red-400">
+                    <button disabled={busy} onClick={() => run(treasuryAcc?.frozen ? "unfreeze" : "freeze", { account: treasuryAddress })} className="btn-sm border-border text-muted hover:border-danger">
                       {treasuryAcc?.frozen ? "Unfreeze" : "Freeze"}
                     </button>
                   )}
@@ -297,7 +297,7 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
               )}
             </div>
           ) : (
-            <p className="text-sm text-slate-400">No treasury account registered for this use case yet.</p>
+            <p className="text-sm text-muted">No treasury account registered for this use case yet.</p>
           )}
         </div>
       )}
@@ -305,16 +305,16 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
       {useCase.terms && <CashflowPanel asset={asset} useCase={useCase} role={role} onChanged={() => { void reload(); onChanged(); }} />}
 
       {asset.unitPrice && asset.currency && can(role, "buy") && (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-3">
-          <div className="text-sm font-semibold text-slate-800">Buy tokens</div>
-          <div className="text-sm text-slate-600">
+        <div className="bg-surface rounded-2xl border border-border/80 shadow-sm p-5 space-y-3">
+          <div className="text-sm font-semibold text-fg">Buy tokens</div>
+          <div className="text-sm text-muted">
             Price: <strong>{asset.unitPrice} {asset.currency}</strong> per token
             {myBalance !== null && (
-              <span className="ml-3 text-slate-400">Your {asset.currency} balance: <strong>{myBalance}</strong></span>
+              <span className="ml-3 text-muted">Your {asset.currency} balance: <strong>{myBalance}</strong></span>
             )}
           </div>
           {safeQty && BigInt(asset.unitPrice) > 0n && (
-            <div className="text-xs text-slate-500">
+            <div className="text-xs text-muted">
               Total: {(BigInt(asset.unitPrice) * BigInt(safeQty)).toString()} {asset.currency}
             </div>
           )}
@@ -336,17 +336,17 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
               {buyBusy ? "Buying…" : "Buy"}
             </button>
           </div>
-          {buyError && <p className="text-sm text-red-600">{buyError}</p>}
+          {buyError && <p className="text-sm text-danger">{buyError}</p>}
         </div>
       )}
 
       {can(role, "issue") && (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-3">
-          <div className="text-sm font-semibold text-slate-800">{asset.unitPrice && asset.currency ? "Update price" : "List for sale"}</div>
+        <div className="bg-surface rounded-2xl border border-border/80 shadow-sm p-5 space-y-3">
+          <div className="text-sm font-semibold text-fg">{asset.unitPrice && asset.currency ? "Update price" : "List for sale"}</div>
           {!asset.unitPrice || !asset.currency ? (
-            <p className="text-sm text-slate-500">Not listed yet — set a price to let buyers purchase directly from the treasury.</p>
+            <p className="text-sm text-muted">Not listed yet — set a price to let buyers purchase directly from the treasury.</p>
           ) : (
-            <p className="text-sm text-slate-600">Currently listed at <strong>{asset.unitPrice} {asset.currency}</strong> per token.</p>
+            <p className="text-sm text-muted">Currently listed at <strong>{asset.unitPrice} {asset.currency}</strong> per token.</p>
           )}
           <div className="flex gap-2">
             <input className="input w-32" type="number" min="1" step="1" placeholder="Unit price" value={listPrice} onChange={(e) => setListPrice(e.target.value)} />
@@ -362,7 +362,7 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
               {listBusy ? "Saving…" : asset.unitPrice && asset.currency ? "Update price" : "List for sale"}
             </button>
           </div>
-          {listError && <p className="text-sm text-red-600">{listError}</p>}
+          {listError && <p className="text-sm text-danger">{listError}</p>}
         </div>
       )}
 
@@ -382,22 +382,21 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
       <Operations role={role} useCase={useCase} isNft={isNft} accounts={accounts} busy={busy} onRun={run} />
 
       {isNft && (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-          <div className="px-4 py-2.5 border-b border-slate-100 text-xs font-semibold text-slate-500 uppercase tracking-wide">Tokens</div>
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-slate-400 text-[11px] uppercase">
+        <Card title="Tokens">
+          <TableShell>
+            <thead>
               <tr>
-                <th className="text-left font-medium px-4 py-2">Token ID</th>
-                <th className="text-left font-medium px-4 py-2">Owner</th>
-                <th className="text-center font-medium px-4 py-2">State</th>
+                <th>Token ID</th>
+                <th>Owner</th>
+                <th className="text-center">State</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody>
               {tokens.map((t) => (
                 <tr key={t.tokenId}>
-                  <td className="px-4 py-2.5 font-mono text-slate-700">#{t.tokenId}</td>
-                  <td className="px-4 py-2.5 text-slate-600">{t.ownerLabel}</td>
-                  <td className="px-4 py-2.5 text-center">{t.frozen ? <Pill tone="red">frozen</Pill> : <span className="text-slate-300 text-xs">—</span>}</td>
+                  <td className="font-mono text-fg">#{t.tokenId}</td>
+                  <td className="text-muted">{t.ownerLabel}</td>
+                  <td className="text-center">{t.frozen ? <Pill tone="red">frozen</Pill> : <span className="text-muted text-xs">—</span>}</td>
                 </tr>
               ))}
               {tokens.length === 0 && (
@@ -408,43 +407,42 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
                 </tr>
               )}
             </tbody>
-          </table>
-        </div>
+          </TableShell>
+        </Card>
       )}
 
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-        <div className="px-4 py-2.5 border-b border-slate-100 text-xs font-semibold text-slate-500 uppercase tracking-wide">Holders</div>
-        <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-slate-400 text-[11px] uppercase">
+      <Card title="Holders">
+        <TableShell>
+          <thead>
             <tr>
-              <th className="text-left font-medium px-4 py-2">Account</th>
-              <th className="text-right font-medium px-4 py-2">{isNft ? "Tokens" : "Balance"}</th>
-              <th className="text-center font-medium px-4 py-2">State</th>
-              <th className="text-right font-medium px-4 py-2">Actions</th>
+              <th>Account</th>
+              <th className="text-right">{isNft ? "Tokens" : "Balance"}</th>
+              <th className="text-center">State</th>
+              <th className="text-right">Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody>
             {accounts.map((acc) => (
               <tr key={acc.address}>
-                <td className="px-4 py-2.5">
-                  <div className="font-medium text-slate-700">{acc.label}</div>
-                  <div className="text-[10px] text-slate-400 font-mono">{acc.address.slice(0, 10)}…{acc.address.slice(-4)}</div>
+                <td>
+                  <div className="font-medium text-fg">{acc.label}</div>
+                  <div className="text-[10px] text-muted font-mono">{acc.address.slice(0, 10)}…{acc.address.slice(-4)}</div>
                 </td>
-                <td className="px-4 py-2.5 text-right font-mono text-slate-700">{acc.balance}</td>
-                <td className="px-4 py-2.5 text-center">
+                <td className="num text-fg">{acc.balance}</td>
+                <td className="text-center">
                   {acc.frozen && <Pill tone="red">frozen</Pill>}
                   {useCase.compliance.allowlist && (acc.allowed ? <Pill tone="green">allowed</Pill> : <Pill tone="gray">not listed</Pill>)}
-                  {!acc.frozen && !useCase.compliance.allowlist && <span className="text-slate-300 text-xs">—</span>}
+                  {!acc.frozen && !useCase.compliance.allowlist && <span className="text-muted text-xs">—</span>}
                 </td>
-                <td className="px-4 py-2.5">
+                <td>
                   <div className="flex justify-end gap-1.5">
                     {canAllow && (
-                      <button disabled={busy} onClick={() => run(acc.allowed ? "disallow" : "allow", { account: acc.address })} className="btn-sm border-slate-200 text-slate-600 hover:border-brand-500">
+                      <button disabled={busy} onClick={() => run(acc.allowed ? "disallow" : "allow", { account: acc.address })} className="btn-sm border-border text-muted hover:border-brand-500">
                         {acc.allowed ? "Disallow" : "Allow"}
                       </button>
                     )}
                     {canFreeze && (
-                      <button disabled={busy} onClick={() => run(acc.frozen ? "unfreeze" : "freeze", { account: acc.address })} className="btn-sm border-slate-200 text-slate-600 hover:border-red-400">
+                      <button disabled={busy} onClick={() => run(acc.frozen ? "unfreeze" : "freeze", { account: acc.address })} className="btn-sm border-border text-muted hover:border-danger">
                         {acc.frozen ? "Unfreeze" : "Freeze"}
                       </button>
                     )}
@@ -453,26 +451,26 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
               </tr>
             ))}
           </tbody>
-        </table>
-      </div>
+        </TableShell>
+      </Card>
 
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5">
-        <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Audit trail</div>
+      <div className="bg-surface rounded-2xl border border-border/80 shadow-sm p-5">
+        <div className="text-xs font-semibold text-muted mb-3">Audit trail</div>
         <ol className="space-y-2">
           {audit.map((e) => (
             <li key={e.id} className="flex items-start gap-3 text-sm">
               <span className="mt-0.5 inline-block w-20 shrink-0 text-[11px] font-semibold text-brand-600 uppercase">{e.action}</span>
-              <span className="flex-1 text-slate-600">
+              <span className="flex-1 text-muted">
                 {summarize(e)}
                 {e.txHash && (
-                  <span className="ml-2 font-mono text-[10px] text-slate-400">
+                  <span className="ml-2 font-mono text-[10px] text-muted">
                     <ExplorerLink chain={chain} kind="tx" value={e.txHash}>{e.txHash.slice(0, 14)}…</ExplorerLink>
                   </span>
                 )}
               </span>
-              <span className="text-[11px] text-slate-400">{new Date(e.createdAt).toLocaleTimeString()}</span>
+              <span className="text-[11px] text-muted">{new Date(e.createdAt).toLocaleTimeString()}</span>
               <button
-                className="shrink-0 rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] text-slate-600 hover:border-brand-500"
+                className="shrink-0 rounded-lg border border-border px-2.5 py-1 text-[11px] text-muted hover:border-brand-500"
                 onClick={() => setAuditDetail(e)}
               >
                 View
@@ -483,13 +481,13 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
               and py-10 — and every other use of it fills a Card body, a section
               or a table body. Inside this dense two-line-per-row feed it is
               taller than the list it replaces. */}
-          {audit.length === 0 && <li className="text-sm text-slate-400">No activity yet.</li>}
+          {audit.length === 0 && <li className="text-sm text-muted">No activity yet.</li>}
         </ol>
       </div>
 
       {(["Issuer", "UseCaseAdmin", "OrgAdmin", "PlatformAdmin"] as string[]).includes(role) && accounts.length > 0 && (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-3">
-          <div className="text-sm font-semibold text-slate-800">Fund CBDC</div>
+        <div className="bg-surface rounded-2xl border border-border/80 shadow-sm p-5 space-y-3">
+          <div className="text-sm font-semibold text-fg">Fund CBDC</div>
           <div className="grid grid-cols-3 gap-3">
             <select className="select" value={fundAccount} onChange={(e) => setFundAccount(e.target.value)}>
               <option value="">Account…</option>
@@ -508,8 +506,8 @@ export function AssetDetail({ assetId, useCases, chains, onBack, onChanged }: Pr
           >
             {fundBusy ? "Funding…" : "Fund account"}
           </button>
-          {fundError && <p className="text-sm text-red-600">{fundError}</p>}
-          {fundSuccess && <p className="text-sm text-emerald-600">{fundSuccess}</p>}
+          {fundError && <p className="text-sm text-danger">{fundError}</p>}
+          {fundSuccess && <p className="text-sm text-success">{fundSuccess}</p>}
         </div>
       )}
 
@@ -550,11 +548,11 @@ function DueDiligenceDisplay({ asset }: { asset: Asset }): JSX.Element | null {
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-2">
+    <div className="bg-surface rounded-2xl border border-border/80 shadow-sm p-5 space-y-2">
       <div className="flex items-center justify-between">
-        <div className="text-sm font-semibold text-slate-800">Due diligence</div>
+        <div className="text-sm font-semibold text-fg">Due diligence</div>
         {dd.riskTier && (
-          <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${dd.riskTier === "low" ? "bg-emerald-100 text-emerald-700" : dd.riskTier === "medium" ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>
+          <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${dd.riskTier === "low" ? "bg-success/10 text-success" : dd.riskTier === "medium" ? "bg-warning/10 text-warning" : "bg-danger/10 text-danger"}`}>
             {dd.riskTier} risk
           </span>
         )}
@@ -628,32 +626,37 @@ function DueDiligencePanel({ asset, onChanged }: { asset: Asset; onChanged: () =
   const dd = asset.dueDiligence;
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-3">
-      <div className="text-sm font-semibold text-slate-800">Complete due diligence</div>
-      <p className="text-xs text-slate-500">Attach a prospectus (required) and, optionally, a legal opinion and any supporting documents, then submit for review.</p>
+    <div className="bg-surface rounded-2xl border border-border/80 shadow-sm p-5 space-y-3">
+      <div className="text-sm font-semibold text-fg">Complete due diligence</div>
+      <p className="text-xs text-muted prose-measure">Attach a prospectus (required) and, optionally, a legal opinion and any supporting documents, then submit for review.</p>
       <div className="grid grid-cols-2 gap-3 text-xs">
-        <label className="rounded-lg border border-dashed border-slate-300 px-3 py-2 text-center cursor-pointer hover:border-brand-400">
+        <label className="rounded-lg border border-dashed border-border px-3 py-2 text-center cursor-pointer hover:border-brand-400">
           {dd?.prospectus ? "✓ Prospectus attached" : "Attach prospectus"}
           <input type="file" className="hidden" onChange={(e) => e.target.files?.[0] && void upload("prospectus", e.target.files[0])} />
         </label>
-        <label className="rounded-lg border border-dashed border-slate-300 px-3 py-2 text-center cursor-pointer hover:border-brand-400">
+        <label className="rounded-lg border border-dashed border-border px-3 py-2 text-center cursor-pointer hover:border-brand-400">
           {dd?.legalOpinion ? "✓ Legal opinion attached" : "Attach legal opinion (optional)"}
           <input type="file" className="hidden" onChange={(e) => e.target.files?.[0] && void upload("legalOpinion", e.target.files[0])} />
         </label>
       </div>
       <div className="flex items-center gap-2">
-        <input className="rounded border border-slate-300 px-2 py-1 text-xs flex-1" placeholder="Label for an additional document" value={additionalLabel} onChange={(e) => setAdditionalLabel(e.target.value)} />
-        <label className="text-xs rounded border border-slate-300 px-3 py-1.5 cursor-pointer hover:border-brand-400">
+        <input
+          className="rounded-lg border border-border bg-elevated/80 px-2.5 py-1 text-xs flex-1 focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15"
+          placeholder="Label for an additional document"
+          value={additionalLabel}
+          onChange={(e) => setAdditionalLabel(e.target.value)}
+        />
+        <label className="text-xs rounded border border-border px-3 py-1.5 cursor-pointer hover:border-brand-400">
           Attach
           <input type="file" className="hidden" onChange={(e) => e.target.files?.[0] && void upload("additional", e.target.files[0])} />
         </label>
       </div>
       {dd?.additionalDocuments?.length ? (
-        <ul className="text-xs text-slate-600 list-disc list-inside">
+        <ul className="text-xs text-muted list-disc list-inside">
           {dd.additionalDocuments.map((d) => <li key={d.id}>{d.label}</li>)}
         </ul>
       ) : null}
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      {error && <p className="text-xs text-danger">{error}</p>}
       <button disabled={busy || !dd?.prospectus} onClick={() => void submit()} className="text-xs rounded bg-brand-600 text-white px-3 py-1.5 font-medium hover:bg-brand-700 disabled:opacity-40">
         Submit for review
       </button>
@@ -760,16 +763,16 @@ function Market({
   const sellReady = posInt(sellQty) && posInt(sellPrice) && sellCurrency !== "";
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-4">
-      <div className="text-sm font-semibold text-slate-800">Market</div>
+    <div className="bg-surface rounded-2xl border border-border/80 shadow-sm p-5 space-y-4">
+      <div className="text-sm font-semibold text-fg">Market</div>
       {disabled ? (
-        <p className="text-sm text-slate-500">Market is not enabled on this deployment.</p>
+        <p className="text-sm text-muted">Market is not enabled on this deployment.</p>
       ) : (
         <>
-          {error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2">{error}</div>}
+          {error && <div className="rounded-lg bg-danger/10 border border-danger/25 text-danger text-sm px-4 py-2">{error}</div>}
 
           <div>
-            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Open asks</div>
+            <div className="text-xs font-semibold text-muted mb-2">Open asks</div>
             <TableShell>
               <thead>
                 <tr>
@@ -784,9 +787,9 @@ function Market({
                   const own = wallet !== null && l.seller.toLowerCase() === wallet;
                   return (
                     <tr key={l.id}>
-                      <td className="font-mono text-[11px] text-slate-500">{short(l.seller)}{own && <Pill tone="gray">you</Pill>}</td>
-                      <td className="num font-mono text-slate-700">{l.quantity}</td>
-                      <td className="num text-slate-700">{l.unitPrice} {l.currency}</td>
+                      <td className="font-mono text-[11px] text-muted">{short(l.seller)}{own && <Pill tone="gray">you</Pill>}</td>
+                      <td className="num font-mono text-fg">{l.quantity}</td>
+                      <td className="num text-fg">{l.unitPrice} {l.currency}</td>
                       {canBuy && (
                         <td>
                           <div className="flex justify-end gap-1.5">
@@ -804,7 +807,7 @@ function Market({
                               disabled={busy || own || !posInt(takeQty[l.id] ?? "")}
                               title={own ? "your listing" : undefined}
                               onClick={() => void doTake(l)}
-                              className="btn-sm border-slate-200 text-slate-600 hover:border-brand-500 disabled:opacity-40"
+                              className="btn-sm border-border text-muted hover:border-brand-500 disabled:opacity-40"
                             >
                               Take
                             </button>
@@ -816,7 +819,7 @@ function Market({
                 })}
                 {listings.length === 0 && (
                   <tr>
-                    <td colSpan={canBuy ? 4 : 3} className="px-3 !py-3 text-center text-sm text-slate-400">No open asks.</td>
+                    <td colSpan={canBuy ? 4 : 3} className="px-3 !py-3 text-center text-sm text-muted">No open asks.</td>
                   </tr>
                 )}
               </tbody>
@@ -825,7 +828,7 @@ function Market({
 
           {canList && user?.walletAddress && (
             <div className="space-y-2">
-              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Sell tokens</div>
+              <div className="text-xs font-semibold text-muted">Sell tokens</div>
               <div className="grid grid-cols-3 gap-3">
                 <input className="input" type="number" min="1" step="1" placeholder="Quantity" value={sellQty} onChange={(e) => setSellQty(e.target.value)} />
                 <input className="input" type="number" min="1" step="1" placeholder="Unit price" value={sellPrice} onChange={(e) => setSellPrice(e.target.value)} />
@@ -846,18 +849,18 @@ function Market({
 
           {myListings.length > 0 && (
             <div>
-              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">My listings</div>
+              <div className="text-xs font-semibold text-muted mb-2">My listings</div>
               <ul className="space-y-1.5">
                 {myListings.map((l) => (
-                  <li key={l.id} className="flex items-center gap-3 text-sm text-slate-600">
+                  <li key={l.id} className="flex items-center gap-3 text-sm text-muted">
                     <span className="font-mono">{l.quantity}</span>
                     <span>@ {l.unitPrice} {l.currency}</span>
-                    <span className="text-[11px] text-slate-400">{new Date(l.createdAt).toLocaleString()}</span>
+                    <span className="text-[11px] text-muted">{new Date(l.createdAt).toLocaleString()}</span>
                     {canCancelListing && (
                       <button
                         disabled={busy}
                         onClick={() => void doCancel(l.id)}
-                        className="ml-auto btn-sm border-slate-200 text-slate-600 hover:border-red-400 disabled:opacity-40"
+                        className="ml-auto btn-sm border-border text-muted hover:border-danger disabled:opacity-40"
                       >
                         Cancel
                       </button>
@@ -869,18 +872,18 @@ function Market({
           )}
 
           <div>
-            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Recent trades</div>
+            <div className="text-xs font-semibold text-muted mb-2">Recent trades</div>
             <ol className="space-y-1.5">
               {trades.map((t, i) => (
-                <li key={i} className="flex items-center gap-2 text-xs text-slate-600">
+                <li key={i} className="flex items-center gap-2 text-xs text-muted">
                   <span className="font-mono">{t.amount ?? "?"} @ {t.unitPrice ?? "?"} {t.currency ?? ""}</span>
-                  <span className="text-slate-400">{short(t.from)} → {short(t.to)}</span>
+                  <span className="text-muted">{short(t.from)} → {short(t.to)}</span>
                   {t.secondary && <Pill tone="green">secondary</Pill>}
-                  <span className="ml-auto text-[11px] text-slate-400">{new Date(t.at).toLocaleString()}</span>
+                  <span className="ml-auto text-[11px] text-muted">{new Date(t.at).toLocaleString()}</span>
                 </li>
               ))}
               {/* One-liner for the same reason as the audit trail above. */}
-              {trades.length === 0 && <li className="text-xs text-slate-400">No trades yet.</li>}
+              {trades.length === 0 && <li className="text-xs text-muted">No trades yet.</li>}
             </ol>
           </div>
         </>
@@ -909,8 +912,8 @@ const OP_TONE: Record<"Mint" | "Transfer" | "Burn", { icon: IconName; iconWrap: 
   // danger-toned button among the three.
   Burn: {
     icon: "warn",
-    iconWrap: "bg-red-50 text-red-600 ring-red-100 group-hover:ring-red-200",
-    button: "bg-red-600 hover:bg-red-700 border-red-700",
+    iconWrap: "bg-danger/10 text-danger ring-danger/20 group-hover:ring-danger/30",
+    button: "bg-danger hover:bg-danger/90 border-danger",
     missingHint: (fields) => `Enter the ${fields.some((f) => f.name === "tokenId") ? "token ID" : "account and amount"} to burn.`,
   },
 };
@@ -980,18 +983,18 @@ function OpForm({
   const ready = fields.every((f) => f.optional || state[f.name]);
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-4 space-y-3 group">
+    <div className="bg-surface rounded-2xl border border-border/80 shadow-sm p-4 space-y-3 group">
       <div className="flex items-center gap-2.5">
         <div className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center ring-1 transition ${tone.iconWrap}`}>
           <Icon name={tone.icon} className="w-4 h-4" />
         </div>
-        <div className="text-sm font-semibold text-slate-800 font-display">{title}</div>
+        <div className="text-sm font-semibold text-fg font-display">{title}</div>
       </div>
       {fields.map((f) => (
         <div key={f.name} className="space-y-1">
-          <label htmlFor={`op-${title}-${f.name}`} className="text-[11px] font-medium text-slate-500">
+          <label htmlFor={`op-${title}-${f.name}`} className="text-[11px] font-medium text-muted">
             {f.label}
-            {f.optional && <span className="text-slate-400 font-normal"> (optional)</span>}
+            {f.optional && <span className="text-muted font-normal"> (optional)</span>}
           </label>
           {f.kind === "account" ? (
             <select id={`op-${title}-${f.name}`} className="select" value={state[f.name] ?? ""} onChange={(e) => set(f.name, e.target.value)}>
@@ -1011,7 +1014,7 @@ function OpForm({
               onChange={(e) => set(f.name, e.target.value)}
             />
           )}
-          {f.hint && <p className="text-[11px] text-slate-400 leading-snug">{f.hint}</p>}
+          {f.hint && <p className="text-[11px] text-muted leading-snug">{f.hint}</p>}
         </div>
       ))}
       <div>
@@ -1022,7 +1025,7 @@ function OpForm({
         >
           {title}
         </button>
-        {!ready && <p className="text-[11px] text-slate-400 mt-1.5 leading-snug">{tone.missingHint(fields)}</p>}
+        {!ready && <p className="text-[11px] text-muted mt-1.5 leading-snug">{tone.missingHint(fields)}</p>}
       </div>
     </div>
   );
@@ -1059,28 +1062,28 @@ function AuditEntryModal({ entry, chain, onClose }: { entry: AuditEntry; chain?:
   const fields = Object.entries(entry.payload).filter(([, v]) => v !== null && v !== undefined);
   return (
     <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4 z-50" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-lg space-y-4 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-surface rounded-xl shadow-xl p-6 w-full max-w-lg space-y-4 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between">
           <div>
             <span className="text-[11px] font-semibold text-brand-600 uppercase tracking-wide">{entry.action}</span>
-            <h3 className="text-sm font-semibold text-slate-900 mt-0.5">{new Date(entry.createdAt).toLocaleString()}</h3>
+            <h3 className="text-sm font-semibold text-fg mt-0.5">{new Date(entry.createdAt).toLocaleString()}</h3>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 text-sm">✕</button>
+          <button onClick={onClose} className="text-muted hover:text-fg text-sm">✕</button>
         </div>
 
         <div className="grid grid-cols-2 gap-3 text-xs">
-          <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2">
-            <div className="text-slate-400 uppercase tracking-wide text-[10px]">Chain</div>
-            <div className="text-slate-700 font-medium"><ChainPill chain={chain} /></div>
+          <div className="rounded-lg bg-elevated border border-border px-3 py-2">
+            <div className="text-muted text-[10px]">Chain</div>
+            <div className="text-fg font-medium"><ChainPill chain={chain} /></div>
           </div>
-          <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2">
-            <div className="text-slate-400 uppercase tracking-wide text-[10px]">Actor</div>
-            <div className="text-slate-700 font-medium font-mono truncate" title={entry.actorId}>{entry.actorId}</div>
+          <div className="rounded-lg bg-elevated border border-border px-3 py-2">
+            <div className="text-muted text-[10px]">Actor</div>
+            <div className="text-fg font-medium font-mono truncate" title={entry.actorId}>{entry.actorId}</div>
           </div>
           {entry.txHash && (
-            <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 col-span-2">
-              <div className="text-slate-400 uppercase tracking-wide text-[10px]">Transaction</div>
-              <div className="text-slate-700 font-medium font-mono break-all">
+            <div className="rounded-lg bg-elevated border border-border px-3 py-2 col-span-2">
+              <div className="text-muted text-[10px]">Transaction</div>
+              <div className="text-fg font-medium font-mono break-all">
                 <ExplorerLink chain={chain} kind="tx" value={entry.txHash}>{entry.txHash}</ExplorerLink>
               </div>
             </div>
@@ -1089,12 +1092,12 @@ function AuditEntryModal({ entry, chain, onClose }: { entry: AuditEntry; chain?:
 
         {fields.length > 0 && (
           <div>
-            <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-2">Details</div>
-            <dl className="divide-y divide-slate-100 rounded-lg border border-slate-200 overflow-hidden">
+            <div className="text-[11px] font-semibold text-muted mb-2">Details</div>
+            <dl className="divide-y divide-border rounded-lg border border-border overflow-hidden">
               {fields.map(([k, v]) => (
                 <div key={k} className="flex justify-between gap-4 px-3 py-2 text-xs">
-                  <dt className="text-slate-500 shrink-0">{k}</dt>
-                  <dd className="text-slate-800 font-mono text-right break-all">
+                  <dt className="text-muted shrink-0">{k}</dt>
+                  <dd className="text-fg font-mono text-right break-all">
                     {typeof v === "object" ? JSON.stringify(v) : String(v)}
                   </dd>
                 </div>
@@ -1104,7 +1107,7 @@ function AuditEntryModal({ entry, chain, onClose }: { entry: AuditEntry; chain?:
         )}
 
         <div className="flex justify-end">
-          <button onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-1.5 text-sm text-slate-600 hover:border-slate-400">Close</button>
+          <button onClick={onClose} className="rounded-lg border border-border px-4 py-1.5 text-sm text-muted hover:border-muted">Close</button>
         </div>
       </div>
     </div>
@@ -1113,7 +1116,7 @@ function AuditEntryModal({ entry, chain, onClose }: { entry: AuditEntry; chain?:
 
 function ChainPill({ chain }: { chain?: ChainInfo }): JSX.Element {
   const real = chain?.mode === "real";
-  const tone = real ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600";
+  const tone = real ? "bg-success/10 text-success" : "bg-elevated text-muted";
   return (
     <span className={`px-1.5 py-0.5 rounded font-medium ${tone}`}>
       {chain?.label ?? "unknown chain"}

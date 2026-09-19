@@ -39,14 +39,14 @@ import {
   tryItAllowed,
   withQuery,
 } from "../../lib/shared/openapi.js";
-import { Card, CopyBlock, EmptyState, Pill, Skeleton } from "./ui.js";
+import { Card, CopyBlock, EmptyState, Pill, Skeleton, TableShell } from "./ui.js";
 
 const METHOD_TONE: Record<string, string> = {
   get: "bg-sky-100 text-sky-700",
-  post: "bg-emerald-100 text-emerald-700",
-  put: "bg-amber-100 text-amber-700",
-  patch: "bg-amber-100 text-amber-700",
-  delete: "bg-red-100 text-red-700",
+  post: "bg-success/10 text-success",
+  put: "bg-warning/10 text-warning",
+  patch: "bg-warning/10 text-warning",
+  delete: "bg-danger/10 text-danger",
 };
 
 export function ApiReference(): JSX.Element {
@@ -114,8 +114,8 @@ export function ApiReference(): JSX.Element {
   if (error) {
     return (
       <Card title="The API reference could not be loaded">
-        <p className="text-sm text-slate-600">{error}</p>
-        <p className="text-xs text-slate-500 mt-2">
+        <p className="text-sm text-muted">{error}</p>
+        <p className="text-xs text-muted mt-2 prose-measure">
           The document is served by the API itself at <span className="font-mono">{openapiUrl(API_BASE) || "/openapi.json"}</span>, and
           in production it requires a signed-in session — a <span className="font-mono">401</span> here usually means the session
           expired, and a network error usually means the API is not reachable from this browser.
@@ -123,7 +123,7 @@ export function ApiReference(): JSX.Element {
         <button
           type="button"
           onClick={() => setAttempt((n) => n + 1)}
-          className="mt-4 rounded-lg border border-slate-300 text-slate-700 px-3 py-1.5 text-xs font-medium hover:bg-slate-50"
+          className="mt-4 rounded-lg border border-border text-fg px-3 py-1.5 text-xs font-medium hover:bg-elevated"
         >
           Try again
         </button>
@@ -149,8 +149,8 @@ export function ApiReference(): JSX.Element {
         description={`Version ${doc.info?.version ?? "—"} · ${total} operations across ${groups.length} groups · generated from this deployment's own OpenAPI document.`}
       >
         <div className="space-y-3">
-          <div className="text-xs text-slate-500">
-            Base URL <span className="font-mono text-slate-700">{baseUrl || "(same origin)"}</span>. Both credentials travel in the
+          <div className="text-xs text-muted prose-measure">
+            Base URL <span className="font-mono text-fg">{baseUrl || "(same origin)"}</span>. Both credentials travel in the
             same header: <span className="font-mono">Authorization: Bearer …</span> — a human session JWT from{" "}
             <span className="font-mono">POST /auth/login</span>, or an opaque organization key (<span className="font-mono">tl_live_…</span>).
           </div>
@@ -161,7 +161,7 @@ export function ApiReference(): JSX.Element {
             onChange={(e) => setFilter(e.target.value)}
           />
           {filter.trim() !== "" && shown.length === 0 && (
-            <p className="text-sm text-slate-500">Nothing matches “{filter.trim()}”.</p>
+            <p className="text-sm text-muted">Nothing matches “{filter.trim()}”.</p>
           )}
         </div>
       </Card>
@@ -206,28 +206,28 @@ function TagSection({ group, doc, baseUrl, open, forceOpen, onToggle }: {
 }): JSX.Element {
   const expanded = open || forceOpen;
   return (
-    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+    <div className="bg-surface rounded-2xl border border-border/80 shadow-sm overflow-hidden">
       <button
         type="button"
         onClick={onToggle}
-        className="w-full flex items-start justify-between gap-4 px-5 py-3.5 text-left hover:bg-slate-50"
+        className="w-full flex items-start justify-between gap-4 px-5 py-3.5 text-left hover:bg-elevated"
       >
         <div className="min-w-0">
-          <h3 className="text-sm font-semibold text-slate-900">{group.name}</h3>
+          <h3 className="text-sm font-semibold text-fg">{group.name}</h3>
           {group.description
-            ? <p className="text-xs text-slate-500 mt-0.5">{group.description}</p>
+            ? <p className="text-xs text-muted mt-0.5">{group.description}</p>
             : (
               // "Other" is the bin for an operation whose tag the document does
               // not describe. Saying so is better than an unexplained heading.
-              <p className="text-xs text-slate-400 mt-0.5 italic">
+              <p className="text-xs text-muted mt-0.5 italic">
                 No description in the document for this group.
               </p>
             )}
         </div>
-        <span className="shrink-0 text-xs text-slate-500 pt-0.5">{group.routes.length} · {expanded ? "hide" : "show"}</span>
+        <span className="shrink-0 text-xs text-muted pt-0.5">{group.routes.length} · {expanded ? "hide" : "show"}</span>
       </button>
       {expanded && (
-        <div className="border-t border-slate-100 divide-y divide-slate-100">
+        <div className="border-t border-border divide-y divide-border">
           {group.routes.map((route) => (
             <Route key={`${route.method} ${route.path}`} route={route} doc={doc} baseUrl={baseUrl} />
           ))}
@@ -244,13 +244,13 @@ function Route({ route, doc, baseUrl }: { route: RouteEntry; doc: OpenApiDocumen
 
   return (
     <div>
-      <button type="button" onClick={() => setOpen((v) => !v)} className="w-full flex items-start gap-3 px-5 py-3 text-left hover:bg-slate-50">
-        <span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wide ${METHOD_TONE[method] ?? "bg-slate-100 text-slate-700"}`}>
+      <button type="button" onClick={() => setOpen((v) => !v)} className="w-full flex items-start gap-3 px-5 py-3 text-left hover:bg-elevated">
+        <span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wide ${METHOD_TONE[method] ?? "bg-elevated text-fg"}`}>
           {method}
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block font-mono text-xs text-slate-800 break-all">{path}</span>
-          {op.summary && <span className="block text-xs text-slate-500 mt-0.5">{op.summary}</span>}
+          <span className="block font-mono text-xs text-fg break-all">{path}</span>
+          {op.summary && <span className="block text-xs text-muted mt-0.5">{op.summary}</span>}
         </span>
         <span className="shrink-0 flex items-center gap-1.5">
           {cred.kind === "public"
@@ -286,16 +286,16 @@ function Route({ route, doc, baseUrl }: { route: RouteEntry; doc: OpenApiDocumen
 function CredentialNote({ route }: { route: RouteEntry }): JSX.Element {
   const { kind, scope } = credentialInfo(route.op);
   const tone = kind === "public"
-    ? "border-slate-200 bg-slate-50"
+    ? "border-border bg-elevated"
     : kind === "session"
-      ? "border-amber-200 bg-amber-50"
+      ? "border-warning/25 bg-warning/10"
       : "border-sky-200 bg-sky-50";
   return (
     <div className={`rounded-lg border px-3 py-2 ${tone}`}>
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Credential</div>
-      <p className="text-sm text-slate-800 mt-0.5">{credentialLine(route.op)}</p>
+      <div className="text-[11px] font-semibold text-muted">Credential</div>
+      <p className="text-sm text-fg mt-0.5">{credentialLine(route.op)}</p>
       {scope && (
-        <p className="text-xs text-slate-500 mt-1">
+        <p className="text-xs text-muted mt-1 prose-measure">
           A key without <span className="font-mono">{scope}</span> is refused{" "}
           <span className="font-mono">403 INSUFFICIENT_SCOPE</span>. A scope only ever narrows the bound service user — it can
           never grant authority that user's role and its organization's capability envelope do not already allow.
@@ -310,19 +310,27 @@ function Parameters({ params, doc }: { params: readonly OpenApiParameter[] | und
   if (rows.length === 0) return null;
   return (
     <section>
-      <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1.5">Parameters</h4>
-      <table className="w-full text-xs">
+      <h4 className="text-[11px] font-semibold text-muted mb-1.5">Parameters</h4>
+      <TableShell>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Location</th>
+            <th>Type</th>
+            <th>Description</th>
+          </tr>
+        </thead>
         <tbody>
           {rows.map((p) => (
-            <tr key={`${p.in}:${p.name}`} className="align-top border-t border-slate-100 first:border-t-0">
-              <td className="py-1.5 pr-3 font-mono text-slate-800 whitespace-nowrap">{p.name}</td>
-              <td className="py-1.5 pr-3 text-slate-500 whitespace-nowrap">{p.in}{p.required ? " · required" : ""}</td>
-              <td className="py-1.5 pr-3 font-mono text-slate-500">{describeShape(p.schema, doc)}</td>
-              <td className="py-1.5 text-slate-500">{p.description ?? p.schema?.description ?? ""}</td>
+            <tr key={`${p.in}:${p.name}`} className="align-top">
+              <td className="font-mono text-fg whitespace-nowrap">{p.name}</td>
+              <td className="text-muted whitespace-nowrap">{p.in}{p.required ? " · required" : ""}</td>
+              <td className="font-mono text-muted">{describeShape(p.schema, doc)}</td>
+              <td className="text-muted">{p.description ?? p.schema?.description ?? ""}</td>
             </tr>
           ))}
         </tbody>
-      </table>
+      </TableShell>
     </section>
   );
 }
@@ -335,24 +343,32 @@ function RequestBody({ route, doc }: { route: RouteEntry; doc: OpenApiDocument }
   const names = Object.keys(props);
   return (
     <section>
-      <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1.5">
+      <h4 className="text-[11px] font-semibold text-muted mb-1.5">
         Request body{route.op.requestBody?.required ? " · required" : ""}
       </h4>
       {names.length === 0 ? (
-        <p className="text-xs font-mono text-slate-600">{describeShape(schema, doc)}</p>
+        <p className="text-xs font-mono text-muted">{describeShape(schema, doc)}</p>
       ) : (
-        <table className="w-full text-xs">
+        <TableShell>
+          <thead>
+            <tr>
+              <th>Field</th>
+              <th>Required</th>
+              <th>Type</th>
+              <th>Description</th>
+            </tr>
+          </thead>
           <tbody>
             {names.map((name) => (
-              <tr key={name} className="align-top border-t border-slate-100 first:border-t-0">
-                <td className="py-1.5 pr-3 font-mono text-slate-800 whitespace-nowrap">{name}</td>
-                <td className="py-1.5 pr-3 text-slate-500 whitespace-nowrap">{required.has(name) ? "required" : "optional"}</td>
-                <td className="py-1.5 pr-3 font-mono text-slate-500">{describeShape(props[name], doc)}</td>
-                <td className="py-1.5 text-slate-500">{resolveRef(props[name], doc)?.description ?? ""}</td>
+              <tr key={name} className="align-top">
+                <td className="font-mono text-fg whitespace-nowrap">{name}</td>
+                <td className="text-muted whitespace-nowrap">{required.has(name) ? "required" : "optional"}</td>
+                <td className="font-mono text-muted">{describeShape(props[name], doc)}</td>
+                <td className="text-muted">{resolveRef(props[name], doc)?.description ?? ""}</td>
               </tr>
             ))}
           </tbody>
-        </table>
+        </TableShell>
       )}
     </section>
   );
@@ -369,22 +385,29 @@ function Responses({ route, doc }: { route: RouteEntry; doc: OpenApiDocument }):
   const documentsSuccess = entries.some(([status]) => status.startsWith("2") || status === "default");
   return (
     <section>
-      <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1.5">Responses</h4>
-      <table className="w-full text-xs">
+      <h4 className="text-[11px] font-semibold text-muted mb-1.5">Responses</h4>
+      <TableShell>
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>Type</th>
+            <th>Description</th>
+          </tr>
+        </thead>
         <tbody>
           {entries.map(([status, response]) => {
             const media = responseMediaTypes(response);
             const json = response?.content?.["application/json"]?.schema;
             return (
-              <tr key={status} className="align-top border-t border-slate-100 first:border-t-0">
-                <td className="py-1.5 pr-3 font-mono font-semibold text-slate-800 whitespace-nowrap">{status}</td>
-                <td className="py-1.5 pr-3 font-mono text-slate-600 break-all">
+              <tr key={status} className="align-top">
+                <td className="font-mono font-semibold text-fg whitespace-nowrap">{status}</td>
+                <td className="font-mono text-muted break-all">
                   {/* A response can be non-JSON — the certificate route returns a
                       PDF — so name the media type rather than rendering "—" and
                       leaving the reader to guess it returns nothing. */}
                   {json ? describeShape(json, doc) : media.length > 0 ? media.join(", ") : "no body"}
                 </td>
-                <td className="py-1.5 text-slate-500">
+                <td className="text-muted">
                   {/* @fastify/swagger writes "Default Response" when a route's
                       schema names no description. It is noise, not information. */}
                   {response?.description === "Default Response" ? "" : response?.description ?? ""}
@@ -393,9 +416,9 @@ function Responses({ route, doc }: { route: RouteEntry; doc: OpenApiDocument }):
             );
           })}
         </tbody>
-      </table>
+      </TableShell>
       {!documentsSuccess && (
-        <p className="text-[11px] text-amber-700 mt-1.5">
+        <p className="text-[11px] text-warning mt-1.5 prose-measure">
           This route&rsquo;s schema documents only failures — no success response. That is a thin spot in the API&rsquo;s own
           document, not a route that always fails: it happens where a handler streams a body OpenAPI never saw described (a PDF
           certificate, an uploaded document). Expect a <span className="font-mono">200</span> carrying that body.
@@ -462,7 +485,7 @@ function TryIt({ route }: { route: RouteEntry }): JSX.Element {
     }
   }, [route.path, pathValues, queryValues, token]);
 
-  const tone = !result ? "" : result.status < 300 ? "text-emerald-700" : result.status < 500 ? "text-amber-700" : "text-red-700";
+  const tone = !result ? "" : result.status < 300 ? "text-success" : result.status < 500 ? "text-warning" : "text-danger";
 
   /**
    * The URL this button will ACTUALLY call.
@@ -482,21 +505,21 @@ function TryIt({ route }: { route: RouteEntry }): JSX.Element {
   );
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-3">
+    <section className="rounded-lg border border-border bg-elevated p-3 space-y-3">
       <div className="flex items-center justify-between gap-3">
-        <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Try it</h4>
-        <span className="text-[11px] text-slate-500">Runs as you, with your signed-in session — not with an API key.</span>
+        <h4 className="text-[11px] font-semibold text-muted">Try it</h4>
+        <span className="text-[11px] text-muted">Runs as you, with your signed-in session — not with an API key.</span>
       </div>
 
-      <div className="text-[11px] text-slate-500">
-        Sends <span className="font-mono text-slate-700">GET {target}</span>
+      <div className="text-[11px] text-muted">
+        Sends <span className="font-mono text-fg">GET {target}</span>
       </div>
 
       {(pathParams.length > 0 || queryParams.length > 0) && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {pathParams.map((p) => (
             <label key={`path-${p.name}`} className="block">
-              <span className="block text-[11px] text-slate-500 mb-0.5">{p.name} <span className="text-slate-400">(path)</span></span>
+              <span className="block text-[11px] text-muted mb-0.5">{p.name} <span className="text-muted">(path)</span></span>
               <input
                 className="input"
                 value={pathValues[p.name] ?? ""}
@@ -506,8 +529,8 @@ function TryIt({ route }: { route: RouteEntry }): JSX.Element {
           ))}
           {queryParams.map((p) => (
             <label key={`query-${p.name}`} className="block">
-              <span className="block text-[11px] text-slate-500 mb-0.5">
-                {p.name} <span className="text-slate-400">(query{p.required ? ", required" : ""})</span>
+              <span className="block text-[11px] text-muted mb-0.5">
+                {p.name} <span className="text-muted">(query{p.required ? ", required" : ""})</span>
               </span>
               <input
                 className="input"
@@ -528,14 +551,14 @@ function TryIt({ route }: { route: RouteEntry }): JSX.Element {
         {busy ? "Sending…" : `Send ${route.method.toUpperCase()}`}
       </button>
 
-      {failure && <p className="text-xs text-red-600">{failure}</p>}
+      {failure && <p className="text-xs text-danger">{failure}</p>}
 
       {result && (
         <div className="space-y-1.5">
           <div className={`text-xs font-semibold ${tone}`}>
             {result.status} {result.statusText}
             {result.status === 403 && (
-              <span className="font-normal text-slate-500">
+              <span className="font-normal text-muted">
                 {" "}— a real refusal. <span className="font-mono">ORG_CAPABILITY_MISSING</span> means this organization&rsquo;s
                 envelope does not cover the call; <span className="font-mono">INSUFFICIENT_SCOPE</span> means a key was missing a
                 scope. <span className="font-mono">details</span> below names which.
@@ -569,17 +592,17 @@ function NoTryIt({ route, doc, baseUrl }: { route: RouteEntry; doc: OpenApiDocum
   return (
     <section className="space-y-2">
       <div className="flex items-center justify-between gap-3">
-        <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Run it yourself</h4>
-        <span className="text-[11px] text-slate-500">{route.method.toUpperCase()} — copy and run in your own shell</span>
+        <h4 className="text-[11px] font-semibold text-muted">Run it yourself</h4>
+        <span className="text-[11px] text-muted">{route.method.toUpperCase()} — copy and run in your own shell</span>
       </div>
       <CopyBlock code={curlFor(route, baseUrl, doc)} language="bash" />
       {mutatingGet ? (
-        <p className="text-xs text-amber-700">
+        <p className="text-xs text-warning prose-measure">
           <span className="font-semibold">This GET is not read-only.</span> {mutatingGet} So it gets no button here even though
           its method would normally earn one — run it when you mean to, against a request you intend to consume.
         </p>
       ) : (
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-muted prose-measure">
           Interactive calls are read-only here: a documentation page should not issue a credential or move tokens against live
           data, and most mutations on this API answer <span className="font-mono">202</span> with a proposal into a real
           maker-checker queue that a second person then has to clear. This snippet is deliberately something you run yourself,
@@ -587,7 +610,7 @@ function NoTryIt({ route, doc, baseUrl }: { route: RouteEntry; doc: OpenApiDocum
         </p>
       )}
       {cred.kind !== "public" && (
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-muted prose-measure">
           Set <span className="font-mono">{cred.kind === "session" ? "TL_SESSION" : "TL_API_KEY"}</span> first
           {cred.kind === "session"
             ? <> — this route takes a human session token from <span className="font-mono">POST /auth/login</span>, not an organization key.</>
@@ -605,7 +628,7 @@ function NoTryIt({ route, doc, baseUrl }: { route: RouteEntry; doc: OpenApiDocum
  */
 function Prose({ text }: { text: string }): JSX.Element {
   return (
-    <div className="text-sm text-slate-600 space-y-1.5">
+    <div className="text-sm text-muted space-y-1.5 prose-measure">
       {text.split(/\n{2,}/).map((para, i) => (
         <p key={i}>{inlineMarkdown(para.replace(/\n/g, " "))}</p>
       ))}
@@ -624,9 +647,9 @@ function inlineMarkdown(text: string): (string | JSX.Element)[] {
   while ((match = pattern.exec(text)) !== null) {
     if (match.index > last) out.push(text.slice(last, match.index));
     if (match[1] !== undefined) {
-      out.push(<span key={key++} className="font-mono text-[0.9em] text-slate-800 bg-slate-100 rounded px-1">{match[1]}</span>);
+      out.push(<span key={key++} className="font-mono text-[0.9em] text-fg bg-elevated rounded px-1">{match[1]}</span>);
     } else {
-      out.push(<strong key={key++} className="font-semibold text-slate-800">{match[2]}</strong>);
+      out.push(<strong key={key++} className="font-semibold text-fg">{match[2]}</strong>);
     }
     last = match.index + match[0].length;
   }

@@ -33,9 +33,9 @@ import { Card, Icon, Pill } from "../shared/ui.js";
 
 function Row(props: { label: string; children: React.ReactNode }): JSX.Element {
   return (
-    <div className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-3 py-2 border-b border-slate-100 last:border-0">
-      <div className="text-xs font-medium uppercase tracking-wide text-slate-500 sm:w-40 shrink-0">{props.label}</div>
-      <div className="text-sm text-slate-800 min-w-0 break-all">{props.children}</div>
+    <div className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-3 py-2 border-b border-border last:border-0">
+      <div className="text-xs font-medium text-muted sm:w-40 shrink-0">{props.label}</div>
+      <div className="text-sm text-fg min-w-0 break-all">{props.children}</div>
     </div>
   );
 }
@@ -93,22 +93,22 @@ function CredentialTool(props: { initialId: string }): JSX.Element {
       </form>
 
       {error && (
-        <div className="mt-4 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-900">{error}</div>
+        <div className="mt-4 rounded-lg bg-warning/10 border border-warning/25 px-4 py-3 text-sm text-warning">{error}</div>
       )}
 
       {status && verdict && prov && (
         <div className="mt-5">
           <div className={`rounded-xl border px-4 py-3 ${
-            verdict.tone === "ok" ? "bg-emerald-50 border-emerald-200" :
-            verdict.tone === "danger" ? "bg-red-50 border-red-200" :
-            verdict.tone === "warn" ? "bg-amber-50 border-amber-200" : "bg-slate-50 border-slate-200"}`}>
+            verdict.tone === "ok" ? "bg-success/10 border-success/25" :
+            verdict.tone === "danger" ? "bg-danger/10 border-danger/25" :
+            verdict.tone === "warn" ? "bg-warning/10 border-warning/25" : "bg-elevated border-border"}`}>
             <div className="flex items-center gap-2">
               <Icon name={verdict.tone === "ok" ? "check" : "shield"} className="w-5 h-5" />
-              <span className="text-base font-semibold text-slate-900">{verdict.headline}</span>
+              <span className="text-base font-semibold text-fg">{verdict.headline}</span>
               <Pill tone={prov.tone === "muted" ? "muted" : prov.tone}>{prov.label}</Pill>
             </div>
-            <p className="text-sm text-slate-700 mt-1">{verdict.detail}</p>
-            <p className="text-xs text-slate-600 mt-1">{prov.detail}</p>
+            <p className="text-sm text-fg mt-1">{verdict.detail}</p>
+            <p className="text-xs text-muted mt-1">{prov.detail}</p>
           </div>
 
           <div className="mt-4">
@@ -125,7 +125,7 @@ function CredentialTool(props: { initialId: string }): JSX.Element {
             )}
           </div>
 
-          <p className="text-xs text-slate-500 mt-4">
+          <p className="text-xs text-muted mt-4 prose-measure">
             This is a validity check, not a disclosure. It deliberately shows no claims and no holder —
             those stay with the holder and are released only when they consent to a presentation.
           </p>
@@ -181,11 +181,11 @@ function DidTool(props: { initialDid: string }): JSX.Element {
       </form>
 
       {error && (
-        <div className="mt-4 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-900">{error}</div>
+        <div className="mt-4 rounded-lg bg-warning/10 border border-warning/25 px-4 py-3 text-sm text-warning">{error}</div>
       )}
 
       {res && failure && (
-        <div className="mt-4 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-900">
+        <div className="mt-4 rounded-lg bg-warning/10 border border-warning/25 px-4 py-3 text-sm text-warning">
           {failure === "methodNotSupported"
             ? "That is a DID, but not a did:key — this platform resolves did:key only."
             : "That is not a valid DID."}
@@ -195,18 +195,18 @@ function DidTool(props: { initialDid: string }): JSX.Element {
       {res?.didDocument && meta && (
         <div className="mt-5">
           <div className={`rounded-xl border px-4 py-3 ${
-            meta.source === "chain" && meta.registered && meta.active ? "bg-emerald-50 border-emerald-200" :
-            meta.source === "chain" && meta.deactivated ? "bg-red-50 border-red-200" : "bg-slate-50 border-slate-200"}`}>
+            meta.source === "chain" && meta.registered && meta.active ? "bg-success/10 border-success/25" :
+            meta.source === "chain" && meta.deactivated ? "bg-danger/10 border-danger/25" : "bg-elevated border-border"}`}>
             <div className="flex items-center gap-2">
               <Icon name="shield" className="w-5 h-5" />
-              <span className="text-base font-semibold text-slate-900">
+              <span className="text-base font-semibold text-fg">
                 {meta.source !== "chain" ? "Key resolved — registration unknown"
                   : meta.deactivated ? "Registered, then deactivated"
                   : meta.registered ? "Registered on the ledger"
                   : "Not registered on the ledger"}
               </span>
             </div>
-            <p className="text-sm text-slate-700 mt-1">
+            <p className="text-sm text-fg mt-1 prose-measure">
               {meta.source !== "chain"
                 // The resolver never fabricates chain state, and neither does this.
                 ? "The DID's public key is derived from the identifier itself, so it always resolves. This deployment anchors no DID registry, so whether any authority accredited this issuer cannot be answered here."
@@ -244,7 +244,7 @@ export function PublicVerify(): JSX.Element {
   const initialDid = (params.get("did") ?? "").trim();
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
+    <div className="min-h-screen bg-elevated flex flex-col">
       <header className="border-b border-white/10 bg-ink/95">
         <div className="max-w-4xl mx-auto px-6 h-16 flex items-center justify-between">
           <button onClick={() => navigate("/")} aria-label="Home"><Logo onDark size={30} /></button>
@@ -258,8 +258,8 @@ export function PublicVerify(): JSX.Element {
       </header>
 
       <main className="flex-1 max-w-4xl w-full mx-auto px-6 py-10">
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Verify a credential</h1>
-        <p className="text-sm text-slate-600 mt-1 max-w-2xl">
+        <h1 className="text-2xl font-semibold tracking-tight text-fg">Verify a credential</h1>
+        <p className="text-sm text-muted mt-1 max-w-2xl">
           Anyone can check a credential issued on this platform — no account needed. Both checks read the
           public record directly; where a ledger is in use, the answer comes from the chain rather than from us.
         </p>
@@ -270,10 +270,10 @@ export function PublicVerify(): JSX.Element {
         </div>
       </main>
 
-      <footer className="border-t border-slate-200 bg-white">
+      <footer className="border-t border-border bg-surface">
         <div className="max-w-4xl mx-auto px-6 py-8 flex flex-col sm:flex-row items-center justify-between gap-4">
           <Logo size={26} />
-          <div className="text-xs text-slate-500 text-center sm:text-right">
+          <div className="text-xs text-muted text-center sm:text-right">
             <div>A product by XPI Quantum Technologies Pvt Ltd · 2026</div>
           </div>
         </div>

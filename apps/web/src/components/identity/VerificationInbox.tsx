@@ -111,18 +111,18 @@ export function VerificationInbox(): JSX.Element {
   return (
     <div className="space-y-5">
       <Card title="Verification requests" description="Relying parties asking you to present credentials. Nothing is shared until you consent.">
-        {err && <div className="text-sm text-rose-600 mb-2">{err}</div>}
-        {msg && <div className="text-sm text-emerald-600 mb-2">{msg}</div>}
-        {pending.length === 0 && <div className="text-sm text-slate-500">No pending requests.</div>}
+        {err && <div className="text-sm text-danger mb-2">{err}</div>}
+        {msg && <div className="text-sm text-success mb-2">{msg}</div>}
+        {pending.length === 0 && <div className="text-sm text-muted">No pending requests.</div>}
         <div className="space-y-3">
           {pending.map((r) => {
             const sel = picked[r.id] ?? {};
             return (
-            <div key={r.id} className="border border-slate-100 rounded-lg p-3">
+            <div key={r.id} className="border border-border rounded-lg p-3">
               <div className="text-sm font-medium">{r.purpose}</div>
-              <div className="text-xs text-slate-500 mb-2">from {r.verifierOrgId} · asks for {r.requestedTypes.join(", ")}</div>
+              <div className="text-xs text-muted mb-2">from {r.verifierOrgId} · asks for {r.requestedTypes.join(", ")}</div>
               {(r.eligibleCredentials ?? []).length === 0
-                ? <div className="text-xs text-amber-600">You hold no unrevoked credential of the requested type(s).</div>
+                ? <div className="text-xs text-warning">You hold no unrevoked credential of the requested type(s).</div>
                 : (r.eligibleCredentials ?? []).map((c) => {
                     const claims = c.claims ?? {};
                     const requestedForType = r.requestedFields?.[c.type] ?? {};
@@ -144,8 +144,8 @@ export function VerificationInbox(): JSX.Element {
                           <span>{candidateLabel(c)}</span>
                         </label>
                         {sel[c.id] && (
-                          <div className="ml-5 mt-1 space-y-1 border-l border-slate-100 pl-3">
-                            <div className="text-[11px] text-slate-400">
+                          <div className="ml-5 mt-1 space-y-1 border-l border-border pl-3">
+                            <div className="text-[11px] text-muted">
                               This only controls what the verifier receives — the credential itself is unchanged.
                             </div>
                             {disclosableFields(claims).map((field) => {
@@ -162,7 +162,7 @@ export function VerificationInbox(): JSX.Element {
                                     {requested && <span className="text-brand-500"> · requested{requested.kind === "predicate" ? ` (${requested.op} ${requested.threshold})` : ""}</span>}
                                   </span>
                                   <select
-                                    className="rounded border border-slate-200 px-1 py-0.5"
+                                    className="rounded-lg border border-border bg-elevated/80 px-1.5 py-1 text-xs focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15"
                                     value={choice.kind}
                                     onChange={(e) => {
                                       const kind = e.target.value as DisclosureChoice["kind"];
@@ -178,7 +178,7 @@ export function VerificationInbox(): JSX.Element {
                                   {choice.kind === "predicate" && (
                                     <>
                                       <select
-                                        className="rounded border border-slate-200 px-1 py-0.5"
+                                        className="rounded-lg border border-border bg-elevated/80 px-1.5 py-1 text-xs focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15"
                                         value={choice.op}
                                         onChange={(e) => setFieldChoice(field, { kind: "predicate", op: e.target.value as PredicateOp, threshold: choice.threshold })}
                                       >
@@ -189,7 +189,7 @@ export function VerificationInbox(): JSX.Element {
                                         <option value="eq">=</option>
                                       </select>
                                       <input
-                                        type="number" className="w-20 rounded border border-slate-200 px-1 py-0.5"
+                                        type="number" className="w-20 rounded-lg border border-border bg-elevated/80 px-1.5 py-1 text-xs focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15"
                                         value={choice.threshold}
                                         onChange={(e) => {
                                           const n = Number(e.target.value);
@@ -208,7 +208,7 @@ export function VerificationInbox(): JSX.Element {
                   })}
               <div className="flex gap-2 mt-2">
                 <button className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm text-white disabled:opacity-40" disabled={!Object.values(sel).some(Boolean)} onClick={() => void consent(r)}>Consent &amp; present</button>
-                <button className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-rose-600" onClick={() => void reject(r)}>Reject</button>
+                <button className="rounded-lg border border-border px-3 py-1.5 text-sm text-danger" onClick={() => void reject(r)}>Reject</button>
               </div>
             </div>
             );
@@ -219,7 +219,7 @@ export function VerificationInbox(): JSX.Element {
         <Card title="Past requests">
           <div className="space-y-1">
             {past.map((r) => (
-              <div key={r.id} className="flex items-center justify-between text-sm border-t border-slate-100 py-1">
+              <div key={r.id} className="flex items-center justify-between text-sm border-t border-border py-1">
                 <span>{r.purpose} · {r.requestedTypes.join(", ")}</span>
                 <Pill tone={r.status === "consented" ? "ok" : r.status === "rejected" ? "muted" : "warn"}>{r.status}</Pill>
               </div>

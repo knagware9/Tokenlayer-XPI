@@ -26,11 +26,11 @@ export function TxHashRow({ label, hash, chainId, chains }: {
   const short = `${hash.slice(0, 10)}…${hash.slice(-6)}`;
   return (
     <div className="flex items-center gap-2 text-xs">
-      <span className="text-slate-500">{label}</span>
+      <span className="text-muted">{label}</span>
       {url
         ? <a className="font-mono text-brand-600 hover:text-brand-700" href={url} target="_blank" rel="noreferrer">{short} ↗</a>
-        : <span className="font-mono text-slate-700">{short}</span>}
-      <button className="text-slate-400 hover:text-slate-600" title="Copy transaction hash"
+        : <span className="font-mono text-fg">{short}</span>}
+      <button className="text-muted hover:text-fg" title="Copy transaction hash"
         onClick={() => void navigator.clipboard.writeText(hash)}>Copy</button>
     </div>
   );
@@ -62,7 +62,7 @@ export function CredentialCard({ credential: c, status, onAcceptanceAction, chai
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-4 space-y-2">
+    <div className="bg-surface rounded-2xl border border-border/80 shadow-sm p-4 space-y-2">
       <div className="flex items-start justify-between gap-2">
         <div className="flex flex-wrap items-center gap-1.5 min-w-0">
           {c.type.map((t) => <Pill key={t} tone="info">{t}</Pill>)}
@@ -77,20 +77,20 @@ export function CredentialCard({ credential: c, status, onAcceptanceAction, chai
             : <Pill tone="muted">unanchored</Pill>)}
         </div>
       </div>
-      <div className="text-xs text-slate-600"><span className="font-medium text-slate-800">{issuerLabel(c)}</span></div>
-      {c.credentialUseCaseKey && <div className="text-[11px] text-slate-400">use case · {c.credentialUseCaseKey}</div>}
-      <div className="text-xs text-slate-500">Issued {fmtDate(c.issuedAt)} · Expires {fmtDate(c.expiresAt)}</div>
-      {c.revokedReason && <div className="text-xs text-rose-600 mt-0.5">Revoked: {c.revokedReason}</div>}
+      <div className="text-xs text-muted"><span className="font-medium text-fg">{issuerLabel(c)}</span></div>
+      {c.credentialUseCaseKey && <div className="text-[11px] text-muted">use case · {c.credentialUseCaseKey}</div>}
+      <div className="text-xs text-muted">Issued {fmtDate(c.issuedAt)} · Expires {fmtDate(c.expiresAt)}</div>
+      {c.revokedReason && <div className="text-xs text-danger mt-0.5">Revoked: {c.revokedReason}</div>}
       {needsReview && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-2.5 space-y-2">
-          <p className="text-xs text-amber-800">This credential needs your review.</p>
+        <div className="bg-warning/10 border border-warning/25 rounded-lg p-2.5 space-y-2">
+          <p className="text-xs text-warning">This credential needs your review.</p>
           {c.acceptance === "changes_requested" && c.acceptanceNote && (
-            <p className="text-xs text-amber-700">Note: {c.acceptanceNote}</p>
+            <p className="text-xs text-warning">Note: {c.acceptanceNote}</p>
           )}
-          {actionError && <p className="text-xs text-red-600">{actionError}</p>}
+          {actionError && <p className="text-xs text-danger">{actionError}</p>}
           <div className="flex flex-wrap items-center gap-2">
             <button
-              className="rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+              className="rounded-lg bg-success px-2.5 py-1 text-[11px] font-medium text-white hover:bg-success/90 disabled:opacity-50"
               disabled={busy}
               onClick={() => void runAction(() => api.acceptCredential(token!, c.id))}
             >
@@ -98,7 +98,7 @@ export function CredentialCard({ credential: c, status, onAcceptanceAction, chai
             </button>
             {c.acceptance === "pending" && (
               <button
-                className="rounded-lg border border-amber-300 px-2.5 py-1 text-[11px] font-medium text-amber-800 hover:border-amber-400 disabled:opacity-50"
+                className="rounded-lg border border-warning/40 px-2.5 py-1 text-[11px] font-medium text-warning hover:border-warning disabled:opacity-50"
                 disabled={busy}
                 onClick={() => setShowChangesBox((s) => !s)}
               >
@@ -106,7 +106,7 @@ export function CredentialCard({ credential: c, status, onAcceptanceAction, chai
               </button>
             )}
             <button
-              className="rounded-lg border border-red-300 px-2.5 py-1 text-[11px] font-medium text-red-700 hover:border-red-400 disabled:opacity-50"
+              className="rounded-lg border border-danger/40 px-2.5 py-1 text-[11px] font-medium text-danger hover:border-danger disabled:opacity-50"
               disabled={busy}
               onClick={() => {
                 if (!window.confirm("Rejecting permanently revokes this credential.")) return;
@@ -119,14 +119,14 @@ export function CredentialCard({ credential: c, status, onAcceptanceAction, chai
           {showChangesBox && (
             <div className="space-y-1.5">
               <textarea
-                className="w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-xs"
+                className="w-full rounded-lg border border-border bg-elevated/80 px-2 py-1.5 text-xs focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15"
                 rows={2}
                 placeholder="What needs to change?"
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
               />
               <button
-                className="rounded-lg bg-amber-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+                className="rounded-lg bg-warning px-2.5 py-1 text-[11px] font-medium text-white hover:bg-warning/90 disabled:opacity-50"
                 disabled={busy || !note.trim()}
                 onClick={() => void runAction(() => api.requestCredentialChanges(token!, c.id, note.trim()))}
               >
@@ -140,30 +140,30 @@ export function CredentialCard({ credential: c, status, onAcceptanceAction, chai
         {open ? "Hide details" : "Details"}
       </button>
       {open && (
-        <div className="mt-2 space-y-2 border-t border-slate-100 pt-2">
+        <div className="mt-2 space-y-2 border-t border-border pt-2">
           <div>
-            <div className="text-[11px] uppercase tracking-wide text-slate-400 mb-1">Claims</div>
+            <div className="text-[11px] text-muted mb-1">Claims</div>
             <dl className="text-xs">
               {Object.entries(c.claims).filter(([k]) => k !== "id").map(([k, v]) => (
                 <div key={k} className="flex justify-between gap-3 py-0.5">
-                  <dt className="text-slate-500">{k}</dt>
-                  <dd className="text-slate-900 font-mono text-[11px] truncate max-w-[60%] text-right">{String(v)}</dd>
+                  <dt className="text-muted">{k}</dt>
+                  <dd className="text-fg font-mono text-[11px] truncate max-w-[60%] text-right">{String(v)}</dd>
                 </div>
               ))}
             </dl>
           </div>
-          <div className="text-[11px] text-slate-500 font-mono break-all">
+          <div className="text-[11px] text-muted font-mono break-all">
             issuer ·{" "}
             <a className="text-brand-600 hover:text-brand-700 underline decoration-dotted"
               href={api.didResolveUrl(c.issuerDid)} target="_blank" rel="noopener noreferrer">{c.issuerDid}</a>
           </div>
-          <div className="text-[11px] text-slate-500 font-mono break-all">holder · {c.holderDid}</div>
+          <div className="text-[11px] text-muted font-mono break-all">holder · {c.holderDid}</div>
           {c.anchorTxHash && <TxHashRow label="Anchored" hash={c.anchorTxHash} chainId={c.anchorChainId} chains={chains} />}
           {c.revokeTxHash && <TxHashRow label="Revoked" hash={c.revokeTxHash} chainId={c.anchorChainId} chains={chains} />}
           <div className="flex gap-2">
-            <button className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-medium hover:border-brand-400"
+            <button className="rounded-lg border border-border px-2.5 py-1 text-[11px] font-medium hover:border-brand-400"
               onClick={() => void navigator.clipboard.writeText(c.vcJwt)}>Copy VC-JWT</button>
-            <a className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-medium hover:border-brand-400"
+            <a className="rounded-lg border border-border px-2.5 py-1 text-[11px] font-medium hover:border-brand-400"
               href={`data:application/jwt;charset=utf-8,${encodeURIComponent(c.vcJwt)}`} download={`${c.type[0] ?? "credential"}-${c.id}.jwt`}>Download</a>
             {c.certificateAvailable && (
               <a className="rounded-lg border border-brand-200 bg-brand-50 px-2.5 py-1 text-[11px] font-medium text-brand-700 hover:border-brand-400"
@@ -173,11 +173,11 @@ export function CredentialCard({ credential: c, status, onAcceptanceAction, chai
                 VC-JWT: this link proves the credential is live without handing
                 over its claims, which is the whole point of the public status
                 route it lands on. */}
-            <button className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-medium hover:border-brand-400"
+            <button className="rounded-lg border border-border px-2.5 py-1 text-[11px] font-medium hover:border-brand-400"
               onClick={() => void navigator.clipboard.writeText(`${window.location.origin}/verify?id=${encodeURIComponent(c.id)}`)}>
               Copy verification link
             </button>
-            <button className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-medium hover:border-brand-400"
+            <button className="rounded-lg border border-border px-2.5 py-1 text-[11px] font-medium hover:border-brand-400"
               onClick={() => setShowQr((v) => !v)}>
               {showQr ? "Hide QR" : "Show QR"}
             </button>
@@ -187,8 +187,8 @@ export function CredentialCard({ credential: c, status, onAcceptanceAction, chai
               {/* Same public link "Copy verification link" copies, as a QR a
                   verifier's phone camera can scan in person — no account, no
                   claims disclosed, just the live validity check. */}
-              <img src={api.credentialQrUrl(c.id)} alt="Scan to verify this credential" className="h-32 w-32 rounded border border-slate-200 bg-white p-1" />
-              <div className="text-[10px] text-slate-400">Scan with a phone camera to verify</div>
+              <img src={api.credentialQrUrl(c.id)} alt="Scan to verify this credential" className="h-32 w-32 rounded border border-border bg-surface p-1" />
+              <div className="text-[10px] text-muted">Scan with a phone camera to verify</div>
             </div>
           )}
         </div>

@@ -33,7 +33,7 @@ import {
   type BeneficiaryRow, type BeneficiaryStatus, type SchemeCounts,
 } from "../../lib/identity/schemes.js";
 import type { CredentialUseCase, IssuedCredential, Organization } from "../../types.js";
-import { Card, EmptyState, Pill, SectionHeader, StatCard } from "../shared/ui.js";
+import { Card, EmptyState, Pill, SectionHeader, StatCard, TableShell } from "../shared/ui.js";
 
 const STATUS_TONE: Record<BeneficiaryStatus, "ok" | "warn" | "danger" | "muted"> = {
   active: "ok", pending: "warn", rejected: "danger", revoked: "danger", expired: "muted",
@@ -113,54 +113,52 @@ function BeneficiaryRegister(props: { scheme: CredentialUseCase; credentials: Is
             hint={all.length === 0 ? "Issue this scheme's credential to enrol its first beneficiary." : "Try a different name, DID or claim."}
           />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
-                <tr>
-                  <th className="text-left font-medium px-3 py-2.5">Beneficiary</th>
-                  <th className="text-left font-medium px-3 py-2.5">Status</th>
-                  <th className="text-left font-medium px-3 py-2.5">Issued</th>
-                  <th className="text-left font-medium px-3 py-2.5">Valid to</th>
-                  <th className="text-left font-medium px-3 py-2.5">Verify</th>
+          <TableShell>
+            <thead>
+              <tr>
+                <th>Beneficiary</th>
+                <th>Status</th>
+                <th>Issued</th>
+                <th>Valid to</th>
+                <th>Verify</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.holderDid}>
+                  <td>
+                    <div className="font-medium text-fg">{r.name ?? <span className="text-muted">unnamed</span>}</div>
+                    <div className="font-mono text-[11px] text-muted break-all">{r.holderDid}</div>
+                    {r.credentials.length > 1 && (
+                      <div className="text-[11px] text-muted">{r.credentials.length} credentials — showing the newest</div>
+                    )}
+                  </td>
+                  <td>
+                    <Pill tone={STATUS_TONE[r.status]}>{STATUS_LABEL[r.status]}</Pill>
+                    {r.status === "revoked" && r.latest.revokedReason && (
+                      <div className="text-[11px] text-muted mt-0.5">{r.latest.revokedReason}</div>
+                    )}
+                  </td>
+                  <td className="text-muted whitespace-nowrap">{r.latest.issuedAt.slice(0, 10)}</td>
+                  <td className="text-muted whitespace-nowrap">
+                    {r.latest.expiresAt ? r.latest.expiresAt.slice(0, 10) : <span className="text-muted">no expiry</span>}
+                  </td>
+                  <td>
+                    {/* What a counter hands a citizen or a verifying office —
+                        the public page, not the credential itself. */}
+                    <a
+                      className="text-xs text-brand-600 hover:text-brand-700 underline decoration-dotted"
+                      href={`/verify?id=${encodeURIComponent(r.latest.id)}`} target="_blank" rel="noopener noreferrer"
+                    >
+                      Public check
+                    </a>
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {rows.map((r) => (
-                  <tr key={r.holderDid}>
-                    <td className="px-3 py-2">
-                      <div className="font-medium text-slate-800">{r.name ?? <span className="text-slate-400">unnamed</span>}</div>
-                      <div className="font-mono text-[11px] text-slate-400 break-all">{r.holderDid}</div>
-                      {r.credentials.length > 1 && (
-                        <div className="text-[11px] text-slate-500">{r.credentials.length} credentials — showing the newest</div>
-                      )}
-                    </td>
-                    <td className="px-3 py-2">
-                      <Pill tone={STATUS_TONE[r.status]}>{STATUS_LABEL[r.status]}</Pill>
-                      {r.status === "revoked" && r.latest.revokedReason && (
-                        <div className="text-[11px] text-slate-500 mt-0.5">{r.latest.revokedReason}</div>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-xs text-slate-600 whitespace-nowrap">{r.latest.issuedAt.slice(0, 10)}</td>
-                    <td className="px-3 py-2 text-xs text-slate-600 whitespace-nowrap">
-                      {r.latest.expiresAt ? r.latest.expiresAt.slice(0, 10) : <span className="text-slate-300">no expiry</span>}
-                    </td>
-                    <td className="px-3 py-2">
-                      {/* What a counter hands a citizen or a verifying office —
-                          the public page, not the credential itself. */}
-                      <a
-                        className="text-xs text-brand-600 hover:text-brand-700 underline decoration-dotted"
-                        href={`/verify?id=${encodeURIComponent(r.latest.id)}`} target="_blank" rel="noopener noreferrer"
-                      >
-                        Public check
-                      </a>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </TableShell>
         )}
-        <p className="text-xs text-slate-500 mt-3">
+        <p className="text-xs text-muted mt-3">
           {rows.length} of {all.length} beneficiar{all.length === 1 ? "y" : "ies"} shown.
         </p>
       </Card>
@@ -245,7 +243,7 @@ export function SchemeConsole(): JSX.Element {
         }
       />
 
-      {error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2">{error}</div>}
+      {error && <div className="rounded-lg bg-danger/10 border border-danger/25 text-danger text-sm px-4 py-2">{error}</div>}
 
       {mine.length === 0 && !busy ? (
         <Card>
@@ -267,7 +265,7 @@ export function SchemeConsole(): JSX.Element {
                 actions={
                   <button
                     onClick={() => setSelected(s.key)}
-                    className="rounded-lg border border-slate-300 text-slate-600 px-3 py-1.5 text-sm font-medium hover:bg-slate-50"
+                    className="rounded-lg border border-border text-muted px-3 py-1.5 text-sm font-medium hover:bg-elevated"
                   >
                     Open register
                   </button>
@@ -287,7 +285,7 @@ export function SchemeConsole(): JSX.Element {
             these are enrolment paperwork, and folding them into a scheme would
             inflate its delivery numbers with its own admin.
           */}
-          <div className="text-sm text-slate-600">
+          <div className="text-sm text-muted">
             {unscoped.length} credential{unscoped.length === 1 ? "" : "s"} —{" "}
             {[...new Set(unscoped.map((c) => c.type))].join(", ")}.{" "}
             {unscoped.filter((c) => statusOf(c) === "active").length} in force.
@@ -299,7 +297,7 @@ export function SchemeConsole(): JSX.Element {
         <div>
           <button
             onClick={() => download(`${org?.name ?? "organization"}-beneficiaries.csv`, registerCsv(beneficiariesOf(issued)))}
-            className="rounded-lg border border-slate-300 text-slate-600 px-3 py-1.5 text-sm font-medium hover:bg-slate-50"
+            className="rounded-lg border border-border text-muted px-3 py-1.5 text-sm font-medium hover:bg-elevated"
           >
             Export every beneficiary
           </button>

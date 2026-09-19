@@ -16,8 +16,19 @@ export function staggerClass(n?: number): string {
 }
 
 // Shared UI primitives for the TokenLayer console.
-// Fonts: Bricolage Grotesque (headings) · Manrope (body) · JetBrains Mono (data)
+// Fonts: Inter (headings/body) · JetBrains Mono (data)
 // All components are zero-dependency beyond Tailwind + hand-drawn SVG.
+//
+// Design rules this file follows (see docs/superpowers for the full spec):
+//  - One bold element per screen; everything else (metadata, status,
+//    timestamps) drops to `text-muted` at 0.75-0.8rem.
+//  - Hairlines, not boxes: `border-border` + whitespace by default. A filled
+//    `bg-elevated`/`bg-surface` card is reserved for something that is
+//    genuinely a separate object — never nest one inside another.
+//  - Every color reads the semantic tokens (`bg-surface`, `text-fg`,
+//    `text-muted`, `border-border`, `bg-danger`/`warning`/`success`) so light
+//    and dark both work and an org's `--brand-*` override still flows through
+//    `--primary`. No hardcoded slate/white/emerald literals below.
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
@@ -283,9 +294,9 @@ export function Icon(props: { name: IconName; className?: string }): JSX.Element
 type CardVariant = "default" | "elevated" | "bordered" | "ink";
 
 const CARD_SURFACE: Record<CardVariant, string> = {
-  default:  "bg-white rounded-2xl border border-slate-200/80 shadow-sm",
-  elevated: "bg-white rounded-2xl border border-slate-100 shadow-md",
-  bordered: "bg-white rounded-2xl border-2 border-brand-400/25 shadow-sm",
+  default:  "bg-surface rounded-2xl border border-border/80 shadow-card",
+  elevated: "bg-surface rounded-2xl border border-border/60 shadow-md",
+  bordered: "bg-surface rounded-2xl border-2 border-brand-400/25 shadow-card",
   ink:      "bg-ink rounded-2xl border border-ink-700 shadow-md text-slate-100",
 };
 
@@ -303,17 +314,17 @@ export function Card(props: {
   return (
     <div className={`${CARD_SURFACE[variant]} ${className ?? ""}`}>
       {hasHeader && (
-        <div className={`flex items-start justify-between gap-4 px-5 pt-4 pb-3 border-b ${isInk ? "border-white/10" : "border-slate-100"}`}>
+        <div className={`flex items-start justify-between gap-4 px-5 pt-4 pb-3 border-b ${isInk ? "border-white/10" : "border-border"}`}>
           <div className="min-w-0">
             {title && (
               <h3
-                className={`text-sm font-semibold leading-6 font-display ${isInk ? "text-white" : "text-slate-900"}`}
+                className={`text-sm font-semibold leading-6 font-display ${isInk ? "text-white" : "text-fg"}`}
               >
                 {title}
               </h3>
             )}
             {description && (
-              <p className={`text-xs mt-0.5 ${isInk ? "text-slate-400" : "text-slate-500"}`}>{description}</p>
+              <p className={`text-xs mt-0.5 ${isInk ? "text-slate-400" : "text-muted"}`}>{description}</p>
             )}
           </div>
           {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
@@ -344,14 +355,14 @@ export function SectionHeader(props: {
     <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2 mb-5">
       <div>
         <div className="flex items-center gap-2.5">
-          <h2 className="text-xl font-bold tracking-tight text-slate-900 font-display">{title}</h2>
+          <h2 className="text-xl font-bold tracking-tight text-fg font-display">{title}</h2>
           {badge && (
             <span className="inline-flex items-center rounded-full bg-brand-50 border border-brand-200/60 text-brand-700 text-[11px] font-semibold px-2.5 py-0.5">
               {badge}
             </span>
           )}
         </div>
-        {description && <p className="text-sm text-slate-500 mt-0.5 leading-snug">{description}</p>}
+        {description && <p className="text-sm text-muted mt-0.5 leading-snug prose-measure">{description}</p>}
       </div>
       {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
     </div>
@@ -362,26 +373,30 @@ export function SectionHeader(props: {
 
 type PillTone = "ok" | "warn" | "danger" | "info" | "muted" | "brand" | "violet" | "amber";
 
+// `ok`/`warn`/`danger` read the semantic success/warning/danger tokens (the
+// same raw value in both themes, so a 10%-opacity tint stays legible on a
+// dark surface too). `info`/`muted`/`brand`/`violet`/`amber` are decorative
+// hues, not status — they keep their own Tailwind scale.
 const PILL_STYLES: Record<PillTone, string> = {
-  ok:     "bg-emerald-50 text-emerald-700 border border-emerald-200/70",
-  warn:   "bg-amber-50  text-amber-700  border border-amber-200/70",
-  danger: "bg-red-50    text-red-700    border border-red-200/70",
-  info:   "bg-sky-50    text-sky-700    border border-sky-200/70",
-  muted:  "bg-slate-100 text-slate-600  border border-slate-200/70",
-  brand:  "bg-brand-50  text-brand-700  border border-brand-200/70",
-  violet: "bg-violet-50 text-violet-700 border border-violet-200/70",
-  amber:  "bg-amber-50  text-amber-700  border border-amber-200/70",
+  ok:     "bg-success/10 text-success border border-success/25",
+  warn:   "bg-warning/10 text-warning border border-warning/25",
+  danger: "bg-danger/10  text-danger  border border-danger/25",
+  info:   "bg-sky-500/10    text-sky-600    border border-sky-500/25",
+  muted:  "bg-elevated   text-muted   border border-border",
+  brand:  "bg-brand-50   text-brand-700 border border-brand-200/70",
+  violet: "bg-violet-500/10 text-violet-600 border border-violet-500/25",
+  amber:  "bg-warning/10 text-warning border border-warning/25",
 };
 
 const PILL_DOTS: Record<PillTone, string> = {
-  ok:     "bg-emerald-500",
-  warn:   "bg-amber-500",
-  danger: "bg-red-500",
+  ok:     "bg-success",
+  warn:   "bg-warning",
+  danger: "bg-danger",
   info:   "bg-sky-500",
-  muted:  "bg-slate-400",
+  muted:  "bg-muted",
   brand:  "bg-brand-500",
   violet: "bg-violet-500",
-  amber:  "bg-amber-500",
+  amber:  "bg-warning",
 };
 
 export function Pill(props: {
@@ -405,7 +420,7 @@ export function Pill(props: {
 
 export function Tag(props: { children: React.ReactNode; className?: string }): JSX.Element {
   return (
-    <span className={`inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600 ${props.className ?? ""}`}>
+    <span className={`inline-flex items-center rounded-md bg-elevated px-2 py-0.5 text-[11px] font-medium text-muted ${props.className ?? ""}`}>
       {props.children}
     </span>
   );
@@ -429,8 +444,8 @@ export function StatCard(props: {
     <div
       className={`rounded-2xl p-4 flex items-start gap-3 group ${
         isPrimary
-          ? "bg-white border-2 border-brand-400/25 shadow-sm"
-          : "bg-white border border-slate-200/80 shadow-sm"
+          ? "bg-surface border-2 border-brand-400/25 shadow-card"
+          : "bg-surface border border-border/80 shadow-card"
       }`}
     >
       {icon && (
@@ -439,20 +454,20 @@ export function StatCard(props: {
         </div>
       )}
       <div className="min-w-0 flex-1">
-        <div className="text-[10px] font-semibold uppercase tracking-widest text-slate-400 mb-0.5">{label}</div>
+        <div className="text-[0.75rem] font-medium text-muted mb-0.5">{label}</div>
         <div
-          className={`font-bold text-slate-900 leading-7 truncate font-display font-data animate-count-in ${
+          className={`font-bold text-fg leading-7 truncate font-display font-data animate-count-in ${
             isPrimary ? "text-3xl" : "text-xl"
           }`}
         >
           {value}
         </div>
         <div className="flex items-center gap-2 mt-0.5">
-          {sub && <div className="text-xs text-slate-400 truncate">{sub}</div>}
+          {sub && <div className="text-[0.75rem] text-muted truncate">{sub}</div>}
           {trend && (
-            <span className={`text-[10px] font-semibold ${
-              trend.direction === "up"   ? "text-emerald-600" :
-              trend.direction === "down" ? "text-red-500" : "text-slate-400"
+            <span className={`text-[0.75rem] font-semibold ${
+              trend.direction === "up"   ? "text-success" :
+              trend.direction === "down" ? "text-danger" : "text-muted"
             }`}>
               {trend.direction === "up" ? "↑" : trend.direction === "down" ? "↓" : "→"} {trend.label}
             </span>
@@ -472,10 +487,10 @@ export function MetricBlock(props: {
   className?: string;
 }): JSX.Element {
   const TONE_CLASSES: Record<string, string> = {
-    default: "text-slate-900",
-    emerald: "text-emerald-600",
-    red:     "text-red-600",
-    amber:   "text-amber-600",
+    default: "text-fg",
+    emerald: "text-success",
+    red:     "text-danger",
+    amber:   "text-warning",
     violet:  "text-violet-600",
     brand:   "text-brand-600",
   };
@@ -485,7 +500,7 @@ export function MetricBlock(props: {
       <div className={`text-2xl font-bold tabular-nums leading-none font-display animate-count-in ${TONE_CLASSES[tone]}`}>
         {typeof props.value === "number" ? props.value.toLocaleString() : props.value}
       </div>
-      <div className="text-[11px] font-medium text-slate-500 uppercase tracking-wide">{props.label}</div>
+      <div className="text-[0.75rem] font-medium text-muted">{props.label}</div>
     </div>
   );
 }
@@ -494,9 +509,9 @@ export function MetricBlock(props: {
 
 export function LiveDot(props: { tone?: "green" | "amber" | "red" | "brand" }): JSX.Element {
   const COLORS = {
-    green: "bg-emerald-500",
-    amber: "bg-amber-400",
-    red:   "bg-red-500",
+    green: "bg-success",
+    amber: "bg-warning",
+    red:   "bg-danger",
     brand: "bg-brand-500",
   };
   const color = COLORS[props.tone ?? "green"];
@@ -519,11 +534,11 @@ export function EmptyState(props: {
   const { icon, title, hint, action } = props;
   return (
     <div className="flex flex-col items-center justify-center text-center py-12 px-6">
-      <div className="w-14 h-14 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mb-4 ring-1 ring-slate-200">
+      <div className="w-14 h-14 rounded-2xl bg-elevated text-muted flex items-center justify-center mb-4 ring-1 ring-border">
         <Icon name={icon ?? "spark"} className="w-7 h-7" />
       </div>
-      <div className="text-sm font-semibold text-slate-700 font-display">{title}</div>
-      {hint && <p className="text-xs text-slate-500 mt-1.5 max-w-xs leading-relaxed">{hint}</p>}
+      <div className="text-sm font-semibold text-fg font-display">{title}</div>
+      {hint && <p className="text-xs text-muted mt-1.5 max-w-xs leading-relaxed">{hint}</p>}
       {action && <div className="mt-5">{action}</div>}
     </div>
   );
@@ -579,7 +594,7 @@ export function Skeleton(props: { lines?: number; className?: string }): JSX.Ele
       {Array.from({ length: lines }, (_, i) => (
         <div
           key={i}
-          className="h-3.5 rounded-lg bg-slate-100"
+          className="h-3.5 rounded-lg bg-elevated"
           style={{ width: i === lines - 1 ? "55%" : i % 2 === 0 ? "100%" : "85%" }}
         />
       ))}
@@ -609,10 +624,10 @@ export function DataBadge(props: { value: string; chars?: number }): JSX.Element
       type="button"
       onClick={() => void copy()}
       title={props.value}
-      className="inline-flex items-center gap-1.5 rounded-md bg-slate-100 hover:bg-slate-200 px-2 py-0.5 transition"
+      className="inline-flex items-center gap-1.5 rounded-md bg-elevated hover:bg-border/60 px-2 py-0.5 transition"
     >
-      <span className="font-data text-[11px] text-slate-600 tracking-tight">{short}</span>
-      <Icon name={copied ? "check" : "doc"} className="w-3 h-3 text-slate-400 shrink-0" />
+      <span className="font-data text-[11px] text-muted tracking-tight">{short}</span>
+      <Icon name={copied ? "check" : "doc"} className="w-3 h-3 text-muted shrink-0" />
     </button>
   );
 }
@@ -627,14 +642,14 @@ export function Pager(props: { page: number; pageSize: number; total: number; on
   const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const to = Math.min(page * pageSize, total);
   return (
-    <div className="flex items-center justify-between gap-3 px-4 py-2 border-t border-slate-100 text-xs text-slate-500">
+    <div className="flex items-center justify-between gap-3 px-4 py-2 border-t border-border text-xs text-muted">
       <span>{from}–{to} of {total}</span>
       <div className="flex items-center gap-1.5">
         <button type="button" disabled={page <= 1} onClick={() => onPage(page - 1)}
-          className="rounded-lg border border-slate-200 px-2.5 py-1 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50">Prev</button>
+          className="rounded-lg border border-border px-2.5 py-1 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-elevated">Prev</button>
         <span className="tabular-nums">Page {page} of {pageCount}</span>
         <button type="button" disabled={page >= pageCount} onClick={() => onPage(page + 1)}
-          className="rounded-lg border border-slate-200 px-2.5 py-1 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50">Next</button>
+          className="rounded-lg border border-border px-2.5 py-1 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-elevated">Next</button>
       </div>
     </div>
   );
@@ -675,8 +690,8 @@ export function Pager(props: { page: number; pageSize: number; total: number; on
  */
 export function TableShell(props: { children: React.ReactNode; className?: string }): JSX.Element {
   return (
-    <div className={`overflow-x-auto overflow-y-auto max-h-[420px] rounded-xl border border-slate-100 ${props.className ?? ""}`}>
-      <table className="w-full text-xs [&_thead]:bg-slate-50/95 [&_thead]:backdrop-blur-sm [&_thead]:text-[10px] [&_thead]:text-slate-400 [&_thead]:uppercase [&_thead]:tracking-widest [&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:bg-slate-50/95 [&_thead_th]:backdrop-blur-sm [&_th]:text-left [&_th]:font-semibold [&_th]:px-3 [&_th]:py-2.5 [&_tbody_tr]:border-t [&_tbody_tr]:border-slate-100 [&_tbody_tr:hover]:bg-slate-50/70 [&_tbody_tr]:transition-colors [&_td]:px-3 [&_td]:py-2.5 [&_td.num]:text-right [&_td.num]:tabular-nums [&_td.num]:font-data">
+    <div className={`overflow-x-auto overflow-y-auto max-h-[420px] rounded-xl border border-border ${props.className ?? ""}`}>
+      <table className="w-full text-xs [&_thead]:bg-elevated/95 [&_thead]:backdrop-blur-sm [&_thead]:text-[0.75rem] [&_thead]:text-muted [&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:bg-elevated/95 [&_thead_th]:backdrop-blur-sm [&_th]:text-left [&_th]:font-semibold [&_th]:px-3 [&_th]:py-2.5 [&_tbody_tr]:border-t [&_tbody_tr]:border-border [&_tbody_tr:hover]:bg-elevated/70 [&_tbody_tr]:transition-colors [&_td]:px-3 [&_td]:py-2.5 [&_td.num]:text-right [&_td.num]:tabular-nums [&_td.num]:font-data">
         {props.children}
       </table>
     </div>

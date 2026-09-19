@@ -6,7 +6,7 @@ import { activePersona } from "../../lib/shared/persona.js";
 import { isExpiringOrExpired } from "../../lib/shared/kyc-expiry.js";
 import type { CredentialUseCase, IdentityResult, Role, UseCase } from "../../types.js";
 import type { DomainKey } from "../../domains.js";
-import { Pill } from "./ui.js";
+import { Pill, TableShell } from "./ui.js";
 import { BatchCsv } from "./BatchCsv.js";
 
 /** The roles PATCH /me/wallet and the auto-assignment work ever give a wallet
@@ -36,7 +36,7 @@ export function UserManagement({ useCaseKey, useCases }: { useCaseKey: string; u
           <button
             key={s}
             onClick={() => setSub(s)}
-            className={`px-3.5 py-1.5 rounded-lg text-sm font-medium ${sub === s ? "bg-white text-brand-700 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-800"}`}
+            className={`rounded-full border px-3 py-1.5 text-xs font-medium ${sub === s ? "bg-primary text-white border-primary" : "bg-surface text-muted border-border hover:bg-elevated"}`}
           >
             {s === "add" ? "Add User" : "Manage Users"}
           </button>
@@ -127,8 +127,8 @@ function AddUser({ useCaseKey, useCases }: { useCaseKey: string; useCases: UseCa
   }
 
   return (
-    <form onSubmit={create} className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 space-y-4 max-w-2xl">
-      <h2 className="font-semibold text-slate-900">{isPlatform ? "Onboard a user" : "Add a user to this use case"}</h2>
+    <form onSubmit={create} className="bg-surface rounded-2xl border border-border/80 shadow-sm p-6 space-y-4 max-w-2xl">
+      <h2 className="font-semibold text-fg">{isPlatform ? "Onboard a user" : "Add a user to this use case"}</h2>
       <div className="grid grid-cols-2 gap-4">
         <input className="input" placeholder="email" value={email} onChange={(e) => setEmail(e.target.value)} />
         <input className="input" type="password" placeholder="password (min 6)" value={password} onChange={(e) => setPassword(e.target.value)} />
@@ -142,8 +142,8 @@ function AddUser({ useCaseKey, useCases }: { useCaseKey: string; useCases: UseCa
         )}
         <input className="input" placeholder="wallet address 0x… (optional)" value={walletAddress} onChange={(e) => setWalletAddress(e.target.value)} />
       </div>
-      <div className="border-t border-slate-100 pt-3">
-        <p className="text-xs font-semibold text-slate-500 mb-2">KYC / onboarding (reviewed before the user can transact)</p>
+      <div className="border-t border-border pt-3">
+        <p className="text-xs font-semibold text-muted mb-2">KYC / onboarding (reviewed before the user can transact)</p>
         <div className="grid grid-cols-2 gap-4">
           <input className="input" placeholder="legal name" value={legalName} onChange={(e) => setLegalName(e.target.value)} />
           <input className="input" placeholder="country" value={country} onChange={(e) => setCountry(e.target.value)} />
@@ -152,8 +152,8 @@ function AddUser({ useCaseKey, useCases }: { useCaseKey: string; useCases: UseCa
           <input className="input col-span-2" placeholder="document reference (URL/ref)" value={documentRef} onChange={(e) => setDocumentRef(e.target.value)} />
         </div>
       </div>
-      {error && <p className="text-sm text-red-600">{error}</p>}
-      {notice && <p className="text-sm text-emerald-600">{notice}</p>}
+      {error && <p className="text-sm text-danger">{error}</p>}
+      {notice && <p className="text-sm text-success">{notice}</p>}
       <button type="submit" className="rounded-lg bg-brand-600 text-white py-1.5 px-4 text-sm font-medium hover:bg-brand-700">Create user</button>
     </form>
   );
@@ -169,7 +169,7 @@ function BatchOnboard(): JSX.Element {
     <div>
       <button
         onClick={() => setOpen((o) => !o)}
-        className="rounded-lg border border-slate-200 text-slate-600 px-3.5 py-1.5 text-sm font-medium hover:bg-slate-50"
+        className="rounded-lg border border-border text-muted px-3.5 py-1.5 text-sm font-medium hover:bg-elevated"
       >
         {open ? "Hide batch onboarding" : "Batch onboard (CSV)"}
       </button>
@@ -286,78 +286,87 @@ function ManageUsers({ rows, me, useCases, onChanged }: { rows: Summary[]; me?: 
 
   return (
     <div className="space-y-3">
-      {error && <p className="text-sm text-red-600">{error}</p>}
-      {notice && <p className="text-sm text-emerald-600">{notice}</p>}
+      {error && <p className="text-sm text-danger">{error}</p>}
+      {notice && <p className="text-sm text-success">{notice}</p>}
       <div className="flex gap-1">
         {(["all", "pending", "expiring"] as const).map((f) => (
           <button
             key={f}
             onClick={() => setKycFilter(f)}
-            className={`px-3 py-1 rounded-lg text-xs font-medium ${kycFilter === f ? "bg-white text-brand-700 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-800"}`}
+            className={`rounded-full border px-3 py-1.5 text-xs font-medium ${kycFilter === f ? "bg-primary text-white border-primary" : "bg-surface text-muted border-border hover:bg-elevated"}`}
           >
             {f === "all" ? "All users" : f === "pending" ? "Pending KYC" : "KYC expiring/expired"}
           </button>
         ))}
       </div>
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="text-xs text-slate-500 bg-slate-50 uppercase tracking-wide"><tr><th className="text-left font-medium px-4 py-2.5">Email</th><th className="text-left font-medium px-4 py-2.5">Role</th><th className="text-left font-medium px-4 py-2.5">Use case</th><th className="text-left font-medium px-4 py-2.5">Status</th><th className="text-left font-medium px-4 py-2.5">KYC</th><th className="px-4 py-2.5 text-right font-medium">Actions</th></tr></thead>
+      <div className="bg-surface rounded-2xl border border-border/80 shadow-sm overflow-hidden">
+        <TableShell>
+          <thead>
+            <tr>
+              <th>Email</th>
+              <th>Role</th>
+              <th>Use case</th>
+              <th>Status</th>
+              <th>KYC</th>
+              <th className="text-right">Actions</th>
+            </tr>
+          </thead>
           <tbody>
             {filteredRows.map((u) => (
               <Fragment key={u.id}>
-                <tr className="border-t border-slate-100">
-                  <td className="px-4 py-2">{u.email}</td>
-                  <td className="px-4 py-2">{u.role}</td>
-                  <td className="px-4 py-2 text-slate-500">{u.useCaseKey ?? "—"}</td>
-                  <td className="px-4 py-2">
+                <tr>
+                  <td>{u.email}</td>
+                  <td>{u.role}</td>
+                  <td className="text-muted">{u.useCaseKey ?? "—"}</td>
+                  <td>
                     <Pill tone={u.active ? "ok" : "warn"}>{u.active ? "active" : "suspended"}</Pill>
                   </td>
-                  <td className="px-4 py-2">
+                  <td>
                     <span title={u.kyc?.legalName ? `${u.kyc.legalName}${u.kyc.country ? " · " + u.kyc.country : ""}` : ""}>
                       <Pill tone={u.kycStatus === "approved" ? "ok" : u.kycStatus === "rejected" ? "danger" : "warn"}>{u.kycStatus}</Pill>
                     </span>
                   </td>
-                  <td className="px-4 py-2 text-right space-x-3">
+                  <td className="text-right space-x-3">
                     {identityIssuerEdge && manageable(u) && u.kycStatus === "pending" && <button onClick={() => setVerifying((v) => (v === u.id ? null : u.id))} className="text-xs text-brand-600 hover:text-brand-700 font-medium">Verify identity (DID/VC)</button>}
                     {isPlatformAdmin && manageable(u) && u.kycStatus === "pending" && <button onClick={() => setReviewingKyc((v) => (v === u.id ? null : u.id))} className="text-xs text-brand-600 hover:text-brand-700 font-medium">Review KYC</button>}
                     {canIssueKycRow(u) && <button onClick={() => setIssuingKyc((v) => (v === u.id ? null : u.id))} className="text-xs text-brand-600 hover:text-brand-700 font-medium">Issue KYC</button>}
                     {manageable(u) ? (
                       <>
                         {canAllowRow(u) && (
-                          <button disabled={allowing === u.id} onClick={() => void allowEverywhere(u)} className="text-xs text-emerald-600 hover:text-emerald-700 font-medium disabled:opacity-40">
+                          <button disabled={allowing === u.id} onClick={() => void allowEverywhere(u)} className="text-xs text-success hover:opacity-70 font-medium disabled:opacity-40">
                             {allowing === u.id ? "Allowing…" : "Allow"}
                           </button>
                         )}
                         <button onClick={() => setEditing(u)} className="text-xs text-brand-600 hover:text-brand-700">Edit</button>
-                        <button onClick={() => act(() => api.updateUser(token!, u.id, { active: !u.active }))} className="text-xs text-amber-600 hover:text-amber-700">{u.active ? "Suspend" : "Reactivate"}</button>
+                        <button onClick={() => act(() => api.updateUser(token!, u.id, { active: !u.active }))} className="text-xs text-warning hover:opacity-70">{u.active ? "Suspend" : "Reactivate"}</button>
                         {identityIssuerEdge && u.kycStatus !== "rejected" && (
                           <button onClick={() => { const reason = window.prompt("Reason for revoking this user's identity?")?.trim(); if (reason) void act(() => api.revokeUserIdentity(token!, u.id, reason).then(() => setNotice("Revoke proposal submitted — pending approval."))); }}
-                            className="text-xs text-red-500 hover:text-red-700">Revoke identity</button>
+                            className="text-xs text-danger hover:opacity-70">Revoke identity</button>
                         )}
-                        <button onClick={() => act(() => api.deleteUser(token!, u.id))} className="text-xs text-red-500 hover:text-red-700">Delete</button>
+                        <button onClick={() => act(() => api.deleteUser(token!, u.id))} className="text-xs text-danger hover:opacity-70">Delete</button>
                       </>
                     ) : (
-                      !canIssueKycRow(u) && <span className="text-xs text-slate-300">—</span>
+                      !canIssueKycRow(u) && <span className="text-xs text-muted">—</span>
                     )}
                   </td>
                 </tr>
                 {verifying === u.id && (
-                  <tr className="border-t border-slate-100 bg-slate-50/60">
-                    <td colSpan={6} className="px-4 py-3">
+                  <tr className="bg-elevated/60">
+                    <td colSpan={6} className="!py-3">
                       <VerifyIdentityPanel user={u} onClose={() => setVerifying(null)} onVerified={() => { setVerifying(null); onChanged(); }} />
                     </td>
                   </tr>
                 )}
                 {reviewingKyc === u.id && (
-                  <tr className="border-t border-slate-100 bg-slate-50/60">
-                    <td colSpan={6} className="px-4 py-3">
+                  <tr className="bg-elevated/60">
+                    <td colSpan={6} className="!py-3">
                       <KycReviewPanel user={u} onClose={() => setReviewingKyc(null)} onDecided={() => { setReviewingKyc(null); onChanged(); }} />
                     </td>
                   </tr>
                 )}
                 {issuingKyc === u.id && (
-                  <tr className="border-t border-slate-100 bg-slate-50/60">
-                    <td colSpan={6} className="px-4 py-3">
+                  <tr className="bg-elevated/60">
+                    <td colSpan={6} className="!py-3">
                       <IssueKycPanel user={u} onClose={() => setIssuingKyc(null)} onIssued={() => { setIssuingKyc(null); onChanged(); }} />
                     </td>
                   </tr>
@@ -365,7 +374,7 @@ function ManageUsers({ rows, me, useCases, onChanged }: { rows: Summary[]; me?: 
               </Fragment>
             ))}
           </tbody>
-        </table>
+        </TableShell>
       </div>
       {editing && (
         <EditPasswordModal
@@ -423,20 +432,20 @@ function VerifyIdentityPanel({ user, onClose, onVerified }: { user: Summary; onC
   }
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
+    <div className="rounded-lg border border-border bg-surface p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-slate-900">Verify identity (DID/VC) · {user.email}</h3>
-        <button onClick={onClose} className="text-xs text-slate-400 hover:text-slate-600">Close</button>
+        <h3 className="text-sm font-semibold text-fg">Verify identity (DID/VC) · {user.email}</h3>
+        <button onClick={onClose} className="text-xs text-muted hover:text-fg">Close</button>
       </div>
-      <p className="text-xs text-slate-500">
+      <p className="text-xs text-muted">
         {challenge ? (
-          <>Challenge <span className="font-mono text-slate-700">{challenge.challenge.slice(0, 12)}…</span> · expires {new Date(challenge.expiresAt).toLocaleTimeString()}</>
+          <>Challenge <span className="font-mono text-fg">{challenge.challenge.slice(0, 12)}…</span> · expires {new Date(challenge.expiresAt).toLocaleTimeString()}</>
         ) : (
           "Requesting challenge…"
         )}
       </p>
       <div>
-        <label className="text-xs font-semibold text-slate-500 mb-1 block">Verifiable Presentation (VP-JWT)</label>
+        <label className="text-xs font-semibold text-muted mb-1 block">Verifiable Presentation (VP-JWT)</label>
         <textarea
           className="input font-mono text-xs h-24 w-full resize-y"
           placeholder="Paste the investor's VP-JWT here"
@@ -448,7 +457,7 @@ function VerifyIdentityPanel({ user, onClose, onVerified }: { user: Summary; onC
         <button
           onClick={() => void mintDemo()}
           disabled={!challenge || busy}
-          className="rounded-lg border border-slate-200 text-slate-600 px-3 py-1.5 text-xs font-medium hover:bg-slate-50 disabled:opacity-40"
+          className="rounded-lg border border-border text-muted px-3 py-1.5 text-xs font-medium hover:bg-elevated disabled:opacity-40"
         >
           Generate demo credential
         </button>
@@ -461,11 +470,11 @@ function VerifyIdentityPanel({ user, onClose, onVerified }: { user: Summary; onC
         </button>
       </div>
       {result && (
-        <p className="text-xs text-emerald-600 font-medium">
+        <p className="text-xs text-success font-medium">
           Verified · country {String(result.claims.country ?? "—")} · issuer {result.issuer.slice(0, 16)}…
         </p>
       )}
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      {error && <p className="text-xs text-danger">{error}</p>}
     </div>
   );
 }
@@ -529,12 +538,12 @@ function KycReviewPanel({ user, onClose, onDecided }: { user: Summary; onClose: 
   }
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
+    <div className="rounded-lg border border-border bg-surface p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-slate-900">Review KYC · {user.email}</h3>
-        <button onClick={onClose} className="text-xs text-slate-400 hover:text-slate-600">Close</button>
+        <h3 className="text-sm font-semibold text-fg">Review KYC · {user.email}</h3>
+        <button onClick={onClose} className="text-xs text-muted hover:text-fg">Close</button>
       </div>
-      <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
+      <div className="grid grid-cols-2 gap-2 text-xs text-muted">
         <div>Legal name: {kyc?.legalName ?? "—"}</div>
         <div>Country: {kyc?.country ?? "—"}</div>
         <div>ID: {kyc?.idType ?? "—"} {kyc?.idNumber ?? ""}</div>
@@ -548,18 +557,18 @@ function KycReviewPanel({ user, onClose, onDecided }: { user: Summary; onClose: 
         {kyc?.idDocument && <button onClick={() => void openDocument(kyc.idDocument!.id)} className="text-xs text-brand-600 hover:text-brand-700 font-medium">View ID document ↗</button>}
         {kyc?.addressDocument && <button onClick={() => void openDocument(kyc.addressDocument!.id)} className="text-xs text-brand-600 hover:text-brand-700 font-medium">View address document ↗</button>}
       </div>
-      {error && <p className="text-xs text-red-600">{error}</p>}
-      <div className="flex items-center gap-3 pt-2 border-t border-slate-100">
-        <select className="rounded border border-slate-300 px-2 py-1 text-xs" value={riskTier} onChange={(e) => setRiskTier(e.target.value as "low" | "medium" | "high")}>
+      {error && <p className="text-xs text-danger">{error}</p>}
+      <div className="flex items-center gap-3 pt-2 border-t border-border">
+        <select className="rounded-lg border border-border bg-elevated/80 px-2.5 py-1 text-xs focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15" value={riskTier} onChange={(e) => setRiskTier(e.target.value as "low" | "medium" | "high")}>
           <option value="low">Low risk</option>
           <option value="medium">Medium risk</option>
           <option value="high">High risk</option>
         </select>
-        <button disabled={busy} onClick={() => void decide("approved")} className="text-xs rounded bg-emerald-600 text-white px-3 py-1.5 font-medium hover:bg-emerald-700 disabled:opacity-40">Propose approve</button>
-        <input className="rounded border border-slate-300 px-2 py-1 text-xs flex-1" placeholder="Rejection reason" value={rejectionReason} onChange={(e) => setRejectionReason(e.target.value)} />
-        <button disabled={busy} onClick={() => void decide("rejected")} className="text-xs rounded border border-red-300 text-red-600 px-3 py-1.5 font-medium hover:bg-red-50 disabled:opacity-40">Propose reject</button>
+        <button disabled={busy} onClick={() => void decide("approved")} className="text-xs rounded bg-success text-white px-3 py-1.5 font-medium hover:bg-success/90 disabled:opacity-40">Propose approve</button>
+        <input className="rounded-lg border border-border bg-elevated/80 px-2.5 py-1 text-xs flex-1 focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15" placeholder="Rejection reason" value={rejectionReason} onChange={(e) => setRejectionReason(e.target.value)} />
+        <button disabled={busy} onClick={() => void decide("rejected")} className="text-xs rounded border border-danger/40 text-danger px-3 py-1.5 font-medium hover:bg-danger/10 disabled:opacity-40">Propose reject</button>
       </div>
-      <p className="text-[11px] text-slate-400">Proposing a decision requires a second Platform Admin to approve it in Approvals before it takes effect.</p>
+      <p className="text-[11px] text-muted">Proposing a decision requires a second Platform Admin to approve it in Approvals before it takes effect.</p>
     </div>
   );
 }
@@ -592,22 +601,22 @@ function IssueKycPanel({ user, onClose, onIssued }: { user: Summary; onClose: ()
   }
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
+    <div className="rounded-lg border border-border bg-surface p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-slate-900">Issue KYC directly · {user.email}</h3>
-        <button onClick={onClose} className="text-xs text-slate-400 hover:text-slate-600">Close</button>
+        <h3 className="text-sm font-semibold text-fg">Issue KYC directly · {user.email}</h3>
+        <button onClick={onClose} className="text-xs text-muted hover:text-fg">Close</button>
       </div>
-      <p className="text-xs text-slate-500">
+      <p className="text-xs text-muted prose-measure">
         Mints this user a decentralized identifier (if they don't already have one) and issues a KYC credential — no
         presented credential needed. Use this for a user with nothing external to present.
       </p>
       <div className="grid grid-cols-2 gap-3">
         <label className="block">
-          <span className="text-xs font-semibold text-slate-500 mb-1 block">Legal name</span>
+          <span className="text-xs font-semibold text-muted mb-1 block">Legal name</span>
           <input className="input text-sm w-full" value={legalName} onChange={(e) => setLegalName(e.target.value)} placeholder="e.g. Jane Doe" />
         </label>
         <label className="block">
-          <span className="text-xs font-semibold text-slate-500 mb-1 block">Country (ISO 3166-1 alpha-2)</span>
+          <span className="text-xs font-semibold text-muted mb-1 block">Country (ISO 3166-1 alpha-2)</span>
           <input className="input text-sm w-full font-mono uppercase" value={country} onChange={(e) => setCountry(e.target.value)} placeholder="e.g. IN" maxLength={2} />
         </label>
       </div>
@@ -619,11 +628,11 @@ function IssueKycPanel({ user, onClose, onIssued }: { user: Summary; onClose: ()
         {busy ? "Issuing…" : "Issue KYC credential"}
       </button>
       {result && (
-        <p className="text-xs text-emerald-600 font-medium">
+        <p className="text-xs text-success font-medium">
           Issued · DID {result.did.slice(0, 16)}… · credential {result.credentialId.slice(0, 12)}…
         </p>
       )}
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      {error && <p className="text-xs text-danger">{error}</p>}
     </div>
   );
 }
@@ -632,12 +641,12 @@ function EditPasswordModal({ user, onClose, onSave }: { user: Summary; onClose: 
   const [pw, setPw] = useState("");
   return (
     <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4 z-50" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm space-y-4" onClick={(e) => e.stopPropagation()}>
-        <h3 className="font-semibold text-slate-900">Reset password</h3>
-        <p className="text-xs text-slate-500">{user.email}</p>
+      <div className="bg-surface rounded-xl shadow-xl p-6 w-full max-w-sm space-y-4" onClick={(e) => e.stopPropagation()}>
+        <h3 className="font-semibold text-fg">Reset password</h3>
+        <p className="text-xs text-muted">{user.email}</p>
         <input className="input" type="password" placeholder="new password (min 6)" value={pw} onChange={(e) => setPw(e.target.value)} />
         <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="text-sm text-slate-500 px-3 py-1.5">Cancel</button>
+          <button onClick={onClose} className="text-sm text-muted px-3 py-1.5">Cancel</button>
           <button disabled={pw.length < 6} onClick={() => void onSave(pw)} className="rounded-lg bg-brand-600 text-white px-4 py-1.5 text-sm font-medium hover:bg-brand-700 disabled:opacity-40">Save</button>
         </div>
       </div>

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "../../api.js";
 import { useAuth } from "../../auth.js";
 import type { ChainInfo, InvoiceRowResult, StagedInvoice, TokenizeResult, UseCase } from "../../types.js";
-import { Card, EmptyState, Pill, SectionHeader } from "../shared/ui.js";
+import { Card, EmptyState, Pill, SectionHeader, TableShell } from "../shared/ui.js";
 import { parseCsv } from "../../lib/shared/csv.js";
 import { isInvoiceUseCase } from "./AssetManagement.js";
 
@@ -167,7 +167,7 @@ const SOURCE_TONE: Record<StagedInvoice["source"], "info" | "muted" | "ok"> = {
 
 const btn = "rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-50";
 const btnPrimary = `${btn} bg-brand-600 text-white hover:bg-brand-700`;
-const btnGhost = `${btn} border border-slate-200 text-slate-700 hover:bg-slate-50`;
+const btnGhost = `${btn} border border-border text-fg hover:bg-elevated`;
 
 interface Props {
   useCase: UseCase;
@@ -345,13 +345,13 @@ export function InvoiceRegister({ useCase, chains }: Props): JSX.Element {
         </button>
       </div>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
-      {notice && <p className="text-sm text-emerald-700">{notice}</p>}
+      {error && <p className="text-sm text-danger">{error}</p>}
+      {notice && <p className="text-sm text-success">{notice}</p>}
       {importResults && importResults.some((r) => r.status !== "staged") && (
-        <div className="text-xs text-slate-500 space-y-0.5">
+        <div className="text-xs text-muted space-y-0.5">
           {importResults.filter((r) => r.status !== "staged").map((r) => (
             <div key={r.index}>
-              Row {r.index + 1}: <span className={r.status === "duplicate" ? "text-amber-700" : "text-red-600"}>{r.status}</span>
+              Row {r.index + 1}: <span className={r.status === "duplicate" ? "text-warning" : "text-danger"}>{r.status}</span>
               {r.error ? ` — ${r.error}` : ""}
             </div>
           ))}
@@ -394,18 +394,18 @@ export function InvoiceRegister({ useCase, chains }: Props): JSX.Element {
       )}
 
       {tokenizeResults && (
-        <div className="text-xs text-slate-500 space-y-0.5">
+        <div className="text-xs text-muted space-y-0.5">
           {tokenizeResults.map((r) => (
             <div key={r.id}>
-              <span className="font-mono text-slate-400">{r.id.slice(0, 8)}…</span>{" "}
-              <span className={r.status === "tokenized" ? "text-emerald-700" : r.status === "pending_approval" || r.status === "skipped" ? "text-amber-700" : "text-red-600"}>{r.status}</span>
+              <span className="font-mono text-muted">{r.id.slice(0, 8)}…</span>{" "}
+              <span className={r.status === "tokenized" ? "text-success" : r.status === "pending_approval" || r.status === "skipped" ? "text-warning" : "text-danger"}>{r.status}</span>
               {r.assetId ? ` → ${r.assetId}` : ""}{r.error ? ` — ${r.error}` : ""}
             </div>
           ))}
         </div>
       )}
 
-      <Card className="overflow-hidden">
+      <Card>
         {rows.length === 0 ? (
           <EmptyState
             icon="doc"
@@ -413,74 +413,72 @@ export function InvoiceRegister({ useCase, chains }: Props): JSX.Element {
             hint={`${isInvoiceUC ? "Pull from ERP, upload" : "Upload"} a CSV/XLSX, or add a${isInvoiceUC ? "n invoice" : " row"} manually to get started.`}
           />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
-                <tr>
-                  <th className="px-4 py-2.5 w-8">
-                    <input type="checkbox" checked={allStagedSelected} disabled={stagedIds.length === 0} onChange={toggleAll} aria-label="Select all staged" />
-                  </th>
-                  {isInvoiceUC ? (
-                    <>
-                      <th className="text-left font-medium px-4 py-2.5">Invoice</th>
-                      <th className="text-left font-medium px-4 py-2.5">Buyer</th>
-                      <th className="text-right font-medium px-4 py-2.5">Amount</th>
-                      <th className="text-left font-medium px-4 py-2.5">Due date</th>
-                    </>
-                  ) : (
-                    previewFields.map((f) => <th key={f} className="text-left font-medium px-4 py-2.5">{f}</th>)
-                  )}
-                  <th className="text-left font-medium px-4 py-2.5">Source</th>
-                  <th className="text-left font-medium px-4 py-2.5">Hash</th>
-                  <th className="text-left font-medium px-4 py-2.5">Status</th>
-                  <th className="px-4 py-2.5" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {rows.map((r) => {
-                  const m = r.metadata;
-                  const amount = m.amount != null && m.amount !== "" ? Number(m.amount) : null;
-                  return (
-                    <tr key={r.id}>
-                      <td className="px-4 py-2.5">
-                        {r.status === "staged" && (
-                          <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggle(r.id)} aria-label={`Select ${String(m.invoiceNumber ?? r.id)}`} />
-                        )}
-                      </td>
-                      {isInvoiceUC ? (
-                        <>
-                          <td className="px-4 py-2.5 font-medium text-slate-800">
-                            {String(m.invoiceNumber ?? "—")}
-                            {m.invoiceDate ? <div className="text-[11px] font-normal text-slate-400">{String(m.invoiceDate)}</div> : null}
-                          </td>
-                          <td className="px-4 py-2.5 text-xs text-slate-600">{String(m.buyerName ?? "—")}</td>
-                          <td className="px-4 py-2.5 text-right font-mono text-slate-700">
-                            {amount != null && Number.isFinite(amount) ? `${amount.toLocaleString("en-IN")} ${String(m.currency ?? "")}`.trim() : "—"}
-                          </td>
-                          <td className="px-4 py-2.5 text-xs text-slate-600">{m.dueDate ? String(m.dueDate) : "—"}</td>
-                        </>
-                      ) : (
-                        previewFields.map((f) => <td key={f} className="px-4 py-2.5 text-xs text-slate-700">{m[f] != null && m[f] !== "" ? String(m[f]) : "—"}</td>)
+          <TableShell>
+            <thead>
+              <tr>
+                <th className="w-8">
+                  <input type="checkbox" checked={allStagedSelected} disabled={stagedIds.length === 0} onChange={toggleAll} aria-label="Select all staged" />
+                </th>
+                {isInvoiceUC ? (
+                  <>
+                    <th>Invoice</th>
+                    <th>Buyer</th>
+                    <th>Amount</th>
+                    <th>Due date</th>
+                  </>
+                ) : (
+                  previewFields.map((f) => <th key={f}>{f}</th>)
+                )}
+                <th>Source</th>
+                <th>Hash</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => {
+                const m = r.metadata;
+                const amount = m.amount != null && m.amount !== "" ? Number(m.amount) : null;
+                return (
+                  <tr key={r.id}>
+                    <td>
+                      {r.status === "staged" && (
+                        <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggle(r.id)} aria-label={`Select ${String(m.invoiceNumber ?? r.id)}`} />
                       )}
-                      <td className="px-4 py-2.5"><Pill tone={SOURCE_TONE[r.source]}>{r.source}</Pill></td>
-                      <td className="px-4 py-2.5 font-mono text-[11px] text-slate-400" title={r.invoiceHash}>{r.invoiceHash.slice(0, 10)}…</td>
-                      <td className="px-4 py-2.5">
-                        <Pill tone={r.status === "tokenized" ? "ok" : "warn"}>{r.status}</Pill>
-                        {r.status === "tokenized" && r.assetId ? (
-                          <div className="text-[11px] font-mono text-slate-400 mt-0.5 max-w-[12rem] truncate" title={r.assetId}>{r.assetId}</div>
-                        ) : null}
-                      </td>
-                      <td className="px-4 py-2.5 text-right">
-                        {r.status === "staged" && (
-                          <button type="button" className="text-xs text-red-600 hover:underline" onClick={() => void deleteInvoice(r.id)}>Delete</button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                    </td>
+                    {isInvoiceUC ? (
+                      <>
+                        <td className="font-medium text-fg">
+                          {String(m.invoiceNumber ?? "—")}
+                          {m.invoiceDate ? <div className="text-[11px] font-normal text-muted">{String(m.invoiceDate)}</div> : null}
+                        </td>
+                        <td className="text-muted">{String(m.buyerName ?? "—")}</td>
+                        <td className="num text-fg">
+                          {amount != null && Number.isFinite(amount) ? `${amount.toLocaleString("en-IN")} ${String(m.currency ?? "")}`.trim() : "—"}
+                        </td>
+                        <td className="text-muted">{m.dueDate ? String(m.dueDate) : "—"}</td>
+                      </>
+                    ) : (
+                      previewFields.map((f) => <td key={f} className="text-fg">{m[f] != null && m[f] !== "" ? String(m[f]) : "—"}</td>)
+                    )}
+                    <td><Pill tone={SOURCE_TONE[r.source]}>{r.source}</Pill></td>
+                    <td className="font-mono text-[11px] text-muted" title={r.invoiceHash}>{r.invoiceHash.slice(0, 10)}…</td>
+                    <td>
+                      <Pill tone={r.status === "tokenized" ? "ok" : "warn"}>{r.status}</Pill>
+                      {r.status === "tokenized" && r.assetId ? (
+                        <div className="text-[11px] font-mono text-muted mt-0.5 max-w-[12rem] truncate" title={r.assetId}>{r.assetId}</div>
+                      ) : null}
+                    </td>
+                    <td className="text-right">
+                      {r.status === "staged" && (
+                        <button type="button" className="text-xs text-danger hover:underline" onClick={() => void deleteInvoice(r.id)}>Delete</button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </TableShell>
         )}
       </Card>
     </div>
@@ -521,12 +519,12 @@ function AddInvoiceForm({ fields, fieldTypes, isInvoiceUC, useCaseKey, onClose, 
   }
 
   return (
-    <Card title={isInvoiceUC ? "Add an invoice" : "Add a row"} actions={<button type="button" className="text-xs text-slate-500 hover:underline" onClick={onClose}>Cancel</button>}>
+    <Card title={isInvoiceUC ? "Add an invoice" : "Add a row"} actions={<button type="button" className="text-xs text-muted hover:underline" onClick={onClose}>Cancel</button>}>
       <form onSubmit={(e) => void submit(e)} className="space-y-4">
         <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
           {fields.map((f) => (
             <label key={f} className="block">
-              <span className="block text-xs font-medium text-slate-600 mb-1">{f}</span>
+              <span className="block text-xs font-medium text-muted mb-1">{f}</span>
               <input
                 className="input"
                 type={isNumberField(f) ? "number" : "text"}
@@ -537,7 +535,7 @@ function AddInvoiceForm({ fields, fieldTypes, isInvoiceUC, useCaseKey, onClose, 
             </label>
           ))}
         </div>
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <p className="text-sm text-danger">{error}</p>}
         <button type="submit" className={btnPrimary} disabled={busy}>{busy ? "Adding…" : isInvoiceUC ? "Add invoice" : "Add row"}</button>
       </form>
     </Card>
@@ -586,11 +584,11 @@ function TokenizeForm({ count, isInvoiceUC, chainIds, chainLabel, defaultChainId
   }
 
   return (
-    <Card title={`Tokenize ${count} ${noun}${count === 1 ? "" : "s"}`} actions={<button type="button" className="text-xs text-slate-500 hover:underline" onClick={onClose}>Cancel</button>}>
+    <Card title={`Tokenize ${count} ${noun}${count === 1 ? "" : "s"}`} actions={<button type="button" className="text-xs text-muted hover:underline" onClick={onClose}>Cancel</button>}>
       <form onSubmit={(e) => void submit(e)} className="space-y-4">
         <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
           <label className="block">
-            <span className="block text-xs font-medium text-slate-600 mb-1">Chain / DLT</span>
+            <span className="block text-xs font-medium text-muted mb-1">Chain / DLT</span>
             <select className="select" value={chainId} onChange={(e) => setChainId(e.target.value)} disabled={busy}>
               {chainIds.length === 0 && <option value="">No deployed chain</option>}
               {chainIds.map((id) => <option key={id} value={id}>{chainLabel(id)}</option>)}
@@ -598,30 +596,30 @@ function TokenizeForm({ count, isInvoiceUC, chainIds, chainLabel, defaultChainId
           </label>
           {isInvoiceUC ? (
             <label className="block">
-              <span className="block text-xs font-medium text-slate-600 mb-1">Par value per token</span>
+              <span className="block text-xs font-medium text-muted mb-1">Par value per token</span>
               <input className="input" type="number" min="1" step="1" value={parValue} onChange={(e) => setParValue(e.target.value)} disabled={busy} />
-              <span className="block text-[11px] text-slate-400 mt-1">supply per invoice = round(amount ÷ par)</span>
+              <span className="block text-[11px] text-muted mt-1">supply per invoice = round(amount ÷ par)</span>
             </label>
           ) : (
             <label className="block">
-              <span className="block text-xs font-medium text-slate-600 mb-1">Supply per row</span>
+              <span className="block text-xs font-medium text-muted mb-1">Supply per row</span>
               <input className="input" type="number" min="1" step="1" value={initialSupply} onChange={(e) => setInitialSupply(e.target.value)} disabled={busy} />
-              <span className="block text-[11px] text-slate-400 mt-1">minted to the use case's treasury, same amount for every selected row</span>
+              <span className="block text-[11px] text-muted mt-1">minted to the use case's treasury, same amount for every selected row</span>
             </label>
           )}
         </div>
-        <label className="flex items-center gap-2 text-sm text-slate-700">
+        <label className="flex items-center gap-2 text-sm text-fg">
           <input type="checkbox" checked={listForSale} onChange={(e) => setListForSale(e.target.checked)} disabled={busy} />
           List for primary sale
         </label>
         {listForSale && (
           <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
             <label className="block">
-              <span className="block text-xs font-medium text-slate-600 mb-1">Unit price</span>
+              <span className="block text-xs font-medium text-muted mb-1">Unit price</span>
               <input className="input" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} disabled={busy} />
             </label>
             <label className="block">
-              <span className="block text-xs font-medium text-slate-600 mb-1">Currency</span>
+              <span className="block text-xs font-medium text-muted mb-1">Currency</span>
               <select className="select" value={currency} onChange={(e) => setCurrency(e.target.value)} disabled={busy}>
                 <option value="">Currency…</option>
                 {availCurrencies.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}

@@ -101,21 +101,21 @@ export function ApprovalsPanel({ onChanged }: { onChanged?: () => void }): JSX.E
 
   return (
     <div className="space-y-4 max-w-3xl">
-      {error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2">{error}</div>}
+      {error && <div className="rounded-lg bg-danger/10 border border-danger/30 text-danger text-sm px-4 py-2">{error}</div>}
 
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 space-y-3">
-        <h2 className="font-semibold text-slate-900">Pending approvals <span className="text-slate-400 font-normal">({pending.length})</span></h2>
-        {pending.length === 0 && <p className="text-sm text-slate-400">Nothing awaiting approval.</p>}
+      <div className="bg-surface rounded-2xl border border-border/80 shadow-sm p-6 space-y-3">
+        <h2 className="font-semibold text-fg">Pending approvals <span className="text-muted font-normal">({pending.length})</span></h2>
+        {pending.length === 0 && <p className="text-sm text-muted">Nothing awaiting approval.</p>}
         {pending.map((p) => {
           const isProposer = p.proposerId === user?.id;
           return (
-            <div key={p.id} className="rounded-lg border border-slate-200 p-4 flex items-start justify-between gap-4">
+            <div key={p.id} className="rounded-lg border border-border p-4 flex items-start justify-between gap-4">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-sm">
-                  <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 text-[10px] font-semibold uppercase">{p.kind}</span>
-                  <span className="text-slate-700">{summarize(p)}</span>
+                  <span className="px-1.5 py-0.5 rounded bg-elevated text-muted text-[10px] font-semibold uppercase">{p.kind}</span>
+                  <span className="text-fg">{summarize(p)}</span>
                 </div>
-                <div className="text-[11px] text-slate-400 mt-1">
+                <div className="text-[11px] text-muted mt-1">
                   by {p.proposerLabel} · {p.approvals.length}/{p.required} approvals
                   {p.assetId && <> · asset {p.assetId.slice(0, 8)}…</>}
                 </div>
@@ -126,7 +126,7 @@ export function ApprovalsPanel({ onChanged }: { onChanged?: () => void }): JSX.E
                   className="text-xs rounded bg-brand-600 text-white px-3 py-1.5 font-medium hover:bg-brand-700 disabled:opacity-40">Approve</button>
                 <button disabled={isProposer || busy === p.id}
                   onClick={() => void decide(p, "reject")}
-                  className="text-xs rounded border border-slate-300 text-slate-600 px-3 py-1.5 font-medium hover:bg-slate-50 disabled:opacity-40">Reject</button>
+                  className="text-xs rounded border border-border text-muted px-3 py-1.5 font-medium hover:bg-elevated disabled:opacity-40">Reject</button>
               </div>
             </div>
           );
@@ -134,8 +134,8 @@ export function ApprovalsPanel({ onChanged }: { onChanged?: () => void }): JSX.E
       </div>
 
       {decided.length > 0 && (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 space-y-2">
-          <h3 className="text-sm font-semibold text-slate-800">Recent decisions</h3>
+        <div className="bg-surface rounded-2xl border border-border/80 shadow-sm p-6 space-y-2">
+          <h3 className="text-sm font-semibold text-fg">Recent decisions</h3>
           {decided.map((p) => <DecisionRow key={p.id} p={p} />)}
         </div>
       )}
@@ -151,10 +151,10 @@ function DecisionRow({ p }: { p: Proposal }): JSX.Element {
   const failedRows = report?.rows.filter((r) => r.status === "failed") ?? [];
 
   return (
-    <div className="text-sm py-1 border-b border-slate-50 last:border-0">
+    <div className="text-sm py-1 border-b border-border/60 last:border-0">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-slate-600 truncate">
-          <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-semibold uppercase mr-2">{p.kind}</span>
+        <span className="text-muted truncate">
+          <span className="px-1.5 py-0.5 rounded bg-elevated text-muted text-[10px] font-semibold uppercase mr-2">{p.kind}</span>
           {summarize(p)}
         </span>
         <div className="flex items-center gap-2 shrink-0">
@@ -167,10 +167,10 @@ function DecisionRow({ p }: { p: Proposal }): JSX.Element {
         </div>
       </div>
       {report && expanded && (
-        <div className="mt-1.5 mb-1 rounded-lg bg-slate-50 border border-slate-100 px-3 py-2 text-xs text-slate-600">
+        <div className="mt-1.5 mb-1 rounded-lg bg-elevated border border-border/80 px-3 py-2 text-xs text-muted">
           <div>Total: {report.total} | Successful: {report.succeeded} | Failed: {report.failed}</div>
           {failedRows.length > 0 && (
-            <ul className="mt-1 list-disc pl-5 space-y-0.5 text-rose-600">
+            <ul className="mt-1 list-disc pl-5 space-y-0.5 text-danger">
               {failedRows.map((r) => (
                 <li key={r.index}>#{r.index + 1} {r.email ?? r.subjectEmail ?? "?"}: {r.error ?? "failed"}</li>
               ))}

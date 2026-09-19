@@ -58,7 +58,7 @@ const KYC_PARTNERS: { name: string; text: string }[] = [
 
 function SectionTag({ children }: { children: string }): JSX.Element {
   return (
-    <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-brand-600">
+    <div className="inline-flex items-center gap-2 text-[11px] font-semibold text-brand-600">
       <span className="w-5 h-px bg-brand-400" aria-hidden="true" />
       {children}
     </div>
@@ -69,7 +69,7 @@ export function Home(): JSX.Element {
   const { navigate } = useRoute();
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
+    <div className="min-h-screen bg-surface flex flex-col">
       {/* Header */}
       <header className="sticky top-0 z-20 border-b border-white/10 bg-ink/95 backdrop-blur">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
@@ -165,12 +165,12 @@ export function Home(): JSX.Element {
           </div>
           <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 gap-5">
             {CHALLENGES.map((c) => (
-              <div key={c.title} className="rounded-2xl border border-slate-200/80 bg-slate-50/60 p-6">
-                <div className="w-10 h-10 rounded-xl bg-white border border-slate-200 text-slate-500 flex items-center justify-center">
+              <div key={c.title} className="rounded-2xl border border-border/80 bg-elevated/60 p-6">
+                <div className="w-10 h-10 rounded-xl bg-surface border border-border text-muted flex items-center justify-center">
                   <Icon name={c.icon} className="w-5 h-5" />
                 </div>
-                <h3 className="mt-4 text-base font-semibold text-slate-900">{c.title}</h3>
-                <p className="mt-1.5 text-sm text-slate-500 leading-relaxed">{c.text}</p>
+                <h3 className="mt-4 text-base font-semibold text-fg">{c.title}</h3>
+                <p className="mt-1.5 text-sm text-muted leading-relaxed">{c.text}</p>
               </div>
             ))}
           </div>
@@ -181,19 +181,19 @@ export function Home(): JSX.Element {
           <div className="max-w-2xl">
             <SectionTag>The solution</SectionTag>
             <h2 className="mt-3 text-3xl font-extrabold tracking-tight text-ink">Introducing XI Tokenize</h2>
-            <p className="mt-3 text-slate-600">
+            <p className="mt-3 text-muted">
               A no-code tokenization studio that lets issuers launch, manage and move real-world assets
               on-chain — without engineering smart contracts, KYC pipelines or compliance logic from scratch.
             </p>
           </div>
           <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
             {PILLARS.map((p) => (
-              <div key={p.title} className="rounded-2xl border border-slate-200/80 bg-white shadow-sm p-6">
+              <div key={p.title} className="rounded-2xl border border-border/80 bg-surface shadow-sm p-6">
                 <div className="w-10 h-10 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center">
                   <Icon name={p.icon} className="w-5 h-5" />
                 </div>
-                <h3 className="mt-4 text-base font-semibold text-slate-900">{p.title}</h3>
-                <p className="mt-1.5 text-sm text-slate-500 leading-relaxed">{p.text}</p>
+                <h3 className="mt-4 text-base font-semibold text-fg">{p.title}</h3>
+                <p className="mt-1.5 text-sm text-muted leading-relaxed">{p.text}</p>
               </div>
             ))}
           </div>
@@ -207,15 +207,15 @@ export function Home(): JSX.Element {
           </div>
           <div className="mt-10 grid grid-cols-1 md:grid-cols-3 gap-5">
             {STEPS.map((s, i) => (
-              <div key={s.title} className="relative rounded-2xl border border-slate-200/80 bg-white shadow-sm p-6">
+              <div key={s.title} className="relative rounded-2xl border border-border/80 bg-surface shadow-sm p-6">
                 <div className="flex items-center gap-3">
                   <div className="shrink-0 w-10 h-10 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center">
                     <Icon name={s.icon} className="w-5 h-5" />
                   </div>
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Step {i + 1}</div>
+                  <div className="text-[11px] font-semibold text-muted">Step {i + 1}</div>
                 </div>
-                <h3 className="mt-4 text-base font-semibold text-slate-900">{s.title}</h3>
-                <p className="mt-1.5 text-sm text-slate-500 leading-relaxed">{s.text}</p>
+                <h3 className="mt-4 text-base font-semibold text-fg">{s.title}</h3>
+                <p className="mt-1.5 text-sm text-muted leading-relaxed">{s.text}</p>
               </div>
             ))}
           </div>
@@ -226,16 +226,16 @@ export function Home(): JSX.Element {
           <div className="max-w-2xl">
             <SectionTag>Technical foundation</SectionTag>
             <h2 className="mt-3 text-3xl font-extrabold tracking-tight text-ink">Multi-standard token support</h2>
-            <p className="mt-3 text-slate-600">Choose the right standard per asset, or mix several in one issuance.</p>
+            <p className="mt-3 text-muted">Choose the right standard per asset, or mix several in one issuance.</p>
           </div>
           <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
             {STANDARDS.map((s) => (
-              <div key={s.code} className="rounded-2xl border border-slate-200/80 bg-white shadow-sm p-6">
+              <div key={s.code} className="rounded-2xl border border-border/80 bg-surface shadow-sm p-6">
                 <div className="inline-flex items-center rounded-md bg-ink px-2.5 py-1 text-xs font-bold tracking-wide text-brand-400">
                   {s.code}
                 </div>
-                <h3 className="mt-3 text-base font-semibold text-slate-900">{s.name}</h3>
-                <p className="mt-1.5 text-sm text-slate-500 leading-relaxed">{s.text}</p>
+                <h3 className="mt-3 text-base font-semibold text-fg">{s.name}</h3>
+                <p className="mt-1.5 text-sm text-muted leading-relaxed">{s.text}</p>
               </div>
             ))}
           </div>
@@ -246,17 +246,17 @@ export function Home(): JSX.Element {
           <div className="max-w-2xl">
             <SectionTag>Coverage</SectionTag>
             <h2 className="mt-3 text-3xl font-extrabold tracking-tight text-ink">One platform, every asset class</h2>
-            <p className="mt-3 text-slate-600">From physical commodities to financial instruments — asset-class agnostic by design.</p>
+            <p className="mt-3 text-muted">From physical commodities to financial instruments — asset-class agnostic by design.</p>
           </div>
           <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
             {ASSETS.map((a) => (
-              <div key={a.title} className="flex gap-4 rounded-2xl border border-slate-200/80 bg-slate-50/60 p-6">
-                <div className="shrink-0 w-10 h-10 rounded-xl bg-white border border-slate-200 text-brand-600 flex items-center justify-center">
+              <div key={a.title} className="flex gap-4 rounded-2xl border border-border/80 bg-elevated/60 p-6">
+                <div className="shrink-0 w-10 h-10 rounded-xl bg-surface border border-border text-brand-600 flex items-center justify-center">
                   <Icon name={a.icon} className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-base font-semibold text-slate-900">{a.title}</h3>
-                  <p className="mt-1 text-sm text-slate-500 leading-relaxed">{a.text}</p>
+                  <h3 className="text-base font-semibold text-fg">{a.title}</h3>
+                  <p className="mt-1 text-sm text-muted leading-relaxed">{a.text}</p>
                 </div>
               </div>
             ))}
@@ -265,7 +265,7 @@ export function Home(): JSX.Element {
 
         {/* Compliance layer */}
         <section className="max-w-6xl mx-auto px-6 pt-16 pb-20">
-          <div className="rounded-3xl border border-slate-200/80 bg-ink text-white overflow-hidden">
+          <div className="rounded-3xl border border-border/80 bg-ink text-white overflow-hidden">
             <div className="grid lg:grid-cols-2 gap-10 p-8 sm:p-10">
               <div>
                 <SectionTag>Compliance layer</SectionTag>
@@ -288,7 +288,7 @@ export function Home(): JSX.Element {
                 </ul>
               </div>
               <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-brand-400">KYC partner ecosystem</div>
+                <div className="text-[11px] font-semibold text-brand-400">KYC partner ecosystem</div>
                 <div className="mt-4 space-y-3">
                   {KYC_PARTNERS.map((k) => (
                     <div key={k.name} className="flex items-center gap-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3">
@@ -340,10 +340,10 @@ export function Home(): JSX.Element {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-slate-200 bg-white">
+      <footer className="border-t border-border bg-surface">
         <div className="max-w-6xl mx-auto px-6 py-8 flex flex-col sm:flex-row items-center justify-between gap-4">
           <Logo size={26} />
-          <div className="text-xs text-slate-500 text-center sm:text-right">
+          <div className="text-xs text-muted text-center sm:text-right">
             <div>A product by XPI Quantum Technologies Pvt Ltd · 2026</div>
           </div>
         </div>

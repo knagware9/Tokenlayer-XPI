@@ -69,7 +69,7 @@ export function KycSubmissionPanel({ onSubmitted }: { onSubmitted: () => void })
     return (
       <Card>
         <SectionHeader title="Complete your KYC" description="Submit your identity details and documents for review." />
-        <div className="mt-3 rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-800">
+        <div className="mt-3 rounded-lg bg-success/10 border border-success/25 px-4 py-3 text-sm text-success">
           Your KYC application has been submitted and is pending review. We'll update your status here once it's been reviewed.
         </div>
       </Card>
@@ -80,34 +80,34 @@ export function KycSubmissionPanel({ onSubmitted }: { onSubmitted: () => void })
     <Card>
       <SectionHeader title="Complete your KYC" description="Submit your identity details and documents for review." />
       <div className="grid gap-3 sm:grid-cols-2 mt-3">
-        <input className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Legal name" value={legalName} onChange={(e) => setLegalName(e.target.value)} />
-        <input className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Country" value={country} onChange={(e) => setCountry(e.target.value)} />
-        <select className="rounded-lg border border-slate-300 px-3 py-2 text-sm" value={idType} onChange={(e) => setIdType(e.target.value)}>
+        <input className="rounded-lg border border-border bg-elevated/80 px-3 py-2 text-sm focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15" placeholder="Legal name" value={legalName} onChange={(e) => setLegalName(e.target.value)} />
+        <input className="rounded-lg border border-border bg-elevated/80 px-3 py-2 text-sm focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15" placeholder="Country" value={country} onChange={(e) => setCountry(e.target.value)} />
+        <select className="rounded-lg border border-border bg-elevated/80 px-3 py-2 text-sm focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15" value={idType} onChange={(e) => setIdType(e.target.value)}>
           <option value="passport">Passport</option>
           <option value="national-id">National ID</option>
           <option value="drivers-license">Driver's license</option>
         </select>
-        <input className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="ID number" value={idNumber} onChange={(e) => setIdNumber(e.target.value)} />
-        <input type="date" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Date of birth" value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} />
-        <input className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Occupation" value={occupation} onChange={(e) => setOccupation(e.target.value)} />
-        <input className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Street address" value={street} onChange={(e) => setStreet(e.target.value)} />
-        <input className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="City" value={city} onChange={(e) => setCity(e.target.value)} />
-        <input className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Postal code" value={postalCode} onChange={(e) => setPostalCode(e.target.value)} />
-        <input className="rounded-lg border border-slate-300 px-3 py-2 text-sm sm:col-span-2" placeholder="Source of funds" value={sourceOfFunds} onChange={(e) => setSourceOfFunds(e.target.value)} />
-        <label className="flex items-center gap-2 text-sm text-slate-600 sm:col-span-2">
+        <input className="rounded-lg border border-border bg-elevated/80 px-3 py-2 text-sm focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15" placeholder="ID number" value={idNumber} onChange={(e) => setIdNumber(e.target.value)} />
+        <input type="date" className="rounded-lg border border-border bg-elevated/80 px-3 py-2 text-sm focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15" placeholder="Date of birth" value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} />
+        <input className="rounded-lg border border-border bg-elevated/80 px-3 py-2 text-sm focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15" placeholder="Occupation" value={occupation} onChange={(e) => setOccupation(e.target.value)} />
+        <input className="rounded-lg border border-border bg-elevated/80 px-3 py-2 text-sm focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15" placeholder="Street address" value={street} onChange={(e) => setStreet(e.target.value)} />
+        <input className="rounded-lg border border-border bg-elevated/80 px-3 py-2 text-sm focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15" placeholder="City" value={city} onChange={(e) => setCity(e.target.value)} />
+        <input className="rounded-lg border border-border bg-elevated/80 px-3 py-2 text-sm focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15" placeholder="Postal code" value={postalCode} onChange={(e) => setPostalCode(e.target.value)} />
+        <input className="rounded-lg border border-border bg-elevated/80 px-3 py-2 text-sm sm:col-span-2 focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15" placeholder="Source of funds" value={sourceOfFunds} onChange={(e) => setSourceOfFunds(e.target.value)} />
+        <label className="flex items-center gap-2 text-sm text-muted sm:col-span-2">
           <input type="checkbox" checked={pepDeclaration} onChange={(e) => setPepDeclaration(e.target.checked)} />
           I am a politically exposed person (PEP)
         </label>
         <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Government-issued ID</label>
+          <label className="block text-xs font-medium text-muted mb-1">Government-issued ID</label>
           <input type="file" accept="application/pdf,image/png,image/jpeg,image/webp" onChange={(e) => setIdFile(e.target.files?.[0] ?? null)} className="text-sm" />
         </div>
         <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Proof of address</label>
+          <label className="block text-xs font-medium text-muted mb-1">Proof of address</label>
           <input type="file" accept="application/pdf,image/png,image/jpeg,image/webp" onChange={(e) => setAddressFile(e.target.files?.[0] ?? null)} className="text-sm" />
         </div>
       </div>
-      {error && <p className="text-sm text-red-600 mt-3">{error}</p>}
+      {error && <p className="text-sm text-danger mt-3">{error}</p>}
       <button
         onClick={() => void submit()}
         disabled={!canSubmit || busy}

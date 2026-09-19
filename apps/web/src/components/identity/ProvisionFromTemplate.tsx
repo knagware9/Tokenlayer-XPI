@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../../api.js";
 import { useAuth } from "../../auth.js";
 import type { OrgType, ProvisionResult, TemplateParam, UseCaseTemplateMeta } from "../../types.js";
-import { Card, EmptyState, Pill, SectionHeader, Skeleton } from "../shared/ui.js";
+import { Card, EmptyState, Pill, SectionHeader, Skeleton, TableShell } from "../shared/ui.js";
 
 /** The provisioning issuer-org types the server accepts, in menu order. */
 const ORG_TYPES: OrgType[] = ["bank", "corporate", "msme", "government", "verifier"];
@@ -44,13 +44,13 @@ function StepDots({ step }: { step: Step }): JSX.Element {
                 ? "bg-brand-600 text-white"
                 : s < step
                   ? "bg-brand-50 text-brand-700"
-                  : "bg-slate-100 text-slate-400"
+                  : "bg-elevated text-muted"
             }`}
           >
             <span className="tabular-nums">{s}</span>
             <span className="hidden sm:inline">{labels[s]}</span>
           </div>
-          {s < 4 && <div className="w-4 h-px bg-slate-200" />}
+          {s < 4 && <div className="w-4 h-px bg-border" />}
         </div>
       ))}
     </div>
@@ -195,27 +195,27 @@ export function ProvisionFromTemplate({ onDone }: { onDone?: () => void }): JSX.
             {templates === null ? (
               <Skeleton lines={6} />
             ) : listError ? (
-              <div className="text-sm text-rose-600">{listError}</div>
+              <div className="text-sm text-danger">{listError}</div>
             ) : templates.length === 0 ? (
               <EmptyState icon="spark" title="No templates available" hint="A platform admin has not published any credential use-case templates yet." />
             ) : (
               <div className="space-y-6">
                 {grouped.map(([category, items]) => (
                   <div key={category}>
-                    <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-2">{category}</div>
+                    <div className="text-[11px] font-semibold text-muted mb-2">{category}</div>
                     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                       {items.map((t) => (
                         <button
                           key={t.key}
                           onClick={() => pickTemplate(t)}
-                          className="text-left rounded-xl border border-slate-200 p-4 hover:border-brand-400 hover:shadow-sm transition flex flex-col"
+                          className="text-left rounded-xl border border-border p-4 hover:border-brand-400 hover:shadow-sm transition flex flex-col"
                         >
                           <div className="flex items-start justify-between gap-2">
-                            <div className="text-sm font-semibold text-slate-900">{t.name}</div>
+                            <div className="text-sm font-semibold text-fg">{t.name}</div>
                             {t.builtIn && <Pill tone="info">Built-in</Pill>}
                           </div>
-                          {t.description && <p className="text-xs text-slate-500 mt-1 line-clamp-3">{t.description}</p>}
-                          <div className="mt-3 text-[11px] text-slate-400">
+                          {t.description && <p className="text-xs text-muted mt-1 line-clamp-3">{t.description}</p>}
+                          <div className="mt-3 text-[11px] text-muted">
                             {t.parameters.length} parameter{t.parameters.length === 1 ? "" : "s"}
                           </div>
                         </button>
@@ -231,10 +231,10 @@ export function ProvisionFromTemplate({ onDone }: { onDone?: () => void }): JSX.
         {/* Step 2 — parameters */}
         {step === 2 && selected && (
           <div className="max-w-2xl">
-            <div className="text-sm font-semibold text-slate-900 mb-1">{selected.name}</div>
-            <p className="text-xs text-slate-500 mb-4">Fill in the template parameters.</p>
+            <div className="text-sm font-semibold text-fg mb-1">{selected.name}</div>
+            <p className="text-xs text-muted mb-4">Fill in the template parameters.</p>
             {selected.parameters.length === 0 ? (
-              <p className="text-sm text-slate-500">This template takes no parameters.</p>
+              <p className="text-sm text-muted">This template takes no parameters.</p>
             ) : (
               <div className="space-y-4">
                 {selected.parameters.map((p) => (
@@ -243,7 +243,7 @@ export function ProvisionFromTemplate({ onDone }: { onDone?: () => void }): JSX.
               </div>
             )}
             <div className="flex items-center gap-2 mt-6">
-              <button onClick={() => setStep(1)} className="rounded-lg border border-slate-200 text-slate-600 px-3.5 py-1.5 text-sm font-medium hover:border-brand-400 hover:text-brand-700">← Back</button>
+              <button onClick={() => setStep(1)} className="rounded-lg border border-border text-muted px-3.5 py-1.5 text-sm font-medium hover:border-brand-400 hover:text-brand-700">← Back</button>
               <button onClick={() => setStep(3)} className="rounded-lg bg-brand-600 text-white px-4 py-1.5 text-sm font-semibold hover:bg-brand-700">Next</button>
             </div>
           </div>
@@ -253,28 +253,28 @@ export function ProvisionFromTemplate({ onDone }: { onDone?: () => void }): JSX.
         {step === 3 && selected && (
           <div className="max-w-2xl space-y-4">
             <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1">Issuer organization name *</label>
+              <label className="block text-xs font-medium text-muted mb-1">Issuer organization name *</label>
               <input className="input w-full" placeholder="e.g. Acme University" value={issuerOrgName} onChange={(e) => setIssuerOrgName(e.target.value)} />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1">Issuer organization type</label>
+              <label className="block text-xs font-medium text-muted mb-1">Issuer organization type</label>
               <select className="select w-full" value={issuerOrgType} onChange={(e) => setIssuerOrgType(e.target.value as OrgType)}>
                 {ORG_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
               </select>
             </div>
-            <label className="flex items-center gap-2 text-sm text-slate-700">
+            <label className="flex items-center gap-2 text-sm text-fg">
               <input type="checkbox" checked={createDeskUsers} onChange={(e) => setCreateDeskUsers(e.target.checked)} />
               Create Issuer / Holder / Verifier desk logins
             </label>
             {createDeskUsers && (
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">Desk email domain</label>
+                <label className="block text-xs font-medium text-muted mb-1">Desk email domain</label>
                 <input className="input w-full" placeholder="e.g. acme.edu" value={deskEmailDomain} onChange={(e) => setDeskEmailDomain(e.target.value)} />
-                <p className="text-[11px] text-slate-400 mt-1">Desk logins are minted at this domain (e.g. issuer@acme.edu). Leave blank for a server default.</p>
+                <p className="text-[11px] text-muted mt-1 prose-measure">Desk logins are minted at this domain (e.g. issuer@acme.edu). Leave blank for a server default.</p>
               </div>
             )}
             <div className="flex items-center gap-2 pt-2">
-              <button onClick={() => setStep(2)} className="rounded-lg border border-slate-200 text-slate-600 px-3.5 py-1.5 text-sm font-medium hover:border-brand-400 hover:text-brand-700">← Back</button>
+              <button onClick={() => setStep(2)} className="rounded-lg border border-border text-muted px-3.5 py-1.5 text-sm font-medium hover:border-brand-400 hover:text-brand-700">← Back</button>
               <button
                 onClick={goReview}
                 disabled={!issuerOrgName.trim()}
@@ -289,10 +289,10 @@ export function ProvisionFromTemplate({ onDone }: { onDone?: () => void }): JSX.
         {/* Step 4 — review + provision */}
         {step === 4 && selected && (
           <div className="max-w-2xl space-y-4">
-            <div className="rounded-xl border border-slate-200 p-4 text-sm">
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Will be created</div>
-              <ul className="space-y-1 text-slate-700">
-                <li>• Organization <span className="font-medium">{issuerOrgName.trim() || "—"}</span> <span className="text-slate-400">({issuerOrgType})</span></li>
+            <div className="rounded-xl border border-border p-4 text-sm">
+              <div className="text-xs font-semibold text-muted mb-2">Will be created</div>
+              <ul className="space-y-1 text-fg">
+                <li>• Organization <span className="font-medium">{issuerOrgName.trim() || "—"}</span> <span className="text-muted">({issuerOrgType})</span></li>
                 <li>• Credential use case from template <span className="font-medium">{selected.name}</span></li>
                 {createDeskUsers && (
                   <li>• Issuer / Holder / Verifier logins{deskEmailDomain.trim() ? <> @{deskEmailDomain.trim()}</> : null}</li>
@@ -301,7 +301,7 @@ export function ProvisionFromTemplate({ onDone }: { onDone?: () => void }): JSX.
             </div>
 
             <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Preview definition</div>
+              <div className="text-xs font-semibold text-muted mb-2">Preview definition</div>
               {previewLoading ? (
                 <Skeleton lines={6} />
               ) : previewError ? (
@@ -314,23 +314,23 @@ export function ProvisionFromTemplate({ onDone }: { onDone?: () => void }): JSX.
                     return certTypes.length ? (
                       <div className="mb-2 flex items-center gap-1.5 flex-wrap">
                         <Pill tone="info">PDF certificate</Pill>
-                        <span className="text-[11px] text-slate-500">{certTypes.join(", ")}</span>
+                        <span className="text-[11px] text-muted">{certTypes.join(", ")}</span>
                       </div>
                     ) : null;
                   })()}
-                  <pre className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] font-mono text-slate-700 overflow-auto max-h-80 whitespace-pre-wrap break-words">
+                  <pre className="rounded-xl border border-border bg-elevated p-3 text-[11px] font-mono text-fg overflow-auto max-h-80 whitespace-pre-wrap break-words">
                     {JSON.stringify(preview, null, 2)}
                   </pre>
                 </>
               ) : (
-                <p className="text-sm text-slate-500">No preview.</p>
+                <p className="text-sm text-muted">No preview.</p>
               )}
             </div>
 
             {provisionError && <ProblemBox title={provisionError.message} problems={provisionError.problems} />}
 
             <div className="flex items-center gap-2 pt-1">
-              <button onClick={() => setStep(3)} disabled={provisioning} className="rounded-lg border border-slate-200 text-slate-600 px-3.5 py-1.5 text-sm font-medium hover:border-brand-400 hover:text-brand-700 disabled:opacity-40">← Back</button>
+              <button onClick={() => setStep(3)} disabled={provisioning} className="rounded-lg border border-border text-muted px-3.5 py-1.5 text-sm font-medium hover:border-brand-400 hover:text-brand-700 disabled:opacity-40">← Back</button>
               <button
                 onClick={() => void doProvision()}
                 disabled={provisioning || previewLoading || !issuerOrgName.trim()}
@@ -350,17 +350,17 @@ export function ProvisionFromTemplate({ onDone }: { onDone?: () => void }): JSX.
 /** One generated parameter input, typed from its declared kind. */
 function ParamField({ param, value, onChange }: { param: TemplateParam; value: unknown; onChange: (v: unknown) => void }): JSX.Element {
   const label = (
-    <label className="block text-xs font-medium text-slate-500 mb-1">
+    <label className="block text-xs font-medium text-muted mb-1">
       {param.label}
       {param.required ? " *" : ""}
     </label>
   );
-  const help = param.help ? <p className="text-[11px] text-slate-400 mt-1">{param.help}</p> : null;
+  const help = param.help ? <p className="text-[11px] text-muted mt-1">{param.help}</p> : null;
 
   if (param.type === "boolean") {
     return (
       <div>
-        <label className="flex items-center gap-2 text-sm text-slate-700">
+        <label className="flex items-center gap-2 text-sm text-fg">
           <input type="checkbox" checked={Boolean(value)} onChange={(e) => onChange(e.target.checked)} />
           {param.label}
           {param.required ? " *" : ""}
@@ -413,7 +413,7 @@ function ParamField({ param, value, onChange }: { param: TemplateParam; value: u
 /** An error box that lists a 400's `problems` array when present. */
 function ProblemBox({ title, problems }: { title: string; problems?: string[] }): JSX.Element {
   return (
-    <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+    <div className="rounded-xl border border-danger/25 bg-danger/10 p-3 text-sm text-danger">
       <div className="font-medium">{title}</div>
       {problems && problems.length > 0 && (
         <ul className="mt-1.5 list-disc pl-5 space-y-0.5 text-xs">
@@ -462,14 +462,14 @@ function ResultPanel({ result, onDone }: { result: ProvisionResult; onDone?: () 
           </div>
           <dl className="grid gap-3 sm:grid-cols-2 text-sm">
             <div>
-              <dt className="text-xs font-medium text-slate-500">Organization</dt>
-              <dd className="text-slate-900 font-medium">{result.org.name}</dd>
-              <dd className="text-[11px] font-mono text-slate-400 break-all">{result.org.did}</dd>
+              <dt className="text-xs font-medium text-muted">Organization</dt>
+              <dd className="text-fg font-medium">{result.org.name}</dd>
+              <dd className="text-[11px] font-mono text-muted break-all">{result.org.did}</dd>
             </div>
             <div>
-              <dt className="text-xs font-medium text-slate-500">Credential use case</dt>
-              <dd className="text-slate-900 font-medium">{result.useCase.name}</dd>
-              <dd className="text-[11px] font-mono text-slate-400">{result.useCase.key}</dd>
+              <dt className="text-xs font-medium text-muted">Credential use case</dt>
+              <dd className="text-fg font-medium">{result.useCase.name}</dd>
+              <dd className="text-[11px] font-mono text-muted">{result.useCase.key}</dd>
             </div>
           </dl>
         </Card>
@@ -479,37 +479,35 @@ function ResultPanel({ result, onDone }: { result: ProvisionResult; onDone?: () 
             title="Desk logins"
             description="Shown once — copy them now. Passwords cannot be retrieved later."
             actions={
-              <button onClick={copyAll} className="rounded-lg border border-slate-200 text-slate-600 px-3 py-1.5 text-xs font-medium hover:border-brand-400 hover:text-brand-700">
+              <button onClick={copyAll} className="rounded-lg border border-border text-muted px-3 py-1.5 text-xs font-medium hover:border-brand-400 hover:text-brand-700">
                 {copiedAll ? "Copied ✓" : "Copy all"}
               </button>
             }
           >
-            <div className="overflow-hidden rounded-xl border border-slate-200">
-              <table className="w-full text-sm">
-                <thead className="text-xs text-slate-500 bg-slate-50 uppercase tracking-wide">
-                  <tr>
-                    <th className="text-left font-medium px-4 py-2.5">Role</th>
-                    <th className="text-left font-medium px-4 py-2.5">Email</th>
-                    <th className="text-left font-medium px-4 py-2.5">Password</th>
-                    <th className="px-4 py-2.5" />
+            <TableShell>
+              <thead>
+                <tr>
+                  <th>Role</th>
+                  <th>Email</th>
+                  <th>Password</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {result.deskUsers.map((u) => (
+                  <tr key={u.email}>
+                    <td><Pill tone="muted">{u.role}</Pill></td>
+                    <td className="font-mono text-xs text-fg break-all">{u.email}</td>
+                    <td className="font-mono text-xs text-fg break-all">{u.password}</td>
+                    <td className="text-right">
+                      <button onClick={() => copyRow(u)} className="text-xs text-brand-600 hover:text-brand-700 font-medium">
+                        {copiedRow === u.email ? "Copied ✓" : "Copy"}
+                      </button>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {result.deskUsers.map((u) => (
-                    <tr key={u.email} className="border-t border-slate-100">
-                      <td className="px-4 py-2"><Pill tone="muted">{u.role}</Pill></td>
-                      <td className="px-4 py-2 font-mono text-xs text-slate-700 break-all">{u.email}</td>
-                      <td className="px-4 py-2 font-mono text-xs text-slate-700 break-all">{u.password}</td>
-                      <td className="px-4 py-2 text-right">
-                        <button onClick={() => copyRow(u)} className="text-xs text-brand-600 hover:text-brand-700 font-medium">
-                          {copiedRow === u.email ? "Copied ✓" : "Copy"}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                ))}
+              </tbody>
+            </TableShell>
           </Card>
         )}
 

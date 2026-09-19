@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../../api.js";
 import { useAuth } from "../../auth.js";
+import { TableShell } from "../shared/ui.js";
 import type { Asset } from "../../types.js";
 
 type Holding = { asset: Asset; balance: string };
@@ -38,51 +39,51 @@ export function MyHoldings({ onSelect }: { onSelect: (id: string) => void }): JS
     })();
   }, [token, wallet]);
 
-  if (!wallet) return <p className="text-sm text-slate-500">No wallet is linked to your account.</p>;
-  if (loading) return <p className="text-sm text-slate-500">Loading holdings…</p>;
-  if (!holdings.length && !cashBalances.length) return <p className="text-sm text-slate-500">You don't hold any credits yet.</p>;
+  if (!wallet) return <p className="text-sm text-muted">No wallet is linked to your account.</p>;
+  if (loading) return <p className="text-sm text-muted">Loading holdings…</p>;
+  if (!holdings.length && !cashBalances.length) return <p className="text-sm text-muted">You don't hold any credits yet.</p>;
 
   return (
     <div className="space-y-4">
       {cashBalances.length > 0 && (
-        <div className="bg-white rounded-xl border border-slate-200 p-5">
-          <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Cash / CBDC balances</div>
+        <div className="bg-surface rounded-xl border border-border p-5">
+          <div className="text-xs font-semibold text-muted mb-2">Cash / CBDC balances</div>
           <div className="space-y-1">
             {cashBalances.map((b) => (
               <div key={b.currency} className="flex justify-between text-sm">
-                <span className="text-slate-600">{b.currency}</span>
-                <span className="font-medium text-slate-800">{b.amount}</span>
+                <span className="text-muted">{b.currency}</span>
+                <span className="font-medium text-fg">{b.amount}</span>
               </div>
             ))}
           </div>
         </div>
       )}
-      {holdings.length > 0 && <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-      <table className="w-full text-sm">
-        <thead className="text-xs text-slate-500 bg-slate-50"><tr><th className="text-left px-4 py-2">Asset</th><th className="text-left px-4 py-2">Symbol</th><th className="text-right px-4 py-2">Balance</th><th className="text-right px-4 py-2"></th></tr></thead>
-        <tbody>
-          {holdings.map((h) => (
-            <tr key={h.asset.id} className="border-t border-slate-100 cursor-pointer hover:bg-slate-50" onClick={() => onSelect(h.asset.id)}>
-              <td className="px-4 py-2">{h.asset.name}</td>
-              <td className="px-4 py-2 text-slate-500">{h.asset.symbol}</td>
-              <td className="px-4 py-2 text-right font-medium">{h.balance}</td>
-              <td className="px-4 py-2 text-right">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onSelect(h.asset.id);
-                  }}
-                  title="View the asset's detail, including its sell options"
-                  className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-medium hover:border-brand-400"
-                >
-                  View
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>}
+      {holdings.length > 0 && (
+        <TableShell>
+          <thead><tr><th>Asset</th><th>Symbol</th><th className="text-right">Balance</th><th></th></tr></thead>
+          <tbody>
+            {holdings.map((h) => (
+              <tr key={h.asset.id} className="cursor-pointer" onClick={() => onSelect(h.asset.id)}>
+                <td className="text-fg">{h.asset.name}</td>
+                <td className="text-muted">{h.asset.symbol}</td>
+                <td className="num text-fg font-medium">{h.balance}</td>
+                <td className="text-right">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelect(h.asset.id);
+                    }}
+                    title="View the asset's detail, including its sell options"
+                    className="rounded-lg border border-border px-2.5 py-1 text-[11px] font-medium hover:border-brand-400"
+                  >
+                    View
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </TableShell>
+      )}
     </div>
   );
 }

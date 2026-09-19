@@ -50,7 +50,7 @@ export function AssetManagement({ useCaseKey, useCases, chains }: { useCaseKey: 
           <button
             key={s.id}
             onClick={() => setSub(s.id)}
-            className={`px-3.5 py-1.5 rounded-lg text-sm font-medium ${sub === s.id ? "bg-white text-brand-700 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-800"}`}
+            className={`rounded-full border px-3 py-1.5 text-xs font-medium ${sub === s.id ? "bg-primary text-white border-primary" : "bg-surface text-muted border-border hover:bg-elevated"}`}
           >
             {s.label}
           </button>

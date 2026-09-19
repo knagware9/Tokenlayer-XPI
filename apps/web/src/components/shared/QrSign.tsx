@@ -36,21 +36,21 @@ export function QrSign(): JSX.Element {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
+    <div className="min-h-screen flex items-center justify-center bg-elevated p-6">
       <div className="w-full max-w-md">
         <div className="mb-6 flex justify-center">
           <Logo size={34} />
         </div>
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+        <div className="bg-surface rounded-2xl border border-border/80 shadow-sm overflow-hidden">
           <div className="h-1 bg-gradient-to-r from-xigreen via-brand-400 to-xiblue" />
           <div className="p-8">
             {!session || !challenge ? (
               <div className="text-center">
-                <div className="mx-auto w-11 h-11 rounded-xl bg-red-50 text-red-600 flex items-center justify-center">
+                <div className="mx-auto w-11 h-11 rounded-xl bg-danger/10 text-danger flex items-center justify-center">
                   <Icon name="warn" className="w-6 h-6" />
                 </div>
-                <h2 className="mt-4 text-lg font-semibold tracking-tight text-slate-900">Invalid sign-in link</h2>
-                <p className="mt-1.5 text-sm text-slate-500">
+                <h2 className="mt-4 text-lg font-semibold tracking-tight text-fg">Invalid sign-in link</h2>
+                <p className="mt-1.5 text-sm text-muted">
                   This link is missing its session details. Start again from your other device.
                 </p>
               </div>
@@ -59,8 +59,8 @@ export function QrSign(): JSX.Element {
                 <div className="mx-auto w-11 h-11 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center">
                   <Icon name="shield" className="w-6 h-6" />
                 </div>
-                <h2 className="mt-4 text-lg font-semibold tracking-tight text-slate-900">This device isn't enrolled</h2>
-                <p className="mt-1.5 text-sm text-slate-500">
+                <h2 className="mt-4 text-lg font-semibold tracking-tight text-fg">This device isn't enrolled</h2>
+                <p className="mt-1.5 text-sm text-muted">
                   To approve sign-ins from here, first{" "}
                   <a href="/login" className="font-medium text-brand-700 hover:text-brand-600">
                     sign in and enroll this device
@@ -73,21 +73,21 @@ export function QrSign(): JSX.Element {
                 <div className="mx-auto w-11 h-11 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center">
                   <Icon name="check" className="w-6 h-6" />
                 </div>
-                <h2 className="mt-4 text-lg font-semibold tracking-tight text-slate-900">Approved</h2>
-                <p className="mt-1.5 text-sm text-slate-500">Return to your other device to continue.</p>
+                <h2 className="mt-4 text-lg font-semibold tracking-tight text-fg">Approved</h2>
+                <p className="mt-1.5 text-sm text-muted">Return to your other device to continue.</p>
               </div>
             ) : (
               <div className="text-center">
                 <div className="mx-auto w-11 h-11 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center">
                   <Icon name="shield" className="w-6 h-6" />
                 </div>
-                <h2 className="mt-4 text-lg font-semibold tracking-tight text-slate-900">
+                <h2 className="mt-4 text-lg font-semibold tracking-tight text-fg">
                   Approve sign-in on your other device?
                 </h2>
-                <p className="mt-1.5 text-sm text-slate-500">
+                <p className="mt-1.5 text-sm text-muted">
                   You're about to authorize a sign-in that was started elsewhere.
                 </p>
-                {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
+                {error && <p className="mt-4 text-sm text-danger">{error}</p>}
                 <button
                   type="button"
                   onClick={() => void approve()}

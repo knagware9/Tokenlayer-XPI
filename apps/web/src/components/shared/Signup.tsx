@@ -169,14 +169,14 @@ export function Signup(): JSX.Element {
 
   return (
     <div className="min-h-screen bg-[#EFF8F4] flex flex-col">
-      <header className="border-b border-slate-200/70 bg-white/70 backdrop-blur">
+      <header className="border-b border-border/70 bg-surface/70 backdrop-blur">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
           <button onClick={() => navigate("/")} className="cursor-pointer">
             <Logo size={30} />
           </button>
           <button
             onClick={() => navigate("/login")}
-            className="rounded-lg border border-slate-200 text-slate-700 px-4 py-2 text-sm font-medium hover:bg-slate-50 transition-colors"
+            className="rounded-lg border border-border text-fg px-4 py-2 text-sm font-medium hover:bg-elevated transition-colors"
           >
             Login
           </button>
@@ -186,14 +186,14 @@ export function Signup(): JSX.Element {
       <main className="flex-1 flex items-start justify-center px-6 py-12">
         <div className="w-full max-w-2xl">
           {done ? (
-            <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+            <div className="bg-surface rounded-2xl border border-border/80 shadow-sm overflow-hidden">
               <div className="h-1 bg-gradient-to-r from-xigreen via-brand-400 to-xiblue" />
               <div className="p-8 text-center">
                 <div className="mx-auto w-12 h-12 rounded-full bg-brand-50 text-brand-600 flex items-center justify-center">
                   <Icon name="check" className="w-7 h-7" />
                 </div>
-                <h2 className="mt-4 text-lg font-semibold tracking-tight text-slate-900">Registration submitted</h2>
-                <p className="mt-2 text-sm text-slate-500 max-w-md mx-auto">
+                <h2 className="mt-4 text-lg font-semibold tracking-tight text-fg">Registration submitted</h2>
+                <p className="mt-2 text-sm text-muted max-w-md mx-auto prose-measure">
                   A platform administrator will review your company details and statutory identifiers.
                   You can log in once your organization is approved.
                 </p>
@@ -206,22 +206,26 @@ export function Signup(): JSX.Element {
               </div>
             </div>
           ) : (
-            <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+            <div className="bg-surface rounded-2xl border border-border/80 shadow-sm overflow-hidden">
               <div className="h-1 bg-gradient-to-r from-xigreen via-brand-400 to-xiblue" />
               <div className="p-8">
                 <div className="flex items-baseline justify-between">
-                  <h2 className="text-lg font-semibold tracking-tight text-slate-900">Corporate registration</h2>
-                  <span className="text-xs font-medium text-slate-400">Step {step + 1} of {STEPS.length}</span>
+                  <h2 className="text-lg font-semibold tracking-tight text-fg">Corporate registration</h2>
+                  <span className="text-xs font-medium text-muted">Step {step + 1} of {STEPS.length}</span>
                 </div>
 
                 {/* Stepper */}
                 <div className="mt-4 flex items-center gap-2">
-                  {STEPS.map((label, i) => (
-                    <div key={label} className="flex-1">
-                      <div className={`h-1.5 rounded-full ${i <= step ? "bg-brand-500" : "bg-slate-200"}`} />
-                      <div className={`mt-1.5 text-[11px] font-medium ${i === step ? "text-brand-700" : "text-slate-400"}`}>{label}</div>
-                    </div>
-                  ))}
+                  {STEPS.map((label, i) => {
+                    const doneStep = i < step;
+                    const current = i === step;
+                    return (
+                      <div key={label} className="flex-1">
+                        <div className={`h-1.5 rounded-full ${doneStep ? "bg-success" : current ? "bg-brand-500" : "bg-muted/25"}`} />
+                        <div className={`mt-1.5 text-[11px] font-medium ${current ? "text-brand-700" : doneStep ? "text-success" : "text-muted"}`}>{label}</div>
+                      </div>
+                    );
+                  })}
                 </div>
 
                 <div className="mt-6">
@@ -246,7 +250,7 @@ export function Signup(): JSX.Element {
                       <Field label="PAN">
                         <input className="input" value={f.pan} onChange={set("pan")} placeholder="AABCU9603R" />
                       </Field>
-                      <Field label={<>GSTIN <span className="text-slate-400 font-normal">(optional)</span></>}>
+                      <Field label={<>GSTIN <span className="text-muted font-normal">(optional)</span></>}>
                         <input className="input" value={f.gstin} onChange={set("gstin")} placeholder="27AABCU9603R1Z5" />
                       </Field>
                       <Field label="Date of incorporation">
@@ -266,32 +270,32 @@ export function Signup(): JSX.Element {
                       </Field>
 
                       {/* KYB certificates — uploaded up front; the registration sends only their ids. */}
-                      <p className="sm:col-span-2 text-xs font-medium text-slate-500 uppercase tracking-wide mt-1">Documents</p>
+                      <p className="sm:col-span-2 text-xs font-medium text-muted mt-1">Documents</p>
                       <Field className="sm:col-span-2" label="CIN certificate (incorporation certificate)">
                         <input
                           type="file"
                           accept="application/pdf,image/png,image/jpeg"
                           disabled={docBusy !== null}
                           onChange={(e) => void pickDocument("cin", e.target.files?.[0])}
-                          className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-brand-50 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-brand-700 hover:file:bg-brand-100"
+                          className="block w-full text-sm text-muted file:mr-3 file:rounded-lg file:border-0 file:bg-brand-50 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-brand-700 hover:file:bg-brand-100"
                         />
                         {docBusy === "cin" ? (
-                          <p className="mt-1.5 text-xs text-slate-500">Uploading…</p>
+                          <p className="mt-1.5 text-xs text-muted">Uploading…</p>
                         ) : cinDoc ? (
                           <p className="mt-1.5 text-xs text-brand-700">✓ {cinDoc.name} · {cinDoc.sha256.slice(0, 12)}…</p>
                         ) : null}
                       </Field>
                       {f.gstin.trim() !== "" && (
-                        <Field className="sm:col-span-2" label={<>GSTIN certificate <span className="text-slate-400 font-normal">(optional)</span></>}>
+                        <Field className="sm:col-span-2" label={<>GSTIN certificate <span className="text-muted font-normal">(optional)</span></>}>
                           <input
                             type="file"
                             accept="application/pdf,image/png,image/jpeg"
                             disabled={docBusy !== null}
                             onChange={(e) => void pickDocument("gstin", e.target.files?.[0])}
-                            className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-brand-50 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-brand-700 hover:file:bg-brand-100"
+                            className="block w-full text-sm text-muted file:mr-3 file:rounded-lg file:border-0 file:bg-brand-50 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-brand-700 hover:file:bg-brand-100"
                           />
                           {docBusy === "gstin" ? (
-                            <p className="mt-1.5 text-xs text-slate-500">Uploading…</p>
+                            <p className="mt-1.5 text-xs text-muted">Uploading…</p>
                           ) : gstinDoc ? (
                             <p className="mt-1.5 text-xs text-brand-700">✓ {gstinDoc.name} · {gstinDoc.sha256.slice(0, 12)}…</p>
                           ) : null}
@@ -302,7 +306,7 @@ export function Signup(): JSX.Element {
 
                   {step === 1 && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <p className="sm:col-span-2 text-sm text-slate-500 -mt-1">
+                      <p className="sm:col-span-2 text-sm text-muted -mt-1 prose-measure">
                         This person becomes the organization's admin — they receive a login once the company is approved.
                       </p>
                       <Field className="sm:col-span-2" label="Full name">
@@ -319,7 +323,7 @@ export function Signup(): JSX.Element {
 
                   {step === CAPABILITY_STEP && (
                     <div className="space-y-5">
-                      <p className="text-sm text-slate-500 -mt-1">
+                      <p className="text-sm text-muted -mt-1 prose-measure">
                         Choose what your organization will do on the platform. The platform administrator
                         approves this envelope along with your KYB details — you can request a change later.
                       </p>
@@ -364,13 +368,13 @@ export function Signup(): JSX.Element {
                   )}
                 </div>
 
-                {error && <p className="mt-5 text-sm text-red-600">{error}</p>}
+                {error && <p className="mt-5 text-sm text-danger">{error}</p>}
 
                 <div className="mt-7 flex items-center justify-between">
                   <button
                     type="button"
                     onClick={step === 0 ? () => navigate("/") : back}
-                    className="text-sm font-medium text-slate-500 hover:text-slate-800"
+                    className="text-sm font-medium text-muted hover:text-fg"
                   >
                     {step === 0 ? "← Home" : "← Back"}
                   </button>
@@ -405,7 +409,7 @@ export function Signup(): JSX.Element {
 function Field({ label, className, children }: { label: React.ReactNode; className?: string; children: React.ReactNode }): JSX.Element {
   return (
     <div className={className}>
-      <label className="block text-xs font-medium text-slate-600 mb-1.5">{label}</label>
+      <label className="block text-xs font-medium text-muted mb-1.5">{label}</label>
       {children}
     </div>
   );
@@ -418,18 +422,18 @@ function CheckGroup({ title, hint, options }: {
   options: { key: string; label: string; hint: string; checked: boolean; onToggle: () => void }[];
 }): JSX.Element {
   return (
-    <div className="rounded-xl border border-slate-200/80 overflow-hidden">
-      <div className="bg-slate-50 px-4 py-2 flex items-baseline justify-between">
-        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</span>
-        <span className="text-[11px] text-slate-400">{hint}</span>
+    <div className="rounded-xl border border-border/80 overflow-hidden">
+      <div className="bg-elevated px-4 py-2 flex items-baseline justify-between">
+        <span className="text-xs font-semibold text-muted">{title}</span>
+        <span className="text-[11px] text-muted">{hint}</span>
       </div>
-      <div className="divide-y divide-slate-100">
+      <div className="divide-y divide-border">
         {options.map((o) => (
-          <label key={o.key} className="flex items-start gap-3 px-4 py-2.5 cursor-pointer hover:bg-slate-50/60">
-            <input type="checkbox" checked={o.checked} onChange={o.onToggle} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
+          <label key={o.key} className="flex items-start gap-3 px-4 py-2.5 cursor-pointer hover:bg-elevated/60">
+            <input type="checkbox" checked={o.checked} onChange={o.onToggle} className="mt-0.5 h-4 w-4 rounded border-border text-brand-600 focus:ring-brand-500" />
             <span className="min-w-0">
-              <span className="block text-sm font-medium text-slate-800">{o.label}</span>
-              <span className="block text-xs text-slate-500">{o.hint}</span>
+              <span className="block text-sm font-medium text-fg">{o.label}</span>
+              <span className="block text-xs text-muted">{o.hint}</span>
             </span>
           </label>
         ))}
@@ -440,9 +444,9 @@ function CheckGroup({ title, hint, options }: {
 
 function ReviewSection({ title, children }: { title: string; children: React.ReactNode }): JSX.Element {
   return (
-    <div className="rounded-xl border border-slate-200/80 overflow-hidden">
-      <div className="bg-slate-50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</div>
-      <div className="divide-y divide-slate-100">{children}</div>
+    <div className="rounded-xl border border-border/80 overflow-hidden">
+      <div className="bg-elevated px-4 py-2 text-xs font-semibold text-muted">{title}</div>
+      <div className="divide-y divide-border">{children}</div>
     </div>
   );
 }
@@ -450,8 +454,8 @@ function ReviewSection({ title, children }: { title: string; children: React.Rea
 function Row({ label, value }: { label: string; value: string }): JSX.Element {
   return (
     <div className="flex items-center justify-between px-4 py-2 text-sm">
-      <span className="text-slate-500">{label}</span>
-      <span className="font-medium text-slate-800 text-right">{value}</span>
+      <span className="text-muted">{label}</span>
+      <span className="font-medium text-fg text-right">{value}</span>
     </div>
   );
 }

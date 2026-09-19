@@ -31,7 +31,7 @@ import { useMemo, useState } from "react";
 import issueACredential from "../../../../../docs/api/guides/issue-a-credential.md?raw";
 import receiveWebhooks from "../../../../../docs/api/guides/receive-webhooks.md?raw";
 import tokenizeAnAsset from "../../../../../docs/api/guides/tokenize-an-asset.md?raw";
-import { Card, CopyBlock } from "./ui.js";
+import { Card, CopyBlock, TableShell } from "./ui.js";
 
 interface Guide { id: string; title: string; blurb: string; source: string }
 
@@ -75,18 +75,18 @@ export function Guides(): JSX.Element {
               className={`rounded-lg border px-3 py-2 text-left text-xs max-w-xs ${
                 g.id === openId
                   ? "border-brand-500 bg-brand-50 text-brand-800"
-                  : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                  : "border-border text-muted hover:bg-elevated"
               }`}
             >
               <span className="block font-semibold">{g.title}</span>
-              <span className="block text-slate-500 mt-0.5">{g.blurb}</span>
+              <span className="block text-muted mt-0.5">{g.blurb}</span>
             </button>
           ))}
         </div>
       </Card>
 
       {guide && (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6">
+        <div className="bg-surface rounded-2xl border border-border/80 shadow-sm p-6">
           <Markdown key={guide.id} source={guide.source} />
         </div>
       )}
@@ -234,12 +234,12 @@ function Markdown({ source }: { source: string }): JSX.Element {
 }
 
 const HEADING_CLASS: Record<number, string> = {
-  1: "text-xl font-bold text-slate-900 mt-2",
-  2: "text-base font-semibold text-slate-900 mt-6 pt-4 border-t border-slate-100",
-  3: "text-sm font-semibold text-slate-900 mt-4",
-  4: "text-sm font-semibold text-slate-700 mt-3",
-  5: "text-xs font-semibold text-slate-700 mt-3",
-  6: "text-xs font-semibold text-slate-600 mt-3",
+  1: "text-xl font-bold text-fg mt-2",
+  2: "text-base font-semibold text-fg mt-6 pt-4 border-t border-border",
+  3: "text-sm font-semibold text-fg mt-4",
+  4: "text-sm font-semibold text-fg mt-3",
+  5: "text-xs font-semibold text-fg mt-3",
+  6: "text-xs font-semibold text-muted mt-3",
 };
 
 function BlockView({ block }: { block: Block }): JSX.Element | null {
@@ -249,46 +249,44 @@ function BlockView({ block }: { block: Block }): JSX.Element | null {
       return <Tag className={HEADING_CLASS[block.level] ?? HEADING_CLASS[3]}>{inline(block.text)}</Tag>;
     }
     case "paragraph":
-      return <p className="text-sm text-slate-600 leading-6">{inline(block.text)}</p>;
+      return <p className="text-sm text-muted leading-6 prose-measure">{inline(block.text)}</p>;
     case "code":
       // Every fenced block gets a copy button — these guides are made of
       // commands, and a command copied by hand is a command with a stray
       // character in it.
       return <CopyBlock code={block.code} language={block.language || undefined} className="my-3" />;
     case "rule":
-      return <hr className="border-slate-200" />;
+      return <hr className="border-border" />;
     case "quote":
       return (
-        <blockquote className="border-l-4 border-amber-300 bg-amber-50 pl-3 py-2 text-sm text-slate-700">
+        <blockquote className="border-l-4 border-border bg-elevated/60 pl-3 py-2 text-sm text-muted prose-measure">
           {inline(block.text)}
         </blockquote>
       );
     case "list":
       return block.ordered ? (
-        <ol className="list-decimal pl-5 space-y-1.5 text-sm text-slate-600 leading-6">
+        <ol className="list-decimal pl-5 space-y-1.5 text-sm text-muted leading-6 prose-measure">
           {block.items.map((item, i) => <li key={i}>{inline(item)}</li>)}
         </ol>
       ) : (
-        <ul className="list-disc pl-5 space-y-1.5 text-sm text-slate-600 leading-6">
+        <ul className="list-disc pl-5 space-y-1.5 text-sm text-muted leading-6 prose-measure">
           {block.items.map((item, i) => <li key={i}>{inline(item)}</li>)}
         </ul>
       );
     case "table":
       return (
-        <div className="overflow-x-auto">
-          <table className="text-xs border border-slate-200 rounded-lg">
-            <thead className="bg-slate-50 text-slate-500 uppercase tracking-wide">
-              <tr>{block.header.map((cell, i) => <th key={i} className="text-left font-medium px-3 py-2 border-b border-slate-200">{inline(cell)}</th>)}</tr>
-            </thead>
-            <tbody>
-              {block.rows.map((row, r) => (
-                <tr key={r} className="border-b border-slate-100 last:border-b-0 align-top">
-                  {row.map((cell, c) => <td key={c} className="px-3 py-1.5 text-slate-600">{inline(cell)}</td>)}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <TableShell>
+          <thead>
+            <tr>{block.header.map((cell, i) => <th key={i}>{inline(cell)}</th>)}</tr>
+          </thead>
+          <tbody>
+            {block.rows.map((row, r) => (
+              <tr key={r}>
+                {row.map((cell, c) => <td key={c}>{inline(cell)}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </TableShell>
       );
   }
 }
@@ -315,7 +313,7 @@ function inline(text: string, depth = 0): (string | JSX.Element)[] {
     const code = /^`([^`]+)`/.exec(rest);
     if (code) {
       flush();
-      out.push(<code key={key++} className="font-mono text-[0.9em] bg-slate-100 text-slate-800 rounded px-1 py-0.5">{code[1]}</code>);
+      out.push(<code key={key++} className="font-mono text-[0.9em] bg-elevated text-fg rounded px-1 py-0.5">{code[1]}</code>);
       i += code[0].length;
       continue;
     }
@@ -323,7 +321,7 @@ function inline(text: string, depth = 0): (string | JSX.Element)[] {
     const bold = /^\*\*([\s\S]+?)\*\*/.exec(rest);
     if (bold) {
       flush();
-      out.push(<strong key={key++} className="font-semibold text-slate-800">{inline(bold[1] ?? "", depth + 1)}</strong>);
+      out.push(<strong key={key++} className="font-semibold text-fg">{inline(bold[1] ?? "", depth + 1)}</strong>);
       i += bold[0].length;
       continue;
     }

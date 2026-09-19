@@ -64,16 +64,16 @@ function IdentityRegistryCard(): JSX.Element {
       ) : (
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
           <Row label="Chain">
-            <span className="font-mono text-slate-700">{registry.chainId}</span>
+            <span className="font-mono text-fg">{registry.chainId}</span>
           </Row>
           <Row label="DID registry">
-            <span className="font-mono text-xs text-slate-700 break-all">{registry.didRegistry}</span>
+            <span className="font-mono text-xs text-fg break-all">{registry.didRegistry}</span>
           </Row>
           <Row label="VC registry">
-            <span className="font-mono text-xs text-slate-700 break-all">{registry.vcRegistry}</span>
+            <span className="font-mono text-xs text-fg break-all">{registry.vcRegistry}</span>
           </Row>
           <Row label="Deploy tx">
-            <span className="font-mono text-xs text-slate-500 break-all">{registry.deployTxHash}</span>
+            <span className="font-mono text-xs text-muted break-all">{registry.deployTxHash}</span>
           </Row>
         </dl>
       )}
@@ -108,7 +108,7 @@ function ChainCard({ chain }: { chain: ChainInfo }): JSX.Element {
       description={`${chain.family} · ${chain.id}`}
       actions={
         <>
-          <span className="text-slate-400">
+          <span className="text-muted">
             <Icon name={familyIcon(chain.family)} className="w-4 h-4" />
           </span>
           {modePill(chain)}
@@ -120,19 +120,19 @@ function ChainCard({ chain }: { chain: ChainInfo }): JSX.Element {
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
             {chain.expectedChainId !== undefined && (
               <Row label="Chain ID">
-                <span className="font-mono text-slate-700">{chain.expectedChainId}</span>
+                <span className="font-mono text-fg">{chain.expectedChainId}</span>
               </Row>
             )}
             {chain.rpcHost && (
               <Row label="RPC">
-                <span className="font-mono rounded bg-slate-100 text-slate-600 px-1.5 py-0.5">
+                <span className="font-mono rounded bg-elevated text-muted px-1.5 py-0.5">
                   {chain.rpcHost}
                 </span>
               </Row>
             )}
             {chain.currencySymbol && (
               <Row label="Currency">
-                <span className="text-slate-700">{chain.currencySymbol}</span>
+                <span className="text-fg">{chain.currencySymbol}</span>
               </Row>
             )}
             {(chain.explorerUrl || chain.faucetUrl) && (
@@ -153,60 +153,60 @@ function ChainCard({ chain }: { chain: ChainInfo }): JSX.Element {
             )}
           </dl>
 
-          <div className="border-t border-slate-100 pt-3">
+          <div className="border-t border-border pt-3">
             <button
               type="button"
               onClick={() => void probe()}
               disabled={probing}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:border-brand-400 hover:text-brand-700 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted hover:border-brand-400 hover:text-brand-700 disabled:opacity-50"
             >
               {probing && (
-                <span className="w-3 h-3 rounded-full border-2 border-slate-300 border-t-brand-600 animate-spin" aria-hidden="true" />
+                <span className="w-3 h-3 rounded-full border-2 border-border border-t-brand-600 animate-spin" aria-hidden="true" />
               )}
               {probing ? "Checking…" : "Check status"}
             </button>
 
-            {probeError && <p className="text-xs text-red-600 mt-2">{probeError}</p>}
+            {probeError && <p className="text-xs text-danger mt-2">{probeError}</p>}
             {status && (
               <div className="mt-2 space-y-1.5">
                 <div className="flex flex-wrap items-center gap-2">
                   {status.reachable ? <Pill tone="ok">reachable</Pill> : <Pill tone="danger">unreachable</Pill>}
                   {status.chainId && (
-                    <span className="text-[11px] text-slate-500">
-                      chainId <span className="font-mono text-slate-700">{status.chainId}</span>
+                    <span className="text-[11px] text-muted">
+                      chainId <span className="font-mono text-fg">{status.chainId}</span>
                     </span>
                   )}
                 </div>
                 {status.operator && (
-                  <div className="text-[11px] text-slate-500">
+                  <div className="text-[11px] text-muted">
                     operator{" "}
-                    <span className="font-mono text-slate-700" title={status.operator}>
+                    <span className="font-mono text-fg" title={status.operator}>
                       {status.operator.length > 18 ? `${status.operator.slice(0, 10)}…${status.operator.slice(-6)}` : status.operator}
                     </span>
                     {status.balance && (
                       <>
-                        {" "}· balance <span className="font-mono text-slate-700">{status.balance}</span>
+                        {" "}· balance <span className="font-mono text-fg">{status.balance}</span>
                       </>
                     )}
                   </div>
                 )}
-                {status.error && <p className="text-xs text-red-600">{status.error}</p>}
+                {status.error && <p className="text-xs text-danger">{status.error}</p>}
               </div>
             )}
           </div>
         </div>
       ) : (
         <div className="text-center py-4 px-2">
-          <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-2">
+          <div className="w-10 h-10 rounded-full bg-elevated text-muted flex items-center justify-center mx-auto mb-2">
             <Icon name="warn" className="w-5 h-5" />
           </div>
-          <div className="text-sm font-medium text-slate-700">Not connected</div>
-          <p className="text-xs text-slate-500 mt-1">
+          <div className="text-sm font-medium text-fg">Not connected</div>
+          <p className="text-xs text-muted mt-1 prose-measure">
             Set the environment variables below and restart the API to bring this network online.
           </p>
           <div className="mt-3 flex flex-col items-center gap-1">
             {(ENV_VARS[chain.id] ?? []).map((v) => (
-              <code key={v} className="text-[11px] font-mono rounded bg-slate-100 text-slate-600 px-2 py-0.5">
+              <code key={v} className="text-[11px] font-mono rounded bg-elevated text-muted px-2 py-0.5">
                 {v}
               </code>
             ))}
@@ -234,7 +234,7 @@ function ChainCard({ chain }: { chain: ChainInfo }): JSX.Element {
 function Row({ label, children }: { label: string; children: React.ReactNode }): JSX.Element {
   return (
     <div className="contents">
-      <dt className="text-slate-400 font-medium">{label}</dt>
+      <dt className="text-muted font-medium">{label}</dt>
       <dd className="min-w-0">{children}</dd>
     </div>
   );

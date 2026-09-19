@@ -3,7 +3,7 @@ import { api, ApiError } from "../../api.js";
 import { useAuth } from "../../auth.js";
 import { can } from "../../rbac.js";
 import type { Asset, AuditVerify } from "../../types.js";
-import { Pill } from "./ui.js";
+import { Pill, TableShell } from "./ui.js";
 
 /** Relative "n ago" for an ISO timestamp. */
 function ago(iso: string): string {
@@ -64,50 +64,48 @@ export function IntegrityPanel({ useCaseKey }: { useCaseKey?: string }): JSX.Ele
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-bold text-slate-900">Audit integrity</h2>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <h2 className="text-lg font-bold text-fg">Audit integrity</h2>
+          <p className="text-xs text-muted mt-0.5 prose-measure">
             Every audit entry is hash-chained to the previous one and periodically anchored on-ledger.
-            {tampered > 0 ? <span className="text-red-600 font-medium"> {tampered} chain(s) show tampering.</span> : <span className="text-emerald-700 font-medium"> All chains verified.</span>}
+            {tampered > 0 ? <span className="text-danger font-medium"> {tampered} chain(s) show tampering.</span> : <span className="text-success font-medium"> All chains verified.</span>}
           </p>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => void reload()} disabled={busy} className="rounded-lg border border-slate-300 text-slate-600 px-3 py-1.5 text-sm font-medium hover:bg-slate-50 disabled:opacity-50">Verify now</button>
+          <button onClick={() => void reload()} disabled={busy} className="rounded-lg border border-border text-muted px-3 py-1.5 text-sm font-medium hover:bg-elevated disabled:opacity-50">Verify now</button>
           {canAnchor && <button onClick={() => void anchorNow()} disabled={busy} className="rounded-lg bg-brand-600 text-white px-4 py-1.5 text-sm font-medium hover:bg-brand-700 disabled:opacity-50">{busy ? "Anchoring…" : "Anchor now"}</button>}
         </div>
       </div>
 
-      {error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2">{error}</div>}
-      {notice && <div className="rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm px-4 py-2">{notice}</div>}
+      {error && <div className="rounded-lg bg-danger/10 border border-danger/20 text-danger text-sm px-4 py-2">{error}</div>}
+      {notice && <div className="rounded-lg bg-success/10 border border-success/20 text-success text-sm px-4 py-2">{notice}</div>}
 
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
-            <tr>
-              <th className="text-left font-medium px-4 py-2.5">Asset</th>
-              <th className="text-left font-medium px-4 py-2.5">Chain status</th>
-              <th className="text-right font-medium px-4 py-2.5">Entries</th>
-              <th className="text-left font-medium px-4 py-2.5">Last anchor</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {rows.map(({ asset, v }) => {
-              const good = v.valid && v.anchorConsistent;
-              const label = !v.valid ? `tampered @#${v.brokenAt} (${v.reason})` : !v.anchorConsistent ? "anchor mismatch" : "verified";
-              return (
-                <tr key={asset.id}>
-                  <td className="px-4 py-2.5 font-medium text-slate-800">{asset.name} <span className="text-slate-400 font-normal">{asset.symbol}</span></td>
-                  <td className="px-4 py-2.5"><Pill tone={good ? "ok" : "danger"}>{good ? "✓ " : "✕ "}{label}</Pill></td>
-                  <td className="px-4 py-2.5 text-right font-mono text-slate-600">{v.count}</td>
-                  <td className="px-4 py-2.5 text-xs text-slate-500">
-                    {v.lastAnchor ? <span className="font-mono">#{v.lastAnchor.seq} · {v.lastAnchor.txHash.slice(0, 12)}… · {ago(v.lastAnchor.at)}</span> : <span className="text-slate-300">not anchored</span>}
-                  </td>
-                </tr>
-              );
-            })}
-            {rows.length === 0 && <tr><td colSpan={4} className="px-4 py-6 text-center text-sm text-slate-400">No assets to verify.</td></tr>}
-          </tbody>
-        </table>
-      </div>
+      <TableShell>
+        <thead>
+          <tr>
+            <th>Asset</th>
+            <th>Chain status</th>
+            <th className="text-right">Entries</th>
+            <th>Last anchor</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(({ asset, v }) => {
+            const good = v.valid && v.anchorConsistent;
+            const label = !v.valid ? `tampered @#${v.brokenAt} (${v.reason})` : !v.anchorConsistent ? "anchor mismatch" : "verified";
+            return (
+              <tr key={asset.id}>
+                <td className="font-medium text-fg">{asset.name} <span className="text-muted font-normal">{asset.symbol}</span></td>
+                <td><Pill tone={good ? "ok" : "danger"}>{good ? "✓ " : "✕ "}{label}</Pill></td>
+                <td className="num text-muted">{v.count}</td>
+                <td className="text-xs text-muted">
+                  {v.lastAnchor ? <span className="font-mono">#{v.lastAnchor.seq} · {v.lastAnchor.txHash.slice(0, 12)}… · {ago(v.lastAnchor.at)}</span> : <span className="text-muted">not anchored</span>}
+                </td>
+              </tr>
+            );
+          })}
+          {rows.length === 0 && <tr><td colSpan={4} className="text-center text-sm text-muted !py-6">No assets to verify.</td></tr>}
+        </tbody>
+      </TableShell>
     </div>
   );
 }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ApiError, api } from "../../api.js";
 import { useAuth } from "../../auth.js";
 import type { DisclosureChoice, HeldCredential, PredicateOp, VerificationRequest } from "../../types.js";
-import { Pager, SectionHeader } from "../shared/ui.js";
+import { Pager, SectionHeader, TableShell } from "../shared/ui.js";
 import { disclosableFields, defaultDisclosuresFor } from "./VerificationInbox.js";
 
 const PAGE_SIZE = 5;
@@ -16,17 +16,17 @@ function Tile({ label, value, tone, active, onClick }: { label: string; value: n
     <button
       type="button"
       onClick={onClick}
-      className={`text-left w-full bg-white rounded-2xl border p-4 animate-slide-up shadow-sm transition-shadow hover:shadow ${active ? "border-brand-400 ring-1 ring-brand-300" : "border-slate-200/80 hover:border-slate-300"}`}
+      className={`text-left w-full bg-surface rounded-2xl border p-4 animate-slide-up shadow-sm transition-shadow hover:shadow ${active ? "border-brand-400 ring-1 ring-brand-300" : "border-border/80 hover:border-border"}`}
     >
-      <div className={`text-2xl font-bold tabular-nums font-display ${tone ?? "text-slate-900"}`}>{value.toLocaleString()}</div>
-      <div className="text-[11px] font-semibold uppercase tracking-widest text-slate-400 mt-1">{label}</div>
+      <div className={`text-2xl font-bold tabular-nums font-display ${tone ?? "text-fg"}`}>{value.toLocaleString()}</div>
+      <div className="text-[11px] font-semibold text-muted mt-1">{label}</div>
     </button>
   );
 }
 
 function BackButton({ onClick }: { onClick: () => void }): JSX.Element {
   return (
-    <button type="button" onClick={onClick} className="text-sm text-slate-500 hover:text-slate-800 inline-flex items-center gap-1.5">
+    <button type="button" onClick={onClick} className="text-sm text-muted hover:text-fg inline-flex items-center gap-1.5">
       ← Back to Dashboard
     </button>
   );
@@ -187,15 +187,15 @@ export function HolderDashboard(): JSX.Element {
       <div className="space-y-5">
         <BackButton onClick={() => setDetail(null)} />
         <SectionHeader title={r.purpose} description={`${r.requestedTypes.join(", ")} · ${r.status}`} />
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5">
-          {actionErr && <div className="text-sm text-rose-600 mb-3">{actionErr}</div>}
-          {actionMsg && <div className="text-sm text-emerald-600 mb-3">{actionMsg}</div>}
+        <div className="bg-surface rounded-2xl border border-border/80 shadow-sm p-5">
+          {actionErr && <div className="text-sm text-danger mb-3">{actionErr}</div>}
+          {actionMsg && <div className="text-sm text-success mb-3">{actionMsg}</div>}
           {r.status !== "pending" ? (
-            <div className="text-sm text-slate-500">
+            <div className="text-sm text-muted">
               {r.status}{r.verifiedAt ? ` · verified ${new Date(r.verifiedAt).toLocaleString()}` : ""}
             </div>
           ) : (r.eligibleCredentials ?? []).length === 0 ? (
-            <div className="text-sm text-amber-600">You hold no unrevoked credential of the requested type(s).</div>
+            <div className="text-sm text-warning">You hold no unrevoked credential of the requested type(s).</div>
           ) : (
             <div className="space-y-4">
               {(r.eligibleCredentials ?? []).map((c) => {
@@ -219,8 +219,8 @@ export function HolderDashboard(): JSX.Element {
                       <span>{c.type} — {c.issuerName ?? c.issuerDid}</span>
                     </label>
                     {sel[c.id] && (
-                      <div className="ml-6 mt-2 space-y-1.5 border-l border-slate-200 pl-4">
-                        <div className="text-xs text-slate-400">
+                      <div className="ml-6 mt-2 space-y-1.5 border-l border-border pl-4">
+                        <div className="text-xs text-muted">
                           This only controls what the verifier receives — the credential itself is unchanged.
                         </div>
                         {disclosableFields(claims).map((field) => {
@@ -235,7 +235,7 @@ export function HolderDashboard(): JSX.Element {
                                 {requested && <span className="text-brand-500"> · requested</span>}
                               </span>
                               <select
-                                className="rounded border border-slate-200 px-1.5 py-1"
+                                className="rounded-lg border border-border bg-elevated/80 px-1.5 py-1 text-xs focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15"
                                 value={choice.kind}
                                 onChange={(e) => {
                                   const kind = e.target.value as DisclosureChoice["kind"];
@@ -251,7 +251,7 @@ export function HolderDashboard(): JSX.Element {
                               {choice.kind === "predicate" && (
                                 <>
                                   <select
-                                    className="rounded border border-slate-200 px-1.5 py-1"
+                                    className="rounded-lg border border-border bg-elevated/80 px-1.5 py-1 text-xs focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15"
                                     value={choice.op}
                                     onChange={(e) => setFieldChoice(field, { kind: "predicate", op: e.target.value as PredicateOp, threshold: choice.threshold })}
                                   >
@@ -262,7 +262,7 @@ export function HolderDashboard(): JSX.Element {
                                     <option value="eq">=</option>
                                   </select>
                                   <input
-                                    type="number" className="w-20 rounded border border-slate-200 px-1.5 py-1"
+                                    type="number" className="w-20 rounded-lg border border-border bg-elevated/80 px-1.5 py-1 text-xs focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15"
                                     value={choice.threshold}
                                     onChange={(e) => {
                                       const n = Number(e.target.value);
@@ -281,7 +281,7 @@ export function HolderDashboard(): JSX.Element {
               })}
               <div className="flex gap-2 pt-1">
                 <button className="rounded-lg bg-brand-600 px-4 py-2 text-sm text-white disabled:opacity-40" disabled={!Object.values(sel).some(Boolean)} onClick={() => void consent(r)}>Consent &amp; present</button>
-                <button className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-rose-600" onClick={() => void reject(r)}>Reject</button>
+                <button className="rounded-lg border border-border px-4 py-2 text-sm text-danger" onClick={() => void reject(r)}>Reject</button>
               </div>
             </div>
           )}
@@ -298,13 +298,13 @@ export function HolderDashboard(): JSX.Element {
       <div className="space-y-5">
         <BackButton onClick={() => setDetail(null)} />
         <SectionHeader title={c.type.filter((t) => t !== "VerifiableCredential").join(", ") || c.type.join(", ")} description={`${c.issuerName ?? c.issuerDid} · ${c.revoked ? "Revoked" : "Active"}`} />
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5">
+        <div className="bg-surface rounded-2xl border border-border/80 shadow-sm p-5">
           <div className="grid grid-cols-2 gap-3 text-sm">
             {Object.entries(c.claims ?? {}).filter(([k]) => k !== "id").map(([k, v]) => (
-              <div key={k} className="min-w-0"><span className="text-slate-400">{k}:</span> <span className="break-all">{String(v)}</span></div>
+              <div key={k} className="min-w-0"><span className="text-muted">{k}:</span> <span className="break-all">{String(v)}</span></div>
             ))}
           </div>
-          <div className="mt-4 pt-4 border-t border-slate-100 text-xs text-slate-400 space-y-1">
+          <div className="mt-4 pt-4 border-t border-border text-xs text-muted space-y-1">
             <div>Issued {new Date(c.issuedAt).toLocaleDateString()}{c.expiresAt ? ` · expires ${new Date(c.expiresAt).toLocaleDateString()}` : ""}</div>
             <div>Holder DID: <span className="font-data">{c.holderDid}</span></div>
           </div>
@@ -320,114 +320,108 @@ export function HolderDashboard(): JSX.Element {
       <div className="grid grid-cols-3 gap-3">
         <Tile label="Requests received for credential share" value={counts.received} active={filter === "requests"} onClick={() => toggleFilter("requests")} />
         <Tile label="Credentials received" value={creds.length} tone="text-sky-600" active={filter === "credentials"} onClick={() => toggleFilter("credentials")} />
-        <Tile label="Consent shared" value={counts.consented} tone="text-emerald-600" active={filter === "consented"} onClick={() => toggleFilter("consented")} />
+        <Tile label="Consent shared" value={counts.consented} tone="text-success" active={filter === "consented"} onClick={() => toggleFilter("consented")} />
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+      <div className="bg-surface rounded-2xl border border-border/80 shadow-sm overflow-hidden">
         <div className="flex flex-wrap items-center gap-2 px-4 pt-3 pb-1">
           <div className="mr-auto">
-            <div className="text-sm font-semibold text-slate-900">Recent activity</div>
-            <div className="text-xs text-slate-400">Every credential you've received or lost, and every share request you've answered — newest first.</div>
+            <div className="text-sm font-semibold text-fg">Recent activity</div>
+            <div className="text-xs text-muted">Every credential you've received or lost, and every share request you've answered — newest first.</div>
           </div>
           <input value={timelineQuery} onChange={(e) => { setTimelineQuery(e.target.value); setTimelinePage(1); }} placeholder="Search…"
-            className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs w-48 max-w-full" />
+            className="rounded-lg border border-border bg-elevated/80 px-2.5 py-1 text-xs w-48 max-w-full focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15" />
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-400">
-              <tr>
-                <th className="text-left px-4 py-2 font-semibold">Kind</th>
-                <th className="text-left px-4 py-2 font-semibold">Summary</th>
-                <th className="text-left px-4 py-2 font-semibold">When</th>
+        <TableShell>
+          <thead>
+            <tr>
+              <th>Kind</th>
+              <th>Summary</th>
+              <th>When</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredTimeline.length === 0 && <tr><td colSpan={3} className="text-muted">Nothing here yet.</td></tr>}
+            {pagedTimeline.map((e, i) => (
+              <tr key={`${e.at}-${i}`}>
+                <td className="font-medium text-fg">{TIMELINE_KIND_LABEL[e.kind]}</td>
+                <td className="text-muted">
+                  {e.summary}
+                  {e.txHash && <span className="ml-2 font-data text-[10px] text-muted">{e.txHash.slice(0, 14)}…</span>}
+                </td>
+                <td className="text-muted" title={new Date(e.at).toLocaleString()}>{new Date(e.at).toLocaleString()}</td>
               </tr>
-            </thead>
-            <tbody>
-              {filteredTimeline.length === 0 && <tr><td colSpan={3} className="px-4 py-4 text-slate-400">Nothing here yet.</td></tr>}
-              {pagedTimeline.map((e, i) => (
-                <tr key={`${e.at}-${i}`} className="border-t border-slate-100">
-                  <td className="px-4 py-2 font-medium text-slate-700">{TIMELINE_KIND_LABEL[e.kind]}</td>
-                  <td className="px-4 py-2 text-slate-600">
-                    {e.summary}
-                    {e.txHash && <span className="ml-2 font-data text-[10px] text-slate-400">{e.txHash.slice(0, 14)}…</span>}
-                  </td>
-                  <td className="px-4 py-2 text-slate-400" title={new Date(e.at).toLocaleString()}>{new Date(e.at).toLocaleString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </TableShell>
         <Pager page={timelinePage} pageSize={PAGE_SIZE} total={filteredTimeline.length} onPage={setTimelinePage} />
       </div>
 
       {filter === "credentials" && (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+        <div className="bg-surface rounded-2xl border border-border/80 shadow-sm overflow-hidden">
           <div className="px-4 pt-3 pb-1">
             <input value={query} onChange={(e) => onQueryChange(e.target.value)} placeholder="Search type or issuer…"
-              className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs w-64 max-w-full" />
+              className="rounded-lg border border-border bg-elevated/80 px-2.5 py-1 text-xs w-64 max-w-full focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15" />
           </div>
-          <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-400">
+          <TableShell>
+            <thead>
               <tr>
-                <th className="text-left px-4 py-2 font-semibold">Type</th>
-                <th className="text-left px-4 py-2 font-semibold">Issuer</th>
-                <th className="text-left px-4 py-2 font-semibold">Issued</th>
-                <th className="text-left px-4 py-2 font-semibold">Status</th>
-                <th className="px-4 py-2"></th>
+                <th>Type</th>
+                <th>Issuer</th>
+                <th>Issued</th>
+                <th>Status</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
-              {filteredCreds.length === 0 && <tr><td colSpan={5} className="px-4 py-4 text-slate-400">{creds.length === 0 ? "No credentials held yet." : "No matches."}</td></tr>}
+              {filteredCreds.length === 0 && <tr><td colSpan={5} className="text-muted">{creds.length === 0 ? "No credentials held yet." : "No matches."}</td></tr>}
               {pagedCreds.map((c) => (
-                <tr key={c.id} className="border-t border-slate-100 hover:bg-slate-50/70 transition-colors">
-                  <td className="px-4 py-2">{c.type.filter((t) => t !== "VerifiableCredential").join(", ") || c.type.join(", ")}</td>
-                  <td className="px-4 py-2">{c.issuerName ?? c.issuerDid}</td>
-                  <td className="px-4 py-2">{new Date(c.issuedAt).toLocaleDateString()}</td>
-                  <td className="px-4 py-2">{c.revoked ? "Revoked" : "Active"}</td>
-                  <td className="px-4 py-2 text-right">
-                    <button className="rounded-lg border border-slate-200 px-3 py-1 text-xs" onClick={() => setDetail({ kind: "credential", id: c.id })}>View</button>
+                <tr key={c.id}>
+                  <td>{c.type.filter((t) => t !== "VerifiableCredential").join(", ") || c.type.join(", ")}</td>
+                  <td>{c.issuerName ?? c.issuerDid}</td>
+                  <td>{new Date(c.issuedAt).toLocaleDateString()}</td>
+                  <td>{c.revoked ? "Revoked" : "Active"}</td>
+                  <td className="text-right">
+                    <button className="rounded-lg border border-border px-3 py-1 text-xs" onClick={() => setDetail({ kind: "credential", id: c.id })}>View</button>
                   </td>
                 </tr>
               ))}
             </tbody>
-          </table>
-          </div>
+          </TableShell>
           <Pager page={page} pageSize={PAGE_SIZE} total={filteredCreds.length} onPage={setPage} />
         </div>
       )}
 
       {(filter === "requests" || filter === "consented") && (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-          {actionMsg && <div className="text-sm text-emerald-600 px-4 pt-3">{actionMsg}</div>}
+        <div className="bg-surface rounded-2xl border border-border/80 shadow-sm overflow-hidden">
+          {actionMsg && <div className="text-sm text-success px-4 pt-3">{actionMsg}</div>}
           <div className="px-4 pt-3 pb-1">
             <input value={query} onChange={(e) => onQueryChange(e.target.value)} placeholder="Search purpose or type…"
-              className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs w-64 max-w-full" />
+              className="rounded-lg border border-border bg-elevated/80 px-2.5 py-1 text-xs w-64 max-w-full focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15" />
           </div>
-          <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-400">
+          <TableShell>
+            <thead>
               <tr>
-                <th className="text-left px-4 py-2 font-semibold">Request</th>
-                <th className="text-left px-4 py-2 font-semibold">Type</th>
-                <th className="text-left px-4 py-2 font-semibold">Status</th>
-                <th className="px-4 py-2"></th>
+                <th>Request</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
-              {filteredRequests.length === 0 && <tr><td colSpan={4} className="px-4 py-4 text-slate-400">{requests.length === 0 ? "Nothing here." : "No matches."}</td></tr>}
+              {filteredRequests.length === 0 && <tr><td colSpan={4} className="text-muted">{requests.length === 0 ? "Nothing here." : "No matches."}</td></tr>}
               {pagedRequests.map((r) => (
-                <tr key={r.id} className="border-t border-slate-100 hover:bg-slate-50/70 transition-colors">
-                  <td className="px-4 py-2">{r.purpose}</td>
-                  <td className="px-4 py-2">{r.requestedTypes.join(", ")}</td>
-                  <td className="px-4 py-2 capitalize">{r.status}</td>
-                  <td className="px-4 py-2 text-right">
-                    <button className="rounded-lg border border-slate-200 px-3 py-1 text-xs" onClick={() => setDetail({ kind: "request", id: r.id })}>View</button>
+                <tr key={r.id}>
+                  <td>{r.purpose}</td>
+                  <td>{r.requestedTypes.join(", ")}</td>
+                  <td className="capitalize">{r.status}</td>
+                  <td className="text-right">
+                    <button className="rounded-lg border border-border px-3 py-1 text-xs" onClick={() => setDetail({ kind: "request", id: r.id })}>View</button>
                   </td>
                 </tr>
               ))}
             </tbody>
-          </table>
-          </div>
+          </TableShell>
           <Pager page={page} pageSize={PAGE_SIZE} total={filteredRequests.length} onPage={setPage} />
         </div>
       )}

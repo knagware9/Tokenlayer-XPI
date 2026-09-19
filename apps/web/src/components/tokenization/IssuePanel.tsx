@@ -75,8 +75,8 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
 
   if (!allowed) {
     return (
-      <div className="bg-white rounded-xl border border-slate-200 p-6 text-sm text-slate-500">
-        Your role (<span className="font-medium text-slate-700">{user?.role}</span>) cannot issue assets. Sign in as an
+      <div className="bg-surface rounded-xl border border-border p-6 text-sm text-muted">
+        Your role (<span className="font-medium text-fg">{user?.role}</span>) cannot issue assets. Sign in as an
         Issuer or Admin.
       </div>
     );
@@ -126,8 +126,8 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
   }
 
   return (
-    <form onSubmit={submit} className="bg-white rounded-xl border border-slate-200 p-6 space-y-4 max-w-2xl">
-      <h2 className="font-semibold text-slate-900">Issue a new asset</h2>
+    <form onSubmit={submit} className="bg-surface rounded-xl border border-border p-6 space-y-4 max-w-2xl">
+      <h2 className="font-semibold text-fg">Issue a new asset</h2>
 
       <div className="grid grid-cols-2 gap-4">
         <Field label="Use case">
@@ -151,11 +151,11 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
       </div>
 
       {useCase && (
-        <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 text-xs text-slate-600 space-y-1.5">
-          {useCase.description && <p>{useCase.description}</p>}
+        <div className="rounded-lg bg-elevated border border-border p-3 text-xs text-muted space-y-1.5">
+          {useCase.description && <p className="prose-measure">{useCase.description}</p>}
           <p className="flex flex-wrap items-center gap-1.5">
             <span className="px-1.5 py-0.5 rounded bg-brand-600 text-white text-[10px] font-semibold">{useCase.tokenStandard}</span>
-            <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 text-[10px] font-medium">{useCase.tokenType}</span>
+            <span className="px-1.5 py-0.5 rounded bg-border text-muted text-[10px] font-medium">{useCase.tokenType}</span>
             <Badge on={useCase.lifecycle.transfer}>transfer</Badge>
             <Badge on={useCase.lifecycle.burn}>burn</Badge>
             <Badge on={useCase.lifecycle.freeze}>freeze</Badge>
@@ -170,13 +170,13 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Series A Note" />
         </Field>
         <Field label="Symbol" hint="Inherited from the use case's contract">
-          <input className="input bg-slate-50 text-slate-500" value={useCase?.symbol ?? ""} disabled />
+          <input className="input bg-elevated text-muted" value={useCase?.symbol ?? ""} disabled />
         </Field>
       </div>
 
       {useCase && (
         <div className="space-y-3">
-          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Metadata</p>
+          <p className="text-xs font-medium text-muted">Metadata</p>
           <div className="grid grid-cols-2 gap-4">
             {Object.entries(useCase.metadataSchema.properties).map(([field, prop]) => {
               const required = useCase.metadataSchema.required?.includes(field);
@@ -187,7 +187,7 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
                 <Field key={field} label={`${field}${required ? " *" : ""}`} hint={isDerived ? "Derived by the platform from the invoice fields" : prop.description}>
                   {isDerived ? (
                     <input
-                      className="input bg-slate-50 text-slate-500 font-mono text-xs"
+                      className="input bg-elevated text-muted font-mono text-xs"
                       readOnly
                       value={derived[field] ?? "(fill invoice fields to compute)"}
                     />
@@ -268,12 +268,12 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
 
       {isFungible && (
         <div className="space-y-2">
-          <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+          <label className="flex items-center gap-2 text-sm text-muted cursor-pointer">
             <input type="checkbox" checked={listForSale} onChange={(e) => setListForSale(e.target.checked)} />
             List for sale
           </label>
           {listForSale && (
-            <div className="rounded-lg border border-slate-200 p-4 space-y-3 bg-slate-50">
+            <div className="rounded-lg border border-border p-4 space-y-3 bg-elevated">
               <div className="grid grid-cols-2 gap-4">
                 <Field label="Unit price">
                   <input className="input" type="number" min="1" value={salePrice} onChange={(e) => setSalePrice(e.target.value)} placeholder="e.g. 5" />
@@ -290,7 +290,7 @@ export function IssuePanel({ useCases, chains, onIssued }: Props): JSX.Element {
         </div>
       )}
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-danger">{error}</p>}
       <button
         type="submit"
         disabled={busy || !name || !chainId}
@@ -319,9 +319,9 @@ function fileToBase64(file: File): Promise<string> {
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }): JSX.Element {
   return (
     <label className="block">
-      <span className="block text-xs font-medium text-slate-600 mb-1">{label}</span>
+      <span className="block text-xs font-medium text-muted mb-1">{label}</span>
       {children}
-      {hint && <span className="block text-[11px] text-slate-400 mt-1">{hint}</span>}
+      {hint && <span className="block text-[11px] text-muted mt-1">{hint}</span>}
     </label>
   );
 }
@@ -330,7 +330,7 @@ function Badge({ on, children }: { on: boolean; children: React.ReactNode }): JS
   return (
     <span
       className={`inline-block mr-1.5 px-1.5 py-0.5 rounded text-[10px] font-medium ${
-        on ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-400 line-through"
+        on ? "bg-success/10 text-success" : "bg-border text-muted line-through"
       }`}
     >
       {children}

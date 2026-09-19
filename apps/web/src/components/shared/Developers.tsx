@@ -8,7 +8,7 @@ import { API_SCOPES, type ApiKeyView, type ApiScope, type OrgCapabilities, type 
 import { ApiReference } from "./ApiReference.js";
 import { Guides } from "./Guides.js";
 import { Webhooks } from "./Webhooks.js";
-import { Card, EmptyState, Pill, SectionHeader } from "./ui.js";
+import { Card, EmptyState, Pill, SectionHeader, TableShell } from "./ui.js";
 
 /**
  * Mirrors the API's `KEY_PREFIX_MARKER` (apps/api/src/shared/api-keys.ts):
@@ -149,17 +149,17 @@ function KeyHygiene({ keys }: { keys: ApiKeyView[] }): JSX.Element {
         : `${s.needsAttention} live key${s.needsAttention === 1 ? "" : "s"} want${s.needsAttention === 1 ? "s" : ""} a decision.`}
     >
       <div className="flex flex-wrap gap-4 text-sm">
-        <div><span className="font-semibold text-slate-900">{s.live}</span> <span className="text-slate-500">live</span></div>
-        {s.neverUsed > 0 && <div><span className="font-semibold text-red-700">{s.neverUsed}</span> <span className="text-slate-500">never used</span></div>}
-        {s.stale > 0 && <div><span className="font-semibold text-amber-700">{s.stale}</span> <span className="text-slate-500">unused 90+ days</span></div>}
-        {s.expiring > 0 && <div><span className="font-semibold text-amber-700">{s.expiring}</span> <span className="text-slate-500">expiring within 30 days</span></div>}
-        {s.expired > 0 && <div><span className="font-semibold text-slate-500">{s.expired}</span> <span className="text-slate-500">expired</span></div>}
-        {s.revoked > 0 && <div><span className="font-semibold text-slate-500">{s.revoked}</span> <span className="text-slate-500">revoked</span></div>}
+        <div><span className="font-semibold text-fg">{s.live}</span> <span className="text-muted">live</span></div>
+        {s.neverUsed > 0 && <div><span className="font-semibold text-danger">{s.neverUsed}</span> <span className="text-muted">never used</span></div>}
+        {s.stale > 0 && <div><span className="font-semibold text-warning">{s.stale}</span> <span className="text-muted">unused 90+ days</span></div>}
+        {s.expiring > 0 && <div><span className="font-semibold text-warning">{s.expiring}</span> <span className="text-muted">expiring within 30 days</span></div>}
+        {s.expired > 0 && <div><span className="font-semibold text-muted">{s.expired}</span> <span className="text-muted">expired</span></div>}
+        {s.revoked > 0 && <div><span className="font-semibold text-muted">{s.revoked}</span> <span className="text-muted">revoked</span></div>}
       </div>
       <div className="mt-3">
-        <div className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-1">What these credentials can do</div>
+        <div className="text-xs font-medium text-muted mb-1">What these credentials can do</div>
         {scopes.length === 0
-          ? <p className="text-sm text-slate-500">No live key holds any scope.</p>
+          ? <p className="text-sm text-muted">No live key holds any scope.</p>
           : <div className="flex flex-wrap gap-1">{scopes.map((sc) => <Pill key={sc} tone="info">{sc}</Pill>)}</div>}
       </div>
     </Card>
@@ -213,7 +213,7 @@ export function Developers(): JSX.Element {
         description="Everything a system needs to call TokenLayer without a person signing in: credentials, event delivery, the full API reference and worked integrations."
       />
 
-      <div className="flex flex-wrap gap-1 border-b border-slate-200">
+      <div className="flex flex-wrap gap-1 border-b border-border">
         {DEV_TABS.map((t) => (
           <button
             key={t.id}
@@ -223,7 +223,7 @@ export function Developers(): JSX.Element {
             className={`-mb-px rounded-t-lg border-b-2 px-3.5 py-2 text-sm font-medium ${
               t.id === tab
                 ? "border-brand-600 text-brand-700"
-                : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300"
+                : "border-transparent text-muted hover:text-fg hover:border-border"
             }`}
           >
             {t.label}
@@ -231,11 +231,11 @@ export function Developers(): JSX.Element {
         ))}
       </div>
 
-      {orgError && needsOrg && <p className="text-sm text-red-600">{orgError}</p>}
+      {orgError && needsOrg && <p className="text-sm text-danger">{orgError}</p>}
 
       {needsOrg && isPlatform && orgs.length > 1 && (
         <div className="flex items-center gap-2">
-          <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Organization</label>
+          <label className="text-xs font-medium text-muted">Organization</label>
           <select
             className="select max-w-xs"
             value={orgId ?? ""}
@@ -263,20 +263,20 @@ function Overview(): JSX.Element {
         title="Two credentials, one header"
         description="Both travel in the same Authorization: Bearer header and are told apart by the token's shape."
       >
-        <div className="text-sm text-slate-600 space-y-2">
+        <div className="text-sm text-muted space-y-2 prose-measure">
           <p>
-            A <strong className="font-semibold text-slate-800">human session</strong> is a JWT from{" "}
+            A <strong className="font-semibold text-fg">human session</strong> is a JWT from{" "}
             <span className="font-mono text-xs">POST /auth/login</span>, valid for 8 hours, carrying the signed-in user&rsquo;s
             identity and role. Service accounts cannot log in.
           </p>
           <p>
-            An <strong className="font-semibold text-slate-800">organization API key</strong> is an opaque{" "}
+            An <strong className="font-semibold text-fg">organization API key</strong> is an opaque{" "}
             <span className="font-mono text-xs">{KEY_MARKER}…</span> secret shown once at creation and stored only as a hash. It
             authenticates <em>as</em> its bound service user, so that user&rsquo;s role, their organization&rsquo;s capability
             envelope and maker-checker all still apply. A key&rsquo;s scopes only ever narrow that — they can never widen it.
           </p>
           <p>
-            <strong className="font-semibold text-slate-800">Most mutations answer <span className="font-mono text-xs">202</span> with a proposal,
+            <strong className="font-semibold text-fg">Most mutations answer <span className="font-mono text-xs">202</span> with a proposal,
             not the object you asked for.</strong> Maker-checker is the default posture: the request records an intent, and the
             work happens when a second, distinct authorized person approves it. Read <span className="font-mono text-xs">proposal.id</span>{" "}
             from a 202 and follow it to a terminal state — treating a 202 as a completed create is the most common integration
@@ -414,7 +414,7 @@ function ApiKeys({ orgId, org }: { orgId: string | null; org: Organization | nul
           org ? (
             <button
               onClick={() => { setCreating((v) => !v); setError(null); }}
-              className="rounded-lg border border-slate-200 text-slate-600 px-3 py-1.5 text-xs font-medium hover:bg-slate-50"
+              className="rounded-lg border border-border text-muted px-3 py-1.5 text-xs font-medium hover:bg-elevated"
             >
               {creating ? "Close" : "Create API key"}
             </button>
@@ -422,10 +422,10 @@ function ApiKeys({ orgId, org }: { orgId: string | null; org: Organization | nul
         }
       />
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-danger">{error}</p>}
 
       {orgId && !org && (
-        <p className="text-sm text-slate-500">
+        <p className="text-sm text-muted prose-measure">
           Existing keys for this organization are listed below, but a new one cannot be created here — this account&rsquo;s
           organization is not in the list you can see, so its capability envelope (which decides the roles a key may take) is
           unavailable.
@@ -467,83 +467,81 @@ function ApiKeys({ orgId, org }: { orgId: string | null; org: Organization | nul
           <EmptyState icon="code" title="No API keys yet" hint="Create one to let a system integrate with this organization." />
         </Card>
       ) : (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="text-xs text-slate-500 bg-slate-50 uppercase tracking-wide">
-              <tr>
-                <th className="text-left font-medium px-4 py-2.5">Name</th>
-                <th className="text-left font-medium px-4 py-2.5">Key</th>
-                <th className="text-left font-medium px-4 py-2.5">Scopes</th>
-                <th className="text-left font-medium px-4 py-2.5">Role</th>
-                <th className="text-left font-medium px-4 py-2.5">Last used</th>
-                <th className="text-left font-medium px-4 py-2.5">Expires</th>
-                <th className="text-left font-medium px-4 py-2.5">Status</th>
-                <th className="text-left font-medium px-4 py-2.5">Health</th>
-                <th className="text-right font-medium px-4 py-2.5">Actions</th>
+        <TableShell>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Key</th>
+              <th>Scopes</th>
+              <th>Role</th>
+              <th>Last used</th>
+              <th>Expires</th>
+              <th>Status</th>
+              <th>Health</th>
+              <th className="text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {keys.map((k) => (
+              <tr key={k.id} className="align-top">
+                <td className="font-medium text-fg">{k.name}</td>
+                <td className="font-mono text-xs text-muted whitespace-nowrap">{KEY_MARKER}{k.prefix}…</td>
+                <td>
+                  <div className="flex flex-wrap gap-1">
+                    {k.scopes.length === 0
+                      ? <Pill tone="muted">no scopes</Pill>
+                      : k.scopes.map((s) => <Pill key={s} tone="info">{s}</Pill>)}
+                  </div>
+                </td>
+                <td className="text-muted">
+                  {k.role ?? "—"}
+                  {k.useCaseKey && <span className="block text-xs text-muted">{k.useCaseKey}</span>}
+                </td>
+                <td className="text-muted whitespace-nowrap">{fmt(k.lastUsedAt)}</td>
+                <td className="text-muted whitespace-nowrap">{k.expiresAt ? fmt(k.expiresAt) : "never"}</td>
+                <td><Pill tone={statusTone(k.status)}>{k.status}</Pill></td>
+                {/* `status` is what the server stores; health is what it
+                    MEANS for a reviewer. An active key unused for a year is
+                    "active" and is also the one worth a conversation. */}
+                <td>
+                  {(() => { const h = healthOf(k); return <span title={HEALTH_NOTE[h]}><Pill tone={healthTone(h)}>{HEALTH_LABEL[h]}</Pill></span>; })()}
+                </td>
+                <td>
+                  <div className="flex justify-end gap-2">
+                    {/*
+                      Rotate is offered for ACTIVE keys only. Rotation replaces
+                      the prefix and the hash and leaves `expiresAt` untouched,
+                      so rotating an EXPIRED key mints a secret that is already
+                      past its expiry — the operator would be walked through the
+                      one-time-secret ceremony for a credential that 401s on its
+                      very first call. An expired key is replaced by creating a
+                      new one, not by rotating the dead one. Revoke stays
+                      available for anything not already revoked.
+                    */}
+                    {canRotate(k.status) && (
+                      <button
+                        onClick={() => void rotate(k)}
+                        disabled={busyId === k.id}
+                        className="text-xs rounded border border-border text-muted px-2.5 py-1 font-medium hover:bg-elevated disabled:opacity-40"
+                      >
+                        Rotate
+                      </button>
+                    )}
+                    {k.status !== "revoked" && (
+                      <button
+                        onClick={() => void revoke(k)}
+                        disabled={busyId === k.id}
+                        className="text-xs rounded border border-danger/30 text-danger px-2.5 py-1 font-medium hover:bg-danger/10 disabled:opacity-40"
+                      >
+                        Revoke
+                      </button>
+                    )}
+                  </div>
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {keys.map((k) => (
-                <tr key={k.id} className="border-t border-slate-100 align-top">
-                  <td className="px-4 py-2 font-medium text-slate-800">{k.name}</td>
-                  <td className="px-4 py-2 font-mono text-xs text-slate-500 whitespace-nowrap">{KEY_MARKER}{k.prefix}…</td>
-                  <td className="px-4 py-2">
-                    <div className="flex flex-wrap gap-1">
-                      {k.scopes.length === 0
-                        ? <Pill tone="muted">no scopes</Pill>
-                        : k.scopes.map((s) => <Pill key={s} tone="info">{s}</Pill>)}
-                    </div>
-                  </td>
-                  <td className="px-4 py-2 text-slate-600">
-                    {k.role ?? "—"}
-                    {k.useCaseKey && <span className="block text-xs text-slate-400">{k.useCaseKey}</span>}
-                  </td>
-                  <td className="px-4 py-2 text-slate-500 whitespace-nowrap">{fmt(k.lastUsedAt)}</td>
-                  <td className="px-4 py-2 text-slate-500 whitespace-nowrap">{k.expiresAt ? fmt(k.expiresAt) : "never"}</td>
-                  <td className="px-4 py-2"><Pill tone={statusTone(k.status)}>{k.status}</Pill></td>
-                  {/* `status` is what the server stores; health is what it
-                      MEANS for a reviewer. An active key unused for a year is
-                      "active" and is also the one worth a conversation. */}
-                  <td className="px-4 py-2">
-                    {(() => { const h = healthOf(k); return <span title={HEALTH_NOTE[h]}><Pill tone={healthTone(h)}>{HEALTH_LABEL[h]}</Pill></span>; })()}
-                  </td>
-                  <td className="px-4 py-2">
-                    <div className="flex justify-end gap-2">
-                      {/*
-                        Rotate is offered for ACTIVE keys only. Rotation replaces
-                        the prefix and the hash and leaves `expiresAt` untouched,
-                        so rotating an EXPIRED key mints a secret that is already
-                        past its expiry — the operator would be walked through the
-                        one-time-secret ceremony for a credential that 401s on its
-                        very first call. An expired key is replaced by creating a
-                        new one, not by rotating the dead one. Revoke stays
-                        available for anything not already revoked.
-                      */}
-                      {canRotate(k.status) && (
-                        <button
-                          onClick={() => void rotate(k)}
-                          disabled={busyId === k.id}
-                          className="text-xs rounded border border-slate-300 text-slate-600 px-2.5 py-1 font-medium hover:bg-slate-50 disabled:opacity-40"
-                        >
-                          Rotate
-                        </button>
-                      )}
-                      {k.status !== "revoked" && (
-                        <button
-                          onClick={() => void revoke(k)}
-                          disabled={busyId === k.id}
-                          className="text-xs rounded border border-red-200 text-red-600 px-2.5 py-1 font-medium hover:bg-red-50 disabled:opacity-40"
-                        >
-                          Revoke
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </TableShell>
       )}
 
       {/*
@@ -581,37 +579,39 @@ function SecretPanel({ name, secret, rotated, onDismiss }: {
   }
 
   return (
-    <div className="bg-white rounded-2xl border-2 border-amber-300 shadow-sm">
-      <div className="px-5 pt-4 pb-3 border-b border-amber-100">
-        <h3 className="text-sm font-semibold text-slate-900">
+    <div className="bg-surface rounded-2xl border-2 border-warning/40 shadow-sm">
+      <div className="px-5 pt-4 pb-3 border-b border-warning/20">
+        <h3 className="text-sm font-semibold text-fg">
           {rotated ? "New secret for" : "Your new API key"} <span className="font-mono">{name}</span>
         </h3>
-        <p className="text-xs text-amber-700 mt-1 font-medium">
+        <p className="text-xs text-warning mt-1 font-medium">
           This is the only time you will see this secret. It is not stored anywhere you can read it back — if you lose it,
           rotate the key to mint a new one.
           {rotated && " The previous secret stopped working the moment this one was created."}
         </p>
-        <p className="text-xs text-slate-500 mt-1">
+        <p className="text-xs text-muted mt-1">
           Leaving this page — a sidebar click, a reload, closing the tab — discards it. You will be asked to confirm first.
         </p>
       </div>
       <div className="p-5 space-y-3">
         <div className="flex items-center gap-2">
+          {/* Deliberately kept dark in both themes — matches ui.tsx's CopyBlock
+              terminal-style secret display, not a light inline-code surface. */}
           <code className="flex-1 min-w-0 break-all rounded-lg bg-slate-900 text-slate-100 font-mono text-xs px-3 py-2.5">{secret}</code>
           <button
             onClick={() => void copy()}
-            className="shrink-0 rounded-lg border border-slate-300 text-slate-600 px-3 py-1.5 text-xs font-medium hover:bg-slate-50"
+            className="shrink-0 rounded-lg border border-border text-muted px-3 py-1.5 text-xs font-medium hover:bg-elevated"
           >
             {copied === "ok" ? "Copied" : "Copy"}
           </button>
         </div>
-        {copied === "fail" && <p className="text-xs text-red-600">Could not reach the clipboard — select the secret above and copy it manually.</p>}
-        <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+        {copied === "fail" && <p className="text-xs text-danger">Could not reach the clipboard — select the secret above and copy it manually.</p>}
+        <label className="flex items-center gap-2 text-sm text-fg cursor-pointer">
           <input
             type="checkbox"
             checked={acked}
             onChange={(e) => setAcked(e.target.checked)}
-            className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+            className="h-4 w-4 rounded border-border text-brand-600 focus:ring-brand-500"
           />
           I have stored this secret somewhere safe.
         </label>
@@ -737,40 +737,40 @@ function CreateKey({ orgId, capabilities, onCreated }: {
   }
 
   return (
-    <form onSubmit={submit} className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 space-y-4">
-      <h2 className="font-semibold text-slate-900">Create an API key</h2>
+    <form onSubmit={submit} className="bg-surface rounded-2xl border border-border/80 shadow-sm p-6 space-y-4">
+      <h2 className="font-semibold text-fg">Create an API key</h2>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <label className="block text-xs font-medium text-slate-500 mb-1">Name</label>
+          <label className="block text-xs font-medium text-muted mb-1">Name</label>
           <input className="input" placeholder="e.g. ERP invoice sync" value={name} onChange={(e) => setName(e.target.value)} />
         </div>
         <div>
-          <label className="block text-xs font-medium text-slate-500 mb-1">Acts as role</label>
+          <label className="block text-xs font-medium text-muted mb-1">Acts as role</label>
           <select className="select" value={role} onChange={(e) => setRole(e.target.value as Role | "")}>
             <option value="">Choose a role…</option>
             {roleOptions.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
         </div>
         <div>
-          <label className="block text-xs font-medium text-slate-500 mb-1">Use case (optional)</label>
+          <label className="block text-xs font-medium text-muted mb-1">Use case (optional)</label>
           <input className="input" placeholder="use-case key" value={useCaseKey} onChange={(e) => setUseCaseKey(e.target.value)} />
         </div>
         <div>
-          <label className="block text-xs font-medium text-slate-500 mb-1">Expires (optional)</label>
+          <label className="block text-xs font-medium text-muted mb-1">Expires (optional)</label>
           {/* `min` is a courtesy only — the API rejects a past expiry with 400 INVALID_EXPIRY. */}
           <input className="input" type="date" min={new Date().toISOString().slice(0, 10)} value={expiry} onChange={(e) => setExpiry(e.target.value)} />
         </div>
       </div>
 
       {hiddenByEnvelope.length > 0 && (
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-muted">
           {hiddenByEnvelope.join(", ")} {hiddenByEnvelope.length === 1 ? "is" : "are"} not offered — this organization&rsquo;s
           capability envelope does not include {hiddenByEnvelope.length === 1 ? "that role" : "those roles"}.
         </p>
       )}
 
       <fieldset>
-        <legend className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1.5">Scopes</legend>
+        <legend className="text-xs font-semibold text-muted mb-1.5">Scopes</legend>
         {/*
           These checkboxes are DELIBERATELY not filtered by the role above.
 
@@ -789,7 +789,7 @@ function CreateKey({ orgId, capabilities, onCreated }: {
           A wrong map is worse than no map, so the honest warning below stands in
           for one until the server exposes the effective set itself.
         */}
-        <p className="text-xs text-slate-500 mb-2">
+        <p className="text-xs text-muted mb-2 prose-measure">
           A scope only ever narrows the role above — ticking one never grants authority the role does not already have. This
           console does not check the two against each other, and neither does the create call: a combination the role cannot
           exercise (say <span className="font-mono">Auditor</span> with <span className="font-mono">assets:issue</span>) is
@@ -798,23 +798,23 @@ function CreateKey({ orgId, capabilities, onCreated }: {
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6">
           {API_SCOPES.map((s) => (
-            <label key={s} className="flex items-start gap-2 py-1 text-sm text-slate-700 cursor-pointer">
+            <label key={s} className="flex items-start gap-2 py-1 text-sm text-fg cursor-pointer">
               <input
                 type="checkbox"
                 checked={scopes.includes(s)}
                 onChange={() => toggleScope(s)}
-                className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                className="mt-0.5 h-4 w-4 shrink-0 rounded border-border text-brand-600 focus:ring-brand-500"
               />
               <span className="min-w-0">
-                <span className="font-mono text-xs text-slate-800">{s}</span>
-                <span className="block text-xs text-slate-500">{SCOPE_DESCRIPTIONS[s]}</span>
+                <span className="font-mono text-xs text-fg">{s}</span>
+                <span className="block text-xs text-muted">{SCOPE_DESCRIPTIONS[s]}</span>
               </span>
             </label>
           ))}
         </div>
       </fieldset>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-danger">{error}</p>}
       <button type="submit" disabled={busy} className="rounded-lg bg-brand-600 text-white py-1.5 px-4 text-sm font-medium hover:bg-brand-700 disabled:opacity-40">
         Create key
       </button>
@@ -835,8 +835,10 @@ function UsingYourKey(): JSX.Element {
   ].join("\n");
   return (
     <Card title="Using your key" description="Send the secret as a bearer token. No cookie, no login, no expiry to refresh.">
+      {/* Deliberately kept dark in both themes — same terminal-block treatment
+          as ui.tsx's CopyBlock, not a light inline-code surface. */}
       <pre className="overflow-x-auto rounded-lg bg-slate-900 text-slate-100 font-mono text-xs p-4 leading-5">{snippet}</pre>
-      <div className="text-xs text-slate-500 mt-3 space-y-1.5">
+      <div className="text-xs text-muted mt-3 space-y-1.5 prose-measure">
         <p>
           A key is refused a <span className="font-mono">401</span> if it is unknown, revoked or expired, and a
           {" "}<span className="font-mono">403 INSUFFICIENT_SCOPE</span> if the call needs a scope it was not granted. A

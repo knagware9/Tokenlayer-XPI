@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ApiError, api } from "../../api.js";
 import { useAuth } from "../../auth.js";
 import type { VerificationRequest, VerificationResult } from "../../types.js";
-import { Pager, SectionHeader } from "../shared/ui.js";
+import { Pager, SectionHeader, TableShell } from "../shared/ui.js";
 
 const PAGE_SIZE = 5;
 
@@ -24,17 +24,17 @@ function Tile({ label, value, tone, active, onClick }: { label: string; value: n
     <button
       type="button"
       onClick={onClick}
-      className={`text-left w-full bg-white rounded-2xl border p-4 animate-slide-up shadow-sm transition-shadow hover:shadow ${active ? "border-brand-400 ring-1 ring-brand-300" : "border-slate-200/80 hover:border-slate-300"}`}
+      className={`text-left w-full bg-surface rounded-2xl border p-4 animate-slide-up shadow-sm transition-shadow hover:shadow ${active ? "border-brand-400 ring-1 ring-brand-300" : "border-border/80 hover:border-border"}`}
     >
-      <div className={`text-2xl font-bold tabular-nums font-display ${tone ?? "text-slate-900"}`}>{value.toLocaleString()}</div>
-      <div className="text-[11px] font-semibold uppercase tracking-widest text-slate-400 mt-1">{label}</div>
+      <div className={`text-2xl font-bold tabular-nums font-display ${tone ?? "text-fg"}`}>{value.toLocaleString()}</div>
+      <div className="text-[11px] font-semibold text-muted mt-1">{label}</div>
     </button>
   );
 }
 
 function BackButton({ onClick }: { onClick: () => void }): JSX.Element {
   return (
-    <button type="button" onClick={onClick} className="text-sm text-slate-500 hover:text-slate-800 inline-flex items-center gap-1.5">
+    <button type="button" onClick={onClick} className="text-sm text-muted hover:text-fg inline-flex items-center gap-1.5">
       ← Back to Dashboard
     </button>
   );
@@ -136,19 +136,19 @@ export function VerifierDashboard(): JSX.Element {
       <div className="space-y-5">
         <BackButton onClick={() => setDetailId(null)} />
         <SectionHeader title={r.purpose} description={`${r.requestedTypes.join(", ")} · holder ${r.holderDid.slice(0, 24)}…`} />
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5">
-          {actionErr && <div className="text-sm text-rose-600 mb-3">{actionErr}</div>}
+        <div className="bg-surface rounded-2xl border border-border/80 shadow-sm p-5">
+          {actionErr && <div className="text-sm text-danger mb-3">{actionErr}</div>}
           <div className="flex items-center justify-between mb-3">
-            <div className="text-xs text-slate-500">
+            <div className="text-xs text-muted">
               created {new Date(r.createdAt).toLocaleString()}
               {r.verifiedAt && ` · verified ${new Date(r.verifiedAt).toLocaleString()}`}
             </div>
             {r.status === "consented" && (
-              <button className="rounded-lg border border-slate-200 px-4 py-2 text-sm" onClick={() => void runVerify(r.id)}>Run verification</button>
+              <button className="rounded-lg border border-border px-4 py-2 text-sm" onClick={() => void runVerify(r.id)}>Run verification</button>
             )}
           </div>
           {!result ? (
-            <div className="text-sm text-slate-400">
+            <div className="text-sm text-muted">
               {r.status !== "consented"
                 ? `Nothing to verify — request is ${r.status}.`
                 : r.verifiedAt
@@ -158,29 +158,29 @@ export function VerifierDashboard(): JSX.Element {
           ) : (
             <div className="space-y-3">
               <div>
-                <span className={`font-medium text-sm ${result.valid ? "text-emerald-700" : "text-rose-700"}`}>{result.valid ? "Presentation is valid." : "Presentation did not fully verify."}</span>
+                <span className={`font-medium text-sm ${result.valid ? "text-success" : "text-danger"}`}>{result.valid ? "Presentation is valid." : "Presentation did not fully verify."}</span>
               </div>
               {result.credentials.map((c, i) => {
                 const checks = c.checks;
                 const firstFail = checks && CHECK_ROWS.find(({ key }) => checks[key] === false)?.key;
                 return (
-                  <div key={i} className="border border-slate-200 rounded-lg p-3 text-sm">
-                    <div className="font-medium">{c.type ?? "unknown credential"} {c.reason && !firstFail && <span className="text-rose-600">· {c.reason}</span>}</div>
+                  <div key={i} className="border border-border rounded-lg p-3 text-sm">
+                    <div className="font-medium">{c.type ?? "unknown credential"} {c.reason && !firstFail && <span className="text-danger">· {c.reason}</span>}</div>
                     {checks && (
                       <div className="mt-1.5 space-y-1">
                         {CHECK_ROWS.map(({ key, label }) => {
                           const v = checks[key];
                           return (
                             <div key={key} className="flex items-center gap-1.5 text-xs">
-                              <span className={v === true ? "text-emerald-600" : v === "unknown" ? "text-slate-400" : "text-rose-600"}>{v === true ? "✓" : v === "unknown" ? "?" : "✗"}</span>
-                              <span className={v === false ? "text-rose-700" : "text-slate-700"}>{label}</span>
-                              {key === firstFail && c.reason && <span className="text-rose-500">— {c.reason}</span>}
+                              <span className={v === true ? "text-success" : v === "unknown" ? "text-muted" : "text-danger"}>{v === true ? "✓" : v === "unknown" ? "?" : "✗"}</span>
+                              <span className={v === false ? "text-danger" : "text-fg"}>{label}</span>
+                              {key === firstFail && c.reason && <span className="text-danger">— {c.reason}</span>}
                             </div>
                           );
                         })}
                       </div>
                     )}
-                    {c.claims && <div className="text-xs text-slate-500 mt-1.5">{claimsLine(c.claims)}</div>}
+                    {c.claims && <div className="text-xs text-muted mt-1.5">{claimsLine(c.claims)}</div>}
                   </div>
                 );
               })}
@@ -197,67 +197,67 @@ export function VerifierDashboard(): JSX.Element {
 
       <div className="grid grid-cols-3 gap-3">
         <Tile label="Verification request sent" value={counts.sent} active={filter === "sent"} onClick={() => toggleFilter("sent")} />
-        <Tile label="Verification pending" value={counts.pending} tone="text-amber-600" active={filter === "pending"} onClick={() => toggleFilter("pending")} />
-        <Tile label="Verified" value={counts.verified} tone="text-emerald-600" active={filter === "verified"} onClick={() => toggleFilter("verified")} />
+        <Tile label="Verification pending" value={counts.pending} tone="text-warning" active={filter === "pending"} onClick={() => toggleFilter("pending")} />
+        <Tile label="Verified" value={counts.verified} tone="text-success" active={filter === "verified"} onClick={() => toggleFilter("verified")} />
       </div>
 
       {(counts.rejected > 0 || counts.expired > 0) && (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5">
-          <h2 className="font-bold text-slate-900 text-sm mb-3 font-display">Not verified</h2>
+        <div className="bg-surface rounded-2xl border border-border/80 shadow-sm p-5">
+          <h2 className="font-bold text-fg text-sm mb-3 font-display">Not verified</h2>
           <div className="grid grid-cols-2 gap-3 max-w-xs">
             <button
               type="button" onClick={() => toggleFilter("rejected")}
-              className={`text-center flex flex-col gap-0.5 rounded-xl border p-2 transition-colors ${filter === "rejected" ? "border-brand-400 ring-1 ring-brand-300" : "border-transparent hover:bg-slate-50"}`}
+              className={`text-center flex flex-col gap-0.5 rounded-xl border p-2 transition-colors ${filter === "rejected" ? "border-brand-400 ring-1 ring-brand-300" : "border-transparent hover:bg-elevated"}`}
             >
-              <div className="text-xl font-bold tabular-nums font-display text-slate-600">{counts.rejected}</div>
-              <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Rejected by holder</div>
+              <div className="text-xl font-bold tabular-nums font-display text-muted">{counts.rejected}</div>
+              <div className="text-[10px] font-semibold text-muted">Rejected by holder</div>
             </button>
             <button
               type="button" onClick={() => toggleFilter("expired")}
-              className={`text-center flex flex-col gap-0.5 rounded-xl border p-2 transition-colors ${filter === "expired" ? "border-brand-400 ring-1 ring-brand-300" : "border-transparent hover:bg-slate-50"}`}
+              className={`text-center flex flex-col gap-0.5 rounded-xl border p-2 transition-colors ${filter === "expired" ? "border-brand-400 ring-1 ring-brand-300" : "border-transparent hover:bg-elevated"}`}
             >
-              <div className="text-xl font-bold tabular-nums font-display text-slate-400">{counts.expired}</div>
-              <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Expired</div>
+              <div className="text-xl font-bold tabular-nums font-display text-muted">{counts.expired}</div>
+              <div className="text-[10px] font-semibold text-muted">Expired</div>
             </button>
           </div>
         </div>
       )}
 
       {filter && (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+        <div className="bg-surface rounded-2xl border border-border/80 shadow-sm overflow-hidden">
           <div className="px-4 pt-3 pb-1">
             <input value={query} onChange={(e) => onQueryChange(e.target.value)} placeholder="Search purpose, type, or holder DID…"
-              className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs w-72 max-w-full" />
+              className="rounded-lg border border-border bg-elevated/80 px-2.5 py-1 text-xs w-72 max-w-full focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15" />
           </div>
-          <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-400">
+          <div className="px-4 pb-4">
+          <TableShell>
+            <thead>
               <tr>
-                <th className="text-left px-4 py-2 font-semibold">Request</th>
-                <th className="text-left px-4 py-2 font-semibold">Type</th>
-                <th className="text-left px-4 py-2 font-semibold">Holder</th>
-                <th className="text-left px-4 py-2 font-semibold">Status</th>
-                <th className="px-4 py-2"></th>
+                <th>Request</th>
+                <th>Type</th>
+                <th>Holder</th>
+                <th>Status</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
-              {filteredRequests.length === 0 && <tr><td colSpan={5} className="px-4 py-4 text-slate-400">{categoryRequests.length === 0 ? "Nothing here." : "No matches."}</td></tr>}
+              {filteredRequests.length === 0 && <tr><td colSpan={5} className="text-muted">{categoryRequests.length === 0 ? "Nothing here." : "No matches."}</td></tr>}
               {pagedRequests.map((r) => (
-                <tr key={r.id} className="border-t border-slate-100 hover:bg-slate-50/70 transition-colors">
-                  <td className="px-4 py-2">{r.purpose}</td>
-                  <td className="px-4 py-2">{r.requestedTypes.join(", ")}</td>
-                  <td className="px-4 py-2">{r.holderDid.slice(0, 20)}…</td>
-                  <td className="px-4 py-2 capitalize">{r.verifiedAt ? "verified" : r.status}</td>
-                  <td className="px-4 py-2 text-right whitespace-nowrap">
+                <tr key={r.id}>
+                  <td>{r.purpose}</td>
+                  <td>{r.requestedTypes.join(", ")}</td>
+                  <td>{r.holderDid.slice(0, 20)}…</td>
+                  <td className="capitalize">{r.verifiedAt ? "verified" : r.status}</td>
+                  <td className="text-right whitespace-nowrap">
                     {r.status === "consented" && (
-                      <button className="rounded-lg border border-slate-200 px-3 py-1 text-xs mr-2" onClick={() => void runVerify(r.id)}>Run verification</button>
+                      <button className="rounded-lg border border-border px-3 py-1 text-xs mr-2" onClick={() => void runVerify(r.id)}>Run verification</button>
                     )}
-                    <button className="rounded-lg border border-slate-200 px-3 py-1 text-xs" onClick={() => setDetailId(r.id)}>View</button>
+                    <button className="rounded-lg border border-border px-3 py-1 text-xs" onClick={() => setDetailId(r.id)}>View</button>
                   </td>
                 </tr>
               ))}
             </tbody>
-          </table>
+          </TableShell>
           </div>
           <Pager page={page} pageSize={PAGE_SIZE} total={filteredRequests.length} onPage={setPage} />
         </div>

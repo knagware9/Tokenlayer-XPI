@@ -23,7 +23,7 @@ export function PersonaHome(): JSX.Element | null {
   if (!persona || !copy) return null;
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
+    <div className="min-h-screen bg-surface flex flex-col">
       <header className="sticky top-0 z-20 border-b border-white/10 bg-ink/95 backdrop-blur">
         <div className="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3 min-w-0">
@@ -92,7 +92,7 @@ export function PersonaHome(): JSX.Element | null {
 
       <main className="flex-1 bg-ink text-white">
         <div className="max-w-5xl mx-auto px-6 py-20 sm:py-28">
-          <p className="text-sm font-medium tracking-wide text-brand-300 uppercase">{copy.product}</p>
+          <p className="text-sm font-medium text-brand-300">{copy.product}</p>
           <h1 className="mt-3 text-4xl sm:text-5xl font-semibold tracking-tight max-w-3xl">{copy.headline}</h1>
           <p className="mt-6 text-lg text-white/70 max-w-2xl leading-relaxed">{copy.blurb}</p>
 
@@ -110,7 +110,7 @@ export function PersonaHome(): JSX.Element | null {
           </div>
 
           <div className="mt-16 border-t border-white/10 pt-10">
-            <h2 className="text-sm font-medium tracking-wide text-white/50 uppercase">What you do here</h2>
+            <h2 className="text-sm font-medium text-white/50">What you do here</h2>
             <ul className="mt-6 grid gap-6 sm:grid-cols-3">
               {copy.does.map((line, i) => (
                 <li key={line} className="text-sm text-white/80 leading-relaxed">

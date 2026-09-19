@@ -33,11 +33,11 @@ export function ReviewAssets(): JSX.Element {
   return (
     <div className="space-y-3">
       {assets.map((a) => (
-        <div key={a.id} className="bg-white rounded-2xl border border-slate-200/80 shadow-sm">
+        <div key={a.id} className="bg-surface rounded-2xl border border-border/80 shadow-sm">
           <div className="p-4 flex items-center justify-between cursor-pointer" onClick={() => setReviewing((v) => (v === a.id ? null : a.id))}>
             <div>
-              <div className="font-medium text-slate-800">{a.name} <span className="text-slate-400 font-normal">{a.symbol}</span></div>
-              <div className="text-xs text-slate-400">{a.dueDiligence?.prospectus ? "Submitted for review" : "Awaiting documents"}</div>
+              <div className="font-medium text-fg">{a.name} <span className="text-muted font-normal">{a.symbol}</span></div>
+              <div className="text-xs text-muted">{a.dueDiligence?.prospectus ? "Submitted for review" : "Awaiting documents"}</div>
             </div>
           </div>
           {reviewing === a.id && <AssetReviewPanel asset={a} onDecided={() => { setReviewing(null); void reload(); }} />}
@@ -91,8 +91,8 @@ function AssetReviewPanel({ asset, onDecided }: { asset: Asset; onDecided: () =>
   }
 
   return (
-    <div className="border-t border-slate-100 p-4 space-y-3 bg-slate-50/60">
-      <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
+    <div className="border-t border-border p-4 space-y-3 bg-elevated/60">
+      <div className="grid grid-cols-2 gap-2 text-xs text-muted">
         <div>
           Prospectus:{" "}
           {dd?.prospectus
@@ -107,7 +107,7 @@ function AssetReviewPanel({ asset, onDecided }: { asset: Asset; onDecided: () =>
         </div>
       </div>
       {dd?.additionalDocuments?.length ? (
-        <div className="text-xs text-slate-600 flex flex-wrap gap-x-1">
+        <div className="text-xs text-muted flex flex-wrap gap-x-1">
           Additional:{" "}
           {dd.additionalDocuments.map((d, i) => (
             <span key={d.id}>
@@ -117,16 +117,16 @@ function AssetReviewPanel({ asset, onDecided }: { asset: Asset; onDecided: () =>
           ))}
         </div>
       ) : null}
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      {error && <p className="text-xs text-danger">{error}</p>}
       <div className="flex items-center gap-3">
-        <select className="rounded border border-slate-300 px-2 py-1 text-xs" value={riskTier} onChange={(e) => setRiskTier(e.target.value as "low" | "medium" | "high")}>
+        <select className="rounded-lg border border-border bg-elevated/80 px-2.5 py-1 text-xs focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15" value={riskTier} onChange={(e) => setRiskTier(e.target.value as "low" | "medium" | "high")}>
           <option value="low">Low risk</option>
           <option value="medium">Medium risk</option>
           <option value="high">High risk</option>
         </select>
-        <button disabled={busy || !dd?.prospectus} onClick={() => void decide("approved")} className="text-xs rounded bg-emerald-600 text-white px-3 py-1.5 font-medium hover:bg-emerald-700 disabled:opacity-40">Approve</button>
-        <input className="rounded border border-slate-300 px-2 py-1 text-xs flex-1" placeholder="Rejection reason" value={rejectionReason} onChange={(e) => setRejectionReason(e.target.value)} />
-        <button disabled={busy} onClick={() => void decide("rejected")} className="text-xs rounded border border-red-300 text-red-600 px-3 py-1.5 font-medium hover:bg-red-50 disabled:opacity-40">Reject</button>
+        <button disabled={busy || !dd?.prospectus} onClick={() => void decide("approved")} className="text-xs rounded bg-success text-white px-3 py-1.5 font-medium hover:bg-success/90 disabled:opacity-40">Approve</button>
+        <input className="rounded-lg border border-border bg-elevated/80 px-2.5 py-1 text-xs flex-1 focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15" placeholder="Rejection reason" value={rejectionReason} onChange={(e) => setRejectionReason(e.target.value)} />
+        <button disabled={busy} onClick={() => void decide("rejected")} className="text-xs rounded border border-danger/40 text-danger px-3 py-1.5 font-medium hover:bg-danger/10 disabled:opacity-40">Reject</button>
       </div>
     </div>
   );

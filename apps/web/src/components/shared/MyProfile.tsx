@@ -149,17 +149,17 @@ export function MyProfile({ onSelect }: { onSelect: (id: string) => void }): JSX
     <div>
       <SectionHeader title="My profile" description="Your account and identity at a glance." />
       <Card>
-        <dl className="divide-y divide-slate-100">
+        <dl className="divide-y divide-border">
           {rows.map((r) => (
             <div key={r.label} className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
-              <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">{r.label}</dt>
-              <dd className={`text-sm text-slate-900 truncate text-right ${r.mono ? "font-mono text-xs" : ""}`}>{r.value}</dd>
+              <dt className="text-xs font-medium text-muted">{r.label}</dt>
+              <dd className={`text-sm text-fg truncate text-right ${r.mono ? "font-mono text-xs" : ""}`}>{r.value}</dd>
             </div>
           ))}
           <div className="flex items-center justify-between gap-4 py-3 last:pb-0">
-            <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">DID</dt>
+            <dt className="text-xs font-medium text-muted">DID</dt>
             <dd className="flex items-center gap-2 min-w-0">
-              <span className="text-xs font-mono text-slate-900 truncate">{didShort}</span>
+              <span className="text-xs font-mono text-fg truncate">{didShort}</span>
               {did && (
                 <button
                   onClick={copyDid}
@@ -171,7 +171,7 @@ export function MyProfile({ onSelect }: { onSelect: (id: string) => void }): JSX
             </dd>
           </div>
         </dl>
-        <div className="mt-5 pt-4 border-t border-slate-100">
+        <div className="mt-5 pt-4 border-t border-border">
           <button
             onClick={() => onSelect("credentials")}
             className="text-sm font-medium text-brand-600 hover:text-brand-700"
@@ -198,7 +198,7 @@ export function MyProfile({ onSelect }: { onSelect: (id: string) => void }): JSX
           description="Register this device's self-custody key to sign in without a password. The private key stays in this browser."
         >
           {keyError && (
-            <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">
+            <div className="mb-4 rounded-lg bg-danger/10 border border-danger/30 px-3 py-2 text-xs text-danger">
               {keyError}
             </div>
           )}
@@ -212,30 +212,30 @@ export function MyProfile({ onSelect }: { onSelect: (id: string) => void }): JSX
 
           <div className="mt-5">
             {loginKeys === null ? (
-              <p className="text-xs text-slate-500">Loading device keys…</p>
+              <p className="text-xs text-muted">Loading device keys…</p>
             ) : loginKeys.length === 0 ? (
-              <p className="text-xs text-slate-500">No devices enrolled yet.</p>
+              <p className="text-xs text-muted">No devices enrolled yet.</p>
             ) : (
-              <ul className="divide-y divide-slate-100">
+              <ul className="divide-y divide-border">
                 {loginKeys.map((k) => (
                   <li key={k.id} className="flex items-center justify-between gap-4 py-3 first:pt-0">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-slate-900 truncate">{k.label || "Device"}</span>
+                        <span className="text-sm font-medium text-fg truncate">{k.label || "Device"}</span>
                         {deviceDid === k.did && (
                           <span className="shrink-0 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-600">
                             this device
                           </span>
                         )}
                       </div>
-                      <div className="mt-0.5 text-xs font-mono text-slate-500 truncate">{shortDid(k.did)}</div>
-                      <div className="mt-0.5 text-[11px] text-slate-400">
+                      <div className="mt-0.5 text-xs font-mono text-muted truncate">{shortDid(k.did)}</div>
+                      <div className="mt-0.5 text-[11px] text-muted">
                         Added {new Date(k.createdAt).toLocaleDateString()}
                       </div>
                     </div>
                     <button
                       onClick={() => void revokeKey(k.id)}
-                      className="shrink-0 text-xs font-medium text-red-600 hover:text-red-700"
+                      className="shrink-0 text-xs font-medium text-danger hover:text-danger/80"
                     >
                       Revoke
                     </button>
@@ -254,7 +254,7 @@ export function MyProfile({ onSelect }: { onSelect: (id: string) => void }): JSX
             description="Link the address you actually hold, replacing the one assigned when your account was created."
           >
             {walletError && (
-              <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">
+              <div className="mb-4 rounded-lg bg-danger/10 border border-danger/30 px-3 py-2 text-xs text-danger">
                 {walletError}
               </div>
             )}
@@ -264,7 +264,7 @@ export function MyProfile({ onSelect }: { onSelect: (id: string) => void }): JSX
                 value={walletInput}
                 onChange={(e) => setWalletInput(e.target.value)}
                 placeholder={user?.walletAddress ?? "0x…"}
-                className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-xs font-mono text-slate-900 focus:border-brand-500 focus:outline-none"
+                className="min-w-0 flex-1 rounded-lg border border-border bg-elevated/80 px-3 py-2 text-xs font-mono text-fg focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15"
               />
               <button
                 onClick={() => void linkWallet()}
@@ -285,12 +285,12 @@ export function MyProfile({ onSelect }: { onSelect: (id: string) => void }): JSX
             description="Top up your own wallet with demo settlement currency."
           >
             {fundError && (
-              <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">
+              <div className="mb-4 rounded-lg bg-danger/10 border border-danger/30 px-3 py-2 text-xs text-danger">
                 {fundError}
               </div>
             )}
             {fundNotice && (
-              <div className="mb-4 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-800">
+              <div className="mb-4 rounded-lg bg-success/10 border border-success/30 px-3 py-2 text-xs text-success">
                 {fundNotice}
               </div>
             )}
@@ -301,12 +301,12 @@ export function MyProfile({ onSelect }: { onSelect: (id: string) => void }): JSX
                 value={fundAmount}
                 onChange={(e) => setFundAmount(e.target.value)}
                 placeholder="amount"
-                className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-brand-500 focus:outline-none"
+                className="min-w-0 flex-1 rounded-lg border border-border bg-elevated/80 px-3 py-2 text-sm text-fg focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15"
               />
               <select
                 value={fundCurrency}
                 onChange={(e) => setFundCurrency(e.target.value)}
-                className="shrink-0 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-brand-500 focus:outline-none"
+                className="shrink-0 rounded-lg border border-border bg-elevated/80 px-3 py-2 text-sm text-fg focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15"
               >
                 {DEMO_CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>

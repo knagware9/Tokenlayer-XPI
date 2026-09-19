@@ -5,11 +5,11 @@ import type { CertificateFieldPlacement, CredentialUseCase } from "../../types.j
 import { SchemaFieldEditor, fieldsToSchema, type FieldRow } from "../shared/SchemaFieldEditor.js";
 import { CertificateDesigner } from "./CertificateDesigner.js";
 import { fieldLabel, withoutStalePlacements } from "../../lib/identity/certificate-layout.js";
-import { Card, EmptyState, SectionHeader } from "../shared/ui.js";
+import { Card, EmptyState, SectionHeader, TableShell } from "../shared/ui.js";
 
 function BackButton({ onClick }: { onClick: () => void }): JSX.Element {
   return (
-    <button type="button" onClick={onClick} className="text-sm text-slate-500 hover:text-slate-800 inline-flex items-center gap-1.5">
+    <button type="button" onClick={onClick} className="text-sm text-muted hover:text-fg inline-flex items-center gap-1.5">
       ← Back to Credential Schemas
     </button>
   );
@@ -57,31 +57,29 @@ function SchemaDetail({ useCase, name, onBack }: { useCase: CredentialUseCase; n
       <SectionHeader title={t.title} description={`${t.name} · ${t.validityDays}d validity · ${t.requiredApprovals} approval(s)`} />
 
       <Card title="Data fields">
-        {err && <div className="text-sm text-rose-600 mb-2">{err}</div>}
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead className="text-[10px] text-slate-400 uppercase tracking-widest">
-              <tr>
-                <th className="text-left font-semibold px-2 py-1.5">Field</th>
-                <th className="text-left font-semibold px-2 py-1.5">Type</th>
-                <th className="text-left font-semibold px-2 py-1.5">Required</th>
-                <th className="text-left font-semibold px-2 py-1.5">Details</th>
+        {err && <div className="text-sm text-danger mb-2">{err}</div>}
+        <TableShell>
+          <thead>
+            <tr>
+              <th>Field</th>
+              <th>Type</th>
+              <th>Required</th>
+              <th>Details</th>
+            </tr>
+          </thead>
+          <tbody>
+            {Object.entries(t.claimSchema.properties).map(([field, p]) => (
+              <tr key={field}>
+                <td className="font-medium text-fg">{field}</td>
+                <td className="text-muted">{p.type}</td>
+                <td>{t.claimSchema.required?.includes(field) ? "Yes" : "—"}</td>
+                <td className="text-muted">
+                  {Array.isArray(p.enum) ? `one of: ${p.enum.join(", ")}` : p.pattern ? `pattern: ${p.pattern}` : "—"}
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {Object.entries(t.claimSchema.properties).map(([field, p]) => (
-                <tr key={field} className="border-t border-slate-100">
-                  <td className="px-2 py-1.5 font-medium text-slate-800">{field}</td>
-                  <td className="px-2 py-1.5 text-slate-600">{p.type}</td>
-                  <td className="px-2 py-1.5">{t.claimSchema.required?.includes(field) ? "Yes" : "—"}</td>
-                  <td className="px-2 py-1.5 text-slate-500">
-                    {Array.isArray(p.enum) ? `one of: ${p.enum.join(", ")}` : p.pattern ? `pattern: ${p.pattern}` : "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </TableShell>
       </Card>
 
       <Card title="PDF certificate design">
@@ -90,36 +88,34 @@ function SchemaDetail({ useCase, name, onBack }: { useCase: CredentialUseCase; n
         ) : (
           <div className="space-y-3 text-sm">
             <div className="grid grid-cols-2 gap-3">
-              <div><div className="text-[11px] uppercase tracking-wide text-slate-400">Heading</div><div className="text-slate-800">{cert.heading || "—"}</div></div>
-              <div><div className="text-[11px] uppercase tracking-wide text-slate-400">Subheading</div><div className="text-slate-800">{cert.subheading || "—"}</div></div>
-              <div><div className="text-[11px] uppercase tracking-wide text-slate-400">Logo / seal</div><div className="text-slate-800">{cert.logoDocumentId ? "Set" : "Organization's default"}</div></div>
-              <div><div className="text-[11px] uppercase tracking-wide text-slate-400">Background artwork</div><div className="text-slate-800">{cert.background ? "Custom artwork" : "Built-in layout"}</div></div>
+              <div><div className="text-[11px] text-muted">Heading</div><div className="text-fg">{cert.heading || "—"}</div></div>
+              <div><div className="text-[11px] text-muted">Subheading</div><div className="text-fg">{cert.subheading || "—"}</div></div>
+              <div><div className="text-[11px] text-muted">Logo / seal</div><div className="text-fg">{cert.logoDocumentId ? "Set" : "Organization's default"}</div></div>
+              <div><div className="text-[11px] text-muted">Background artwork</div><div className="text-fg">{cert.background ? "Custom artwork" : "Built-in layout"}</div></div>
             </div>
             <div>
-              <div className="text-[11px] uppercase tracking-wide text-slate-400 mb-1">Claims printed</div>
+              <div className="text-[11px] text-muted mb-1">Claims printed</div>
               <div className="flex flex-wrap gap-1.5">
-                {claimOrder.map((k) => <span key={k} className="rounded-full border border-slate-200 px-2 py-0.5 text-[11px] text-slate-600">{k}</span>)}
+                {claimOrder.map((k) => <span key={k} className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted">{k}</span>)}
               </div>
             </div>
             {cert.background && (cert.placements?.length ?? 0) > 0 && (
               <div>
-                <div className="text-[11px] uppercase tracking-wide text-slate-400 mb-1">Placements</div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead className="text-[10px] text-slate-400 uppercase tracking-widest">
-                      <tr><th className="text-left font-semibold px-2 py-1">Field</th><th className="text-left font-semibold px-2 py-1">Position</th><th className="text-left font-semibold px-2 py-1">Font</th></tr>
-                    </thead>
-                    <tbody>
-                      {cert.placements!.map((p) => (
-                        <tr key={p.field} className="border-t border-slate-100">
-                          <td className="px-2 py-1 text-slate-700">{fieldLabel(p.field)}</td>
-                          <td className="px-2 py-1 text-slate-500">{(p.x * 100).toFixed(0)}%, {(p.y * 100).toFixed(0)}%</td>
-                          <td className="px-2 py-1 text-slate-500">{p.font ?? "sans"} {p.fontSize ?? ""}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <div className="text-[11px] text-muted mb-1">Placements</div>
+                <TableShell>
+                  <thead>
+                    <tr><th>Field</th><th>Position</th><th>Font</th></tr>
+                  </thead>
+                  <tbody>
+                    {cert.placements!.map((p) => (
+                      <tr key={p.field}>
+                        <td className="text-fg">{fieldLabel(p.field)}</td>
+                        <td className="text-muted">{(p.x * 100).toFixed(0)}%, {(p.y * 100).toFixed(0)}%</td>
+                        <td className="text-muted">{p.font ?? "sans"} {p.fontSize ?? ""}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </TableShell>
               </div>
             )}
             <button
@@ -287,23 +283,23 @@ export function CredentialSchemas({ useCase, onChanged }: { useCase: CredentialU
         {useCase.credentialTypes.length === 0 ? (
           <EmptyState icon="doc" title="No credential schemas yet" hint="Add one below to start issuing this type of credential." />
         ) : (
-          <div className="divide-y divide-slate-100">
+          <div className="divide-y divide-border">
             {useCase.credentialTypes.map((t) => (
               <button
                 key={t.name}
                 type="button"
                 onClick={() => setDetail(t.name)}
-                className="w-full py-2.5 flex items-center justify-between gap-3 text-left hover:bg-slate-50/70 -mx-1 px-1 rounded-lg transition-colors"
+                className="w-full py-2.5 flex items-center justify-between gap-3 text-left hover:bg-elevated/70 -mx-1 px-1 rounded-lg transition-colors"
               >
                 <div className="min-w-0">
-                  <div className="text-sm font-medium text-slate-900 truncate">{t.title} <span className="text-slate-400 font-normal">({t.name})</span></div>
-                  <div className="text-xs text-slate-500">{Object.keys(t.claimSchema.properties).length} claim field(s) · {t.validityDays}d validity · {t.requiredApprovals} approval(s)</div>
+                  <div className="text-sm font-medium text-fg truncate">{t.title} <span className="text-muted font-normal">({t.name})</span></div>
+                  <div className="text-xs text-muted">{Object.keys(t.claimSchema.properties).length} claim field(s) · {t.validityDays}d validity · {t.requiredApprovals} approval(s)</div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   {t.certificate?.enabled && (
                     <span className="rounded-full border border-brand-200 bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700">PDF certificate</span>
                   )}
-                  <span className="text-slate-300">→</span>
+                  <span className="text-muted">→</span>
                 </div>
               </button>
             ))}
@@ -313,47 +309,47 @@ export function CredentialSchemas({ useCase, onChanged }: { useCase: CredentialU
 
       {open && (
         <Card title="Add a credential schema">
-          {err && <div className="text-sm text-rose-600 mb-2">{err}</div>}
+          {err && <div className="text-sm text-danger mb-2">{err}</div>}
           <div className="grid grid-cols-2 gap-2 mb-2">
             <div>
-              <label className="block text-xs text-slate-500 mb-1">Name (machine id, e.g. AddressProof)</label>
+              <label className="block text-xs text-muted mb-1">Name (machine id, e.g. AddressProof)</label>
               <input className="input w-full" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
             </div>
             <div>
-              <label className="block text-xs text-slate-500 mb-1">Title (display name)</label>
+              <label className="block text-xs text-muted mb-1">Title (display name)</label>
               <input className="input w-full" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
             </div>
             <div>
-              <label className="block text-xs text-slate-500 mb-1">Validity (days)</label>
+              <label className="block text-xs text-muted mb-1">Validity (days)</label>
               <input className="input w-full" type="number" value={draft.validityDays} onChange={(e) => setDraft({ ...draft, validityDays: e.target.value })} />
             </div>
             <div>
-              <label className="block text-xs text-slate-500 mb-1">Required approvals</label>
+              <label className="block text-xs text-muted mb-1">Required approvals</label>
               <input className="input w-full" type="number" value={draft.requiredApprovals} onChange={(e) => setDraft({ ...draft, requiredApprovals: e.target.value })} />
             </div>
           </div>
           <SchemaFieldEditor fields={draft.fields} onChange={(fields) => setDraft({ ...draft, fields })} />
 
-          <div className="mt-3 rounded-lg border border-slate-200 p-3 space-y-2">
+          <div className="mt-3 rounded-lg border border-border p-3 space-y-2">
             <label className="flex items-center gap-2 text-xs font-medium">
               <input type="checkbox" checked={draft.certEnabled} onChange={(e) => setDraft({ ...draft, certEnabled: e.target.checked })} />
               Issue PDF certificate for this credential type
             </label>
             {draft.certEnabled && (
               <div className="space-y-2 pl-1">
-                <input className="w-full rounded border-slate-300 text-xs" placeholder="Certificate heading (e.g. Certificate of Domicile)"
+                <input className="w-full rounded-lg border border-border bg-elevated/80 px-2.5 py-1 text-xs focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15" placeholder="Certificate heading (e.g. Certificate of Domicile)"
                   value={draft.certHeading} onChange={(e) => setDraft({ ...draft, certHeading: e.target.value })} />
-                <input className="w-full rounded border-slate-300 text-xs" placeholder="Subheading (e.g. issuing authority)"
+                <input className="w-full rounded-lg border border-border bg-elevated/80 px-2.5 py-1 text-xs focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15" placeholder="Subheading (e.g. issuing authority)"
                   value={draft.certSubheading} onChange={(e) => setDraft({ ...draft, certSubheading: e.target.value })} />
-                <div className="text-[11px] text-slate-500">Claims to show (none selected ⇒ all):</div>
+                <div className="text-[11px] text-muted">Claims to show (none selected ⇒ all):</div>
                 <div className="flex flex-wrap gap-1.5">
                   {claimKeysOf(draft).map((k) => (
                     <button type="button" key={k}
-                      className={`rounded-full border px-2 py-0.5 text-[11px] ${draft.certClaimKeys.includes(k) ? "border-brand-400 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-500"}`}
+                      className={`rounded-full border px-2 py-0.5 text-[11px] ${draft.certClaimKeys.includes(k) ? "border-brand-400 bg-brand-50 text-brand-700" : "border-border text-muted"}`}
                       onClick={() => setDraft({ ...draft, certClaimKeys: toggle(draft.certClaimKeys, k) })}>{k}</button>
                   ))}
                 </div>
-                <label className="block text-[11px] text-slate-500">
+                <label className="block text-[11px] text-muted">
                   Logo / seal (optional):
                   <input type="file" accept="image/png,image/jpeg" className="mt-1 block text-[11px]"
                     onChange={async (e) => {
@@ -363,9 +359,9 @@ export function CredentialSchemas({ useCase, onChanged }: { useCase: CredentialU
                       try { const r = await api.uploadDocument(token, file.type, btoa(bin)); setDraft((d) => ({ ...d, certLogoDocumentId: r.id })); }
                       catch { setErr("logo upload failed"); }
                     }} />
-                  {draft.certLogoDocumentId && <span className="ml-2 text-emerald-600">✓ uploaded</span>}
+                  {draft.certLogoDocumentId && <span className="ml-2 text-success">✓ uploaded</span>}
                 </label>
-                <details className="rounded border border-slate-200 p-2">
+                <details className="rounded border border-border p-2">
                   <summary className="cursor-pointer text-[11px] font-medium text-brand-700">Design certificate →</summary>
                   <div className="mt-2">
                     <CertificateDesigner
@@ -393,7 +389,7 @@ export function CredentialSchemas({ useCase, onChanged }: { useCase: CredentialU
             </button>
             <button
               onClick={() => { setOpen(false); setErr(null); }}
-              className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:border-brand-400"
+              className="rounded-lg border border-border px-4 py-2 text-sm text-muted hover:border-brand-400"
             >
               Cancel
             </button>

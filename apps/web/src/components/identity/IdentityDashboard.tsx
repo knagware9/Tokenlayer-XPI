@@ -19,12 +19,12 @@ const ISSUANCE_PROPOSAL_KINDS = new Set(["issue-credential", "issue-usecase-cred
 // credential status board. Read-only; all aggregation is server-side.
 
 const STATUS_META: Record<DerivedCredentialStatus, { label: string; pill: string }> = {
-  accepted: { label: "Accepted", pill: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-  pending: { label: "Pending acceptance", pill: "bg-amber-50 text-amber-700 border-amber-200" },
-  changes_requested: { label: "Changes requested", pill: "bg-rose-50 text-rose-700 border-rose-200" },
-  rejected: { label: "Rejected by holder", pill: "bg-slate-100 text-slate-600 border-slate-200" },
-  revoked: { label: "Revoked", pill: "bg-red-50 text-red-700 border-red-200" },
-  expired: { label: "Expired", pill: "bg-slate-100 text-slate-500 border-slate-200" },
+  accepted: { label: "Accepted", pill: "bg-success/10 text-success border-success/25" },
+  pending: { label: "Pending acceptance", pill: "bg-warning/10 text-warning border-warning/25" },
+  changes_requested: { label: "Changes requested", pill: "bg-danger/10 text-danger border-danger/25" },
+  rejected: { label: "Rejected by holder", pill: "bg-elevated text-muted border-border" },
+  revoked: { label: "Revoked", pill: "bg-danger/10 text-danger border-danger/25" },
+  expired: { label: "Expired", pill: "bg-elevated text-muted border-border" },
 };
 const STATUS_ORDER: DerivedCredentialStatus[] = ["pending", "accepted", "changes_requested", "rejected", "revoked", "expired"];
 
@@ -34,20 +34,20 @@ function StatusPill({ status }: { status: DerivedCredentialStatus }): JSX.Elemen
 }
 
 function Tile({ label, value, tone, stagger, active, onClick }: { label: string; value: number; tone?: string; stagger?: number; active?: boolean; onClick?: () => void }): JSX.Element {
-  const shared = `text-left w-full bg-white rounded-2xl border p-4 shadow-sm transition-shadow ${staggerClass(stagger)} ${active ? "border-brand-400 ring-1 ring-brand-300" : "border-slate-200/80"}`;
+  const shared = `text-left w-full bg-surface rounded-2xl border p-4 shadow-sm transition-shadow ${staggerClass(stagger)} ${active ? "border-brand-400 ring-1 ring-brand-300" : "border-border/80"}`;
   const body = (
     <>
-      <div className={`text-2xl font-bold tabular-nums font-display animate-count-in ${tone ?? "text-slate-900"}`}>{value.toLocaleString()}</div>
-      <div className="text-[11px] font-semibold uppercase tracking-widest text-slate-400 mt-1">{label}</div>
+      <div className={`text-2xl font-bold tabular-nums font-display animate-count-in ${tone ?? "text-fg"}`}>{value.toLocaleString()}</div>
+      <div className="text-[11px] font-semibold text-muted mt-1">{label}</div>
     </>
   );
   if (!onClick) return <div className={shared}>{body}</div>;
-  return <button type="button" onClick={onClick} className={`${shared} hover:shadow hover:border-slate-300 cursor-pointer`}>{body}</button>;
+  return <button type="button" onClick={onClick} className={`${shared} hover:shadow hover:border-border cursor-pointer`}>{body}</button>;
 }
 
 function BackButton({ onClick }: { onClick: () => void }): JSX.Element {
   return (
-    <button type="button" onClick={onClick} className="text-sm text-slate-500 hover:text-slate-800 inline-flex items-center gap-1.5">
+    <button type="button" onClick={onClick} className="text-sm text-muted hover:text-fg inline-flex items-center gap-1.5">
       ← Back to Dashboard
     </button>
   );
@@ -165,17 +165,17 @@ export function IdentityDashboard(): JSX.Element {
       <div className="space-y-4">
         <BackButton onClick={() => setBoardDetailId(null)} />
         <SectionHeader title={r.type} description={`${r.holderLabel} · ${STATUS_META[r.status].label}`} />
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-3 max-w-2xl">
+        <div className="bg-surface rounded-2xl border border-border/80 shadow-sm p-5 space-y-3 max-w-2xl">
           <div className="flex items-center justify-between">
             <StatusPill status={r.status} />
-            {r.acceptanceNote && <div className="text-xs text-rose-500">{r.acceptanceNote}</div>}
+            {r.acceptanceNote && <div className="text-xs text-danger">{r.acceptanceNote}</div>}
           </div>
           <div className="grid grid-cols-2 gap-3 text-sm">
-            <div><div className="text-[11px] uppercase tracking-wide text-slate-400">Credential id</div><div className="font-data text-slate-700 break-all">{r.credentialId}</div></div>
-            <div><div className="text-[11px] uppercase tracking-wide text-slate-400">Holder DID</div><div className="font-data text-slate-700 break-all">{r.holderDid}</div></div>
-            <div><div className="text-[11px] uppercase tracking-wide text-slate-400">Use case</div><div className="text-slate-700">{r.useCaseName} <span className="text-slate-400">({r.useCaseKey})</span></div></div>
-            <div><div className="text-[11px] uppercase tracking-wide text-slate-400">Issued</div><div className="text-slate-700 font-data">{new Date(r.issuedAt).toLocaleString()}</div></div>
-            <div><div className="text-[11px] uppercase tracking-wide text-slate-400">Expires</div><div className="text-slate-700 font-data">{r.expiresAt ? new Date(r.expiresAt).toLocaleString() : "—"}</div></div>
+            <div><div className="text-[11px] text-muted">Credential id</div><div className="font-data text-fg break-all">{r.credentialId}</div></div>
+            <div><div className="text-[11px] text-muted">Holder DID</div><div className="font-data text-fg break-all">{r.holderDid}</div></div>
+            <div><div className="text-[11px] text-muted">Use case</div><div className="text-fg">{r.useCaseName} <span className="text-muted">({r.useCaseKey})</span></div></div>
+            <div><div className="text-[11px] text-muted">Issued</div><div className="text-fg font-data">{new Date(r.issuedAt).toLocaleString()}</div></div>
+            <div><div className="text-[11px] text-muted">Expires</div><div className="text-fg font-data">{r.expiresAt ? new Date(r.expiresAt).toLocaleString() : "—"}</div></div>
           </div>
         </div>
       </div>
@@ -189,14 +189,14 @@ export function IdentityDashboard(): JSX.Element {
       <div className="space-y-4">
         <BackButton onClick={() => setProposalDetailId(null)} />
         <SectionHeader title={p.kind} description={`${p.proposerLabel} · ${p.status}`} />
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-3 max-w-2xl text-sm">
-          {p.error && <div className="text-rose-600">{p.error}</div>}
+        <div className="bg-surface rounded-2xl border border-border/80 shadow-sm p-5 space-y-3 max-w-2xl text-sm">
+          {p.error && <div className="text-danger">{p.error}</div>}
           <div className="grid grid-cols-2 gap-1.5">
             {Object.entries(p.payload).filter(([k]) => k !== "claims").map(([k, v]) => (
-              <div key={k} className="min-w-0"><span className="text-slate-400">{k}:</span> <span className="text-slate-700 break-all">{typeof v === "object" ? JSON.stringify(v) : String(v)}</span></div>
+              <div key={k} className="min-w-0"><span className="text-muted">{k}:</span> <span className="text-fg break-all">{typeof v === "object" ? JSON.stringify(v) : String(v)}</span></div>
             ))}
           </div>
-          <div className="text-[11px] text-slate-400 border-t border-slate-100 pt-2">
+          <div className="text-[11px] text-muted border-t border-border pt-2">
             Created {new Date(p.createdAt).toLocaleString()} · {p.approvals.length}/{p.required} approval{p.required === 1 ? "" : "s"}
             {p.decidedAt && ` · decided ${new Date(p.decidedAt).toLocaleString()}`}
           </div>
@@ -212,147 +212,143 @@ export function IdentityDashboard(): JSX.Element {
 
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
         <Tile label="Issued" value={t.issued} stagger={1} active={statusFilter === "all"} onClick={() => toggleStatusFilter("all")} />
-        <Tile label="Accepted" value={t.accepted} tone="text-emerald-600" stagger={2} active={statusFilter === "accepted"} onClick={() => toggleStatusFilter("accepted")} />
-        <Tile label="Pending" value={t.pendingAcceptance} tone="text-amber-600" stagger={3} active={statusFilter === "pending"} onClick={() => toggleStatusFilter("pending")} />
-        <Tile label="Changes req." value={t.changesRequested} tone="text-rose-600" stagger={4} active={statusFilter === "changes_requested"} onClick={() => toggleStatusFilter("changes_requested")} />
-        <Tile label="Rejected" value={t.rejectedByHolder} tone="text-slate-600" stagger={5} active={statusFilter === "rejected"} onClick={() => toggleStatusFilter("rejected")} />
-        <Tile label="Revoked" value={t.revoked} tone="text-red-600" stagger={6} active={statusFilter === "revoked"} onClick={() => toggleStatusFilter("revoked")} />
-        <Tile label="Expired" value={t.expired} tone="text-slate-400" stagger={7} active={statusFilter === "expired"} onClick={() => toggleStatusFilter("expired")} />
+        <Tile label="Accepted" value={t.accepted} tone="text-success" stagger={2} active={statusFilter === "accepted"} onClick={() => toggleStatusFilter("accepted")} />
+        <Tile label="Pending" value={t.pendingAcceptance} tone="text-warning" stagger={3} active={statusFilter === "pending"} onClick={() => toggleStatusFilter("pending")} />
+        <Tile label="Changes req." value={t.changesRequested} tone="text-danger" stagger={4} active={statusFilter === "changes_requested"} onClick={() => toggleStatusFilter("changes_requested")} />
+        <Tile label="Rejected" value={t.rejectedByHolder} tone="text-muted" stagger={5} active={statusFilter === "rejected"} onClick={() => toggleStatusFilter("rejected")} />
+        <Tile label="Revoked" value={t.revoked} tone="text-danger" stagger={6} active={statusFilter === "revoked"} onClick={() => toggleStatusFilter("revoked")} />
+        <Tile label="Expired" value={t.expired} tone="text-muted" stagger={7} active={statusFilter === "expired"} onClick={() => toggleStatusFilter("expired")} />
       </div>
-      <p className="text-[11px] text-slate-400 -mt-2">Click a tile to filter the credential status board below.</p>
+      <p className="text-[11px] text-muted -mt-2">Click a tile to filter the credential status board below.</p>
 
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 animate-slide-up stagger-1">
-        <h2 className="font-bold text-slate-900 text-sm mb-1 font-display">Issuance requests</h2>
-        <p className="text-xs text-slate-500 mb-4">Outcome of the maker-checker proposals submitted to mint a credential — separate from the lifecycle totals above, which track a credential after it exists. Click a tile to see the proposals.</p>
+      <div className="bg-surface rounded-2xl border border-border/80 shadow-sm p-5 animate-slide-up stagger-1">
+        <h2 className="font-bold text-fg text-sm mb-1 font-display">Issuance requests</h2>
+        <p className="text-xs text-muted mb-4">Outcome of the maker-checker proposals submitted to mint a credential — separate from the lifecycle totals above, which track a credential after it exists. Click a tile to see the proposals.</p>
         <div className="grid grid-cols-3 gap-3 text-center">
           <button type="button" onClick={() => toggleProposalFilter("all")}
-            className={`flex flex-col gap-0.5 rounded-xl border p-2 transition-colors ${proposalFilter === "all" ? "border-brand-400 ring-1 ring-brand-300" : "border-transparent hover:bg-slate-50"}`}>
-            <div className="text-xl font-bold tabular-nums font-display text-slate-900">{issuance.issued}</div>
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Issued</div>
+            className={`flex flex-col gap-0.5 rounded-xl border p-2 transition-colors ${proposalFilter === "all" ? "border-brand-400 ring-1 ring-brand-300" : "border-transparent hover:bg-elevated"}`}>
+            <div className="text-xl font-bold tabular-nums font-display text-fg">{issuance.issued}</div>
+            <div className="text-[10px] font-semibold text-muted">Issued</div>
           </button>
           <button type="button" onClick={() => toggleProposalFilter("executed")}
-            className={`flex flex-col gap-0.5 rounded-xl border p-2 transition-colors ${proposalFilter === "executed" ? "border-brand-400 ring-1 ring-brand-300" : "border-transparent hover:bg-slate-50"}`}>
-            <div className="text-xl font-bold tabular-nums font-display text-emerald-600">{issuance.success}</div>
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Success</div>
+            className={`flex flex-col gap-0.5 rounded-xl border p-2 transition-colors ${proposalFilter === "executed" ? "border-brand-400 ring-1 ring-brand-300" : "border-transparent hover:bg-elevated"}`}>
+            <div className="text-xl font-bold tabular-nums font-display text-success">{issuance.success}</div>
+            <div className="text-[10px] font-semibold text-muted">Success</div>
           </button>
           <button type="button" onClick={() => toggleProposalFilter("failed")}
-            className={`flex flex-col gap-0.5 rounded-xl border p-2 transition-colors ${proposalFilter === "failed" ? "border-brand-400 ring-1 ring-brand-300" : "border-transparent hover:bg-slate-50"}`}>
-            <div className="text-xl font-bold tabular-nums font-display text-red-600">{issuance.failed}</div>
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Failed</div>
+            className={`flex flex-col gap-0.5 rounded-xl border p-2 transition-colors ${proposalFilter === "failed" ? "border-brand-400 ring-1 ring-brand-300" : "border-transparent hover:bg-elevated"}`}>
+            <div className="text-xl font-bold tabular-nums font-display text-danger">{issuance.failed}</div>
+            <div className="text-[10px] font-semibold text-muted">Failed</div>
           </button>
         </div>
 
         {proposalFilter && (
-          <div className="mt-4 rounded-xl border border-slate-200 overflow-hidden">
-            <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead className="bg-slate-50 text-[10px] uppercase tracking-widest text-slate-400">
+          <div className="mt-4">
+            <TableShell>
+              <thead>
                 <tr>
-                  <th className="text-left font-semibold px-3 py-2">Kind</th>
-                  <th className="text-left font-semibold px-3 py-2">Proposer</th>
-                  <th className="text-left font-semibold px-3 py-2">Status</th>
-                  <th className="text-left font-semibold px-3 py-2">Created</th>
-                  <th className="px-3 py-2"></th>
+                  <th>Kind</th>
+                  <th>Proposer</th>
+                  <th>Status</th>
+                  <th>Created</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
-                {pagedIssuanceRows.length === 0 && <tr><td colSpan={5} className="px-3 py-4 text-center text-slate-400">Nothing here.</td></tr>}
+                {pagedIssuanceRows.length === 0 && <tr><td colSpan={5} className="text-center text-muted">Nothing here.</td></tr>}
                 {pagedIssuanceRows.map((p) => (
-                  <tr key={p.id} className="border-t border-slate-100">
-                    <td className="px-3 py-2 text-slate-700">{p.kind}</td>
-                    <td className="px-3 py-2 text-slate-500">{p.proposerLabel}</td>
-                    <td className="px-3 py-2 capitalize text-slate-700">{p.status}</td>
-                    <td className="px-3 py-2 text-slate-400 font-data">{new Date(p.createdAt).toLocaleString()}</td>
-                    <td className="px-3 py-2 text-right">
-                      <button className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px]" onClick={() => setProposalDetailId(p.id)}>View</button>
+                  <tr key={p.id}>
+                    <td className="text-fg">{p.kind}</td>
+                    <td className="text-muted">{p.proposerLabel}</td>
+                    <td className="capitalize text-fg">{p.status}</td>
+                    <td className="text-muted font-data">{new Date(p.createdAt).toLocaleString()}</td>
+                    <td className="text-right">
+                      <button className="rounded-lg border border-border px-2.5 py-1 text-[11px]" onClick={() => setProposalDetailId(p.id)}>View</button>
                     </td>
                   </tr>
                 ))}
               </tbody>
-            </table>
-            </div>
+            </TableShell>
             <Pager page={proposalPage} pageSize={PAGE_SIZE} total={issuanceRows.length} onPage={setProposalPage} />
           </div>
         )}
       </div>
 
       <div className="grid lg:grid-cols-2 gap-4">
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 animate-slide-up stagger-2">
-          <h2 className="font-bold text-slate-900 text-sm mb-4 font-display">Issued — last 30 days</h2>
+        <div className="bg-surface rounded-2xl border border-border/80 shadow-sm p-5 animate-slide-up stagger-2">
+          <h2 className="font-bold text-fg text-sm mb-4 font-display">Issued — last 30 days</h2>
           <ActivityStrip days={data.activity} />
         </div>
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 animate-slide-up stagger-3">
-          <h2 className="font-bold text-slate-900 text-sm mb-4 font-display">Verification activity</h2>
+        <div className="bg-surface rounded-2xl border border-border/80 shadow-sm p-5 animate-slide-up stagger-3">
+          <h2 className="font-bold text-fg text-sm mb-4 font-display">Verification activity</h2>
           <div className="grid grid-cols-3 gap-3 text-center">
             {([
-              ["Pending",        data.verification.pending,       "text-amber-600"],
+              ["Pending",        data.verification.pending,       "text-warning"],
               ["Awaiting verify",data.verification.consented,     "text-sky-600"],
-              ["Verified valid", data.verification.verifiedValid, "text-emerald-600"],
-              ["Verified inv.",  data.verification.verifiedInvalid,"text-red-600"],
-              ["Rejected",       data.verification.rejected,      "text-slate-500"],
-              ["Expired",        data.verification.expired,       "text-slate-400"],
+              ["Verified valid", data.verification.verifiedValid, "text-success"],
+              ["Verified inv.",  data.verification.verifiedInvalid,"text-danger"],
+              ["Rejected",       data.verification.rejected,      "text-muted"],
+              ["Expired",        data.verification.expired,       "text-muted"],
             ] as const).map(([label, v, tone]) => (
               <div key={label} className="flex flex-col gap-0.5">
                 <div className={`text-xl font-bold tabular-nums font-display ${tone}`}>{v}</div>
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</div>
+                <div className="text-[10px] font-semibold text-muted">{label}</div>
               </div>
             ))}
           </div>
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-3 animate-slide-up stagger-4">
+      <div className="bg-surface rounded-2xl border border-border/80 shadow-sm p-5 space-y-3 animate-slide-up stagger-4">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="font-bold text-slate-900 text-sm mr-auto font-display">Recent activity</h2>
-          <p className="text-xs text-slate-500 w-full -mt-1 mb-1">Every credential issued or revoked, and every verification requested or decided, across your identity use cases — newest first.</p>
+          <h2 className="font-bold text-fg text-sm mr-auto font-display">Recent activity</h2>
+          <p className="text-xs text-muted w-full -mt-1 mb-1">Every credential issued or revoked, and every verification requested or decided, across your identity use cases — newest first.</p>
           <input value={activityQuery} onChange={(e) => { setActivityQuery(e.target.value); setActivityPage(1); }} placeholder="Search holder, type…"
-            className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs" />
+            className="rounded-lg border border-border bg-elevated/80 px-2.5 py-1 text-xs focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15" />
         </div>
-        <div className="overflow-x-auto rounded-lg border border-slate-200">
-          <table className="w-full text-xs">
-            <thead className="text-[10px] text-slate-400 bg-slate-50/80 uppercase tracking-widest">
-              <tr>
-                <th className="text-left font-semibold px-3 py-2.5">Kind</th>
-                <th className="text-left font-semibold px-3 py-2.5">Summary</th>
-                <th className="text-left font-semibold px-3 py-2.5">Use case</th>
-                <th className="text-left font-semibold px-3 py-2.5">When</th>
+        <TableShell>
+          <thead>
+            <tr>
+              <th>Kind</th>
+              <th>Summary</th>
+              <th>Use case</th>
+              <th>When</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pagedActivityRows.map((e, i) => (
+              <tr key={`${e.at}-${i}`}>
+                <td className="text-fg font-medium">{ACTIVITY_KIND_LABEL[e.kind]}</td>
+                <td className="text-fg">
+                  {e.summary}
+                  {e.txHash && <span className="ml-2 font-data text-[10px] text-muted">{e.txHash.slice(0, 14)}…</span>}
+                </td>
+                <td className="text-muted">{e.useCaseName}</td>
+                <td className="text-muted font-data" title={new Date(e.at).toLocaleString()}>{new Date(e.at).toLocaleString()}</td>
               </tr>
-            </thead>
-            <tbody>
-              {pagedActivityRows.map((e, i) => (
-                <tr key={`${e.at}-${i}`} className="border-t border-slate-100 hover:bg-slate-50/70 transition-colors">
-                  <td className="px-3 py-2 text-slate-700 font-medium text-xs">{ACTIVITY_KIND_LABEL[e.kind]}</td>
-                  <td className="px-3 py-2 text-slate-700 text-xs">
-                    {e.summary}
-                    {e.txHash && <span className="ml-2 font-data text-[10px] text-slate-400">{e.txHash.slice(0, 14)}…</span>}
-                  </td>
-                  <td className="px-3 py-2 text-slate-400 text-xs">{e.useCaseName}</td>
-                  <td className="px-3 py-2 text-slate-400 text-xs font-data" title={new Date(e.at).toLocaleString()}>{new Date(e.at).toLocaleString()}</td>
-                </tr>
-              ))}
-              {activityRows.length === 0 && (
-                <tr><td colSpan={4} className="px-3 py-6 text-center text-slate-400 text-xs">No activity yet.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+            ))}
+            {activityRows.length === 0 && (
+              <tr><td colSpan={4} className="text-center text-muted">No activity yet.</td></tr>
+            )}
+          </tbody>
+        </TableShell>
         <Pager page={activityPage} pageSize={PAGE_SIZE} total={activityRows.length} onPage={setActivityPage} />
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-3 animate-slide-up stagger-4">
+      <div className="bg-surface rounded-2xl border border-border/80 shadow-sm p-5 space-y-3 animate-slide-up stagger-4">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="font-bold text-slate-900 text-sm mr-auto font-display">Credential status board</h2>
+          <h2 className="font-bold text-fg text-sm mr-auto font-display">Credential status board</h2>
           <input value={search} onChange={(e) => { setSearch(e.target.value); setBoardPage(1); }} placeholder="Search holder…"
-            className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs" />
+            className="rounded-lg border border-border bg-elevated/80 px-2.5 py-1 text-xs focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15" />
           <select value={typeFilter} onChange={(e) => { setTypeFilter(e.target.value); setBoardPage(1); }}
-            className="rounded-lg border border-slate-200 px-2 py-1 text-xs bg-white">
+            className="rounded-lg border border-border bg-elevated/80 px-2 py-1 text-xs focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15">
             <option value="all">All types</option>
             {types.map((ty) => <option key={ty} value={ty}>{ty}</option>)}
           </select>
         </div>
         <div className="flex flex-wrap gap-1.5">
           <button onClick={() => toggleStatusFilter("all")}
-            className={`rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${statusFilter === "all" ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>
+            className={`rounded-full border px-3 py-1.5 text-xs font-medium ${statusFilter === "all" ? "bg-primary text-white border-primary" : "bg-surface text-muted border-border hover:bg-elevated"}`}>
             All ({data.board.length})
           </button>
           {STATUS_ORDER.map((s) => {
@@ -360,14 +356,14 @@ export function IdentityDashboard(): JSX.Element {
             if (n === 0) return null;
             return (
               <button key={s} onClick={() => toggleStatusFilter(s)}
-                className={`rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${statusFilter === s ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>
+                className={`rounded-full border px-3 py-1.5 text-xs font-medium ${statusFilter === s ? "bg-primary text-white border-primary" : "bg-surface text-muted border-border hover:bg-elevated"}`}>
                 {STATUS_META[s].label} ({n})
               </button>
             );
           })}
         </div>
         {data.boardTotal > data.board.length && (
-          <p className="text-xs text-slate-500">Showing the newest {data.board.length} of {data.boardTotal} credentials.</p>
+          <p className="text-xs text-muted">Showing the newest {data.board.length} of {data.boardTotal} credentials.</p>
         )}
         <TableShell>
           <thead>
@@ -384,22 +380,22 @@ export function IdentityDashboard(): JSX.Element {
           <tbody>
             {pagedRows.map((r) => (
               <tr key={r.credentialId}>
-                <td className="text-slate-700 font-medium">{r.holderLabel}</td>
-                <td className="text-slate-700">{r.type}</td>
-                <td className="text-slate-400">{r.useCaseName}</td>
-                <td className="text-slate-400 font-data">{new Date(r.issuedAt).toLocaleDateString()}</td>
-                <td className="text-slate-400 font-data">{r.expiresAt ? new Date(r.expiresAt).toLocaleDateString() : "—"}</td>
+                <td className="text-fg font-medium">{r.holderLabel}</td>
+                <td className="text-fg">{r.type}</td>
+                <td className="text-muted">{r.useCaseName}</td>
+                <td className="text-muted font-data">{new Date(r.issuedAt).toLocaleDateString()}</td>
+                <td className="text-muted font-data">{r.expiresAt ? new Date(r.expiresAt).toLocaleDateString() : "—"}</td>
                 <td>
                   <StatusPill status={r.status} />
-                  {r.acceptanceNote && <div className="text-[11px] text-rose-500 mt-0.5">{r.acceptanceNote}</div>}
+                  {r.acceptanceNote && <div className="text-[11px] text-danger mt-0.5">{r.acceptanceNote}</div>}
                 </td>
                 <td className="text-right">
-                  <button className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px]" onClick={() => setBoardDetailId(r.credentialId)}>View</button>
+                  <button className="rounded-lg border border-border px-2.5 py-1 text-[11px]" onClick={() => setBoardDetailId(r.credentialId)}>View</button>
                 </td>
               </tr>
             ))}
             {rows.length === 0 && (
-              <tr><td colSpan={7} className="px-3 !py-6 text-center text-slate-400">No credentials match.</td></tr>
+              <tr><td colSpan={7} className="px-3 !py-6 text-center text-muted">No credentials match.</td></tr>
             )}
           </tbody>
         </TableShell>
@@ -407,21 +403,21 @@ export function IdentityDashboard(): JSX.Element {
       </div>
 
       {data.byUseCase.length > 1 && (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-3">
-          <h2 className="font-semibold text-slate-900 text-sm">By use case</h2>
+        <div className="bg-surface rounded-2xl border border-border/80 shadow-sm p-5 space-y-3">
+          <h2 className="font-semibold text-fg text-sm">By use case</h2>
           {data.byUseCase.map((u) => (
-            <details key={u.key} className="rounded-lg border border-slate-200 p-3">
-              <summary className="cursor-pointer text-sm text-slate-800 font-medium">
-                {u.name} <span className="text-slate-400 font-normal">— {u.counts.issued} issued</span>
+            <details key={u.key} className="rounded-lg border border-border p-3">
+              <summary className="cursor-pointer text-sm text-fg font-medium">
+                {u.name} <span className="text-muted font-normal">— {u.counts.issued} issued</span>
               </summary>
               <div className="mt-2 space-y-1">
                 {u.byType.map((ty) => (
-                  <div key={ty.type} className="flex flex-wrap gap-x-4 text-xs text-slate-600">
-                    <span className="font-medium text-slate-800 w-44 truncate">{ty.type}</span>
+                  <div key={ty.type} className="flex flex-wrap gap-x-4 text-xs text-muted">
+                    <span className="font-medium text-fg w-44 truncate">{ty.type}</span>
                     <span>issued {ty.counts.issued}</span>
-                    <span className="text-emerald-600">accepted {ty.counts.accepted}</span>
-                    <span className="text-amber-600">pending {ty.counts.pendingAcceptance}</span>
-                    <span className="text-red-600">revoked {ty.counts.revoked}</span>
+                    <span className="text-success">accepted {ty.counts.accepted}</span>
+                    <span className="text-warning">pending {ty.counts.pendingAcceptance}</span>
+                    <span className="text-danger">revoked {ty.counts.revoked}</span>
                   </div>
                 ))}
               </div>

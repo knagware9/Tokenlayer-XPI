@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { ApiError } from "../../api.js";
 import { parseCsv } from "../../lib/shared/csv.js";
+import { TableShell } from "./ui.js";
 
 // ============================================================================
 // BatchCsv — a generic "upload a CSV, review it, submit as one batch
@@ -115,12 +116,12 @@ export function BatchCsv(props: {
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 space-y-4">
-      <h2 className="font-semibold text-slate-900">{title}</h2>
+    <div className="bg-surface rounded-2xl border border-border/80 shadow-sm p-6 space-y-4">
+      <h2 className="font-semibold text-fg">{title}</h2>
 
-      <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 space-y-1.5">
+      <div className="rounded-xl border border-border bg-elevated p-3 text-xs text-muted space-y-1.5">
         <div>
-          Expected columns: <span className="font-mono text-slate-800">{headerLineDisplay}</span>
+          Expected columns: <span className="font-mono text-fg">{headerLineDisplay}</span>
         </div>
         <a
           href={templateHref}
@@ -133,40 +134,38 @@ export function BatchCsv(props: {
 
       <div>
         <input type="file" accept=".csv" onChange={(e) => void onFile(e)} className="text-sm" />
-        {fileName && <span className="ml-2 text-xs text-slate-500">{fileName}</span>}
+        {fileName && <span className="ml-2 text-xs text-muted">{fileName}</span>}
       </div>
 
-      {headerError && <p className="text-sm text-red-600">{headerError}</p>}
+      {headerError && <p className="text-sm text-danger">{headerError}</p>}
 
       {rows.length > 0 && (
         <div className="space-y-2">
-          <div className="overflow-x-auto rounded-lg border border-slate-200">
-            <table className="w-full text-xs">
-              <thead className="text-[11px] text-slate-500 bg-slate-50 uppercase tracking-wide">
-                <tr>
-                  <th className="text-left font-medium px-3 py-2">#</th>
-                  {columns.map((c) => <th key={c} className="text-left font-medium px-3 py-2">{c}</th>)}
-                  <th className="text-left font-medium px-3 py-2">Issue</th>
-                </tr>
-              </thead>
-              <tbody>
-                {preview.map((_, i) => {
-                  const err = rowErrors[i];
-                  return (
-                    <tr key={i} className={`border-t border-slate-100 ${err ? "bg-red-50" : ""}`}>
-                      <td className="px-3 py-1.5 text-slate-400">{i + 1}</td>
-                      {columns.map((c) => <td key={c} className="px-3 py-1.5 text-slate-700">{rawRows[i]?.[c] ?? ""}</td>)}
-                      <td className="px-3 py-1.5 text-red-600">{err ?? ""}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          <p className="text-xs text-slate-500">
+          <TableShell>
+            <thead>
+              <tr>
+                <th>#</th>
+                {columns.map((c) => <th key={c}>{c}</th>)}
+                <th>Issue</th>
+              </tr>
+            </thead>
+            <tbody>
+              {preview.map((_, i) => {
+                const err = rowErrors[i];
+                return (
+                  <tr key={i} className={err ? "bg-danger/10" : ""}>
+                    <td className="num text-muted">{i + 1}</td>
+                    {columns.map((c) => <td key={c} className="text-fg">{rawRows[i]?.[c] ?? ""}</td>)}
+                    <td className="text-danger">{err ?? ""}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </TableShell>
+          <p className="text-xs text-muted">
             {rows.length} rows total{rows.length > PREVIEW_LIMIT ? ` (showing first ${PREVIEW_LIMIT})` : ""}
             {invalidCount > 0 && (
-              <span className="text-red-600">
+              <span className="text-danger">
                 {" — "}{invalidCount} invalid row{invalidCount === 1 ? "" : "s"}
                 {invalidBeyondPreview > 0 ? ` (${invalidBeyondPreview} beyond the preview)` : ""}
               </span>
@@ -176,7 +175,7 @@ export function BatchCsv(props: {
       )}
 
       {submitError && (
-        <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+        <div className="rounded-xl border border-danger/25 bg-danger/10 p-3 text-sm text-danger">
           <div className="font-medium">{submitError}</div>
           {rowProblems && rowProblems.length > 0 && (
             <ul className="mt-1.5 list-disc pl-5 space-y-0.5 text-xs">
@@ -185,7 +184,7 @@ export function BatchCsv(props: {
           )}
         </div>
       )}
-      {successNote && <p className="text-sm text-emerald-600">{successNote}</p>}
+      {successNote && <p className="text-sm text-success">{successNote}</p>}
 
       <button
         onClick={() => void submit()}

@@ -129,68 +129,66 @@ export function Dashboard({ useCaseKey, useCases, chains }: { useCaseKey?: strin
     if (!h) { setDetailHolderAddress(null); return <></>; }
     return (
       <div className="space-y-4">
-        <button type="button" onClick={() => setDetailHolderAddress(null)} className="text-sm text-slate-500 hover:text-slate-800 inline-flex items-center gap-1.5">
+        <button type="button" onClick={() => setDetailHolderAddress(null)} className="text-sm text-muted hover:text-fg inline-flex items-center gap-1.5">
           ← Back to holders
         </button>
         <div>
-          <h2 className="font-display text-lg font-bold text-slate-900">{h.label}</h2>
-          <p className="text-xs font-mono text-slate-400 break-all">{h.address}</p>
+          <h2 className="font-display text-lg font-bold text-fg">{h.label}</h2>
+          <p className="text-xs font-mono text-muted break-all">{h.address}</p>
         </div>
         <Card title={`Holdings (${h.holdings.length})`}>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead className="text-[10px] text-slate-400 uppercase tracking-widest">
-                <tr>
-                  <th className="text-left font-semibold px-3 py-2">Asset</th>
-                  <th className="text-right font-semibold px-3 py-2">Balance</th>
-                  <th className="text-right font-semibold px-3 py-2">Price</th>
-                  <th className="text-right font-semibold px-3 py-2">Value</th>
-                  <th className="text-left font-semibold px-3 py-2">Chain</th>
-                  <th className="text-left font-semibold px-3 py-2">State</th>
-                  <th className="px-3 py-2"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {h.holdings.map((hold) => {
-                  const asset = (assets ?? []).find((a) => a.id === hold.assetId);
-                  const chain = chains.find((c) => c.id === asset?.chainId);
-                  // Not listed for sale ⇒ no price, so no value either — same
-                  // "—" the Assets table already shows for an unpriced asset,
-                  // never a fabricated 0.
-                  const priced = asset?.unitPrice && asset.currency;
-                  const value = priced ? Number(hold.balance) * Number(asset.unitPrice) : null;
-                  return (
-                    <tr key={hold.assetId} className="border-t border-slate-100">
-                      <td className="px-3 py-2">
-                        <div className="font-medium text-slate-800">{hold.assetName}</div>
-                        <div className="text-slate-400">{hold.assetSymbol}</div>
-                      </td>
-                      <td className="px-3 py-2 text-right font-data tabular-nums text-slate-700">{fmtInt(hold.balance)}</td>
-                      <td className="px-3 py-2 text-right text-slate-600">{priced ? `${asset.unitPrice} ${asset.currency}` : "—"}</td>
-                      <td className="px-3 py-2 text-right font-data tabular-nums text-slate-700">{value !== null && Number.isFinite(value) ? `${value.toLocaleString()} ${asset!.currency}` : "—"}</td>
-                      <td className="px-3 py-2 text-slate-600">{chain?.label ?? asset?.chainId ?? "—"}</td>
-                      <td className="px-3 py-2">
-                        {hold.frozen && <Pill tone="danger">frozen</Pill>}
-                        {!hold.frozen && hold.allowed && <Pill tone="ok">allowed</Pill>}
-                        {!hold.frozen && !hold.allowed && <span className="text-slate-300">—</span>}
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        <button onClick={() => setDetailAssetId(hold.assetId)} className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-medium hover:border-brand-400">
-                          View asset
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <TableShell>
+            <thead>
+              <tr>
+                <th>Asset</th>
+                <th>Balance</th>
+                <th>Price</th>
+                <th>Value</th>
+                <th>Chain</th>
+                <th>State</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {h.holdings.map((hold) => {
+                const asset = (assets ?? []).find((a) => a.id === hold.assetId);
+                const chain = chains.find((c) => c.id === asset?.chainId);
+                // Not listed for sale ⇒ no price, so no value either — same
+                // "—" the Assets table already shows for an unpriced asset,
+                // never a fabricated 0.
+                const priced = asset?.unitPrice && asset.currency;
+                const value = priced ? Number(hold.balance) * Number(asset.unitPrice) : null;
+                return (
+                  <tr key={hold.assetId}>
+                    <td>
+                      <div className="font-medium text-fg">{hold.assetName}</div>
+                      <div className="text-muted">{hold.assetSymbol}</div>
+                    </td>
+                    <td className="num text-fg">{fmtInt(hold.balance)}</td>
+                    <td className="num text-muted">{priced ? `${asset.unitPrice} ${asset.currency}` : "—"}</td>
+                    <td className="num text-fg">{value !== null && Number.isFinite(value) ? `${value.toLocaleString()} ${asset!.currency}` : "—"}</td>
+                    <td className="text-muted">{chain?.label ?? asset?.chainId ?? "—"}</td>
+                    <td>
+                      {hold.frozen && <Pill tone="danger">frozen</Pill>}
+                      {!hold.frozen && hold.allowed && <Pill tone="ok">allowed</Pill>}
+                      {!hold.frozen && !hold.allowed && <span className="text-muted">—</span>}
+                    </td>
+                    <td className="text-right">
+                      <button onClick={() => setDetailAssetId(hold.assetId)} className="rounded-lg border border-border px-2.5 py-1 text-[11px] font-medium hover:border-brand-400">
+                        View asset
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </TableShell>
         </Card>
       </div>
     );
   }
 
-  if (error) return <Card><p className="text-sm text-red-600">{error}</p></Card>;
+  if (error) return <Card><p className="text-sm text-danger">{error}</p></Card>;
   if (!data)
     return (
       <div className="space-y-4">
@@ -263,13 +261,13 @@ export function Dashboard({ useCaseKey, useCases, chains }: { useCaseKey?: strin
                 value={assetQuery}
                 onChange={(e) => { setAssetQuery(e.target.value); setAssetPage(1); }}
                 placeholder="Search name or symbol…"
-                className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs flex-1 min-w-[160px]"
+                className="rounded-lg border border-border bg-elevated/80 px-2.5 py-1 text-xs flex-1 min-w-[160px] focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15"
               />
               {([
                 ["all", "All"], ["available", "Listed"], ["sold-out", "Sold out"], ["not-listed", "Not listed"],
               ] as const).map(([key, label]) => (
                 <button key={key} onClick={() => { setAvailFilter(key); setAssetPage(1); }}
-                  className={`rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${availFilter === key ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>
+                  className={`rounded-full border px-3 py-1.5 text-xs font-medium ${availFilter === key ? "bg-primary text-white border-primary" : "bg-surface text-muted border-border hover:bg-elevated"}`}>
                   {label}
                 </button>
               ))}
@@ -280,53 +278,51 @@ export function Dashboard({ useCaseKey, useCases, chains }: { useCaseKey?: strin
               <EmptyState icon="coins" title="No assets match" hint="Try a different filter or search term." />
             ) : (
               <>
-                <div className="overflow-x-auto rounded-lg border border-slate-200">
-                  <table className="w-full text-xs">
-                    <thead className="text-[10px] text-slate-400 bg-slate-50/80 uppercase tracking-widest">
-                      <tr>
-                        <th className="text-left font-semibold px-3 py-2.5">Asset</th>
-                        <th className="text-left font-semibold px-3 py-2.5">Type</th>
-                        <th className="text-right font-semibold px-3 py-2.5">Price</th>
-                        <th className="text-right font-semibold px-3 py-2.5">Supply</th>
-                        <th className="text-left font-semibold px-3 py-2.5">Chain</th>
-                        <th className="text-left font-semibold px-3 py-2.5">Availability</th>
-                        <th className="px-3 py-2.5"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {pagedAssets.map((a) => {
-                        const avail = availability(a);
-                        const chain = chainOf(a.chainId);
-                        return (
-                          <tr key={a.id} className="border-t border-slate-100 hover:bg-slate-50/70 transition-colors">
-                            <td className="px-3 py-2">
-                              <div className="font-medium text-slate-800">{a.name}</div>
-                              <div className="text-slate-400">{a.symbol}</div>
-                            </td>
-                            <td className="px-3 py-2 text-slate-600">{a.tokenType}</td>
-                            <td className="px-3 py-2 text-right text-slate-700">{a.unitPrice ? `${a.unitPrice} ${a.currency}` : "—"}</td>
-                            <td className="px-3 py-2 text-right font-data tabular-nums text-slate-700">{a.totalSupply ? fmtInt(a.totalSupply) : "—"}</td>
-                            <td className="px-3 py-2">
-                              <span title={a.contractRef}>
-                                <Pill tone={chain?.mode === "real" ? "ok" : "muted"}>{chain?.label ?? a.chainId}</Pill>
-                              </span>
-                            </td>
-                            <td className="px-3 py-2">
-                              {avail === "available" && <Pill tone="ok">Available</Pill>}
-                              {avail === "sold-out" && <Pill tone="warn">Sold out</Pill>}
-                              {avail === "not-listed" && <Pill tone="muted">Not listed</Pill>}
-                            </td>
-                            <td className="px-3 py-2 text-right">
-                              <button onClick={() => setDetailAssetId(a.id)} className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-medium hover:border-brand-400">
-                                View
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                <TableShell>
+                  <thead>
+                    <tr>
+                      <th>Asset</th>
+                      <th>Type</th>
+                      <th>Price</th>
+                      <th>Supply</th>
+                      <th>Chain</th>
+                      <th>Availability</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pagedAssets.map((a) => {
+                      const avail = availability(a);
+                      const chain = chainOf(a.chainId);
+                      return (
+                        <tr key={a.id}>
+                          <td>
+                            <div className="font-medium text-fg">{a.name}</div>
+                            <div className="text-muted">{a.symbol}</div>
+                          </td>
+                          <td className="text-muted">{a.tokenType}</td>
+                          <td className="num text-fg">{a.unitPrice ? `${a.unitPrice} ${a.currency}` : "—"}</td>
+                          <td className="num text-fg">{a.totalSupply ? fmtInt(a.totalSupply) : "—"}</td>
+                          <td>
+                            <span title={a.contractRef}>
+                              <Pill tone={chain?.mode === "real" ? "ok" : "muted"}>{chain?.label ?? a.chainId}</Pill>
+                            </span>
+                          </td>
+                          <td>
+                            {avail === "available" && <Pill tone="ok">Available</Pill>}
+                            {avail === "sold-out" && <Pill tone="warn">Sold out</Pill>}
+                            {avail === "not-listed" && <Pill tone="muted">Not listed</Pill>}
+                          </td>
+                          <td className="text-right">
+                            <button onClick={() => setDetailAssetId(a.id)} className="rounded-lg border border-border px-2.5 py-1 text-[11px] font-medium hover:border-brand-400">
+                              View
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </TableShell>
                 <Pager page={assetPage} pageSize={ASSET_PAGE_SIZE} total={filteredAssets.length} onPage={setAssetPage} />
               </>
             )}
@@ -341,7 +337,7 @@ export function Dashboard({ useCaseKey, useCases, chains }: { useCaseKey?: strin
               value={holderQuery}
               onChange={(e) => { setHolderQuery(e.target.value); setHolderPage(1); }}
               placeholder="Search name or address…"
-              className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs w-full mb-3"
+              className="rounded-lg border border-border bg-elevated/80 px-2.5 py-1 text-xs w-full mb-3 focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15"
             />
             {holdersLoading || holders === null ? (
               <Skeleton lines={4} />
@@ -349,33 +345,31 @@ export function Dashboard({ useCaseKey, useCases, chains }: { useCaseKey?: strin
               <EmptyState icon="users" title="No holders match" hint="Try a different search term, or nobody holds a balance yet." />
             ) : (
               <>
-                <div className="overflow-x-auto rounded-lg border border-slate-200">
-                  <table className="w-full text-xs">
-                    <thead className="text-[10px] text-slate-400 bg-slate-50/80 uppercase tracking-widest">
-                      <tr>
-                        <th className="text-left font-semibold px-3 py-2.5">Account</th>
-                        <th className="text-right font-semibold px-3 py-2.5">Assets held</th>
-                        <th className="px-3 py-2.5"></th>
+                <TableShell>
+                  <thead>
+                    <tr>
+                      <th>Account</th>
+                      <th>Assets held</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pagedHolders.map((h) => (
+                      <tr key={h.address}>
+                        <td>
+                          <div className="font-medium text-fg">{h.label}</div>
+                          <div className="text-muted font-mono">{truncateAddr(h.address)}</div>
+                        </td>
+                        <td className="num text-fg">{h.holdings.length}</td>
+                        <td className="text-right">
+                          <button onClick={() => setDetailHolderAddress(h.address)} className="rounded-lg border border-border px-2.5 py-1 text-[11px] font-medium hover:border-brand-400">
+                            View
+                          </button>
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {pagedHolders.map((h) => (
-                        <tr key={h.address} className="border-t border-slate-100 hover:bg-slate-50/70 transition-colors">
-                          <td className="px-3 py-2">
-                            <div className="font-medium text-slate-800">{h.label}</div>
-                            <div className="text-slate-400 font-mono">{truncateAddr(h.address)}</div>
-                          </td>
-                          <td className="px-3 py-2 text-right font-data tabular-nums text-slate-700">{h.holdings.length}</td>
-                          <td className="px-3 py-2 text-right">
-                            <button onClick={() => setDetailHolderAddress(h.address)} className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-medium hover:border-brand-400">
-                              View
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                    ))}
+                  </tbody>
+                </TableShell>
                 <Pager page={holderPage} pageSize={HOLDER_PAGE_SIZE} total={filteredHolders.length} onPage={setHolderPage} />
               </>
             )}
@@ -391,7 +385,7 @@ export function Dashboard({ useCaseKey, useCases, chains }: { useCaseKey?: strin
         </div>
         <Card title={`Activity — transactions / day (${data.activity.length}d)`}>
           <AreaChart points={activityPoints} />
-          <div className="flex justify-between text-[10px] text-slate-400 mt-1">
+          <div className="flex justify-between text-[0.75rem] text-muted mt-1">
             <span>{data.activity[0]?.date}</span>
             <span>{data.activity[data.activity.length - 1]?.date}</span>
           </div>
@@ -414,18 +408,18 @@ export function Dashboard({ useCaseKey, useCases, chains }: { useCaseKey?: strin
               <tbody>
                 {data.byUseCase.map((u) => (
                   <tr key={u.useCaseKey} onClick={() => navigate(`/${u.useCaseKey}`)} title={`Open ${u.name}`} className="cursor-pointer">
-                    <td className="font-medium text-slate-800">
-                      {u.name} <span className="font-normal text-slate-400">{u.symbol}</span>
+                    <td className="font-medium text-fg">
+                      {u.name} <span className="font-normal text-muted">{u.symbol}</span>
                     </td>
                     <td>
                       <span className="inline-flex items-center gap-1.5">
                         <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: colorFor(u.chainId) }} />
-                        <span className="text-slate-600">{u.chainId}</span>
+                        <span className="text-muted">{u.chainId}</span>
                       </span>
                     </td>
-                    <td className="num text-slate-700">{fmtInt(u.supply)}</td>
-                    <td className="num text-slate-700">{u.holders}</td>
-                    <td className="num text-slate-600">{fmtMoney(u.valueByCurrency)}</td>
+                    <td className="num text-fg">{fmtInt(u.supply)}</td>
+                    <td className="num text-fg">{u.holders}</td>
+                    <td className="num text-muted">{fmtMoney(u.valueByCurrency)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -440,37 +434,37 @@ export function Dashboard({ useCaseKey, useCases, chains }: { useCaseKey?: strin
         </Card>
         <div id="dash-recent" className={flash("dash-recent")}>
           <Card title="Recent activity">
-            <ol className="space-y-0 divide-y divide-slate-100">
+            <ol className="space-y-0 divide-y divide-border">
               {data.recent.slice(0, 8).map((e, i) => {
                 const clickable = !!e.useCaseKey;
                 const ACTION_COLORS: Record<string, string> = {
-                  mint: "bg-emerald-50 text-emerald-700 border-emerald-200/70",
-                  burn: "bg-red-50 text-red-700 border-red-200/70",
-                  transfer: "bg-sky-50 text-sky-700 border-sky-200/70",
+                  mint: "bg-success/10 text-success border-success/25",
+                  burn: "bg-danger/10 text-danger border-danger/25",
+                  transfer: "bg-sky-500/10 text-sky-600 border-sky-500/25",
                   issue: "bg-brand-50 text-brand-700 border-brand-200/70",
                 };
-                const actionStyle = ACTION_COLORS[e.action.toLowerCase()] ?? "bg-slate-100 text-slate-600 border-slate-200";
+                const actionStyle = ACTION_COLORS[e.action.toLowerCase()] ?? "bg-elevated text-muted border-border";
                 return (
                   <li
                     key={`${e.at}-${e.assetId}-${i}`}
                     onClick={clickable ? () => navigate(`/${e.useCaseKey}`) : undefined}
                     title={clickable ? `Open ${e.assetName}` : undefined}
-                    className={`flex items-center gap-3 py-2.5 first:pt-0 last:pb-0 text-xs ${clickable ? "cursor-pointer hover:bg-slate-50/80 -mx-2 px-2 rounded-lg transition-colors" : ""}`}
+                    className={`flex items-center gap-3 py-2.5 first:pt-0 last:pb-0 text-xs ${clickable ? "cursor-pointer hover:bg-elevated/80 -mx-2 px-2 rounded-lg transition-colors" : ""}`}
                   >
-                    <span className={`shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${actionStyle}`}>
+                    <span className={`shrink-0 rounded-md border px-1.5 py-0.5 text-[0.75rem] font-semibold ${actionStyle}`}>
                       {e.action}
                     </span>
-                    <span className="flex-1 min-w-0 text-slate-600 truncate">
-                      <span className="font-semibold text-slate-800">{e.assetName}</span>
-                      <span className="text-slate-400"> · </span>
+                    <span className="flex-1 min-w-0 text-muted truncate">
+                      <span className="font-semibold text-fg">{e.assetName}</span>
+                      <span className="text-muted"> · </span>
                       {e.summary}
                     </span>
-                    <span className="font-data text-[10px] text-slate-400 shrink-0">{new Date(e.at).toLocaleDateString()}</span>
+                    <span className="font-data text-[0.75rem] text-muted shrink-0">{new Date(e.at).toLocaleDateString()}</span>
                   </li>
                 );
               })}
               {data.recent.length === 0 && (
-                <li className="text-xs text-slate-400 py-4 text-center">No activity yet.</li>
+                <li className="text-xs text-muted py-4 text-center">No activity yet.</li>
               )}
             </ol>
           </Card>

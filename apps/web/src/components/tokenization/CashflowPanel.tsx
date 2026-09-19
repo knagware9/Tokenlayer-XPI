@@ -2,14 +2,15 @@ import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../../api.js";
 import { useAuth } from "../../auth.js";
 import { can } from "../../rbac.js";
+import { TableShell } from "../shared/ui.js";
 import type { Asset, Cashflow, CashflowPreview, Role, UseCase } from "../../types.js";
 
 const TONE: Record<Cashflow["status"], string> = {
-  scheduled: "bg-slate-100 text-slate-500",
-  due: "bg-amber-100 text-amber-700",
-  overdue: "bg-red-100 text-red-700",
+  scheduled: "bg-elevated text-muted",
+  due: "bg-warning/10 text-warning",
+  overdue: "bg-danger/10 text-danger",
   executing: "bg-brand-50 text-brand-700",
-  executed: "bg-emerald-100 text-emerald-700",
+  executed: "bg-success/10 text-success",
 };
 
 /**
@@ -63,22 +64,22 @@ export function CashflowPanel({ asset, useCase, role, onChanged }: { asset: Asse
   }
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-4">
-      <h3 className="text-sm font-semibold text-slate-800">Cashflows & settlement</h3>
-      {error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2">{error}</div>}
-      {info && <div className="rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-2">{info}</div>}
-      <table className="w-full text-sm">
-        <thead className="text-xs text-slate-500 uppercase tracking-wide">
-          <tr><th className="text-left py-1.5">#</th><th className="text-left">Type</th><th className="text-left">Due</th><th className="text-right">Amount</th><th className="text-left pl-4">Status</th><th /></tr>
+    <div className="bg-surface rounded-xl border border-border p-6 space-y-4">
+      <h3 className="text-sm font-semibold text-fg">Cashflows & settlement</h3>
+      {error && <div className="rounded-lg bg-danger/10 border border-danger/25 text-danger text-sm px-4 py-2">{error}</div>}
+      {info && <div className="rounded-lg bg-warning/10 border border-warning/25 text-warning text-sm px-4 py-2">{info}</div>}
+      <TableShell>
+        <thead>
+          <tr><th>#</th><th>Type</th><th>Due</th><th className="text-right">Amount</th><th>Status</th><th /></tr>
         </thead>
-        <tbody className="divide-y divide-slate-100">
+        <tbody>
           {rows.map((cf) => (
             <tr key={cf.id}>
-              <td className="py-2 text-slate-500">{cf.seq}</td>
-              <td className="capitalize text-slate-700">{cf.kind}</td>
-              <td className="text-slate-600">{cf.dueDate}</td>
-              <td className="text-right font-mono text-slate-700">₹{Number(cf.amount).toLocaleString("en-IN")}</td>
-              <td className="pl-4"><span className={`text-xs px-2 py-0.5 rounded-full ${TONE[cf.status]}`}>{cf.status}</span></td>
+              <td className="text-muted">{cf.seq}</td>
+              <td className="capitalize text-fg">{cf.kind}</td>
+              <td className="text-muted">{cf.dueDate}</td>
+              <td className="num text-fg">₹{Number(cf.amount).toLocaleString("en-IN")}</td>
+              <td><span className={`text-xs px-2 py-0.5 rounded-full ${TONE[cf.status]}`}>{cf.status}</span></td>
               <td className="text-right">
                 {operator && payable(cf) && cf.kind === "coupon" && (
                   <button disabled={busy} onClick={() => void run(() => api.executeCashflow(token!, asset.id, cf.id, payer || undefined))} className="text-xs rounded bg-brand-600 text-white px-2.5 py-1 hover:bg-brand-700 disabled:opacity-50">Pay coupon</button>
@@ -87,11 +88,11 @@ export function CashflowPanel({ asset, useCase, role, onChanged }: { asset: Asse
             </tr>
           ))}
         </tbody>
-      </table>
+      </TableShell>
 
       {operator && rows.some((cf) => cf.kind === "redemption" && cf.status !== "executed") && (
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-2">
-          <div className="text-xs font-medium text-slate-600">Record repayment & settle</div>
+        <div className="rounded-lg border border-border bg-elevated p-4 space-y-2">
+          <div className="text-xs font-medium text-muted">Record repayment & settle</div>
           <div className="grid grid-cols-3 gap-3">
             <select className="select" value={payer} onChange={(e) => setPayer(e.target.value)} disabled={busy}>
               <option value="">Payer account…</option>
@@ -119,7 +120,7 @@ export function CashflowPanel({ asset, useCase, role, onChanged }: { asset: Asse
             </button>
           </div>
           {preview && (
-            <div className="text-[11px] text-slate-500">
+            <div className="text-[11px] text-muted">
               Payout preview: {preview.split.map((s) => `${s.address.slice(0, 6)}… ₹${Number(s.amount).toLocaleString("en-IN")}`).join(" · ")}
             </div>
           )}

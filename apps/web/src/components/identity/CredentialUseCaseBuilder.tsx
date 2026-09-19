@@ -398,10 +398,10 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
   const orgLabel = (id: string): string => orgs.find((o) => o.id === id)?.name ?? id;
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm">
+    <div className="bg-surface rounded-2xl border border-border/80 shadow-sm">
       <div className="flex flex-col md:flex-row">
         {/* progress rail */}
-        <nav className="md:w-56 shrink-0 border-b md:border-b-0 md:border-r border-slate-100 p-4 md:p-5">
+        <nav className="md:w-56 shrink-0 border-b md:border-b-0 md:border-r border-border p-4 md:p-5">
           <ol className="flex md:flex-col gap-1 md:gap-0.5 overflow-x-auto">
             {STEPS.map((label, i) => {
               const reachable = i <= step || STEPS.slice(0, i).every((_, j) => stepValid[j]);
@@ -414,12 +414,12 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
                     disabled={!reachable}
                     onClick={() => reachable && setStep(i)}
                     className={`w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm whitespace-nowrap ${
-                      current ? "bg-brand-50 text-brand-700 font-semibold" : "text-slate-600 hover:bg-slate-50"
+                      current ? "bg-brand-50 text-brand-700 font-semibold" : "text-muted hover:bg-elevated"
                     } disabled:opacity-40 disabled:cursor-not-allowed`}
                   >
                     <span
                       className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-semibold shrink-0 ${
-                        done ? "bg-emerald-100 text-emerald-700" : current ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-500"
+                        done ? "bg-success/15 text-success" : current ? "bg-brand-600 text-white" : "bg-elevated text-muted"
                       }`}
                     >
                       {done ? <Icon name="check" className="w-3.5 h-3.5" /> : i + 1}
@@ -451,7 +451,7 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
                     }}
                     placeholder="e.g. corp-trade-credentials"
                   />
-                  {key && !keyValid && <span className="block text-[11px] text-red-600 mt-1">Lowercase letters, digits and hyphens only.</span>}
+                  {key && !keyValid && <span className="block text-[11px] text-danger mt-1">Lowercase letters, digits and hyphens only.</span>}
                 </L>
               </div>
               <L label="Description">
@@ -470,14 +470,14 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
               <StepIntro title="Credential types" hint="Each type is a claim schema. Start from a template or build fields by hand." />
               <div className="space-y-5">
                 {credTypes.map((ct, i) => (
-                  <section key={i} className="rounded-xl border border-slate-200 p-4 space-y-3">
+                  <section key={i} className="rounded-xl border border-border p-4 space-y-3">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Credential type {i + 1}</span>
+                      <span className="text-xs font-semibold text-muted">Credential type {i + 1}</span>
                       {credTypes.length > 1 && (
                         <button
                           type="button"
                           onClick={() => setCredTypes((arr) => arr.filter((_, j) => j !== i))}
-                          className="text-slate-400 hover:text-red-500 text-xs font-medium"
+                          className="text-muted hover:text-danger text-xs font-medium"
                         >
                           remove
                         </button>
@@ -520,29 +520,29 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
                       </L>
                     </div>
                     <div>
-                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Claim fields</div>
+                      <div className="text-xs font-semibold text-muted mb-2">Claim fields</div>
                       <SchemaFieldEditor fields={ct.fields} onChange={(f) => patchCredType(i, { fields: f })} />
                     </div>
-                    <div className="mt-3 rounded-lg border border-slate-200 p-3 space-y-2">
+                    <div className="mt-3 rounded-lg border border-border p-3 space-y-2">
                       <label className="flex items-center gap-2 text-xs font-medium">
                         <input type="checkbox" checked={ct.certEnabled} onChange={(e) => patchCredType(i, { certEnabled: e.target.checked })} />
                         Issue PDF certificate for this credential type
                       </label>
                       {ct.certEnabled && (
                         <div className="space-y-2 pl-1">
-                          <input className="w-full rounded border-slate-300 text-xs" placeholder="Certificate heading (e.g. Certificate of Domicile)"
+                          <input className="w-full rounded-lg border border-border bg-elevated/80 px-2.5 py-1 text-xs focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15" placeholder="Certificate heading (e.g. Certificate of Domicile)"
                             value={ct.certHeading} onChange={(e) => patchCredType(i, { certHeading: e.target.value })} />
-                          <input className="w-full rounded border-slate-300 text-xs" placeholder="Subheading (e.g. issuing authority)"
+                          <input className="w-full rounded-lg border border-border bg-elevated/80 px-2.5 py-1 text-xs focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15" placeholder="Subheading (e.g. issuing authority)"
                             value={ct.certSubheading} onChange={(e) => patchCredType(i, { certSubheading: e.target.value })} />
-                          <div className="text-[11px] text-slate-500">Claims to show (none selected ⇒ all):</div>
+                          <div className="text-[11px] text-muted">Claims to show (none selected ⇒ all):</div>
                           <div className="flex flex-wrap gap-1.5">
                             {ct.fields.map((f) => f.name).filter(Boolean).map((k) => (
                               <button type="button" key={k}
-                                className={`rounded-full border px-2 py-0.5 text-[11px] ${ct.certClaimKeys.includes(k) ? "border-brand-400 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-500"}`}
+                                className={`rounded-full border px-2 py-0.5 text-[11px] ${ct.certClaimKeys.includes(k) ? "border-brand-400 bg-brand-50 text-brand-700" : "border-border text-muted"}`}
                                 onClick={() => patchCredType(i, { certClaimKeys: toggle(ct.certClaimKeys, k) })}>{k}</button>
                             ))}
                           </div>
-                          <label className="block text-[11px] text-slate-500">
+                          <label className="block text-[11px] text-muted">
                             Logo / seal (optional):
                             <input type="file" accept="image/png,image/jpeg" className="mt-1 block text-[11px]"
                               onChange={async (e) => {
@@ -552,9 +552,9 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
                                 try { const r = await api.uploadDocument(token, file.type, btoa(bin)); patchCredType(i, { certLogoDocumentId: r.id }); }
                                 catch { setError("logo upload failed"); }
                               }} />
-                            {ct.certLogoDocumentId && <span className="ml-2 text-emerald-600">✓ uploaded</span>}
+                            {ct.certLogoDocumentId && <span className="ml-2 text-success">✓ uploaded</span>}
                           </label>
-                          <details className="rounded border border-slate-200 p-2">
+                          <details className="rounded border border-border p-2">
                             <summary className="cursor-pointer text-[11px] font-medium text-brand-700">Design certificate →</summary>
                             <div className="mt-2">
                               <CertificateDesigner
@@ -581,7 +581,7 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
               >
                 + add credential type
               </button>
-              {dupCredName && <p className="text-xs text-red-600">Two credential types share the same name — names must be unique.</p>}
+              {dupCredName && <p className="text-xs text-danger">Two credential types share the same name — names must be unique.</p>}
             </div>
           )}
 
@@ -589,8 +589,8 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
             <div className="space-y-5">
               <StepIntro title="Roles" hint="Who issues these credentials, who may hold them, and who may verify them." />
 
-              <section className="rounded-lg border border-slate-200 p-4 space-y-3">
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Issuer</div>
+              <section className="rounded-lg border border-border p-4 space-y-3">
+                <div className="text-xs font-semibold text-muted">Issuer</div>
                 <div className="flex flex-wrap gap-4 text-sm">
                   <Radio checked={issuerKind === "platform"} onChange={() => setIssuerKind("platform")}>The platform</Radio>
                   <Radio checked={issuerKind === "org"} onChange={() => setIssuerKind("org")}>A specific organization</Radio>
@@ -607,8 +607,8 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
                 )}
               </section>
 
-              <section className="rounded-lg border border-slate-200 p-4 space-y-3">
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Holders</div>
+              <section className="rounded-lg border border-border p-4 space-y-3">
+                <div className="text-xs font-semibold text-muted">Holders</div>
                 <div className="flex flex-wrap gap-4 text-sm">
                   <Radio checked={holderWho === "any-onboarded"} onChange={() => setHolderWho("any-onboarded")}>Any onboarded org</Radio>
                   <Radio checked={holderWho === "orgType"} onChange={() => setHolderWho("orgType")}>By org type</Radio>
@@ -623,7 +623,7 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
                 )}
                 {holderWho === "specific" && (
                   <div className="flex flex-wrap gap-2">
-                    {orgs.length === 0 && <span className="text-xs text-slate-400">No organizations available.</span>}
+                    {orgs.length === 0 && <span className="text-xs text-muted">No organizations available.</span>}
                     {orgs.map((o) => (
                       <Chip key={o.id} active={holderOrgIds.includes(o.id)} onClick={() => setHolderOrgIds((s) => toggle(s, o.id))}>{o.name}</Chip>
                     ))}
@@ -631,15 +631,15 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
                 )}
               </section>
 
-              <section className="rounded-lg border border-slate-200 p-4 space-y-3">
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Verifiers</div>
+              <section className="rounded-lg border border-border p-4 space-y-3">
+                <div className="text-xs font-semibold text-muted">Verifiers</div>
                 <div className="flex flex-wrap gap-4 text-sm">
                   <Radio checked={verifierKind === "any"} onChange={() => setVerifierKind("any")}>Anyone</Radio>
                   <Radio checked={verifierKind === "orgs"} onChange={() => setVerifierKind("orgs")}>Specific orgs</Radio>
                 </div>
                 {verifierKind === "orgs" && (
                   <div className="flex flex-wrap gap-2">
-                    {orgs.length === 0 && <span className="text-xs text-slate-400">No organizations available.</span>}
+                    {orgs.length === 0 && <span className="text-xs text-muted">No organizations available.</span>}
                     {orgs.map((o) => (
                       <Chip key={o.id} active={verifierOrgIds.includes(o.id)} onClick={() => setVerifierOrgIds((s) => toggle(s, o.id))}>{o.name}</Chip>
                     ))}
@@ -649,7 +649,7 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
                   <input type="checkbox" checked={holderAcceptance} onChange={(e) => setHolderAcceptance(e.target.checked)} />
                   Require holder acceptance
                 </label>
-                <p className="text-[11px] text-slate-500 mt-1">Issued credentials stay pending until the holder accepts, rejects, or requests changes.</p>
+                <p className="text-[11px] text-muted mt-1">Issued credentials stay pending until the holder accepts, rejects, or requests changes.</p>
               </section>
             </div>
           )}
@@ -659,19 +659,19 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
               <StepIntro title="Review & create" hint="Confirm the credential use case before it is authored." />
               <div className="grid gap-3 sm:grid-cols-2">
                 <SummaryTile label="Basics" stagger={1}>
-                  <div className="text-sm font-semibold text-slate-800">{name || "—"}</div>
-                  <div className="text-xs text-slate-500">{key}</div>
-                  {description && <div className="text-xs text-slate-500 mt-1">{description}</div>}
+                  <div className="text-sm font-semibold text-fg">{name || "—"}</div>
+                  <div className="text-xs text-muted">{key}</div>
+                  {description && <div className="text-xs text-muted mt-1">{description}</div>}
                 </SummaryTile>
                 <SummaryTile label="Credential types" stagger={2}>
-                  <div className="text-sm font-semibold text-slate-800">{namedCredTypes.length}</div>
-                  <div className="text-xs text-slate-500">{namedCredTypes.map((c) => c.name.trim()).join(", ") || "—"}</div>
+                  <div className="text-sm font-semibold text-fg">{namedCredTypes.length}</div>
+                  <div className="text-xs text-muted">{namedCredTypes.map((c) => c.name.trim()).join(", ") || "—"}</div>
                 </SummaryTile>
                 <SummaryTile label="Issuer" stagger={3}>
-                  <div className="text-sm text-slate-700">{issuerKind === "platform" ? "The platform" : `Org: ${orgLabel(issuerOrgId)}`}</div>
+                  <div className="text-sm text-muted">{issuerKind === "platform" ? "The platform" : `Org: ${orgLabel(issuerOrgId)}`}</div>
                 </SummaryTile>
                 <SummaryTile label="Holders" stagger={4}>
-                  <div className="text-sm text-slate-700">
+                  <div className="text-sm text-muted">
                     {holderWho === "any-onboarded"
                       ? "Any onboarded org"
                       : holderWho === "orgType"
@@ -680,17 +680,17 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
                   </div>
                 </SummaryTile>
                 <SummaryTile label="Verifiers" stagger={5}>
-                  <div className="text-sm text-slate-700">{verifierKind === "any" ? "Anyone" : `Orgs: ${verifierOrgIds.map(orgLabel).join(", ") || "—"}`}</div>
+                  <div className="text-sm text-muted">{verifierKind === "any" ? "Anyone" : `Orgs: ${verifierOrgIds.map(orgLabel).join(", ") || "—"}`}</div>
                 </SummaryTile>
               </div>
-              {error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2">{error}</div>}
-              {notice && <div className="rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm px-4 py-2">{notice}</div>}
+              {error && <div className="rounded-lg bg-danger/10 border border-danger/25 text-danger text-sm px-4 py-2">{error}</div>}
+              {notice && <div className="rounded-lg bg-success/10 border border-success/25 text-success text-sm px-4 py-2">{notice}</div>}
 
-              <div className="rounded-xl border border-slate-200 p-4">
+              <div className="rounded-xl border border-border p-4">
                 <div className="flex items-center justify-between gap-2">
                   <div>
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Save as template</div>
-                    <p className="text-[11px] text-slate-400 mt-0.5">Publish this configuration to the template catalog so it can be provisioned again later.</p>
+                    <div className="text-xs font-semibold text-muted">Save as template</div>
+                    <p className="text-[11px] text-muted mt-0.5 prose-measure">Publish this configuration to the template catalog so it can be provisioned again later.</p>
                   </div>
                   {!showSaveTemplate && (
                     <button
@@ -701,7 +701,7 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
                         setTemplateSaved(false);
                       }}
                       disabled={!canCreate}
-                      className="rounded-lg border border-slate-200 text-slate-600 px-3 py-1.5 text-xs font-medium hover:border-brand-400 hover:text-brand-700 disabled:opacity-40 shrink-0"
+                      className="rounded-lg border border-border text-muted px-3 py-1.5 text-xs font-medium hover:border-brand-400 hover:text-brand-700 disabled:opacity-40 shrink-0"
                     >
                       Save as template
                     </button>
@@ -728,26 +728,26 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
                         type="button"
                         onClick={() => setShowSaveTemplate(false)}
                         disabled={templateBusy}
-                        className="rounded-lg border border-slate-200 text-slate-600 px-3.5 py-1.5 text-sm font-medium hover:border-brand-400 hover:text-brand-700"
+                        className="rounded-lg border border-border text-muted px-3.5 py-1.5 text-sm font-medium hover:border-brand-400 hover:text-brand-700"
                       >
                         Cancel
                       </button>
                     </div>
-                    {templateError && <div className="sm:col-span-2 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs px-3 py-1.5">{templateError}</div>}
+                    {templateError && <div className="sm:col-span-2 rounded-lg bg-danger/10 border border-danger/25 text-danger text-xs px-3 py-1.5">{templateError}</div>}
                   </div>
                 )}
-                {templateSaved && !showSaveTemplate && <p className="text-xs text-emerald-600 mt-2">Template saved — it now appears in the provisioning catalog.</p>}
+                {templateSaved && !showSaveTemplate && <p className="text-xs text-success mt-2">Template saved — it now appears in the provisioning catalog.</p>}
               </div>
             </div>
           )}
 
           {/* footer nav */}
-          <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between">
+          <div className="mt-6 pt-4 border-t border-border flex items-center justify-between">
             <button
               type="button"
               onClick={() => setStep((s) => Math.max(0, s - 1))}
               disabled={step === 0}
-              className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+              className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted hover:bg-elevated disabled:opacity-40"
             >
               ← Back
             </button>
@@ -780,16 +780,16 @@ export function CredentialUseCaseBuilder({ onCreated }: Props): JSX.Element {
 function StepIntro({ title, hint }: { title: string; hint: string }): JSX.Element {
   return (
     <div>
-      <h3 className="text-base font-semibold text-slate-900">{title}</h3>
-      <p className="text-xs text-slate-500 mt-0.5">{hint}</p>
+      <h3 className="text-base font-semibold text-fg">{title}</h3>
+      <p className="text-xs text-muted mt-0.5 prose-measure">{hint}</p>
     </div>
   );
 }
 
 function SummaryTile({ label, children, stagger }: { label: string; children: React.ReactNode; stagger?: number }): JSX.Element {
   return (
-    <div className={`rounded-xl border border-slate-200 p-3 ${staggerClass(stagger)}`}>
-      <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400 mb-1.5">{label}</div>
+    <div className={`rounded-xl border border-border p-3 ${staggerClass(stagger)}`}>
+      <div className="text-[11px] font-medium text-muted mb-1.5">{label}</div>
       {children}
     </div>
   );
@@ -798,9 +798,9 @@ function SummaryTile({ label, children, stagger }: { label: string; children: Re
 function L({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }): JSX.Element {
   return (
     <label className="block">
-      <span className="block text-xs font-medium text-slate-600 mb-1">{label}</span>
+      <span className="block text-xs font-medium text-muted mb-1">{label}</span>
       {children}
-      {hint && <span className="block text-[11px] text-slate-400 mt-1">{hint}</span>}
+      {hint && <span className="block text-[11px] text-muted mt-1">{hint}</span>}
     </label>
   );
 }
@@ -809,7 +809,7 @@ function Radio({ checked, onChange, children }: { checked: boolean; onChange: ()
   return (
     <label className="flex items-center gap-2 cursor-pointer">
       <input type="radio" checked={checked} onChange={onChange} />
-      <span className="text-slate-700">{children}</span>
+      <span className="text-muted">{children}</span>
     </label>
   );
 }
@@ -820,7 +820,7 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
       type="button"
       onClick={onClick}
       className={`px-2.5 py-1 rounded-full text-xs font-medium border ${
-        active ? "bg-brand-600 text-white border-brand-600" : "bg-white text-slate-500 border-slate-200 hover:border-brand-400"
+        active ? "bg-brand-600 text-white border-brand-600" : "bg-surface text-muted border-border hover:border-brand-400"
       }`}
     >
       {children}

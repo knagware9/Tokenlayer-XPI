@@ -133,7 +133,7 @@ export function Login(): JSX.Element {
   }
 
   return (
-    <div className="min-h-screen flex bg-slate-50">
+    <div className="min-h-screen flex bg-elevated">
       {/* Brand panel — hidden on small screens */}
       <div className="hidden lg:flex lg:w-1/2 xl:w-[46%] flex-col justify-between p-12 bg-gradient-to-br from-slate-900 via-[#0E2B26] to-[#0a5a4d] relative overflow-hidden">
         <div
@@ -191,7 +191,7 @@ export function Login(): JSX.Element {
           <div className="lg:hidden mb-6 flex justify-center">
             <Logo size={34} />
           </div>
-          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+          <div className="bg-surface rounded-2xl border border-border/80 shadow-sm overflow-hidden">
             <div className="h-1 bg-gradient-to-r from-xigreen via-brand-400 to-xiblue" />
             <div className="p-8">
               <div className="mb-6 flex items-start gap-3">
@@ -199,15 +199,15 @@ export function Login(): JSX.Element {
                   <LogoMark size={26} />
                 </div>
                 <div>
-                  <h2 className="text-lg font-semibold tracking-tight text-slate-900">Sign in</h2>
-                  <p className="text-sm text-slate-500 mt-0.5">{copy && persona ? `${copy.product} · ${persona.label}` : "Access your tokenization console"}</p>
+                  <h2 className="text-lg font-semibold tracking-tight text-fg">Sign in</h2>
+                  <p className="text-sm text-muted mt-0.5">{copy && persona ? `${copy.product} · ${persona.label}` : "Access your tokenization console"}</p>
                 </div>
               </div>
               <form onSubmit={submit} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1.5">Email</label>
+                  <label className="block text-xs font-medium text-muted mb-1.5">Email</label>
                   <input
-                    className="w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                    className="w-full rounded-lg border border-border bg-elevated/80 px-3.5 py-2.5 text-sm text-fg placeholder:text-muted focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     autoComplete="username"
@@ -215,17 +215,17 @@ export function Login(): JSX.Element {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1.5">Password</label>
+                  <label className="block text-xs font-medium text-muted mb-1.5">Password</label>
                   <input
                     type="password"
-                    className="w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                    className="w-full rounded-lg border border-border bg-elevated/80 px-3.5 py-2.5 text-sm text-fg placeholder:text-muted focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     autoComplete="current-password"
                     placeholder="••••••••"
                   />
                 </div>
-                {error && <p className="text-sm text-red-600">{error}</p>}
+                {error && <p className="text-sm text-danger">{error}</p>}
                 <button
                   type="submit"
                   disabled={busy}
@@ -235,13 +235,13 @@ export function Login(): JSX.Element {
                 </button>
               </form>
               {/* Passwordless sign-in */}
-              <div className="mt-6 pt-6 border-t border-slate-100">
+              <div className="mt-6 pt-6 border-t border-border">
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
                     onClick={() => void startQr()}
                     disabled={qrBusy}
-                    className="flex-1 rounded-lg border border-slate-300 text-slate-700 py-2.5 text-sm font-medium hover:bg-slate-50 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-colors"
+                    className="flex-1 rounded-lg border border-border text-fg py-2.5 text-sm font-medium hover:bg-elevated disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-colors"
                   >
                     Sign in with QR
                   </button>
@@ -250,37 +250,37 @@ export function Login(): JSX.Element {
                       type="button"
                       onClick={() => void signInWithThisDevice()}
                       disabled={qrBusy}
-                      className="flex-1 rounded-lg border border-slate-300 text-slate-700 py-2.5 text-sm font-medium hover:bg-slate-50 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-colors"
+                      className="flex-1 rounded-lg border border-border text-fg py-2.5 text-sm font-medium hover:bg-elevated disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-colors"
                     >
                       Use this device
                     </button>
                   )}
                 </div>
-                {qrError && <p className="mt-3 text-sm text-red-600">{qrError}</p>}
+                {qrError && <p className="mt-3 text-sm text-danger">{qrError}</p>}
                 {qrSvg && (
                   <div className="mt-4 flex flex-col items-center">
                     <div
                       className="w-44 h-44 [&>svg]:w-full [&>svg]:h-full"
                       dangerouslySetInnerHTML={{ __html: qrSvg }}
                     />
-                    <p className="mt-2 text-xs text-slate-500">Scan with an enrolled device</p>
+                    <p className="mt-2 text-xs text-muted">Scan with an enrolled device</p>
                   </div>
                 )}
               </div>
 
               {forgotMode ? (
-                <form onSubmit={submitForgot} className="mt-5 space-y-3 border-t border-slate-100 pt-5">
+                <form onSubmit={submitForgot} className="mt-5 space-y-3 border-t border-border pt-5">
                   <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1.5">Email</label>
+                    <label className="block text-xs font-medium text-muted mb-1.5">Email</label>
                     <input
-                      className="w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                      className="w-full rounded-lg border border-border bg-elevated/80 px-3.5 py-2.5 text-sm text-fg placeholder:text-muted focus:outline-none focus:border-primary focus:bg-surface focus:ring-4 focus:ring-primary/15"
                       value={forgotEmail}
                       onChange={(e) => setForgotEmail(e.target.value)}
                       autoComplete="username"
                       placeholder="you@institution.com"
                     />
                   </div>
-                  {forgotNotice && <p className="text-sm text-slate-600">{forgotNotice}</p>}
+                  {forgotNotice && <p className="text-sm text-muted">{forgotNotice}</p>}
                   <div className="flex items-center gap-3">
                     <button
                       type="submit"
@@ -292,14 +292,14 @@ export function Login(): JSX.Element {
                     <button
                       type="button"
                       onClick={() => { setForgotMode(false); setForgotNotice(null); }}
-                      className="text-sm font-medium text-slate-500 hover:text-slate-700"
+                      className="text-sm font-medium text-muted hover:text-fg"
                     >
                       Back to sign in
                     </button>
                   </div>
                 </form>
               ) : (
-                <p className="mt-5 text-center text-sm text-slate-500">
+                <p className="mt-5 text-center text-sm text-muted">
                   <button type="button" onClick={() => setForgotMode(true)} className="font-medium text-brand-700 hover:text-brand-600">
                     Forgot password?
                   </button>

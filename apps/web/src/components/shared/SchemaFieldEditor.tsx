@@ -64,7 +64,7 @@ export function SchemaFieldEditor({ fields, onChange }: { fields: FieldRow[]; on
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Fields</span>
+        <span className="text-xs font-semibold text-muted">Fields</span>
         <button
           type="button"
           onClick={() => onChange([...fields, { name: "", kind: "string", required: false }])}
@@ -75,7 +75,7 @@ export function SchemaFieldEditor({ fields, onChange }: { fields: FieldRow[]; on
       </div>
       <div className="space-y-3">
         {fields.map((f, i) => (
-          <div key={i} className="rounded-lg border border-slate-200 p-3 space-y-2">
+          <div key={i} className="rounded-lg border border-border p-3 space-y-2">
             <div className="flex items-center gap-2">
               <input className="input flex-1" placeholder="field name" value={f.name} onChange={(e) => setField(i, { name: e.target.value })} />
               <select className="select w-36" value={f.kind} onChange={(e) => setField(i, { kind: e.target.value as FieldKind })}>
@@ -85,11 +85,11 @@ export function SchemaFieldEditor({ fields, onChange }: { fields: FieldRow[]; on
                 <option value="enum">enum</option>
                 <option value="document">document</option>
               </select>
-              <label className="flex items-center gap-1 text-xs text-slate-500 whitespace-nowrap">
+              <label className="flex items-center gap-1 text-xs text-muted whitespace-nowrap">
                 <input type="checkbox" checked={f.required} onChange={() => setField(i, { required: !f.required })} />
                 req
               </label>
-              <button type="button" onClick={() => onChange(fields.filter((_, j) => j !== i))} className="text-slate-400 hover:text-red-500 text-sm px-1">
+              <button type="button" onClick={() => onChange(fields.filter((_, j) => j !== i))} className="text-muted hover:text-danger text-sm px-1">
                 ×
               </button>
             </div>
@@ -110,8 +110,8 @@ export function SchemaFieldEditor({ fields, onChange }: { fields: FieldRow[]; on
           </div>
         ))}
       </div>
-      {hasDuplicateField && <p className="text-xs text-red-600 mt-2">Two fields share the same name — field names must be unique.</p>}
-      {hasEmptyEnum && <p className="text-xs text-red-600 mt-2">Every enum field needs at least one value.</p>}
+      {hasDuplicateField && <p className="text-xs text-danger mt-2">Two fields share the same name — field names must be unique.</p>}
+      {hasEmptyEnum && <p className="text-xs text-danger mt-2">Every enum field needs at least one value.</p>}
     </div>
   );
 }

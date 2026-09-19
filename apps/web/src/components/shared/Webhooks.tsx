@@ -13,7 +13,7 @@ import {
   type WebhookDelivery,
   type WebhookEndpoint,
 } from "../../types.js";
-import { Card, EmptyState, Pill, SectionHeader } from "./ui.js";
+import { Card, EmptyState, Pill, SectionHeader, TableShell } from "./ui.js";
 
 /** The header every delivery carries: `t=<unix>,v1=<hex>`. */
 const SIGNATURE_HEADER = "Tokenlayer-Signature";
@@ -307,7 +307,7 @@ export function Webhooks({ orgId, org }: { orgId: string | null; org: Organizati
           org ? (
             <button
               onClick={() => { setCreating((v) => !v); setError(null); setNotice(null); }}
-              className="rounded-lg border border-slate-200 text-slate-600 px-3 py-1.5 text-xs font-medium hover:bg-slate-50"
+              className="rounded-lg border border-border text-muted px-3 py-1.5 text-xs font-medium hover:bg-elevated"
             >
               {creating ? "Close" : "Add endpoint"}
             </button>
@@ -316,14 +316,14 @@ export function Webhooks({ orgId, org }: { orgId: string | null; org: Organizati
       />
 
       {org === null && (
-        <p className="text-sm text-slate-500">
+        <p className="text-sm text-muted prose-measure">
           Existing endpoints are listed below, but a new one cannot be registered here — this account&rsquo;s organization is
           not in the list you can see, so its capability envelope (which decides the events it may subscribe to) is unavailable.
         </p>
       )}
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
-      {notice && <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">{notice}</p>}
+      {error && <p className="text-sm text-danger">{error}</p>}
+      {notice && <p className="text-sm text-muted bg-elevated border border-border rounded-lg px-3 py-2">{notice}</p>}
 
       {/*
         THE AUTO-DISABLE ANNOUNCEMENT. Not a pill — a banner, above the table,
@@ -333,23 +333,23 @@ export function Webhooks({ orgId, org }: { orgId: string | null; org: Organizati
         operator does not read it here, nobody tells them at all.
       */}
       {disabled.map((e) => (
-        <div key={e.id} className="rounded-2xl border-2 border-red-300 bg-red-50/60 p-4">
+        <div key={e.id} className="rounded-2xl border-2 border-danger/40 bg-danger/10 p-4">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
-              <h3 className="text-sm font-semibold text-red-800">This endpoint is switched off and is receiving nothing</h3>
-              <p className="font-mono text-xs text-slate-700 mt-1 break-all">{e.url}</p>
-              <p className="text-xs text-red-700 mt-2">
+              <h3 className="text-sm font-semibold text-danger">This endpoint is switched off and is receiving nothing</h3>
+              <p className="font-mono text-xs text-fg mt-1 break-all">{e.url}</p>
+              <p className="text-xs text-danger mt-2">
                 <span className="font-medium">Reason:</span> {e.disabledReason ?? "not recorded"}
               </p>
-              <p className="text-xs text-red-700">
+              <p className="text-xs text-danger">
                 <span className="font-medium">Switched off:</span> {fmt(e.disabledAt)}
               </p>
-              <p className="text-xs text-slate-600 mt-2">
+              <p className="text-xs text-muted mt-2 prose-measure">
                 Events that happened while it was off were not queued for it. Catch up with{" "}
                 <span className="font-mono">GET /events?after=&lt;seq&gt;</span> — the cursor keeps every event this
                 organization produced, whether or not a delivery was ever attempted.
               </p>
-              <p className="text-xs text-slate-600 mt-1">
+              <p className="text-xs text-muted mt-1 prose-measure">
                 Re-enabling resets the failure counters and the failure clock. Fix the cause first — an endpoint that is
                 still failing will disable itself again.
               </p>
@@ -359,7 +359,7 @@ export function Webhooks({ orgId, org }: { orgId: string | null; org: Organizati
             <button
               onClick={() => void reEnable(e)}
               disabled={busyId === e.id}
-              className="shrink-0 rounded-lg bg-red-600 text-white px-3 py-1.5 text-xs font-medium hover:bg-red-700 disabled:opacity-40"
+              className="shrink-0 rounded-lg bg-danger text-white px-3 py-1.5 text-xs font-medium hover:bg-danger/90 disabled:opacity-40"
             >
               Re-enable
             </button>
@@ -395,103 +395,101 @@ export function Webhooks({ orgId, org }: { orgId: string | null; org: Organizati
           />
         </Card>
       ) : (
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="text-xs text-slate-500 bg-slate-50 uppercase tracking-wide">
-              <tr>
-                <th className="text-left font-medium px-4 py-2.5">Endpoint</th>
-                <th className="text-left font-medium px-4 py-2.5">Events</th>
-                <th className="text-left font-medium px-4 py-2.5">Status</th>
-                <th className="text-left font-medium px-4 py-2.5">Last delivery</th>
-                <th className="text-left font-medium px-4 py-2.5">Recent failures</th>
-                <th className="text-right font-medium px-4 py-2.5">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {endpoints.map((e) => (
-                <Fragment key={e.id}>
-                  <tr className="border-t border-slate-100 align-top">
-                    <td className="px-4 py-2">
-                      <div className="font-mono text-xs text-slate-800 break-all">{e.url}</div>
-                      {e.description && <div className="text-xs text-slate-500 mt-0.5">{e.description}</div>}
-                      <div className="text-xs text-slate-400 mt-0.5">
-                        {e.useCaseKey ? <>only <span className="font-mono">{e.useCaseKey}</span></> : "all use cases"}
-                      </div>
-                    </td>
-                    <td className="px-4 py-2">
-                      <div className="flex flex-wrap gap-1 max-w-xs">
-                        {e.eventTypes.map((t) => (
-                          <Pill key={t} tone={t === "*" ? "warn" : "info"}>{t === "*" ? "* (everything)" : t}</Pill>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="px-4 py-2">
+        <TableShell>
+          <thead>
+            <tr>
+              <th>Endpoint</th>
+              <th>Events</th>
+              <th>Status</th>
+              <th>Last delivery</th>
+              <th>Recent failures</th>
+              <th className="text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {endpoints.map((e) => (
+              <Fragment key={e.id}>
+                <tr className="align-top">
+                  <td>
+                    <div className="font-mono text-xs text-fg break-all">{e.url}</div>
+                    {e.description && <div className="text-xs text-muted mt-0.5">{e.description}</div>}
+                    <div className="text-xs text-muted mt-0.5">
+                      {e.useCaseKey ? <>only <span className="font-mono">{e.useCaseKey}</span></> : "all use cases"}
+                    </div>
+                  </td>
+                  <td>
+                    <div className="flex flex-wrap gap-1 max-w-xs">
+                      {e.eventTypes.map((t) => (
+                        <Pill key={t} tone={t === "*" ? "warn" : "info"}>{t === "*" ? "* (everything)" : t}</Pill>
+                      ))}
+                    </div>
+                  </td>
+                  <td>
+                    {/*
+                      A bare "disabled" pill would be the whole story in a
+                      cell nobody reads, so the pill says what happened and
+                      the banner above carries the reason and the control.
+                    */}
+                    {e.status === "active"
+                      ? <Pill tone="ok">active</Pill>
+                      : <Pill tone="danger">switched off — see above</Pill>}
+                  </td>
+                  <td className="text-muted whitespace-nowrap">{fmt(e.lastDeliveryAt)}</td>
+                  <td>
+                    <FailureCounters endpoint={e} />
+                  </td>
+                  <td>
+                    <div className="flex justify-end flex-wrap gap-2">
+                      <button
+                        onClick={() => setOpenDeliveries((cur) => (cur === e.id ? null : e.id))}
+                        className="text-xs rounded border border-border text-muted px-2.5 py-1 font-medium hover:bg-elevated"
+                      >
+                        {openDeliveries === e.id ? "Hide deliveries" : "Deliveries"}
+                      </button>
                       {/*
-                        A bare "disabled" pill would be the whole story in a
-                        cell nobody reads, so the pill says what happened and
-                        the banner above carries the reason and the control.
+                        Send test is offered only for an ACTIVE endpoint: the
+                        dispatcher settles a delivery to a switched-off
+                        endpoint as dead without sending, so the server 409s
+                        rather than pretend. Re-enable is the control that
+                        applies instead, and it is in the banner above.
                       */}
-                      {e.status === "active"
-                        ? <Pill tone="ok">active</Pill>
-                        : <Pill tone="danger">switched off — see above</Pill>}
-                    </td>
-                    <td className="px-4 py-2 text-slate-500 whitespace-nowrap">{fmt(e.lastDeliveryAt)}</td>
-                    <td className="px-4 py-2">
-                      <FailureCounters endpoint={e} />
-                    </td>
-                    <td className="px-4 py-2">
-                      <div className="flex justify-end flex-wrap gap-2">
+                      {canSendTest(e.status) && (
                         <button
-                          onClick={() => setOpenDeliveries((cur) => (cur === e.id ? null : e.id))}
-                          className="text-xs rounded border border-slate-300 text-slate-600 px-2.5 py-1 font-medium hover:bg-slate-50"
-                        >
-                          {openDeliveries === e.id ? "Hide deliveries" : "Deliveries"}
-                        </button>
-                        {/*
-                          Send test is offered only for an ACTIVE endpoint: the
-                          dispatcher settles a delivery to a switched-off
-                          endpoint as dead without sending, so the server 409s
-                          rather than pretend. Re-enable is the control that
-                          applies instead, and it is in the banner above.
-                        */}
-                        {canSendTest(e.status) && (
-                          <button
-                            onClick={() => void sendTest(e)}
-                            disabled={busyId === e.id}
-                            className="text-xs rounded border border-slate-300 text-slate-600 px-2.5 py-1 font-medium hover:bg-slate-50 disabled:opacity-40"
-                          >
-                            Send test
-                          </button>
-                        )}
-                        <button
-                          onClick={() => void rotate(e)}
+                          onClick={() => void sendTest(e)}
                           disabled={busyId === e.id}
-                          className="text-xs rounded border border-slate-300 text-slate-600 px-2.5 py-1 font-medium hover:bg-slate-50 disabled:opacity-40"
+                          className="text-xs rounded border border-border text-muted px-2.5 py-1 font-medium hover:bg-elevated disabled:opacity-40"
                         >
-                          Rotate secret
+                          Send test
                         </button>
-                        <button
-                          onClick={() => void remove(e)}
-                          disabled={busyId === e.id}
-                          className="text-xs rounded border border-red-200 text-red-600 px-2.5 py-1 font-medium hover:bg-red-50 disabled:opacity-40"
-                        >
-                          Delete
-                        </button>
-                      </div>
+                      )}
+                      <button
+                        onClick={() => void rotate(e)}
+                        disabled={busyId === e.id}
+                        className="text-xs rounded border border-border text-muted px-2.5 py-1 font-medium hover:bg-elevated disabled:opacity-40"
+                      >
+                        Rotate secret
+                      </button>
+                      <button
+                        onClick={() => void remove(e)}
+                        disabled={busyId === e.id}
+                        className="text-xs rounded border border-danger/25 text-danger px-2.5 py-1 font-medium hover:bg-danger/10 disabled:opacity-40"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+                {openDeliveries === e.id && (
+                  <tr className="bg-elevated/60">
+                    <td colSpan={6}>
+                      <Deliveries orgId={orgId} endpoint={e} />
                     </td>
                   </tr>
-                  {openDeliveries === e.id && (
-                    <tr className="border-t border-slate-100 bg-slate-50/60">
-                      <td colSpan={6} className="px-4 py-3">
-                        <Deliveries orgId={orgId} endpoint={e} />
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                )}
+              </Fragment>
+            ))}
+          </tbody>
+        </TableShell>
       )}
 
       <VerifyingDeliveries />
@@ -520,14 +518,14 @@ export function Webhooks({ orgId, org }: { orgId: string | null; org: Organizati
 function FailureCounters({ endpoint }: { endpoint: WebhookEndpoint }): JSX.Element {
   const { consecutiveFailures, consecutiveGuardFailures, failingSince } = endpoint;
   if (consecutiveFailures === 0 && consecutiveGuardFailures === 0) {
-    return <span className="text-xs text-slate-400">none</span>;
+    return <span className="text-xs text-muted">none</span>;
   }
   return (
     <div className="space-y-1 max-w-[15rem]">
       {consecutiveFailures > 0 && (
         <div>
           <Pill tone="warn">{consecutiveFailures} in a row · your server</Pill>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <p className="text-xs text-muted mt-0.5">
             Delivered to your URL and got a bad answer (non-2xx, timeout or unreachable). This is the count that switches an
             endpoint off if it keeps up.
           </p>
@@ -536,14 +534,14 @@ function FailureCounters({ endpoint }: { endpoint: WebhookEndpoint }): JSX.Eleme
       {consecutiveGuardFailures > 0 && (
         <div>
           <Pill tone="danger">{consecutiveGuardFailures} in a row · blocked before sending</Pill>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <p className="text-xs text-muted mt-0.5">
             Nothing was sent: the URL failed its safety check at delivery time — the host stopped resolving, or now resolves to
             a private address. Your handler never saw a request, so check DNS and the hostname, not your logs. These do not
             switch an endpoint off.
           </p>
         </div>
       )}
-      {failingSince && <p className="text-xs text-slate-400">failing since {fmt(failingSince)}</p>}
+      {failingSince && <p className="text-xs text-muted">failing since {fmt(failingSince)}</p>}
     </div>
   );
 }
@@ -573,17 +571,17 @@ function SigningSecretPanel({ url, secret, rotated, onDismiss }: {
   }
 
   return (
-    <div className="bg-white rounded-2xl border-2 border-amber-300 shadow-sm">
-      <div className="px-5 pt-4 pb-3 border-b border-amber-100">
-        <h3 className="text-sm font-semibold text-slate-900">
+    <div className="bg-surface rounded-2xl border-2 border-warning/40 shadow-sm">
+      <div className="px-5 pt-4 pb-3 border-b border-warning/20">
+        <h3 className="text-sm font-semibold text-fg">
           {rotated ? "New signing secret for" : "Signing secret for"} <span className="font-mono break-all">{url}</span>
         </h3>
-        <p className="text-xs text-amber-700 mt-1 font-medium">
+        <p className="text-xs text-warning mt-1 font-medium">
           This is the only time you will see this secret. It is not stored anywhere you can read it back — if you lose it,
           rotate the endpoint to mint a new one.
           {rotated && " The previous secret stopped signing the moment this one was created: deploy this to your verifier now, or deliveries will start failing verification."}
         </p>
-        <p className="text-xs text-slate-500 mt-1">
+        <p className="text-xs text-muted mt-1">
           Leaving this page — a sidebar click, a reload, closing the tab — discards it. You will be asked to confirm first.
         </p>
       </div>
@@ -592,18 +590,18 @@ function SigningSecretPanel({ url, secret, rotated, onDismiss }: {
           <code className="flex-1 min-w-0 break-all rounded-lg bg-slate-900 text-slate-100 font-mono text-xs px-3 py-2.5">{secret}</code>
           <button
             onClick={() => void copy()}
-            className="shrink-0 rounded-lg border border-slate-300 text-slate-600 px-3 py-1.5 text-xs font-medium hover:bg-slate-50"
+            className="shrink-0 rounded-lg border border-border text-muted px-3 py-1.5 text-xs font-medium hover:bg-elevated"
           >
             {copied === "ok" ? "Copied" : "Copy"}
           </button>
         </div>
-        {copied === "fail" && <p className="text-xs text-red-600">Could not reach the clipboard — select the secret above and copy it manually.</p>}
-        <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+        {copied === "fail" && <p className="text-xs text-danger">Could not reach the clipboard — select the secret above and copy it manually.</p>}
+        <label className="flex items-center gap-2 text-sm text-fg cursor-pointer">
           <input
             type="checkbox"
             checked={acked}
             onChange={(e) => setAcked(e.target.checked)}
-            className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+            className="h-4 w-4 rounded border-border text-brand-600 focus:ring-brand-500"
           />
           I have stored this secret somewhere safe.
         </label>
@@ -674,52 +672,52 @@ function CreateWebhook({ orgId, capabilities, role, onCreated }: {
   }
 
   return (
-    <form onSubmit={submit} className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 space-y-4">
-      <h2 className="font-semibold text-slate-900">Add a webhook endpoint</h2>
+    <form onSubmit={submit} className="bg-surface rounded-2xl border border-border/80 shadow-sm p-6 space-y-4">
+      <h2 className="font-semibold text-fg">Add a webhook endpoint</h2>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="sm:col-span-2">
-          <label className="block text-xs font-medium text-slate-500 mb-1">URL</label>
+          <label className="block text-xs font-medium text-muted mb-1">URL</label>
           <input className="input" placeholder="https://api.example.com/hooks/tokenlayer" value={url} onChange={(e) => setUrl(e.target.value)} />
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-xs text-muted mt-1">
             HTTPS only. The host is resolved and checked before every delivery — a URL that resolves to a private or loopback
             address is refused.
           </p>
         </div>
         <div>
-          <label className="block text-xs font-medium text-slate-500 mb-1">Description (optional)</label>
+          <label className="block text-xs font-medium text-muted mb-1">Description (optional)</label>
           <input className="input" placeholder="e.g. ERP inbound listener" value={description} onChange={(e) => setDescription(e.target.value)} />
         </div>
         <div>
-          <label className="block text-xs font-medium text-slate-500 mb-1">Use case (optional)</label>
+          <label className="block text-xs font-medium text-muted mb-1">Use case (optional)</label>
           <input className="input" placeholder="all use cases" value={useCaseKey} onChange={(e) => setUseCaseKey(e.target.value)} />
-          <p className="text-xs text-slate-500 mt-1">Leave empty to receive this organization&rsquo;s events from every use case.</p>
+          <p className="text-xs text-muted mt-1">Leave empty to receive this organization&rsquo;s events from every use case.</p>
         </div>
       </div>
 
       <fieldset>
-        <legend className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1.5">Events to receive</legend>
-        <p className="text-xs text-slate-500 mb-2">
+        <legend className="text-xs font-semibold text-muted mb-1.5">Events to receive</legend>
+        <p className="text-xs text-muted mb-2 prose-measure">
           Nothing is selected by default — pick exactly the events your handler has code for. Subscribing to everything points
           a firehose at a URL that usually only cares about one thing.
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6">
           {offered.map((t) => (
-            <label key={t} className="flex items-start gap-2 py-1 text-sm text-slate-700 cursor-pointer">
+            <label key={t} className="flex items-start gap-2 py-1 text-sm text-fg cursor-pointer">
               <input
                 type="checkbox"
                 checked={eventTypes.includes(t)}
                 onChange={() => toggle(t)}
-                className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                className="mt-0.5 h-4 w-4 shrink-0 rounded border-border text-brand-600 focus:ring-brand-500"
               />
               <span className="min-w-0">
-                <span className="font-mono text-xs text-slate-800">{t}</span>
-                <span className="block text-xs text-slate-500">{EVENT_DESCRIPTIONS[t]}</span>
+                <span className="font-mono text-xs text-fg">{t}</span>
+                <span className="block text-xs text-muted">{EVENT_DESCRIPTIONS[t]}</span>
               </span>
             </label>
           ))}
         </div>
         {hiddenByEnvelope.length > 0 && (
-          <p className="text-xs text-slate-500 mt-2">
+          <p className="text-xs text-muted mt-2">
             {hiddenByEnvelope.join(", ")} {hiddenByEnvelope.length === 1 ? "is" : "are"} not offered — this
             organization&rsquo;s capability envelope does not include the product{" "}
             {hiddenByEnvelope.length === 1 ? "domain that event belongs to" : "domains those events belong to"}.
@@ -727,7 +725,7 @@ function CreateWebhook({ orgId, capabilities, role, onCreated }: {
         )}
       </fieldset>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-danger">{error}</p>}
       <button type="submit" disabled={busy} className="rounded-lg bg-brand-600 text-white py-1.5 px-4 text-sm font-medium hover:bg-brand-700 disabled:opacity-40">
         Register endpoint
       </button>
@@ -773,52 +771,52 @@ function Deliveries({ orgId, endpoint }: { orgId: string; endpoint: WebhookEndpo
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-3">
-        <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 flex items-center gap-2">
+        <h4 className="text-xs font-semibold text-muted flex items-center gap-2">
           Deliveries
         </h4>
-        <button onClick={reload} className="text-xs rounded border border-slate-300 text-slate-600 px-2.5 py-1 font-medium hover:bg-slate-50">
+        <button onClick={reload} className="text-xs rounded border border-border text-muted px-2.5 py-1 font-medium hover:bg-elevated">
           Refresh
         </button>
       </div>
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      {error && <p className="text-xs text-danger">{error}</p>}
       {rows === null ? (
-        <p className="text-xs text-slate-500">Loading…</p>
+        <p className="text-xs text-muted">Loading…</p>
       ) : rows.length === 0 ? (
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-muted prose-measure">
           Nothing has been queued for this endpoint yet. &ldquo;Send test&rdquo; queues a synthetic ping so you can prove
           signature verification before the first real event.
         </p>
       ) : (
-        <table className="w-full text-xs bg-white rounded-lg border border-slate-200 overflow-hidden">
-          <thead className="text-slate-500 bg-slate-50 uppercase tracking-wide">
+        <TableShell>
+          <thead>
             <tr>
-              <th className="text-left font-medium px-3 py-2">Event</th>
-              <th className="text-left font-medium px-3 py-2">Status</th>
-              <th className="text-left font-medium px-3 py-2">Response</th>
-              <th className="text-left font-medium px-3 py-2">Attempts</th>
-              <th className="text-left font-medium px-3 py-2">Last attempt</th>
-              <th className="text-left font-medium px-3 py-2">Next attempt</th>
-              <th className="text-right font-medium px-3 py-2">Actions</th>
+              <th>Event</th>
+              <th>Status</th>
+              <th>Response</th>
+              <th className="text-right">Attempts</th>
+              <th>Last attempt</th>
+              <th>Next attempt</th>
+              <th className="text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((d) => (
-              <tr key={d.id} className="border-t border-slate-100 align-top">
-                <td className="px-3 py-2">
-                  <div className="font-mono text-slate-700 break-all">{d.eventId}</div>
-                  <div className="text-slate-400">seq {d.eventSeq}</div>
+              <tr key={d.id} className="align-top">
+                <td>
+                  <div className="font-mono text-fg break-all">{d.eventId}</div>
+                  <div className="text-muted">seq {d.eventSeq}</div>
                 </td>
-                <td className="px-3 py-2"><Pill tone={deliveryTone(d.status)}>{d.status}</Pill></td>
-                <td className="px-3 py-2">
-                  <div className="text-slate-700">{d.responseStatus ?? "—"}{d.durationMs !== null ? ` · ${d.durationMs}ms` : ""}</div>
-                  {d.responseError && <div className="text-red-600 break-words max-w-xs">{d.responseError}</div>}
+                <td><Pill tone={deliveryTone(d.status)}>{d.status}</Pill></td>
+                <td>
+                  <div className="text-fg">{d.responseStatus ?? "—"}{d.durationMs !== null ? ` · ${d.durationMs}ms` : ""}</div>
+                  {d.responseError && <div className="text-danger break-words max-w-xs">{d.responseError}</div>}
                 </td>
-                <td className="px-3 py-2 text-slate-600">{d.attempts}</td>
-                <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{fmt(d.lastAttemptAt)}</td>
-                <td className="px-3 py-2 text-slate-500 whitespace-nowrap">
+                <td className="num text-muted">{d.attempts}</td>
+                <td className="text-muted whitespace-nowrap">{fmt(d.lastAttemptAt)}</td>
+                <td className="text-muted whitespace-nowrap">
                   {d.status === "delivered" || d.status === "dead" ? "—" : fmt(d.nextAttemptAt)}
                 </td>
-                <td className="px-3 py-2">
+                <td>
                   <div className="flex justify-end">
                     {/*
                       Replay is offered ONLY for a settled failure. `inflight` is
@@ -831,7 +829,7 @@ function Deliveries({ orgId, endpoint }: { orgId: string; endpoint: WebhookEndpo
                       <button
                         onClick={() => void replay(d)}
                         disabled={busyId === d.id}
-                        className="rounded border border-slate-300 text-slate-600 px-2.5 py-1 font-medium hover:bg-slate-50 disabled:opacity-40"
+                        className="rounded border border-border text-muted px-2.5 py-1 font-medium hover:bg-elevated disabled:opacity-40"
                       >
                         Replay
                       </button>
@@ -841,9 +839,9 @@ function Deliveries({ orgId, endpoint }: { orgId: string; endpoint: WebhookEndpo
               </tr>
             ))}
           </tbody>
-        </table>
+        </TableShell>
       )}
-      <p className="text-xs text-slate-500">
+      <p className="text-xs text-muted">
         A delivery row records the attempt, not the payload. Read the event body from{" "}
         <span className="font-mono">GET /events</span> using the event id or seq above.
       </p>
@@ -896,7 +894,7 @@ function VerifyingDeliveries(): JSX.Element {
       description="Every delivery carries Tokenlayer-Signature, Tokenlayer-Event-Id, Tokenlayer-Delivery-Id and Tokenlayer-Event-Type. Verify before you trust the body."
     >
       <pre className="overflow-x-auto rounded-lg bg-slate-900 text-slate-100 font-mono text-xs p-4 leading-5">{snippet}</pre>
-      <div className="text-xs text-slate-500 mt-3 space-y-1.5">
+      <div className="text-xs text-muted mt-3 space-y-1.5 prose-measure">
         <p>
           <strong>Sign the RAW BYTES.</strong> This is the mistake almost everyone makes first: a framework that has already
           parsed the body hands you an object, and hashing <span className="font-mono">JSON.stringify(req.body)</span> gives a

@@ -23,7 +23,7 @@ export function ContractCodeView({ code }: { code: ContractCode }): JSX.Element 
           <a
             href={downloadHref}
             download={code.filename}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 hover:border-brand-400 hover:text-brand-700"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-muted hover:border-brand-400 hover:text-brand-700"
           >
             <Icon name="doc" className="w-3.5 h-3.5" />
             Download
@@ -34,14 +34,14 @@ export function ContractCodeView({ code }: { code: ContractCode }): JSX.Element 
       <div className="space-y-4">
         {code.constructorArgs.length > 0 && (
           <div>
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1.5">
+            <div className="text-[11px] font-semibold text-muted mb-1.5">
               Constructor arguments
             </div>
             <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
               {code.constructorArgs.map((a) => (
                 <div key={a.name} className="contents">
-                  <dt className="text-slate-500 font-medium">{a.name}</dt>
-                  <dd className="font-mono text-slate-700 break-all">{a.value}</dd>
+                  <dt className="text-muted font-medium">{a.name}</dt>
+                  <dd className="font-mono text-fg break-all">{a.value}</dd>
                 </div>
               ))}
             </dl>
@@ -52,13 +52,13 @@ export function ContractCodeView({ code }: { code: ContractCode }): JSX.Element 
           <div className="flex flex-wrap items-center gap-2">
             <Pill tone="ok">deployed</Pill>
             <span
-              className="inline-flex items-center rounded-full bg-slate-100 text-slate-600 px-2 py-0.5 text-[11px] font-mono"
+              className="inline-flex items-center rounded-full bg-elevated text-muted px-2 py-0.5 text-[11px] font-mono"
               title={code.deployed.contractRef}
             >
               contract {truncate(code.deployed.contractRef)}
             </span>
             <span
-              className="inline-flex items-center rounded-full bg-slate-100 text-slate-600 px-2 py-0.5 text-[11px] font-mono"
+              className="inline-flex items-center rounded-full bg-elevated text-muted px-2 py-0.5 text-[11px] font-mono"
               title={code.deployed.deployTxHash}
             >
               tx {truncate(code.deployed.deployTxHash)}

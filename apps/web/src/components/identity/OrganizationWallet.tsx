@@ -46,7 +46,7 @@ export function OrganizationWallet(): JSX.Element {
         title={org ? `Organization wallet · ${org.name}` : "Organization wallet"}
         description="Verifiable credentials held by your organization as an entity."
       />
-      {org && <p className="font-mono text-xs text-slate-500 break-all -mt-3 mb-4">{org.did}</p>}
+      {org && <p className="font-mono text-xs text-muted break-all -mt-3 mb-4">{org.did}</p>}
       {creds === null ? <Card><Skeleton lines={4} /></Card>
         : creds.length === 0 ? <Card><EmptyState icon="doc" title="No credentials yet" hint="Credentials issued to your organization will appear here." /></Card>
         : <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">{creds.map((c) => <CredentialCard key={c.id} credential={c} status={statuses[c.id]} chains={chains} onAcceptanceAction={() => setReloadKey((k) => k + 1)} />)}</div>}
